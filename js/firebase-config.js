@@ -16,3 +16,8 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 const analytics = firebase.analytics();
+// في firebase-config.js أضف:
+const coursesRef = db.collection('courses');
+const chaptersRef = db.collection('chapters');
+const studentsRef = db.collection('students');
+const mediaRef = storage.ref();
