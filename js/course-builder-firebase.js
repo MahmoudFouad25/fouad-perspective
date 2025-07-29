@@ -442,7 +442,7 @@ async function saveLesson() {
     const duration = modal.querySelector('input[placeholder="مثال: 15:30"]').value.trim();
     
     if (!title) {
-        showError('يرجى إدخال عنوان الدرس');
+        alert('يرجى إدخال عنوان الدرس');
         return;
     }
     
@@ -452,27 +452,37 @@ async function saveLesson() {
         title: title,
         description: description,
         duration: parseInt(duration) || 0,
-        freePreview: document.querySelector('[data-modal-toggle="free-preview"]').classList.contains('active'),
-        downloadable: document.querySelector('[data-modal-toggle="downloadable"]').classList.contains('active'),
-        commentsEnabled: document.querySelector('[data-modal-toggle="comments"]').classList.contains('active'),
+        freePreview: document.querySelector('[data-modal-toggle="free-preview"]')?.classList.contains('active') || false,
+        downloadable: document.querySelector('[data-modal-toggle="downloadable"]')?.classList.contains('active') || false,
+        commentsEnabled: document.querySelector('[data-modal-toggle="comments"]')?.classList.contains('active') || true,
         content: lessonIndex !== null ? courseData.modules[moduleIndex].lessons[lessonIndex].content : {},
-        order: lessonIndex !== null ? courseData.modules[moduleIndex].lessons[lessonIndex].order : courseData.modules[moduleIndex].lessons.length
+        order: lessonIndex !== null ? courseData.modules[moduleIndex].lessons[lessonIndex].order : (courseData.modules[moduleIndex].lessons?.length || 0)
     };
+    
+    // تأكد من وجود مصفوفة الدروس
+    if (!courseData.modules[moduleIndex].lessons) {
+        courseData.modules[moduleIndex].lessons = [];
+    }
     
     if (lessonIndex !== null) {
         // تعديل درس موجود
         courseData.modules[moduleIndex].lessons[lessonIndex] = lessonData;
     } else {
         // إضافة درس جديد
-        if (!courseData.modules[moduleIndex].lessons) {
-            courseData.modules[moduleIndex].lessons = [];
-        }
         courseData.modules[moduleIndex].lessons.push(lessonData);
     }
     
+    // حفظ التغييرات
     await saveCourse();
+    
+    // تحديث العرض
     updateCurriculum();
+    
+    // إغلاق النافذة
     closeModal('lesson-modal');
+    
+    // إظهار رسالة نجاح
+    showSuccessMessage('تم حفظ الدرس بنجاح!');
 }
 
 // دالة لتعديل درس
