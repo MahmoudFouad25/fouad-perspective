@@ -21,3 +21,4 @@ const coursesRef = db.collection('courses');
 const chaptersRef = db.collection('chapters');
 const studentsRef = db.collection('students');
 const mediaRef = storage.ref();
+const analytics = firebase.analytics(); // أضف هذا السطر
