@@ -30,6 +30,17 @@ let courseData = {
     createdAt: null,
     updatedAt: null
 };
+// التحقق من تسجيل الدخول
+auth.onAuthStateChanged(user => {
+    if (!user) {
+        // غير مسجل دخول، حوّله لصفحة تسجيل الدخول
+        window.location.href = 'login.html';
+    } else {
+        // مسجل دخول، ابدأ تحميل الدورة
+        console.log('User logged in:', user.email);
+        initializeCourse();
+    }
+});
 
 // دالة لتوليد معرف فريد
 function generateId() {
