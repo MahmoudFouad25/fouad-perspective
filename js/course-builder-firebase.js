@@ -30,22 +30,25 @@ let courseData = {
     createdAt: null,
     updatedAt: null
 };
-// التحقق من تسجيل الدخول
-auth.onAuthStateChanged(user => {
-    if (!user) {
-        // غير مسجل دخول، حوّله لصفحة تسجيل الدخول
-        window.location.href = 'login.html';
-    } else {
-        // مسجل دخول، ابدأ تحميل الدورة
-        console.log('User logged in:', user.email);
-        initializeCourse();
-    }
-});
 
 // دالة لتوليد معرف فريد
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
+
+// التحقق من تسجيل الدخول وتهيئة الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            console.log('User logged in:', user.email);
+            initializeCourse();
+            bindEventListeners();
+        } else {
+            console.log('No user logged in');
+            window.location.href = 'login.html';
+        }
+    });
+});
 
 // دالة لتهيئة الدورة
 async function initializeCourse() {
@@ -263,8 +266,8 @@ function createLessonElement(lesson, moduleIndex, lessonIndex) {
                     <i class="fas fa-edit"></i>
                 </button>
                 <button class="lesson-settings-btn" onclick="openLessonSettings(${moduleIndex}, ${lessonIndex})" data-tooltip="إعدادات">
-        <i class="fas fa-cog"></i>
-    </button>
+                    <i class="fas fa-cog"></i>
+                </button>
                 <button class="btn btn-icon btn-secondary btn-sm" onclick="previewLesson(${moduleIndex}, ${lessonIndex})" data-tooltip="معاينة">
                     <i class="fas fa-eye"></i>
                 </button>
@@ -768,23 +771,6 @@ function handleInputChange(field, value) {
     }
 }
 
-// ربط مستمعي الأحداث عند تحميل الصفحة
-document.addEventListener('DOMContentLoaded', function() {
-    // التحقق من تسجيل الدخول
-    auth.onAuthStateChanged(user => {
-        if (user) {
-            // تهيئة الدورة
-            initializeCourse();
-            
-            // ربط مستمعي الأحداث للمدخلات
-            bindEventListeners();
-        } else {
-            // إعادة توجيه لصفحة تسجيل الدخول
-            window.location.href = 'login.html';
-        }
-    });
-});
-
 // دالة لربط مستمعي الأحداث
 function bindEventListeners() {
     // حفظ تلقائي عند تغيير المدخلات
@@ -1055,3 +1041,4 @@ window.removeCover = removeCover;
 window.toggleSwitch = toggleSwitch;
 window.closeModal = closeModal;
 window.switchTab = switchTab;
+window.saveLesson = saveLesson;
