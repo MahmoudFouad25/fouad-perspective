@@ -1,5 +1,11 @@
-// Course Builder - النسخة النهائية الشغالة
-console.log('🚀 بدء تحميل Course Builder...');
+// Course Builder - Firebase Integration
+console.log('🚀 بدء تحميل Course Builder Firebase...');
+
+// انتظار تحميل الصفحة و Firebase
+document.addEventListener('DOMContentLoaded', function() {
+    // التحقق من Firebase بعد ثانية
+    setTimeout(initializeCourseBuilder, 1000);
+});
 
 // متغيرات عامة
 let currentCourseId = null;
@@ -10,321 +16,228 @@ let currentCourseData = {
     modules: []
 };
 
-// التأكد من تحميل الصفحة
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeApp);
-} else {
-    initializeApp();
-}
-
-// تهيئة التطبيق
-function initializeApp() {
-    console.log('🔧 تهيئة التطبيق...');
+// تهيئة Course Builder
+function initializeCourseBuilder() {
+    console.log('🔧 تهيئة Course Builder...');
     
     // التحقق من Firebase
-    if (typeof firebase === 'undefined') {
-        console.error('❌ Firebase غير محمل!');
-        setTimeout(initializeApp, 500);
+    if (typeof firebase === 'undefined' || typeof db === 'undefined') {
+        console.error('❌ Firebase غير متاح!');
+        setTimeout(initializeCourseBuilder, 500);
         return;
     }
     
-    // التحقق من الخدمات
-    if (typeof auth === 'undefined' || typeof db === 'undefined') {
-        console.error('❌ خدمات Firebase غير جاهزة!');
-        setTimeout(initializeApp, 500);
-        return;
-    }
+    console.log('✅ Firebase جاهز');
     
-    console.log('✅ Firebase جاهز للعمل');
-    
-    // بدء العمل
-    checkAuth();
-    setupUI();
-}
-
-// التحقق من تسجيل الدخول
-function checkAuth() {
-    auth.onAuthStateChanged(user => {
-        if (user) {
-            console.log('✅ مسجل دخول:', user.email);
-            loadCourseData();
-        } else {
-            console.log('❌ غير مسجل دخول');
-            // السماح بالعمل بدون تسجيل دخول للتطوير
-            loadCourseData();
-        }
-    });
-}
-
-// إعداد الواجهة
-function setupUI() {
-    // إزالة الوحدات الافتراضية
-    const defaultModules = document.querySelectorAll('.chapter-item');
-    defaultModules.forEach(module => {
-        if (module.textContent.includes('فوم العطش الوجودي')) {
-            module.remove();
-        }
-    });
-    
-    // ربط الأزرار
-    setupButtons();
-}
-
-// ربط الأزرار
-function setupButtons() {
-    // زر حفظ الدورة
-    const saveBtn = document.querySelector('button[onclick*="saveCourse"]');
-    if (saveBtn) {
-        saveBtn.onclick = saveCourseData;
+    // التحقق من الصفحة الحالية
+    if (window.location.pathname.includes('course-preview.html')) {
+        initializePreviewPage();
+    } else if (window.location.pathname.includes('course-builder.html')) {
+        initializeBuilderPage();
     }
 }
 
-// تحميل بيانات الدورة
-async function loadCourseData() {
+// تهيئة صفحة المعاينة
+function initializePreviewPage() {
+    console.log('📄 تهيئة صفحة المعاينة...');
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const courseId = urlParams.get('courseId');
+    
+    if (courseId) {
+        loadCourseForPreview(courseId);
+    }
+}
+
+// تهيئة صفحة البناء
+function initializeBuilderPage() {
+    console.log('🏗️ تهيئة صفحة البناء...');
+    
+    // تحميل بيانات الدورة إن وجدت
     const urlParams = new URLSearchParams(window.location.search);
     const courseId = urlParams.get('id');
     
     if (courseId && courseId !== 'new') {
         currentCourseId = courseId;
-        try {
-            const doc = await db.collection('courses').doc(courseId).get();
-            if (doc.exists) {
-                currentCourseData = doc.data();
-                console.log('✅ تم تحميل الدورة');
-                updateUI();
+        loadCourseData(courseId);
+    }
+    
+    // ربط الأزرار
+    setupEventListeners();
+    
+    // تفعيل الحفظ التلقائي
+    enableAutoSave();
+}
+
+// تحميل بيانات الدورة للمعاينة
+async function loadCourseForPreview(courseId) {
+    try {
+        const doc = await db.collection('courses').doc(courseId).get();
+        
+        if (doc.exists) {
+            const courseData = doc.data();
+            console.log('✅ تم تحميل بيانات الدورة:', courseData);
+            
+            // تحديث عناصر الصفحة
+            if (document.getElementById('course-title')) {
+                document.getElementById('course-title').textContent = courseData.title || 'دورة جديدة';
             }
-        } catch (error) {
-            console.error('خطأ في التحميل:', error);
+            
+            // يمكنك إضافة المزيد من العناصر هنا
+        } else {
+            console.error('❌ الدورة غير موجودة');
         }
-    } else {
-        console.log('📝 دورة جديدة');
-        updateUI();
+    } catch (error) {
+        console.error('❌ خطأ في تحميل الدورة:', error);
     }
 }
 
-// تحديث الواجهة
-function updateUI() {
+// تحميل بيانات الدورة للتحرير
+async function loadCourseData(courseId) {
+    try {
+        console.log('📥 تحميل بيانات الدورة...');
+        
+        const doc = await db.collection('courses').doc(courseId).get();
+        
+        if (doc.exists) {
+            currentCourseData = doc.data();
+            console.log('✅ تم تحميل الدورة:', currentCourseData);
+            
+            // تحديث الواجهة
+            updateUIWithCourseData();
+        } else {
+            console.warn('⚠️ الدورة غير موجودة');
+        }
+    } catch (error) {
+        console.error('❌ خطأ في تحميل البيانات:', error);
+    }
+}
+
+// تحديث الواجهة بالبيانات
+function updateUIWithCourseData() {
     // تحديث العنوان
-    const titleInput = document.querySelector('input[value="ملاذ الحياري"]');
+    const titleInput = document.querySelector('input[placeholder*="اسم الدورة"]');
     if (titleInput && currentCourseData.title) {
         titleInput.value = currentCourseData.title;
     }
     
-    // تحديث قائمة الوحدات
-    updateModulesList();
+    // تحديث العنوان الفرعي
+    const subtitleInput = document.querySelector('input[placeholder*="عنوان فرعي"]');
+    if (subtitleInput && currentCourseData.subtitle) {
+        subtitleInput.value = currentCourseData.subtitle;
+    }
+    
+    // تحديث الوصف
+    const descriptionTextarea = document.querySelector('textarea[placeholder*="وصف"]');
+    if (descriptionTextarea && currentCourseData.description) {
+        descriptionTextarea.value = currentCourseData.description;
+    }
+    
+    // تحديث الوحدات
+    if (currentCourseData.modules && currentCourseData.modules.length > 0) {
+        displayModules();
+    }
 }
 
-// تحديث قائمة الوحدات
-function updateModulesList() {
-    const container = document.querySelector('.chapters-sidebar');
-    if (!container) return;
+// عرض الوحدات
+function displayModules() {
+    const modulesContainer = document.getElementById('modules-container');
+    if (!modulesContainer) return;
     
-    // البحث عن منطقة الوحدات
-    let modulesArea = container.querySelector('.modules-list');
-    if (!modulesArea) {
-        // إنشاء منطقة للوحدات
-        modulesArea = document.createElement('div');
-        modulesArea.className = 'modules-list';
-        
-        // إضافتها قبل زر إضافة وحدة
-        const addBtn = container.querySelector('button[onclick*="addModule"]');
-        if (addBtn) {
-            container.insertBefore(modulesArea, addBtn);
-        } else {
-            container.appendChild(modulesArea);
-        }
-    }
+    // مسح المحتوى الحالي
+    modulesContainer.innerHTML = '';
     
-    // مسح المحتوى القديم
-    modulesArea.innerHTML = '';
-    
-    // إضافة الوحدات
-    if (currentCourseData.modules && currentCourseData.modules.length > 0) {
-        currentCourseData.modules.forEach((module, index) => {
-            const moduleEl = createModuleElement(module, index);
-            modulesArea.appendChild(moduleEl);
-        });
-    }
+    // إضافة كل وحدة
+    currentCourseData.modules.forEach((module, index) => {
+        const moduleElement = createModuleElement(module, index);
+        modulesContainer.appendChild(moduleElement);
+    });
 }
 
 // إنشاء عنصر الوحدة
 function createModuleElement(module, index) {
-    const div = document.createElement('div');
-    div.className = 'chapter-item';
-    div.innerHTML = `
-        <div class="chapter-header">
-            <div class="chapter-title">
-                <span class="chapter-number">${index + 1}</span>
-                <span>${module.title}</span>
+    const moduleDiv = document.createElement('div');
+    moduleDiv.className = 'module fade-in';
+    moduleDiv.draggable = true;
+    moduleDiv.innerHTML = `
+        <div class="module-header">
+            <i class="fas fa-grip-vertical drag-handle"></i>
+            <div class="module-info">
+                <h4 class="module-title">${module.title}</h4>
+                <div class="module-meta">
+                    <span><i class="fas fa-book-open"></i> ${module.lessons ? module.lessons.length : 0} دروس</span>
+                    <span><i class="fas fa-clock"></i> ${module.duration || 0} دقيقة</span>
+                </div>
             </div>
-            <div class="chapter-actions">
-                <button class="btn btn-icon btn-secondary" style="width: 30px; height: 30px;" onclick="editModule(${index})">
+            <div class="module-actions">
+                <button class="btn btn-icon btn-secondary" onclick="editModule(${index})">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button class="btn btn-icon btn-secondary" style="width: 30px; height: 30px;" onclick="deleteModule(${index})">
+                <button class="btn btn-icon btn-secondary" onclick="deleteModule(${index})">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
         </div>
-        <div class="chapter-info">
-            <span><i class="fas fa-video"></i> ${module.lessons ? module.lessons.length : 0} دروس</span>
-            <span><i class="fas fa-clock"></i> ${module.duration || '0'} دقيقة</span>
-        </div>
-    `;
-    return div;
-}
-
-// إضافة وحدة جديدة
-window.addModule = function() {
-    // إنشاء نافذة منبثقة بسيطة
-    const modalHTML = `
-        <div id="add-module-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-            <div style="background: white; padding: 2rem; border-radius: 10px; min-width: 400px;">
-                <h3 style="margin-bottom: 1rem;">إضافة وحدة جديدة</h3>
-                <input type="text" id="module-title" placeholder="عنوان الوحدة" style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 5px;">
-                <textarea id="module-desc" placeholder="وصف الوحدة (اختياري)" style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 5px; min-height: 80px;"></textarea>
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button onclick="closeModuleModal()" style="padding: 0.5rem 1rem;">إلغاء</button>
-                    <button onclick="saveNewModule()" style="padding: 0.5rem 1rem; background: #f4c430; border: none; border-radius: 5px;">حفظ</button>
-                </div>
-            </div>
+        <div class="module-content">
+            <!-- دروس الوحدة -->
+            <button class="add-content-btn" onclick="showContentMenu(this)">
+                <i class="fas fa-plus"></i>
+                إضافة محتوى
+            </button>
         </div>
     `;
     
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-    document.getElementById('module-title').focus();
+    return moduleDiv;
 }
 
-// حفظ الوحدة الجديدة
-window.saveNewModule = function() {
-    const title = document.getElementById('module-title').value.trim();
-    const desc = document.getElementById('module-desc').value.trim();
-    
-    if (!title) {
-        alert('من فضلك أدخل عنوان الوحدة');
-        return;
+// ربط مستمعي الأحداث
+function setupEventListeners() {
+    // زر حفظ الدورة
+    const saveBtn = document.querySelector('.btn-primary:has(.fa-save)');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveCourse);
     }
     
-    // إضافة الوحدة
-    if (!currentCourseData.modules) {
-        currentCourseData.modules = [];
+    // زر نشر الدورة
+    const publishBtn = document.querySelector('.btn-success:has(.fa-rocket)');
+    if (publishBtn) {
+        publishBtn.addEventListener('click', publishCourse);
     }
     
-    currentCourseData.modules.push({
-        title: title,
-        description: desc,
-        lessons: [],
-        duration: 0,
-        createdAt: new Date()
-    });
-    
-    // تحديث الواجهة
-    updateModulesList();
-    closeModuleModal();
-    
-    // حفظ تلقائي
-    saveCourseData();
-}
-
-// إغلاق نافذة الوحدة
-window.closeModuleModal = function() {
-    const modal = document.getElementById('add-module-modal');
-    if (modal) modal.remove();
-}
-
-// تعديل وحدة
-window.editModule = function(index) {
-    const module = currentCourseData.modules[index];
-    
-    // إنشاء نافذة التعديل
-    const modalHTML = `
-        <div id="edit-module-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-            <div style="background: white; padding: 2rem; border-radius: 10px; min-width: 400px;">
-                <h3 style="margin-bottom: 1rem;">تعديل الوحدة</h3>
-                <input type="text" id="edit-module-title" value="${module.title}" style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 5px;">
-                <textarea id="edit-module-desc" style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 5px; min-height: 80px;">${module.description || ''}</textarea>
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button onclick="closeEditModal()" style="padding: 0.5rem 1rem;">إلغاء</button>
-                    <button onclick="saveEditModule(${index})" style="padding: 0.5rem 1rem; background: #f4c430; border: none; border-radius: 5px;">حفظ</button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-}
-
-// حفظ تعديلات الوحدة
-window.saveEditModule = function(index) {
-    const title = document.getElementById('edit-module-title').value.trim();
-    const desc = document.getElementById('edit-module-desc').value.trim();
-    
-    if (!title) {
-        alert('من فضلك أدخل عنوان الوحدة');
-        return;
-    }
-    
-    // تحديث البيانات
-    currentCourseData.modules[index].title = title;
-    currentCourseData.modules[index].description = desc;
-    
-    // تحديث الواجهة
-    updateModulesList();
-    closeEditModal();
-    
-    // حفظ تلقائي
-    saveCourseData();
-}
-
-// إغلاق نافذة التعديل
-window.closeEditModal = function() {
-    const modal = document.getElementById('edit-module-modal');
-    if (modal) modal.remove();
-}
-
-// حذف وحدة
-window.deleteModule = function(index) {
-    if (confirm('هل أنت متأكد من حذف هذه الوحدة؟')) {
-        currentCourseData.modules.splice(index, 1);
-        updateModulesList();
-        saveCourseData();
+    // زر المعاينة
+    const previewBtn = document.querySelector('.btn-secondary:has(.fa-eye)');
+    if (previewBtn) {
+        previewBtn.addEventListener('click', previewCourse);
     }
 }
 
-// حفظ بيانات الدورة
-async function saveCourseData() {
+// حفظ الدورة
+async function saveCourse() {
     try {
-        console.log('💾 جاري الحفظ...');
+        console.log('💾 جاري حفظ الدورة...');
         
-        // جمع البيانات من الحقول
-        const titleInput = document.querySelector('input[value*="ملاذ"]') || document.querySelector('input[name="title"]');
-        if (titleInput) currentCourseData.title = titleInput.value;
+        // جمع البيانات من الواجهة
+        collectDataFromUI();
         
-        // التحقق من Firebase
-        if (typeof db === 'undefined') {
-            console.error('❌ Firebase غير جاهز');
-            alert('عذراً، هناك مشكلة في الاتصال. حاول مرة أخرى.');
-            return;
-        }
-        
-        // إضافة بيانات التحديث
-        currentCourseData.updatedAt = new Date();
+        // إضافة الوقت
+        currentCourseData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
         
         if (currentCourseId) {
             // تحديث دورة موجودة
-            await db.collection('courses').doc(currentCourseId).set(currentCourseData);
+            await db.collection('courses').doc(currentCourseId).update(currentCourseData);
+            console.log('✅ تم تحديث الدورة');
         } else {
             // إنشاء دورة جديدة
-            currentCourseData.createdAt = new Date();
+            currentCourseData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             const docRef = await db.collection('courses').add(currentCourseData);
             currentCourseId = docRef.id;
             
             // تحديث URL
             window.history.replaceState({}, '', `?id=${currentCourseId}`);
+            console.log('✅ تم إنشاء دورة جديدة:', currentCourseId);
         }
         
-        console.log('✅ تم الحفظ بنجاح');
-        showSuccessMessage();
+        showSuccessMessage('تم حفظ الدورة بنجاح!');
         
     } catch (error) {
         console.error('❌ خطأ في الحفظ:', error);
@@ -332,25 +245,154 @@ async function saveCourseData() {
     }
 }
 
-// إظهار رسالة النجاح
-function showSuccessMessage() {
-    const msg = document.createElement('div');
-    msg.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: #28a745;
-        color: white;
-        padding: 1rem 2rem;
-        border-radius: 8px;
-        font-weight: bold;
-        z-index: 9999;
-    `;
-    msg.textContent = 'تم الحفظ بنجاح!';
-    document.body.appendChild(msg);
+// جمع البيانات من الواجهة
+function collectDataFromUI() {
+    // العنوان
+    const titleInput = document.querySelector('input[placeholder*="اسم الدورة"]');
+    if (titleInput) {
+        currentCourseData.title = titleInput.value;
+    }
     
-    setTimeout(() => msg.remove(), 3000);
+    // العنوان الفرعي
+    const subtitleInput = document.querySelector('input[placeholder*="عنوان فرعي"]');
+    if (subtitleInput) {
+        currentCourseData.subtitle = subtitleInput.value;
+    }
+    
+    // الوصف
+    const descriptionTextarea = document.querySelector('textarea[placeholder*="وصف"]');
+    if (descriptionTextarea) {
+        currentCourseData.description = descriptionTextarea.value;
+    }
+    
+    // يمكن إضافة المزيد من الحقول هنا
 }
 
-console.log('✅ Course Builder جاهز للعمل!');
+// نشر الدورة
+async function publishCourse() {
+    if (!currentCourseId) {
+        alert('يرجى حفظ الدورة أولاً');
+        return;
+    }
+    
+    if (confirm('هل أنت متأكد من نشر الدورة؟')) {
+        try {
+            await db.collection('courses').doc(currentCourseId).update({
+                status: 'published',
+                publishedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            showSuccessMessage('تم نشر الدورة بنجاح!');
+            
+            // تحديث الواجهة
+            const statusBadge = document.querySelector('.status-badge');
+            if (statusBadge) {
+                statusBadge.className = 'status-badge published';
+                statusBadge.innerHTML = '<i class="fas fa-circle"></i> منشورة';
+            }
+            
+        } catch (error) {
+            console.error('❌ خطأ في النشر:', error);
+            alert('حدث خطأ في نشر الدورة');
+        }
+    }
+}
+
+// معاينة الدورة
+async function previewCourse() {
+    // حفظ أولاً
+    await saveCourse();
+    
+    if (currentCourseId) {
+        window.open(`course-preview.html?courseId=${currentCourseId}`, '_blank');
+    }
+}
+
+// الحفظ التلقائي
+function enableAutoSave() {
+    let saveTimeout;
+    
+    // مراقبة جميع الحقول
+    document.addEventListener('input', function(e) {
+        if (e.target.matches('input, textarea, select')) {
+            clearTimeout(saveTimeout);
+            
+            // إظهار مؤشر الحفظ
+            updateSaveIndicator('saving');
+            
+            // الحفظ بعد ثانيتين من التوقف عن الكتابة
+            saveTimeout = setTimeout(async () => {
+                await saveCourse();
+                updateSaveIndicator('saved');
+            }, 2000);
+        }
+    });
+}
+
+// تحديث مؤشر الحفظ
+function updateSaveIndicator(status) {
+    const indicator = document.querySelector('.auto-save-indicator');
+    if (!indicator) return;
+    
+    if (status === 'saving') {
+        indicator.className = 'auto-save-indicator saving';
+        indicator.innerHTML = '<i class="fas fa-spinner spinning"></i><span>جاري الحفظ...</span>';
+    } else if (status === 'saved') {
+        indicator.className = 'auto-save-indicator saved';
+        indicator.innerHTML = '<i class="fas fa-check-circle"></i><span>تم الحفظ</span>';
+    }
+}
+
+// إظهار رسالة النجاح
+function showSuccessMessage(message) {
+    const successDiv = document.getElementById('success-message');
+    if (successDiv) {
+        successDiv.querySelector('span').textContent = message;
+        successDiv.classList.add('active');
+        
+        setTimeout(() => {
+            successDiv.classList.remove('active');
+        }, 3000);
+    }
+}
+
+// وظائف الوحدات (يجب أن تكون عامة)
+window.addModule = function() {
+    const title = prompt('أدخل عنوان الوحدة الجديدة:');
+    if (!title) return;
+    
+    if (!currentCourseData.modules) {
+        currentCourseData.modules = [];
+    }
+    
+    currentCourseData.modules.push({
+        title: title,
+        lessons: [],
+        duration: 0,
+        createdAt: new Date()
+    });
+    
+    displayModules();
+    saveCourse();
+};
+
+window.editModule = function(index) {
+    const module = currentCourseData.modules[index];
+    const newTitle = prompt('تعديل عنوان الوحدة:', module.title);
+    
+    if (newTitle && newTitle !== module.title) {
+        module.title = newTitle;
+        displayModules();
+        saveCourse();
+    }
+};
+
+window.deleteModule = function(index) {
+    if (confirm('هل أنت متأكد من حذف هذه الوحدة؟')) {
+        currentCourseData.modules.splice(index, 1);
+        displayModules();
+        saveCourse();
+    }
+};
+
+console.log('✅ Course Builder Firebase جاهز!');
