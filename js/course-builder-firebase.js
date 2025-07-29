@@ -862,11 +862,22 @@ function bindEventListeners() {
         });
     });
     
-    // زر حفظ الدرس في النافذة المنبثقة
-    const saveLessonBtn = document.querySelector('.modal-footer .btn-primary');
-    if (saveLessonBtn) {
-        saveLessonBtn.addEventListener('click', saveLesson);
+// زر حفظ الدرس في النافذة المنبثقة
+setTimeout(() => {
+    const modal = document.getElementById('lesson-modal');
+    if (modal) {
+        const saveBtn = modal.querySelector('.btn-primary');
+        if (saveBtn) {
+            // احذف أي مستمع قديم
+            saveBtn.onclick = null;
+            // أضف المستمع الجديد
+            saveBtn.onclick = function(e) {
+                e.preventDefault();
+                saveLesson();
+            };
+        }
     }
+}, 1000);
     
     // إغلاق النوافذ المنبثقة بالضغط على Escape
     document.addEventListener('keydown', function(e) {
