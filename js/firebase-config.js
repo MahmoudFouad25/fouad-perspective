@@ -1,31 +1,65 @@
-// تحقق من عدم تحميل Firebase مرتين
-if (typeof firebase === 'undefined') {
-    console.error('❌ Firebase غير محمل! تأكد من تحميل المكتبات أولاً');
-} else if (!firebase.apps.length) {
-    // تكوين Firebase
-    const firebaseConfig = {
-        apiKey: "AIzaSyBAcPzPzIDYHvezf5klAwFzU0gmoo_AsCo",
-        authDomain: "fouad-academy.firebaseapp.com",
-        projectId: "fouad-academy",
-        storageBucket: "fouad-academy.firebasestorage.app",
-        messagingSenderId: "553738647199",
-        appId: "1:553738647199:web:4e73c59b115da5be15d4aa",
-        measurementId: "G-M0VML1SRZ4"
-    };
+// Firebase Configuration for Fouad Perspective
+// Path: js/firebase-config.js
 
-    // تهيئة Firebase
-    firebase.initializeApp(firebaseConfig);
-    console.log('✅ تم تهيئة Firebase بنجاح');
-} else {
-    console.log('⚠️ Firebase محمل بالفعل');
+// Your web app's Firebase configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+    authDomain: "fouad-perspective.firebaseapp.com",
+    projectId: "fouad-perspective",
+    storageBucket: "fouad-perspective.firebasestorage.app",
+    messagingSenderId: "1068763865336",
+    appId: "1:1068763865336:web:b791abcd22d536aedd5b0d",
+    measurementId: "G-RY1FYVB3Q9"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+
+// Initialize Firebase Analytics (optional)
+if (typeof firebase.analytics !== 'undefined') {
+    firebase.analytics();
 }
 
-// تهيئة الخدمات
+// Helper functions for authentication
 const auth = firebase.auth();
-const db = firebase.firestore();
-const storage = firebase.storage();
 
-// جعل المتغيرات عامة
-window.auth = auth;
-window.db = db;
-window.storage = storage;
+// تسجيل الخروج
+function signOut() {
+    auth.signOut().then(() => {
+        // تم تسجيل الخروج بنجاح
+        window.location.href = '../index.html';
+    }).catch((error) => {
+        console.error('Error signing out:', error);
+    });
+}
+
+// التحقق من صلاحية الأدمن
+function checkAdminAuth() {
+    return new Promise((resolve, reject) => {
+        auth.onAuthStateChanged((user) => {
+            if (user && user.email === 'admin@fouad-academy.com') {
+                resolve(user);
+            } else {
+                reject('Unauthorized access');
+                window.location.href = './login.html';
+            }
+        });
+    });
+}
+
+// حماية صفحات الأدمن
+function protectAdminPage() {
+    auth.onAuthStateChanged((user) => {
+        if (!user || user.email !== 'admin@fouad-academy.com') {
+            window.location.href = './login.html';
+        }
+    });
+}
+
+// Export functions for use in other scripts
+window.firebaseAuth = {
+    signOut,
+    checkAdminAuth,
+    protectAdminPage,
+    auth
+};
