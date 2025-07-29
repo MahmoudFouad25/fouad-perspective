@@ -1,4 +1,4 @@
-// إعدادات Firebase للمشروع
+// تهيئة Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyBAcPzPzIDYHvezf5klAwFzU0gmoo_AsCo",
   authDomain: "fouad-academy.firebaseapp.com",
@@ -9,16 +9,17 @@ const firebaseConfig = {
   measurementId: "G-M0VML1SRZ4"
 };
 
-// تهيئة Firebase
+// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 
-// تهيئة الخدمات
+// Initialize services
 const auth = firebase.auth();
 const db = firebase.firestore();
-const analytics = firebase.analytics();
-// في firebase-config.js أضف:
-const coursesRef = db.collection('courses');
-const chaptersRef = db.collection('chapters');
-const studentsRef = db.collection('students');
-const mediaRef = storage.ref();
-//const analytics = firebase.analytics(); // أضف هذا السطر
+
+// Initialize storage only if available
+let storage;
+try {
+  storage = firebase.storage();
+} catch (error) {
+  console.warn('Firebase Storage not initialized:', error);
+}
