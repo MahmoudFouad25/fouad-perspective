@@ -251,6 +251,9 @@ function createLessonElement(lesson, moduleIndex, lessonIndex) {
                 <button class="btn btn-icon btn-secondary btn-sm" onclick="editLesson(${moduleIndex}, ${lessonIndex})" data-tooltip="تعديل">
                     <i class="fas fa-edit"></i>
                 </button>
+                <button class="lesson-settings-btn" onclick="openLessonSettings(${moduleIndex}, ${lessonIndex})" data-tooltip="إعدادات">
+        <i class="fas fa-cog"></i>
+    </button>
                 <button class="btn btn-icon btn-secondary btn-sm" onclick="previewLesson(${moduleIndex}, ${lessonIndex})" data-tooltip="معاينة">
                     <i class="fas fa-eye"></i>
                 </button>
