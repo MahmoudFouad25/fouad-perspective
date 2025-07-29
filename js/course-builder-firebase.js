@@ -37,15 +37,25 @@ function generateId() {
 }
 
 // التحقق من تسجيل الدخول وتهيئة الصفحة
+// التحقق من تسجيل الدخول عند تحميل الصفحة
 document.addEventListener('DOMContentLoaded', function() {
+    // التحقق من وجود Firebase
+    if (typeof firebase === 'undefined') {
+        console.error('Firebase غير محمل!');
+        alert('خطأ: Firebase غير محمل. تأكد من الاتصال بالإنترنت');
+        return;
+    }
+    
+    // التحقق من تسجيل الدخول
     auth.onAuthStateChanged(user => {
-        if (user) {
+        if (!user) {
+            // غير مسجل دخول، حوّله لصفحة تسجيل الدخول
+            window.location.href = 'login.html';
+        } else {
+            // مسجل دخول، ابدأ تحميل الدورة
             console.log('User logged in:', user.email);
             initializeCourse();
             bindEventListeners();
-        } else {
-            console.log('No user logged in');
-            window.location.href = 'login.html';
         }
     });
 });
