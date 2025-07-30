@@ -1720,43 +1720,44 @@
         }
 
         // Save to Firestore
-        async function saveCourseData() {
-            if (!firebase.firestore) {
-                console.error('Firestore not initialized');
-                return Promise.reject('Firestore not initialized');
+async function saveCourseData() {
+    if (!firebase.firestore) {
+        console.error('Firestore not initialized');
+        return Promise.reject('Firestore not initialized');
+    }
+    
+    try {
+        const dataToSave = {
+            ...courseData,
+            slug: window.firebaseDB.courses.createSlug(courseData.title)
+        };
+        
+        // إزالة القيم undefined
+        Object.keys(dataToSave).forEach(key => {
+            if (dataToSave[key] === undefined) {
+                delete dataToSave[key];
             }
+        });
+        
+        if (courseData.id) {
+            // تحديث دورة موجودة
+            await window.firebaseDB.courses.updateCourse(courseData.id, dataToSave);
+        } else {
+            // إنشاء دورة جديدة
+            const newId = await window.firebaseDB.courses.createCourse(dataToSave);
+            courseData.id = newId;
             
-            const db = firebase.firestore();
-            
-            try {
-                const dataToSave = {
-                    ...courseData,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                // إزالة القيم undefined
-                Object.keys(dataToSave).forEach(key => {
-                    if (dataToSave[key] === undefined) {
-                        delete dataToSave[key];
-                    }
-                });
-                
-                if (courseData.id) {
-                    await db.collection('courses').doc(courseData.id).update(dataToSave);
-                } else {
-                    const docRef = await db.collection('courses').add({
-                        ...dataToSave,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    courseData.id = docRef.id;
-                }
-                
-                return Promise.resolve();
-            } catch (error) {
-                console.error('Error saving course:', error);
-                return Promise.reject(error);
-            }
+            // تحديث URL
+            const newUrl = `${window.location.pathname}?id=${newId}`;
+            window.history.replaceState({}, '', newUrl);
         }
+        
+        return Promise.resolve();
+    } catch (error) {
+        console.error('Error saving course:', error);
+        return Promise.reject(error);
+    }
+}
 
         // Load Course Data
         async function loadCourseData() {
@@ -2708,55 +2709,64 @@
         }
 
         // Preview Course
-        function previewCourse() {
-            saveCourseData().then(() => {
-                Swal.fire({
-                    icon: 'info',
-                    title: 'المعاينة',
-                    text: 'ميزة المعاينة ستكون متاحة قريباً',
-                    confirmButtonColor: '#f4c430'
-                });
-            });
-        }
-
-        // Publish Course
-        function publishCourse() {
-            if (courseData.progress < 60) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'الدورة غير مكتملة',
-                    text: 'يجب إكمال 60% على الأقل من محتوى الدورة قبل النشر',
-                    confirmButtonColor: '#f4c430'
-                });
-                return;
-            }
-            
+// تحديث دالة المعاينة
+function previewCourse() {
+    saveCourseData().then(() => {
+        if (courseData.id) {
+            // فتح صفحة المعاينة مع ID الدورة
+            window.open(`./course-preview.html?id=${courseData.id}`, '_blank');
+        } else {
             Swal.fire({
-                title: 'نشر الدورة',
-                text: 'هل أنت متأكد من نشر الدورة؟ سيتمكن الطلاب من الوصول إليها',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: 'نشر الآن',
-                cancelButtonText: 'إلغاء',
+                icon: 'warning',
+                title: 'احفظ الدورة أولاً',
+                text: 'يجب حفظ الدورة قبل المعاينة',
                 confirmButtonColor: '#f4c430'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    courseData.status = 'published';
-                    courseData.publishedAt = new Date().toISOString();
-                    
-                    saveCourseData().then(() => {
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'تم النشر بنجاح!',
-                            text: 'دورتك متاحة الآن للطلاب',
-                            confirmButtonColor: '#f4c430'
-                        }).then(() => {
-                            window.location.href = './dashboard.html';
-                        });
-                    });
-                }
             });
         }
+    });
+}
+
+
+// تحديث دالة النشر
+function publishCourse() {
+    if (courseData.progress < 60) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'الدورة غير مكتملة',
+            text: 'يجب إكمال 60% على الأقل من محتوى الدورة قبل النشر',
+            confirmButtonColor: '#f4c430'
+        });
+        return;
+    }
+    
+    Swal.fire({
+        title: 'نشر الدورة',
+        text: 'هل أنت متأكد من نشر الدورة؟ سيتمكن الطلاب من الوصول إليها',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'نشر الآن',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#f4c430'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            courseData.status = 'published';
+            courseData.publishedAt = new Date().toISOString();
+            
+            saveCourseData().then(() => {
+                window.firebaseDB.courses.publishCourse(courseData.id).then(() => {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'تم النشر بنجاح!',
+                        text: 'دورتك متاحة الآن للطلاب',
+                        confirmButtonColor: '#f4c430'
+                    }).then(() => {
+                        window.location.href = './courses.html';
+                    });
+                });
+            });
+        }
+    });
+}
 
         // Save Draft
         function saveDraft() {
