@@ -1637,155 +1637,350 @@ border-radius: 50%;
     <script src="../js/firebase-config.js"></script>
     
     <script>
-        // حماية الصفحة
-        window.firebaseAuth.protectAdminPage();
+    // حماية الصفحة
+    window.firebaseAuth.protectAdminPage();
 
-        // متغيرات عامة
-        let currentDevice = 'desktop';
-        let currentTab = 'overview';
-        let videoPlayer = null;
+    // متغيرات عامة
+    let currentDevice = 'desktop';
+    let currentTab = 'overview';
+    let videoPlayer = null;
+    let currentCourseId = null;
 
-        // تهيئة الصفحة
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeVideoPlayer();
-            loadCourseData();
+    // تهيئة الصفحة
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeVideoPlayer();
+        loadCourseData();
+    });
+
+    // تهيئة مشغل الفيديو
+    function initializeVideoPlayer() {
+        videoPlayer = videojs('courseVideo', {
+            controls: true,
+            fluid: true,
+            playbackRates: [0.5, 1, 1.5, 2]
         });
+    }
 
-        // تهيئة مشغل الفيديو
-        function initializeVideoPlayer() {
-            videoPlayer = videojs('courseVideo', {
-                controls: true,
-                fluid: true,
-                playbackRates: [0.5, 1, 1.5, 2]
+    // تحميل بيانات الدورة
+    async function loadCourseData() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseId = urlParams.get('id');
+        
+        if (!courseId) {
+            Swal.fire({
+                icon: 'error',
+                title: 'خطأ',
+                text: 'لم يتم تحديد الدورة',
+                confirmButtonColor: '#f4c430'
+            }).then(() => {
+                window.location.href = './courses.html';
+            });
+            return;
+        }
+        
+        currentCourseId = courseId;
+        
+        try {
+            // عرض حالة التحميل
+            showLoadingState();
+            
+            // جلب بيانات الدورة
+            const course = await window.firebaseDB.courses.getCourse(courseId);
+            
+            if (!course) {
+                throw new Error('الدورة غير موجودة');
+            }
+            
+            // تحديث العنوان
+            document.title = `${course.title} - معاينة - منظور الفؤاد`;
+            
+            // تحديث البيانات في الصفحة
+            updateCourseUI(course);
+            
+        } catch (error) {
+            console.error('Error loading course:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'خطأ في تحميل الدورة',
+                text: error.message,
+                confirmButtonColor: '#f4c430'
+            }).then(() => {
+                window.location.href = './courses.html';
             });
         }
+    }
 
-        // تحميل بيانات الدورة
-        function loadCourseData() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const courseId = urlParams.get('id');
+    // تحديث واجهة المستخدم بالبيانات
+    function updateCourseUI(course) {
+        // Hero Section
+        document.querySelector('.course-title').textContent = course.title || 'دورة بدون عنوان';
+        document.querySelector('.course-subtitle').textContent = course.subtitle || '';
+        document.querySelector('.course-category').textContent = course.category || 'تطوير الذات';
+        
+        // تحديث الصورة
+        if (course.thumbnailUrl) {
+            document.querySelector('.hero-background').style.backgroundImage = `url(${course.thumbnailUrl})`;
+        }
+        
+        // معلومات المدرب
+        document.querySelector('.instructor-details h4').textContent = course.instructorName || 'المدرب';
+        document.querySelector('.instructor-details p').textContent = course.instructorBio || '';
+        
+        // About Section
+        const descriptionElement = document.querySelector('.description-content');
+        if (course.detailedDescription) {
+            descriptionElement.innerHTML = course.detailedDescription;
+        }
+        
+        // Learning Objectives
+        if (course.objectives && course.objectives.length > 0) {
+            const objectivesGrid = document.querySelector('.objectives-grid');
+            objectivesGrid.innerHTML = course.objectives.map((obj, index) => `
+                <div class="objective-item">
+                    <div class="objective-icon">
+                        <i class="fas fa-check"></i>
+                    </div>
+                    <div>
+                        <h4>هدف ${index + 1}</h4>
+                        <p>${obj}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Curriculum
+        if (course.modules && course.modules.length > 0) {
+            const curriculumSection = document.querySelector('.curriculum-section');
+            const modulesHTML = course.modules.map((module, index) => `
+                <div class="module-item ${index === 0 ? 'expanded' : ''}">
+                    <div class="module-header" onclick="toggleModule(this)">
+                        <div class="module-title">
+                            <div class="module-number">${index + 1}</div>
+                            <div class="module-info">
+                                <h3>${module.title}</h3>
+                                <p>${module.lessons ? module.lessons.length : 0} دروس</p>
+                            </div>
+                        </div>
+                        <div class="module-meta">
+                            <span><i class="fas fa-video"></i> ${module.lessons ? module.lessons.length : 0} دروس</span>
+                            <span><i class="fas fa-clock"></i> ${calculateModuleDuration(module)} دقيقة</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                    </div>
+                    <div class="module-content">
+                        ${module.lessons ? module.lessons.map(lesson => `
+                            <div class="lesson-item" onclick="playLesson('${lesson.id}')">
+                                <div class="lesson-icon">
+                                    <i class="fas ${getLessonIcon(lesson.type)}"></i>
+                                </div>
+                                <div class="lesson-info">
+                                    <div class="lesson-title">${lesson.title}</div>
+                                    <div class="lesson-duration">${lesson.duration || 0} دقيقة</div>
+                                </div>
+                                <div class="lesson-status"></div>
+                            </div>
+                        `).join('') : '<p style="text-align: center; color: var(--text-muted);">لا توجد دروس بعد</p>'}
+                    </div>
+                </div>
+            `).join('');
             
-            if (courseId) {
-                // تحميل البيانات من Firestore
-                console.log('Loading course:', courseId);
+            curriculumSection.innerHTML = `
+                <h2 class="section-title">
+                    <i class="fas fa-list"></i>
+                    منهج الدورة
+                </h2>
+                ${modulesHTML}
+            `;
+        }
+        
+        // السعر
+        if (course.priceType === 'paid' && course.price) {
+            document.querySelector('.price-value').innerHTML = `
+                ${course.price} <span class="price-currency">ر.س</span>
+            `;
+            
+            if (course.salePrice) {
+                document.querySelector('.original-price').textContent = `${course.price} ر.س`;
+                document.querySelector('.price-value').innerHTML = `
+                    ${course.salePrice} <span class="price-currency">ر.س</span>
+                `;
+                const discount = Math.round((1 - course.salePrice / course.price) * 100);
+                document.querySelector('.discount-badge').textContent = `خصم ${discount}%`;
             }
+        } else if (course.priceType === 'free') {
+            document.querySelector('.price-value').innerHTML = 'مجاناً';
+            document.querySelector('.original-price').style.display = 'none';
+            document.querySelector('.discount-badge').style.display = 'none';
         }
+        
+        // تحديث أزرار التحكم
+        document.querySelector('.btn-secondary[href*="course-builder"]').href = `./course-builder.html?id=${course.id}`;
+        
+        // إخفاء حالة التحميل
+        hideLoadingState();
+    }
 
-        // تبديل الجهاز
-        function setDevice(device) {
-            currentDevice = device;
-            const container = document.getElementById('previewContainer');
-            const buttons = document.querySelectorAll('.device-btn');
-            
-            // تحديث الأزرار
-            buttons.forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-            
-            // تحديث العرض
-            container.classList.remove('tablet-view', 'mobile-view');
-            if (device === 'tablet') {
-                container.classList.add('tablet-view');
-            } else if (device === 'mobile') {
-                container.classList.add('mobile-view');
-            }
+    // دوال مساعدة
+    function calculateModuleDuration(module) {
+        if (!module.lessons) return 0;
+        return module.lessons.reduce((total, lesson) => total + (lesson.duration || 0), 0);
+    }
+
+    function getLessonIcon(type) {
+        const icons = {
+            video: 'fa-video',
+            text: 'fa-file-alt',
+            quiz: 'fa-question-circle',
+            assignment: 'fa-tasks',
+            resource: 'fa-download',
+            live: 'fa-broadcast-tower'
+        };
+        return icons[type] || 'fa-file';
+    }
+
+    function showLoadingState() {
+        // يمكنك إضافة مؤشر تحميل هنا
+        document.querySelector('.preview-frame').style.opacity = '0.5';
+    }
+
+    function hideLoadingState() {
+        // إخفاء مؤشر التحميل
+        document.querySelector('.preview-frame').style.opacity = '1';
+    }
+
+    // تبديل الجهاز
+    function setDevice(device) {
+        currentDevice = device;
+        const container = document.getElementById('previewContainer');
+        const buttons = document.querySelectorAll('.device-btn');
+        
+        // تحديث الأزرار
+        buttons.forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+        
+        // تحديث العرض
+        container.classList.remove('tablet-view', 'mobile-view');
+        if (device === 'tablet') {
+            container.classList.add('tablet-view');
+        } else if (device === 'mobile') {
+            container.classList.add('mobile-view');
         }
+    }
 
-        // عرض التبويب
-        function showTab(tabName) {
-            currentTab = tabName;
-            
-            // تحديث الأزرار
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            
-            // تحديث المحتوى
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(`${tabName}-tab`).classList.add('active');
-        }
-
-        // تبديل الوحدات
-        function toggleModule(header) {
-            const module = header.parentElement;
-            module.classList.toggle('expanded');
-        }
-
-        // تبديل الأسئلة الشائعة
-        function toggleFAQ(question) {
-            const faqItem = question.parentElement;
-            const wasActive = faqItem.classList.contains('active');
-            
-            // إغلاق جميع الأسئلة
-            document.querySelectorAll('.faq-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            
-            // فتح السؤال المحدد
-            if (!wasActive) {
-                faqItem.classList.add('active');
-            }
-        }
-
-        // تشغيل الدرس
-        function playLesson(lessonId) {
-            const modal = document.getElementById('videoModal');
-            const title = event.target.closest('.lesson-item').querySelector('.lesson-title').textContent;
-            
-            document.getElementById('videoTitle').textContent = title;
-            modal.classList.add('active');
-            
-            // تشغيل الفيديو
-            if (videoPlayer) {
-                videoPlayer.play();
-            }
-        }
-
-        // إغلاق الفيديو
-        function closeVideo() {
-            const modal = document.getElementById('videoModal');
-            modal.classList.remove('active');
-            
-            if (videoPlayer) {
-                videoPlayer.pause();
-            }
-        }
-
-        // وظائف الأدمن
-        function toggleStudentView() {
-            alert('معاينة كطالب - قريباً');
-        }
-
-        function showAnalytics() {
-            alert('تحليلات الدورة - قريباً');
-        }
-
-        function editCourse() {
-            window.location.href = './course-builder.html?id=1';
-        }
-
-        function toggleSettings() {
-            alert('إعدادات الدورة - قريباً');
-        }
-
-        function publishCourse() {
-            if (confirm('هل أنت متأكد من نشر الدورة؟')) {
-                alert('تم نشر الدورة بنجاح!');
-            }
-        }
-
-        function goBack() {
-            window.location.href = './courses.html';
-        }
-
-        // إغلاق الفيديو عند النقر خارجه
-        document.getElementById('videoModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeVideo();
-            }
+    // عرض التبويب
+    function showTab(tabName) {
+        currentTab = tabName;
+        
+        // تحديث الأزرار
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
         });
-    </script>
+        event.target.classList.add('active');
+        
+        // تحديث المحتوى
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        document.getElementById(`${tabName}-tab`).classList.add('active');
+    }
+
+    // تبديل الوحدات
+    function toggleModule(header) {
+        const module = header.parentElement;
+        module.classList.toggle('expanded');
+    }
+
+    // تبديل الأسئلة الشائعة
+    function toggleFAQ(question) {
+        const faqItem = question.parentElement;
+        const wasActive = faqItem.classList.contains('active');
+        
+        // إغلاق جميع الأسئلة
+        document.querySelectorAll('.faq-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        // فتح السؤال المحدد
+        if (!wasActive) {
+            faqItem.classList.add('active');
+        }
+    }
+
+    // تشغيل الدرس
+    function playLesson(lessonId) {
+        const modal = document.getElementById('videoModal');
+        const title = event.target.closest('.lesson-item').querySelector('.lesson-title').textContent;
+        
+        document.getElementById('videoTitle').textContent = title;
+        modal.classList.add('active');
+        
+        // تشغيل الفيديو
+        if (videoPlayer) {
+            videoPlayer.play();
+        }
+    }
+
+    // إغلاق الفيديو
+    function closeVideo() {
+        const modal = document.getElementById('videoModal');
+        modal.classList.remove('active');
+        
+        if (videoPlayer) {
+            videoPlayer.pause();
+        }
+    }
+
+    // وظائف الأدمن
+    function toggleStudentView() {
+        alert('معاينة كطالب - قريباً');
+    }
+
+    function showAnalytics() {
+        alert('تحليلات الدورة - قريباً');
+    }
+
+    function editCourse() {
+        if (currentCourseId) {
+            window.location.href = `./course-builder.html?id=${currentCourseId}`;
+        }
+    }
+
+    function toggleSettings() {
+        alert('إعدادات الدورة - قريباً');
+    }
+
+    function publishCourse() {
+        if (confirm('هل أنت متأكد من نشر الدورة؟')) {
+            if (currentCourseId) {
+                window.firebaseDB.courses.publishCourse(currentCourseId).then(() => {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'تم النشر بنجاح!',
+                        text: 'الدورة متاحة الآن للطلاب',
+                        confirmButtonColor: '#f4c430'
+                    });
+                }).catch(error => {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'خطأ في النشر',
+                        text: error.message,
+                        confirmButtonColor: '#f4c430'
+                    });
+                });
+            }
+        }
+    }
+
+    function goBack() {
+        window.location.href = './courses.html';
+    }
+
+    // إغلاق الفيديو عند النقر خارجه
+    document.getElementById('videoModal').addEventListener('click', function(e) {
+        if (e.target === this) {
+            closeVideo();
+        }
+    });
+</script>
 </body>
 </html>
