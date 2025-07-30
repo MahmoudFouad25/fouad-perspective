@@ -1448,12 +1448,7 @@
     <script src="../js/firebase-config.js"></script>
     
     <script>
-        // حماية الصفحة - التأكد من وجود firebase
-        if (window.firebaseAuth && window.firebaseAuth.protectAdminPage) {
-            window.firebaseAuth.protectAdminPage();
-        }
-
-        // Global Variables
+        // Global Variables - متاحة في كل مكان
         let courseData = {
             id: null,
             title: 'دورة جديدة',
@@ -1493,199 +1488,203 @@
         let quillEditor = null;
         let autoSaveTimeout = null;
 
-        // Initialize
+        // حماية الصفحة
+        window.addEventListener('load', function() {
+            if (window.firebaseAuth && window.firebaseAuth.protectAdminPage) {
+                window.firebaseAuth.protectAdminPage();
+            }
+        });
+
+        // تهيئة الصفحة عند التحميل
         document.addEventListener('DOMContentLoaded', function() {
             initializeEditor();
             loadCourseData();
             setupEventListeners();
             updateProgress();
+            initializeSortable();
         });
 
         // Initialize Quill Editor
-// إصلاح مشكلة Quill بتهيئة أفضل
-function initializeEditor() {
-    // التحقق من وجود العنصر قبل التهيئة
-    const editorElement = document.getElementById('descriptionEditor');
-    if (editorElement && typeof Quill !== 'undefined') {
-        try {
-            // تنظيف أي محرر سابق
-            editorElement.innerHTML = '';
-            
-            quillEditor = new Quill('#descriptionEditor', {
-                theme: 'snow',
-                placeholder: 'اكتب وصفاً تفصيلياً للدورة...',
-                modules: {
-                    toolbar: [
-                        [{ 'header': [1, 2, 3, false] }],
-                        ['bold', 'italic', 'underline'],
-                        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                        [{ 'align': [] }],
-                        ['link'],  // إزالة image مؤقتاً لتجنب المشاكل
-                        ['clean']
-                    ]
+        function initializeEditor() {
+            const editorElement = document.getElementById('descriptionEditor');
+            if (editorElement && typeof Quill !== 'undefined') {
+                try {
+                    editorElement.innerHTML = '';
+                    
+                    quillEditor = new Quill('#descriptionEditor', {
+                        theme: 'snow',
+                        placeholder: 'اكتب وصفاً تفصيلياً للدورة...',
+                        modules: {
+                            toolbar: [
+                                [{ 'header': [1, 2, 3, false] }],
+                                ['bold', 'italic', 'underline'],
+                                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                                [{ 'align': [] }],
+                                ['link'],
+                                ['clean']
+                            ]
+                        }
+                    });
+                    
+                    quillEditor.on('text-change', function(delta, oldDelta, source) {
+                        if (source === 'user') {
+                            courseData.detailedDescription = quillEditor.root.innerHTML;
+                            autoSave();
+                        }
+                    });
+                } catch (error) {
+                    console.error('Error initializing Quill editor:', error);
                 }
-            });
-
+            }
+        }
 
         // Setup Event Listeners
         function setupEventListeners() {
             // العنوان الرئيسي
-            document.getElementById('courseTitle').addEventListener('input', function(e) {
-                courseData.title = e.target.value;
-                document.getElementById('courseTitleMain').value = e.target.value;
-                autoSave();
-            });
+            const courseTitleInput = document.getElementById('courseTitle');
+            const courseTitleMainInput = document.getElementById('courseTitleMain');
             
-            document.getElementById('courseTitleMain').addEventListener('input', function(e) {
-                courseData.title = e.target.value;
-                document.getElementById('courseTitle').value = e.target.value;
-                autoSave();
-            });
+            if (courseTitleInput) {
+                courseTitleInput.addEventListener('input', function(e) {
+                    courseData.title = e.target.value;
+                    if (courseTitleMainInput) {
+                        courseTitleMainInput.value = e.target.value;
+                    }
+                    autoSave();
+                });
+            }
+            
+            if (courseTitleMainInput) {
+                courseTitleMainInput.addEventListener('input', function(e) {
+                    courseData.title = e.target.value;
+                    if (courseTitleInput) {
+                        courseTitleInput.value = e.target.value;
+                    }
+                    autoSave();
+                });
+            }
 
             // الحقول الأخرى
-            document.getElementById('courseSubtitle').addEventListener('input', e => {
-                courseData.subtitle = e.target.value;
-                autoSave();
+            const fields = {
+                'courseSubtitle': 'subtitle',
+                'courseDescription': 'description',
+                'courseIntroVideo': 'introVideo',
+                'instructorName': 'instructorName',
+                'instructorBio': 'instructorBio',
+                'coursePrice': 'price',
+                'courseSalePrice': 'salePrice',
+                'maxStudents': 'maxStudents',
+                'startDate': 'startDate',
+                'endDate': 'endDate',
+                'certificateThreshold': 'certificateThreshold',
+                'seoTitle': 'seoTitle',
+                'seoDescription': 'seoDescription',
+                'keywords': 'keywords'
+            };
+
+            Object.keys(fields).forEach(fieldId => {
+                const element = document.getElementById(fieldId);
+                if (element) {
+                    element.addEventListener(element.type === 'checkbox' ? 'change' : 'input', function(e) {
+                        let value = e.target.value;
+                        
+                        // معالجة خاصة لبعض الحقول
+                        if (fieldId === 'coursePrice' || fieldId === 'courseSalePrice') {
+                            value = parseFloat(value) || 0;
+                        } else if (fieldId === 'maxStudents' || fieldId === 'certificateThreshold') {
+                            value = parseInt(value) || null;
+                        } else if (fieldId === 'keywords') {
+                            value = value.split(',').map(k => k.trim()).filter(k => k);
+                        }
+                        
+                        courseData[fields[fieldId]] = value;
+                        autoSave();
+                    });
+                }
             });
 
-            document.getElementById('courseDescription').addEventListener('input', e => {
-                courseData.description = e.target.value;
-                autoSave();
+            // Checkboxes
+            const checkboxes = {
+                'certificateEnabled': 'certificate',
+                'allowComments': 'allowComments',
+                'hasForum': 'hasForum',
+                'allowSharing': 'allowSharing',
+                'isPublic': 'isPublic'
+            };
+
+            Object.keys(checkboxes).forEach(checkboxId => {
+                const element = document.getElementById(checkboxId);
+                if (element) {
+                    element.addEventListener('change', function(e) {
+                        courseData[checkboxes[checkboxId]] = e.target.checked;
+                        autoSave();
+                    });
+                }
             });
 
-            document.getElementById('courseIntroVideo').addEventListener('input', e => {
-                courseData.introVideo = e.target.value;
-                autoSave();
-            });
-
-            document.getElementById('instructorName').addEventListener('input', e => {
-                courseData.instructorName = e.target.value;
-                autoSave();
-            });
-
-            document.getElementById('instructorBio').addEventListener('input', e => {
-                courseData.instructorBio = e.target.value;
-                autoSave();
-            });
-
-            // Pricing fields
-            document.getElementById('coursePrice').addEventListener('input', e => {
-                courseData.price = parseFloat(e.target.value) || 0;
-                autoSave();
-            });
-
-            document.getElementById('courseSalePrice').addEventListener('input', e => {
-                courseData.salePrice = parseFloat(e.target.value) || null;
-                autoSave();
-            });
-
-            // Access fields
-            document.getElementById('maxStudents').addEventListener('input', e => {
-                courseData.maxStudents = parseInt(e.target.value) || null;
-                autoSave();
-            });
-
-            document.getElementById('startDate').addEventListener('change', e => {
-                courseData.startDate = e.target.value;
-                autoSave();
-            });
-
-            document.getElementById('endDate').addEventListener('change', e => {
-                courseData.endDate = e.target.value;
-                autoSave();
-            });
-
-            // Student settings
-            document.getElementById('certificateEnabled').addEventListener('change', e => {
-                courseData.certificate = e.target.checked;
-                autoSave();
-            });
-
-            document.getElementById('certificateThreshold').addEventListener('input', e => {
-                courseData.certificateThreshold = parseInt(e.target.value) || 80;
-                autoSave();
-            });
-
-            document.getElementById('allowComments').addEventListener('change', e => {
-                courseData.allowComments = e.target.checked;
-                autoSave();
-            });
-
-            document.getElementById('hasForum').addEventListener('change', e => {
-                courseData.hasForum = e.target.checked;
-                autoSave();
-            });
-
-            // SEO fields
-            document.getElementById('seoTitle').addEventListener('input', e => {
-                courseData.seoTitle = e.target.value;
-                autoSave();
-            });
-
-            document.getElementById('seoDescription').addEventListener('input', e => {
-                courseData.seoDescription = e.target.value;
-                autoSave();
-            });
-
-            document.getElementById('keywords').addEventListener('input', e => {
-                courseData.keywords = e.target.value.split(',').map(k => k.trim()).filter(k => k);
-                autoSave();
-            });
-
-            // Sharing settings
-            document.getElementById('allowSharing').addEventListener('change', e => {
-                courseData.allowSharing = e.target.checked;
-                autoSave();
-            });
-
-            document.getElementById('isPublic').addEventListener('change', e => {
-                courseData.isPublic = e.target.checked;
-                autoSave();
+            // أحداث الأهداف التعليمية
+            document.querySelectorAll('.objective-input').forEach(input => {
+                input.addEventListener('input', updateObjectives);
             });
         }
 
-        // Step Navigation
+        // دوال التنقل بين الخطوات
         function showStep(stepNumber) {
-            // Update active step in nav
+            // تحديث القائمة الجانبية
             document.querySelectorAll('.step-item').forEach(item => {
                 item.classList.remove('active');
-                if (parseInt(item.dataset.step) === stepNumber) {
+                const itemStep = parseInt(item.dataset.step);
+                if (itemStep === stepNumber) {
                     item.classList.add('active');
                 }
-                if (parseInt(item.dataset.step) < stepNumber) {
+                if (itemStep < stepNumber) {
                     item.classList.add('completed');
+                } else {
+                    item.classList.remove('completed');
                 }
             });
             
-            // Show corresponding panel
+            // إظهار الخطوة المطلوبة
             document.querySelectorAll('.step-panel').forEach(panel => {
                 panel.classList.remove('active');
             });
-            document.getElementById(`step${stepNumber}`).classList.add('active');
+            const targetPanel = document.getElementById(`step${stepNumber}`);
+            if (targetPanel) {
+                targetPanel.classList.add('active');
+            }
             
             currentStep = stepNumber;
             
-            // Scroll to top
-            document.querySelector('.main-panel').scrollTop = 0;
+            // التمرير لأعلى
+            const mainPanel = document.querySelector('.main-panel');
+            if (mainPanel) {
+                mainPanel.scrollTop = 0;
+            }
         }
 
         function saveAndNext(currentStepNum) {
-            // Show success
-            Swal.fire({
-                icon: 'success',
-                title: 'تم الحفظ',
-                text: 'تم حفظ البيانات بنجاح',
-                timer: 1500,
-                showConfirmButton: false
+            saveCourseData().then(() => {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم الحفظ',
+                    text: 'تم حفظ البيانات بنجاح',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+                
+                if (currentStepNum < 5) {
+                    showStep(currentStepNum + 1);
+                }
+                
+                updateProgress();
+            }).catch(error => {
+                console.error('Error saving:', error);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'خطأ',
+                    text: 'حدث خطأ في حفظ البيانات'
+                });
             });
-            
-            // Move to next step
-            if (currentStepNum < 5) {
-                showStep(currentStepNum + 1);
-            }
-            
-            updateProgress();
-            saveCourseData();
         }
 
         // Auto Save
@@ -1693,18 +1692,29 @@ function initializeEditor() {
             clearTimeout(autoSaveTimeout);
             
             const saveIndicator = document.getElementById('saveIndicator');
-            saveIndicator.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>جاري الحفظ...</span>';
-            saveIndicator.classList.add('saving');
+            if (saveIndicator) {
+                saveIndicator.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>جاري الحفظ...</span>';
+                saveIndicator.classList.add('saving');
+                saveIndicator.classList.remove('saved');
+            }
             
             autoSaveTimeout = setTimeout(() => {
                 saveCourseData().then(() => {
-                    saveIndicator.innerHTML = '<i class="fas fa-check-circle"></i> <span>تم الحفظ</span>';
-                    saveIndicator.classList.remove('saving');
-                    saveIndicator.classList.add('saved');
-                    
-                    setTimeout(() => {
-                        saveIndicator.classList.remove('saved');
-                    }, 3000);
+                    if (saveIndicator) {
+                        saveIndicator.innerHTML = '<i class="fas fa-check-circle"></i> <span>تم الحفظ</span>';
+                        saveIndicator.classList.remove('saving');
+                        saveIndicator.classList.add('saved');
+                        
+                        setTimeout(() => {
+                            saveIndicator.classList.remove('saved');
+                        }, 3000);
+                    }
+                }).catch(error => {
+                    console.error('Auto save error:', error);
+                    if (saveIndicator) {
+                        saveIndicator.innerHTML = '<i class="fas fa-exclamation-circle"></i> <span>خطأ في الحفظ</span>';
+                        saveIndicator.classList.remove('saving');
+                    }
                 });
             }, 1000);
         }
@@ -1713,7 +1723,7 @@ function initializeEditor() {
         async function saveCourseData() {
             if (!firebase.firestore) {
                 console.error('Firestore not initialized');
-                return;
+                return Promise.reject('Firestore not initialized');
             }
             
             const db = firebase.firestore();
@@ -1724,6 +1734,13 @@ function initializeEditor() {
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
                 
+                // إزالة القيم undefined
+                Object.keys(dataToSave).forEach(key => {
+                    if (dataToSave[key] === undefined) {
+                        delete dataToSave[key];
+                    }
+                });
+                
                 if (courseData.id) {
                     await db.collection('courses').doc(courseData.id).update(dataToSave);
                 } else {
@@ -1733,13 +1750,11 @@ function initializeEditor() {
                     });
                     courseData.id = docRef.id;
                 }
+                
+                return Promise.resolve();
             } catch (error) {
                 console.error('Error saving course:', error);
-                Swal.fire({
-                    icon: 'error',
-                    title: 'خطأ',
-                    text: 'حدث خطأ في حفظ البيانات'
-                });
+                return Promise.reject(error);
             }
         }
 
@@ -1755,8 +1770,6 @@ function initializeEditor() {
                     
                     if (doc.exists) {
                         courseData = { id: doc.id, ...doc.data() };
-                        
-                        // Update UI with loaded data
                         updateUIWithCourseData();
                         updateProgress();
                     }
@@ -1862,7 +1875,7 @@ function initializeEditor() {
             }
         }
 
-        // Learning Objectives
+        // Learning Objectives Functions
         function addObjective() {
             const container = document.getElementById('learningObjectives');
             const count = container.children.length + 1;
@@ -1994,7 +2007,7 @@ function initializeEditor() {
                     html: `
                         <div style="text-align: right;">
                             <p style="margin-bottom: 1rem;">لحفظ الصورة، ارفعها على GitHub في:</p>
-                            <code style="background: #f0f0f0; padding: 0.5rem; display: block; margin: 1rem 0; direction: ltr;">
+                            <code style="background: #f0f0f0; padding: 0.5rem; display: block; margin: 1rem 0; direction: ltr; color: #333;">
                                 media/${type === 'course' ? 'courses' : 'instructors'}/${file.name}
                             </code>
                             <p style="color: #666;">ثم اضغط تم بعد رفعها</p>
@@ -2064,7 +2077,7 @@ function initializeEditor() {
             const uploadDiv = document.getElementById('courseImageUpload');
             uploadDiv.classList.add('has-image');
             uploadDiv.innerHTML = `
-                <img src="${url}" alt="Course thumbnail">
+                <img src="${url}" alt="Course thumbnail" onerror="this.src='https://via.placeholder.com/400x225?text=صورة+الدورة'">
                 <div class="upload-overlay">
                     <button class="btn btn-primary" onclick="uploadCourseImage(); event.stopPropagation();">تغيير الصورة</button>
                 </div>
@@ -2075,35 +2088,41 @@ function initializeEditor() {
             const uploadDiv = document.getElementById('instructorImageUpload');
             uploadDiv.classList.add('has-image');
             uploadDiv.innerHTML = `
-                <img src="${url}" alt="Instructor" style="width: 100%; height: 100%; object-fit: cover;">
+                <img src="${url}" alt="Instructor" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://via.placeholder.com/300x300?text=صورة+المدرب'">
                 <div class="upload-overlay">
                     <button class="btn btn-primary" onclick="uploadInstructorImage(); event.stopPropagation();">تغيير الصورة</button>
                 </div>
             `;
         }
 
-        // Pricing
+        // Pricing Functions
         function selectPriceType(type) {
             document.querySelectorAll('.price-option').forEach(option => {
                 option.classList.remove('active');
             });
             
-            document.querySelector(`[data-type="${type}"]`).classList.add('active');
+            const selectedOption = document.querySelector(`[data-type="${type}"]`);
+            if (selectedOption) {
+                selectedOption.classList.add('active');
+            }
+            
             courseData.priceType = type;
             
             const pricingDetails = document.getElementById('pricingDetails');
-            if (type === 'paid') {
-                pricingDetails.style.display = 'block';
-            } else {
-                pricingDetails.style.display = 'none';
-                courseData.price = 0;
-                courseData.salePrice = null;
+            if (pricingDetails) {
+                if (type === 'paid') {
+                    pricingDetails.style.display = 'block';
+                } else {
+                    pricingDetails.style.display = 'none';
+                    courseData.price = 0;
+                    courseData.salePrice = null;
+                }
             }
             
             autoSave();
         }
 
-        // Coupons
+        // Coupon Functions
         function addCoupon() {
             Swal.fire({
                 title: 'إضافة كوبون خصم',
@@ -2149,6 +2168,9 @@ function initializeEditor() {
                 }
             }).then((result) => {
                 if (result.isConfirmed) {
+                    if (!courseData.coupons) {
+                        courseData.coupons = [];
+                    }
                     courseData.coupons.push(result.value);
                     renderCoupons();
                     autoSave();
@@ -2158,6 +2180,8 @@ function initializeEditor() {
 
         function renderCoupons() {
             const couponList = document.getElementById('couponList');
+            if (!couponList || !courseData.coupons) return;
+            
             couponList.innerHTML = courseData.coupons.map((coupon, index) => `
                 <div class="coupon-item">
                     <div>
@@ -2178,18 +2202,22 @@ function initializeEditor() {
             autoSave();
         }
 
-        // Student Access
+        // Student Access Functions
         function selectAccessType(type) {
             document.querySelectorAll('.access-card').forEach(card => {
                 card.classList.remove('selected');
             });
             
-            document.querySelector(`[data-access="${type}"]`).classList.add('selected');
+            const selectedCard = document.querySelector(`[data-access="${type}"]`);
+            if (selectedCard) {
+                selectedCard.classList.add('selected');
+            }
+            
             courseData.accessType = type;
             autoSave();
         }
 
-        // Curriculum Builder
+        // Curriculum Builder Functions
         function addModule() {
             const moduleId = Date.now();
             const moduleNumber = courseData.modules.length + 1;
@@ -2206,67 +2234,67 @@ function initializeEditor() {
             autoSave();
         }
 
-// تحديث دالة renderModule لإصلاح Sortable للدروس
-function renderModule(module) {
-    const modulesList = document.getElementById('modulesList');
-    const moduleElement = document.createElement('div');
-    moduleElement.className = 'module-item' + (module.expanded ? ' expanded' : '');
-    moduleElement.dataset.moduleId = module.id;
-    
-    moduleElement.innerHTML = `
-        <div class="module-header">
-            <i class="fas fa-grip-vertical drag-handle"></i>
-            <div class="module-info">
-                <div class="module-number">${courseData.modules.indexOf(module) + 1}</div>
-                <input type="text" 
-                       class="module-title-input" 
-                       value="${module.title}" 
-                       onchange="updateModuleTitle(${module.id}, this.value)"
-                       placeholder="اسم الوحدة">
-            </div>
-            <div class="module-actions">
-                <button class="icon-btn" onclick="toggleModule(${module.id})" title="إظهار/إخفاء">
-                    <i class="fas fa-chevron-down"></i>
-                </button>
-                <button class="icon-btn danger" onclick="deleteModule(${module.id})" title="حذف">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-        </div>
-        <div class="module-content">
-            <div class="lessons-list" id="lessons-${module.id}">
-                ${module.lessons.map(lesson => renderLessonHTML(lesson, module.id)).join('')}
-            </div>
-            <button class="add-content-btn" onclick="showContentTypes(${module.id})">
-                <i class="fas fa-plus"></i>
-                إضافة محتوى
-            </button>
-        </div>
-    `;
-    
-    modulesList.appendChild(moduleElement);
-    
-    // Initialize sortable for lessons بطريقة آمنة
-    setTimeout(() => {
-        const lessonsContainer = document.getElementById(`lessons-${module.id}`);
-        if (lessonsContainer && typeof Sortable !== 'undefined') {
-            try {
-                new Sortable(lessonsContainer, {
-                    animation: 150,
-                    handle: '.lesson-item',
-                    ghostClass: 'dragging',
-                    onEnd: function(evt) {
-                        updateLessonsOrder(module.id);
-                        autoSave();
+        function renderModule(module) {
+            const modulesList = document.getElementById('modulesList');
+            if (!modulesList) return;
+            
+            const moduleElement = document.createElement('div');
+            moduleElement.className = 'module-item' + (module.expanded ? ' expanded' : '');
+            moduleElement.dataset.moduleId = module.id;
+            
+            moduleElement.innerHTML = `
+                <div class="module-header">
+                    <i class="fas fa-grip-vertical drag-handle"></i>
+                    <div class="module-info">
+                        <div class="module-number">${courseData.modules.indexOf(module) + 1}</div>
+                        <input type="text" 
+                               class="module-title-input" 
+                               value="${module.title}" 
+                               onchange="updateModuleTitle(${module.id}, this.value)"
+                               placeholder="اسم الوحدة">
+                    </div>
+                    <div class="module-actions">
+                        <button class="icon-btn" onclick="toggleModule(${module.id})" title="إظهار/إخفاء">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <button class="icon-btn danger" onclick="deleteModule(${module.id})" title="حذف">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="module-content">
+                    <div class="lessons-list" id="lessons-${module.id}">
+                        ${module.lessons.map(lesson => renderLessonHTML(lesson, module.id)).join('')}
+                    </div>
+                    <button class="add-content-btn" onclick="showContentTypes(${module.id})">
+                        <i class="fas fa-plus"></i>
+                        إضافة محتوى
+                    </button>
+                </div>
+            `;
+            
+            modulesList.appendChild(moduleElement);
+            
+            // Initialize sortable for lessons
+            setTimeout(() => {
+                const lessonsContainer = document.getElementById(`lessons-${module.id}`);
+                if (lessonsContainer && typeof Sortable !== 'undefined') {
+                    try {
+                        new Sortable(lessonsContainer, {
+                            animation: 150,
+                            handle: '.lesson-item',
+                            ghostClass: 'dragging',
+                            onEnd: function() {
+                                updateLessonsOrder(module.id);
+                                autoSave();
+                            }
+                        });
+                    } catch (error) {
+                        console.warn('Sortable lessons initialization warning:', error);
                     }
-                });
-            } catch (error) {
-                console.warn('Sortable lessons initialization warning:', error);
-            }
+                }
+            }, 500);
         }
-    }, 500);
-}
-
 
         function renderLessonHTML(lesson, moduleId) {
             const iconMap = {
@@ -2311,90 +2339,85 @@ function renderModule(module) {
             return labels[type] || 'درس';
         }
 
-// إصلاح دالة showContentTypes
-function showContentTypes(moduleId) {
-    // جعل الدالة global لتعمل من داخل onclick
-    window.currentModuleId = moduleId;
-    
-    Swal.fire({
-        title: 'اختر نوع المحتوى',
-        html: `
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
-                <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
-                     onmouseover="this.style.background='#e0e0e0'" 
-                     onmouseout="this.style.background='#f0f0f0'"
-                     data-type="video">
-                    <i class="fas fa-video" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
-                    <div style="font-weight: 600;">فيديو</div>
-                </div>
-                <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
-                     onmouseover="this.style.background='#e0e0e0'" 
-                     onmouseout="this.style.background='#f0f0f0'"
-                     data-type="text">
-                    <i class="fas fa-file-alt" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
-                    <div style="font-weight: 600;">نص</div>
-                </div>
-                <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
-                     onmouseover="this.style.background='#e0e0e0'" 
-                     onmouseout="this.style.background='#f0f0f0'"
-                     data-type="quiz">
-                    <i class="fas fa-question-circle" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
-                    <div style="font-weight: 600;">اختبار</div>
-                </div>
-                <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
-                     onmouseover="this.style.background='#e0e0e0'" 
-                     onmouseout="this.style.background='#f0f0f0'"
-                     data-type="assignment">
-                    <i class="fas fa-tasks" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
-                    <div style="font-weight: 600;">مهمة</div>
-                </div>
-                <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
-                     onmouseover="this.style.background='#e0e0e0'" 
-                     onmouseout="this.style.background='#f0f0f0'"
-                     data-type="resource">
-                    <i class="fas fa-download" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
-                    <div style="font-weight: 600;">مورد</div>
-                </div>
-                <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
-                     onmouseover="this.style.background='#e0e0e0'" 
-                     onmouseout="this.style.background='#f0f0f0'"
-                     data-type="live">
-                    <i class="fas fa-broadcast-tower" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
-                    <div style="font-weight: 600;">جلسة حية</div>
-                </div>
-            </div>
-        `,
-        showConfirmButton: false,
-        showCancelButton: true,
-        cancelButtonText: 'إلغاء',
-        width: '600px',
-        didOpen: () => {
-            // إضافة event listeners بعد فتح النافذة
-            document.querySelectorAll('.content-type-option').forEach(option => {
-                option.addEventListener('click', function() {
-                    const type = this.getAttribute('data-type');
-                    Swal.close();
-                    addLesson(window.currentModuleId, type);
-                });
+        function showContentTypes(moduleId) {
+            window.currentModuleId = moduleId;
+            
+            Swal.fire({
+                title: 'اختر نوع المحتوى',
+                html: `
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                        <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
+                             onmouseover="this.style.background='#e0e0e0'" 
+                             onmouseout="this.style.background='#f0f0f0'"
+                             data-type="video">
+                            <i class="fas fa-video" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
+                            <div style="font-weight: 600; color: #333;">فيديو</div>
+                        </div>
+                        <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
+                             onmouseover="this.style.background='#e0e0e0'" 
+                             onmouseout="this.style.background='#f0f0f0'"
+                             data-type="text">
+                            <i class="fas fa-file-alt" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
+                            <div style="font-weight: 600; color: #333;">نص</div>
+                        </div>
+                        <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
+                             onmouseover="this.style.background='#e0e0e0'" 
+                             onmouseout="this.style.background='#f0f0f0'"
+                             data-type="quiz">
+                            <i class="fas fa-question-circle" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
+                            <div style="font-weight: 600; color: #333;">اختبار</div>
+                        </div>
+                        <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
+                             onmouseover="this.style.background='#e0e0e0'" 
+                             onmouseout="this.style.background='#f0f0f0'"
+                             data-type="assignment">
+                            <i class="fas fa-tasks" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
+                            <div style="font-weight: 600; color: #333;">مهمة</div>
+                        </div>
+                        <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
+                             onmouseover="this.style.background='#e0e0e0'" 
+                             onmouseout="this.style.background='#f0f0f0'"
+                             data-type="resource">
+                            <i class="fas fa-download" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
+                            <div style="font-weight: 600; color: #333;">مورد</div>
+                        </div>
+                        <div class="content-type-option" style="text-align: center; padding: 1.5rem; background: #f0f0f0; border-radius: 10px; cursor: pointer; transition: all 0.3s;" 
+                             onmouseover="this.style.background='#e0e0e0'" 
+                             onmouseout="this.style.background='#f0f0f0'"
+                             data-type="live">
+                            <i class="fas fa-broadcast-tower" style="font-size: 2rem; color: #f4c430; margin-bottom: 0.5rem; display: block;"></i>
+                            <div style="font-weight: 600; color: #333;">جلسة حية</div>
+                        </div>
+                    </div>
+                `,
+                showConfirmButton: false,
+                showCancelButton: true,
+                cancelButtonText: 'إلغاء',
+                width: '600px',
+                didOpen: () => {
+                    document.querySelectorAll('.content-type-option').forEach(option => {
+                        option.addEventListener('click', function() {
+                            const type = this.getAttribute('data-type');
+                            Swal.close();
+                            addLesson(window.currentModuleId, type);
+                        });
+                    });
+                }
             });
         }
-    });
-}
 
-// تحديث دالة addLesson لتعمل بشكل صحيح
-function addLesson(moduleId, type) {
-    const lessonId = Date.now();
-    const lesson = {
-        id: lessonId,
-        type: type,
-        title: `${getLessonTypeLabel(type)} جديد`,
-        content: '',
-        duration: 0
-    };
-    
-    showLessonEditor(moduleId, lesson, true);
-}
-
+        function addLesson(moduleId, type) {
+            const lessonId = Date.now();
+            const lesson = {
+                id: lessonId,
+                type: type,
+                title: `${getLessonTypeLabel(type)} جديد`,
+                content: '',
+                duration: 0
+            };
+            
+            showLessonEditor(moduleId, lesson, true);
+        }
 
         function editLesson(moduleId, lessonId) {
             const module = courseData.modules.find(m => m.id === moduleId);
@@ -2405,169 +2428,133 @@ function addLesson(moduleId, type) {
             }
         }
 
-// تحديث دالة showLessonEditor لإصلاح حفظ الدروس
-function showLessonEditor(moduleId, lesson, isNew = false) {
-    let editorContent = '';
-    
-    switch(lesson.type) {
-        case 'video':
-            editorContent = `
-                <div class="form-group">
-                    <label class="form-label">عنوان الدرس</label>
-                    <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">رابط الفيديو</label>
-                    <input type="url" id="videoUrl" class="form-control" placeholder="YouTube, Vimeo, أو رابط مباشر" value="${lesson.videoUrl || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">مدة الفيديو (بالدقائق)</label>
-                    <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-            `;
-            break;
+        function showLessonEditor(moduleId, lesson, isNew = false) {
+            let editorContent = '';
             
-        case 'text':
-            editorContent = `
-                <div class="form-group">
-                    <label class="form-label">عنوان الدرس</label>
-                    <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">محتوى الدرس</label>
-                    <textarea id="lessonContent" class="form-control" rows="10" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">${lesson.content || ''}</textarea>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">وقت القراءة المتوقع (بالدقائق)</label>
-                    <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-            `;
-            break;
-            
-        default:
-            editorContent = `
-                <div class="form-group">
-                    <label class="form-label">عنوان الدرس</label>
-                    <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">الوقت المتوقع (بالدقائق)</label>
-                    <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                </div>
-                <div style="text-align: center; padding: 2rem; background: #f0f0f0; border-radius: 8px;">
-                    <i class="fas fa-tools" style="font-size: 3rem; color: #f4c430; margin-bottom: 1rem; display: block;"></i>
-                    <p>محرر متقدم قادم قريباً!</p>
-                </div>
-            `;
-    }
-    
-    Swal.fire({
-        title: isNew ? 'إضافة محتوى جديد' : 'تعديل المحتوى',
-        html: editorContent,
-        width: '700px',
-        showCancelButton: true,
-        confirmButtonText: isNew ? 'إضافة' : 'حفظ',
-        cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#f4c430',
-        customClass: {
-            input: 'form-control'
-        },
-        preConfirm: () => {
-            const title = document.getElementById('lessonTitle').value;
-            if (!title) {
-                Swal.showValidationMessage('يرجى إدخال عنوان المحتوى');
-                return false;
+            switch(lesson.type) {
+                case 'video':
+                    editorContent = `
+                        <div class="form-group">
+                            <label class="form-label">عنوان الدرس</label>
+                            <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">رابط الفيديو</label>
+                            <input type="url" id="videoUrl" class="form-control" placeholder="YouTube, Vimeo, أو رابط مباشر" value="${lesson.videoUrl || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">مدة الفيديو (بالدقائق)</label>
+                            <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                    `;
+                    break;
+                    
+                case 'text':
+                    editorContent = `
+                        <div class="form-group">
+                            <label class="form-label">عنوان الدرس</label>
+                            <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">محتوى الدرس</label>
+                            <textarea id="lessonContent" class="form-control" rows="10" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">${lesson.content || ''}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">وقت القراءة المتوقع (بالدقائق)</label>
+                            <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                    `;
+                    break;
+                    
+                default:
+                    editorContent = `
+                        <div class="form-group">
+                            <label class="form-label">عنوان الدرس</label>
+                            <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">الوقت المتوقع (بالدقائق)</label>
+                            <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration || ''}" style="background: #f5f5f5; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                        </div>
+                        <div style="text-align: center; padding: 2rem; background: #f0f0f0; border-radius: 8px;">
+                            <i class="fas fa-tools" style="font-size: 3rem; color: #f4c430; margin-bottom: 1rem; display: block;"></i>
+                            <p style="color: #666;">محرر متقدم قادم قريباً!</p>
+                        </div>
+                    `;
             }
             
-            const updatedLesson = {
-                ...lesson,
-                title: title,
-                duration: parseInt(document.getElementById('lessonDuration')?.value || 0)
-            };
-            
-            // Get type-specific data
-            if (lesson.type === 'video') {
-                updatedLesson.videoUrl = document.getElementById('videoUrl').value;
-            } else if (lesson.type === 'text') {
-                updatedLesson.content = document.getElementById('lessonContent').value;
-            }
-            
-            return updatedLesson;
-        }
-    }).then((result) => {
-        if (result.isConfirmed) {
-            const module = courseData.modules.find(m => m.id === moduleId);
-            if (!module) return;
-            
-            if (isNew) {
-                module.lessons.push(result.value);
-            } else {
-                const index = module.lessons.findIndex(l => l.id === lesson.id);
-                if (index !== -1) {
-                    module.lessons[index] = result.value;
-                }
-            }
-            
-            // Re-render lessons
-            const lessonsContainer = document.getElementById(`lessons-${moduleId}`);
-            if (lessonsContainer) {
-                lessonsContainer.innerHTML = module.lessons.map(l => renderLessonHTML(l, moduleId)).join('');
-            }
-            
-            updateProgress();
-            autoSave();
-            
-            // إظهار رسالة نجاح
-            const Toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 3000,
-                timerProgressBar: true
-            });
-            
-            Toast.fire({
-                icon: 'success',
-                title: isNew ? 'تم إضافة المحتوى بنجاح' : 'تم حفظ التغييرات'
-            });
-        }
-    });
-}
-
-// تحديث تهيئة الصفحة
-document.addEventListener('DOMContentLoaded', function() {
-    // تأخير تهيئة المحرر لتجنب مشاكل DOM
-    setTimeout(() => {
-        initializeEditor();
-        loadCourseData();
-        setupEventListeners();
-        updateProgress();
-        initializeSortable();
-    }, 100);
-});
-
-// إصلاح تهيئة Sortable
-function initializeSortable() {
-    // تأجيل التهيئة لضمان تحميل العناصر
-    setTimeout(() => {
-        const modulesList = document.getElementById('modulesList');
-        if (modulesList && typeof Sortable !== 'undefined') {
-            try {
-                new Sortable(modulesList, {
-                    animation: 150,
-                    handle: '.drag-handle',
-                    ghostClass: 'dragging',
-                    onEnd: function(evt) {
-                        updateModulesOrder();
-                        autoSave();
+            Swal.fire({
+                title: isNew ? 'إضافة محتوى جديد' : 'تعديل المحتوى',
+                html: editorContent,
+                width: '700px',
+                showCancelButton: true,
+                confirmButtonText: isNew ? 'إضافة' : 'حفظ',
+                cancelButtonText: 'إلغاء',
+                confirmButtonColor: '#f4c430',
+                customClass: {
+                    input: 'form-control'
+                },
+                preConfirm: () => {
+                    const title = document.getElementById('lessonTitle').value;
+                    if (!title) {
+                        Swal.showValidationMessage('يرجى إدخال عنوان المحتوى');
+                        return false;
                     }
-                });
-            } catch (error) {
-                console.warn('Sortable initialization warning:', error);
-            }
+                    
+                    const updatedLesson = {
+                        ...lesson,
+                        title: title,
+                        duration: parseInt(document.getElementById('lessonDuration')?.value || 0)
+                    };
+                    
+                    // Get type-specific data
+                    if (lesson.type === 'video') {
+                        updatedLesson.videoUrl = document.getElementById('videoUrl').value;
+                    } else if (lesson.type === 'text') {
+                        updatedLesson.content = document.getElementById('lessonContent').value;
+                    }
+                    
+                    return updatedLesson;
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const module = courseData.modules.find(m => m.id === moduleId);
+                    if (!module) return;
+                    
+                    if (isNew) {
+                        module.lessons.push(result.value);
+                    } else {
+                        const index = module.lessons.findIndex(l => l.id === lesson.id);
+                        if (index !== -1) {
+                            module.lessons[index] = result.value;
+                        }
+                    }
+                    
+                    // Re-render lessons
+                    const lessonsContainer = document.getElementById(`lessons-${moduleId}`);
+                    if (lessonsContainer) {
+                        lessonsContainer.innerHTML = module.lessons.map(l => renderLessonHTML(l, moduleId)).join('');
+                    }
+                    
+                    updateProgress();
+                    autoSave();
+                    
+                    // إظهار رسالة نجاح
+                    const Toast = Swal.mixin({
+                        toast: true,
+                        position: 'top-end',
+                        showConfirmButton: false,
+                        timer: 3000,
+                        timerProgressBar: true
+                    });
+                    
+                    Toast.fire({
+                        icon: 'success',
+                        title: isNew ? 'تم إضافة المحتوى بنجاح' : 'تم حفظ التغييرات'
+                    });
+                }
+            });
         }
-    }, 1000);
-}
 
         function updateModuleTitle(moduleId, title) {
             const module = courseData.modules.find(m => m.id === moduleId);
@@ -2581,7 +2568,7 @@ function initializeSortable() {
             const moduleElement = document.querySelector(`[data-module-id="${moduleId}"]`);
             const module = courseData.modules.find(m => m.id === moduleId);
             
-            if (module) {
+            if (module && moduleElement) {
                 module.expanded = !module.expanded;
                 moduleElement.classList.toggle('expanded');
             }
@@ -2599,7 +2586,10 @@ function initializeSortable() {
             }).then((result) => {
                 if (result.isConfirmed) {
                     courseData.modules = courseData.modules.filter(m => m.id !== moduleId);
-                    document.querySelector(`[data-module-id="${moduleId}"]`).remove();
+                    const moduleElement = document.querySelector(`[data-module-id="${moduleId}"]`);
+                    if (moduleElement) {
+                        moduleElement.remove();
+                    }
                     
                     updateModuleNumbers();
                     updateProgress();
@@ -2609,6 +2599,8 @@ function initializeSortable() {
         }
 
         function deleteLesson(moduleId, lessonId) {
+            event.stopPropagation();
+            
             Swal.fire({
                 title: 'تأكيد الحذف',
                 text: 'هل أنت متأكد من حذف هذا المحتوى؟',
@@ -2622,7 +2614,10 @@ function initializeSortable() {
                     const module = courseData.modules.find(m => m.id === moduleId);
                     if (module) {
                         module.lessons = module.lessons.filter(l => l.id !== lessonId);
-                        document.querySelector(`[data-lesson-id="${lessonId}"]`).remove();
+                        const lessonElement = document.querySelector(`[data-lesson-id="${lessonId}"]`);
+                        if (lessonElement) {
+                            lessonElement.remove();
+                        }
                         updateProgress();
                         autoSave();
                     }
@@ -2632,7 +2627,10 @@ function initializeSortable() {
 
         function updateModuleNumbers() {
             document.querySelectorAll('.module-item').forEach((element, index) => {
-                element.querySelector('.module-number').textContent = index + 1;
+                const numberElement = element.querySelector('.module-number');
+                if (numberElement) {
+                    numberElement.textContent = index + 1;
+                }
             });
         }
 
@@ -2654,7 +2652,7 @@ function initializeSortable() {
             module.lessons = newOrder;
         }
 
-        // Progress
+        // Progress Update
         function updateProgress() {
             let completedSteps = 0;
             const totalSteps = 20;
@@ -2663,21 +2661,25 @@ function initializeSortable() {
             if (courseData.title && courseData.title !== 'دورة جديدة') completedSteps++;
             if (courseData.description) completedSteps++;
             if (courseData.detailedDescription) completedSteps++;
-            if (courseData.objectives.length > 0) completedSteps++;
+            if (courseData.objectives && courseData.objectives.length > 0) completedSteps++;
             
             // Pricing (3 steps)
             if (courseData.priceType) completedSteps++;
             if (courseData.priceType === 'free' || courseData.price > 0) completedSteps++;
-            if (courseData.coupons.length > 0) completedSteps++;
+            if (courseData.coupons && courseData.coupons.length > 0) completedSteps++;
             
             // Curriculum (8 steps)
-            if (courseData.modules.length > 0) completedSteps += 2;
-            if (courseData.modules.length >= 3) completedSteps += 2;
+            if (courseData.modules && courseData.modules.length > 0) completedSteps += 2;
+            if (courseData.modules && courseData.modules.length >= 3) completedSteps += 2;
             
             let totalLessons = 0;
-            courseData.modules.forEach(module => {
-                totalLessons += module.lessons.length;
-            });
+            if (courseData.modules) {
+                courseData.modules.forEach(module => {
+                    if (module.lessons) {
+                        totalLessons += module.lessons.length;
+                    }
+                });
+            }
             
             if (totalLessons > 0) completedSteps += 2;
             if (totalLessons >= 5) completedSteps += 2;
@@ -2689,24 +2691,35 @@ function initializeSortable() {
             
             // Publishing (2 steps)
             if (courseData.seoTitle || courseData.title) completedSteps++;
-            if (courseData.keywords.length > 0 || courseData.seoDescription) completedSteps++;
+            if ((courseData.keywords && courseData.keywords.length > 0) || courseData.seoDescription) completedSteps++;
             
             const progress = Math.round((completedSteps / totalSteps) * 100);
             courseData.progress = progress;
             
-            document.getElementById('progressBar').style.width = `${progress}%`;
-            document.getElementById('progressPercent').textContent = progress;
+            const progressBar = document.getElementById('progressBar');
+            const progressPercent = document.getElementById('progressPercent');
+            
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+            }
+            if (progressPercent) {
+                progressPercent.textContent = progress;
+            }
         }
 
-        // Preview
+        // Preview Course
         function previewCourse() {
             saveCourseData().then(() => {
-                const previewUrl = `/course-preview.html?id=${courseData.id || 'draft'}`;
-                window.open(previewUrl, '_blank');
+                Swal.fire({
+                    icon: 'info',
+                    title: 'المعاينة',
+                    text: 'ميزة المعاينة ستكون متاحة قريباً',
+                    confirmButtonColor: '#f4c430'
+                });
             });
         }
 
-        // Publishing
+        // Publish Course
         function publishCourse() {
             if (courseData.progress < 60) {
                 Swal.fire({
@@ -2745,6 +2758,7 @@ function initializeSortable() {
             });
         }
 
+        // Save Draft
         function saveDraft() {
             courseData.status = 'draft';
             saveCourseData().then(() => {
@@ -2758,7 +2772,7 @@ function initializeSortable() {
             });
         }
 
-        // Navigation
+        // Go Back
         function goBack() {
             Swal.fire({
                 title: 'هل تريد المغادرة؟',
@@ -2775,8 +2789,8 @@ function initializeSortable() {
             });
         }
 
-        // Initialize Sortable for modules
-        document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Sortable
+        function initializeSortable() {
             setTimeout(() => {
                 const modulesList = document.getElementById('modulesList');
                 if (modulesList && typeof Sortable !== 'undefined') {
@@ -2791,11 +2805,11 @@ function initializeSortable() {
                             }
                         });
                     } catch (error) {
-                        console.error('Sortable initialization error:', error);
+                        console.warn('Sortable initialization warning:', error);
                     }
                 }
-            }, 500);
-        });
+            }, 1000);
+        }
 
         function updateModulesOrder() {
             const moduleElements = document.querySelectorAll('.module-item');
@@ -2813,12 +2827,42 @@ function initializeSortable() {
             updateModuleNumbers();
         }
 
-        // Add event listeners for all objective inputs on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.objective-input').forEach(input => {
-                input.addEventListener('input', updateObjectives);
-            });
-        });
+        // تأكد من أن جميع الدوال متاحة globally
+        window.showStep = showStep;
+        window.saveAndNext = saveAndNext;
+        window.goBack = goBack;
+        window.previewCourse = previewCourse;
+        window.publishCourse = publishCourse;
+        window.saveDraft = saveDraft;
+        window.saveCourseData = saveCourseData;
+        window.updateProgress = updateProgress;
+        window.selectPriceType = selectPriceType;
+        window.addCoupon = addCoupon;
+        window.removeCoupon = removeCoupon;
+        window.selectAccessType = selectAccessType;
+        window.addModule = addModule;
+        window.renderModule = renderModule;
+        window.showContentTypes = showContentTypes;
+        window.addLesson = addLesson;
+        window.editLesson = editLesson;
+        window.updateModuleTitle = updateModuleTitle;
+        window.toggleModule = toggleModule;
+        window.deleteModule = deleteModule;
+        window.deleteLesson = deleteLesson;
+        window.addObjective = addObjective;
+        window.removeObjective = removeObjective;
+        window.uploadCourseImage = uploadCourseImage;
+        window.uploadInstructorImage = uploadInstructorImage;
+        window.selectImageFile = selectImageFile;
+        window.enterImageUrl = enterImageUrl;
+        window.updateObjectives = updateObjectives;
+        window.renderCoupons = renderCoupons;
+        window.renderLessonHTML = renderLessonHTML;
+        window.getLessonTypeLabel = getLessonTypeLabel;
+        window.showLessonEditor = showLessonEditor;
+        window.displayCourseImage = displayCourseImage;
+        window.displayInstructorImage = displayInstructorImage;
+        window.handleImageFile = handleImageFile;
     </script>
 </body>
 </html>
