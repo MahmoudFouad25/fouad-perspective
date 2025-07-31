@@ -332,12 +332,26 @@
         const db = firebase.firestore();
 
         let isProcessingLogin = false; // متغير لمنع التكرار
+        let authChangeTimeout = null; // timeout للـ auth changes
 
         // التحقق من وجود مستخدم مسجل دخول
         auth.onAuthStateChanged(async (user) => {
+            // مسح timeout السابق
+            if (authChangeTimeout) {
+                clearTimeout(authChangeTimeout);
+            }
+            
+            // تأخير قصير عشان نتجنب الـ race conditions
+            authChangeTimeout = setTimeout(async () => {
+                await handleAuthStateChange(user);
+            }, 100);
+        });
+
+        // معالج تغيير حالة المصادقة
+        async function handleAuthStateChange(user) {
             // تجنب المعالجة المتكررة
             if (isProcessingLogin) {
-                console.log('🔄 معالجة تسجيل الدخول جارية، تجاهل...');
+                console.log('🔄 معالجة جارية، تجاهل...');
                 return;
             }
 
@@ -346,6 +360,7 @@
                 
                 // توجيه الأدمن مباشرة
                 if (user.email === 'admin@fouad-academy.com') {
+                    console.log('👨‍💼 توجيه الأدمن...');
                     window.location.href = './admin/index.html';
                     return;
                 }
@@ -353,16 +368,25 @@
                 isProcessingLogin = true;
                 
                 try {
+                    // انتظار قصير عشان Firebase يستقر
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    console.log('🔍 فحص بيانات المستخدم...');
+                    
                     // فحص إذا كان المستخدم موجود في users collection
                     const userDoc = await db.collection('users').doc(user.uid).get();
                     
                     if (userDoc.exists) {
                         // المستخدم موجود - توجيه للوحة التحكم
-                        console.log('👤 المستخدم موجود في النظام');
-                        window.location.href = './dashboard.html';
+                        console.log('👤 المستخدم موجود، توجيه للوحة التحكم...');
+                        // تأخير قصير عشان نتأكد إن كل حاجة جاهزة
+                        setTimeout(() => {
+                            window.location.href = './dashboard.html';
+                        }, 200);
+                        
                     } else {
-                        // المستخدم مش موجود - ممكن يكون جديد ومحتاج نقل بيانات
-                        console.log('🆕 مستخدم جديد - فحص userCredentials...');
+                        // المستخدم مش موجود - فحص userCredentials
+                        console.log('🆕 مستخدم جديد - فحص البيانات المؤقتة...');
                         
                         const credentialDoc = await db.collection('userCredentials').doc(user.email).get();
                         
@@ -370,18 +394,30 @@
                             // نقل البيانات
                             console.log('📋 نقل بيانات المستخدم الجديد...');
                             await transferUserDataSilent(user.uid, credentialDoc.data(), credentialDoc);
-                            window.location.href = './dashboard.html';
+                            
+                            // توجيه للوحة التحكم بعد النقل
+                            setTimeout(() => {
+                                window.location.href = './dashboard.html';
+                            }, 500);
+                            
                         } else {
-                            // حالة غريبة - المستخدم موجود في Auth بس مش في أي collection
-                            console.warn('⚠️ المستخدم موجود في Auth بس مش في النظام');
-                            await auth.signOut();
-                            showError('حدث خطأ في النظام. يرجى المحاولة مرة أخرى أو التواصل مع الإدارة');
+                            // حالة غريبة - توجيه على أي حال
+                            console.warn('⚠️ بيانات غير مكتملة - توجيه للوحة التحكم');
+                            setTimeout(() => {
+                                window.location.href = './dashboard.html';
+                            }, 200);
                         }
                     }
+                    
                 } catch (error) {
-                    console.error('❌ خطأ في معالجة تسجيل الدخول:', error);
-                    await auth.signOut();
-                    showError('حدث خطأ في تسجيل الدخول');
+                    console.error('❌ خطأ في معالجة المصادقة:', error);
+                    
+                    // في حالة أي خطأ، جرب التوجيه للوحة التحكم
+                    console.log('🔄 توجيه رغم الخطأ...');
+                    setTimeout(() => {
+                        window.location.href = './dashboard.html';
+                    }, 200);
+                    
                 } finally {
                     isProcessingLogin = false;
                 }
@@ -389,7 +425,7 @@
                 console.log('👤 لا يوجد مستخدم مسجل دخول');
                 isProcessingLogin = false;
             }
-        });
+        }
 
         // معالج النموذج
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
@@ -504,11 +540,15 @@
                 // استخدام الدالة الصامتة
                 await transferUserDataSilent(uid, credentialData, credentialDoc);
                 
-                // عرض رسالة ترحيب
+                console.log('✅ تم نقل البيانات بنجاح، عرض رسالة الترحيب...');
+                
+                // عرض رسالة ترحيب مع توجيه مباشر
                 await showWelcomeMessage(credentialData);
 
             } catch (error) {
                 console.error('❌ خطأ في نقل البيانات:', error);
+                // في حالة خطأ، وجه للوحة التحكم على أي حال
+                window.location.href = './dashboard.html';
                 throw error;
             }
         }
@@ -564,36 +604,34 @@
             }
         }
 
-        // عرض رسالة ترحيب
+        // عرض رسالة ترحيب (مبسطة)
         async function showWelcomeMessage(userData) {
             const enrollments = userData.enrollments || [];
             
-            await Swal.fire({
+            // رسالة مبسطة بدون انتظار
+            Swal.fire({
                 icon: 'success',
                 title: `مرحباً ${userData.name}!`,
                 html: `
                     <div style="text-align: right; direction: rtl;">
-                        <p style="margin-bottom: 1rem;">🎉 تم تفعيل حسابك بنجاح!</p>
-                        
+                        <p>🎉 تم تفعيل حسابك بنجاح!</p>
                         ${enrollments.length > 0 ? `
-                            <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
-                                <strong>📚 الدورات والمسارات المخصصة لك:</strong><br>
-                                ${enrollments.map(e => `• ${e.title} (${e.type === 'bundle' ? 'مسار' : 'دورة'})`).join('<br>')}
-                            </div>
-                        ` : '<p>لم يتم تخصيص دورات بعد - تواصل مع الإدارة</p>'}
-                        
-                        <p style="margin-top: 1rem;">يمكنك الآن الوصول لجميع المحتوى المتاح لك</p>
+                            <p><strong>📚 دوراتك:</strong> ${enrollments.length} ${enrollments.length === 1 ? 'دورة' : 'دورات'}</p>
+                        ` : ''}
+                        <p>جاري التوجيه...</p>
                     </div>
                 `,
-                confirmButtonText: 'ابدأ التعلم! 🚀',
-                confirmButtonColor: '#f4c430',
-                showClass: {
-                    popup: 'animate__animated animate__fadeInDown'
-                },
-                hideClass: {
-                    popup: 'animate__animated animate__fadeOutUp'
-                }
+                timer: 2000,
+                showConfirmButton: false,
+                allowOutsideClick: false,
+                allowEscapeKey: false
             });
+            
+            // توجيه مباشر بعد ثانيتين
+            setTimeout(() => {
+                console.log('🚀 توجيه للوحة التحكم من رسالة الترحيب...');
+                window.location.href = './dashboard.html';
+            }, 2000);
         }
 
         // رسائل الخطأ
