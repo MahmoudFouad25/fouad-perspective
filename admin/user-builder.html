@@ -953,7 +953,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js"></script>
     
     <!-- Firebase Config -->
-    <script src="/fouad-perspective/js/firebase-config.js"></script>
+    <script src="../js/firebase-config.js"></script>
     
     <script>
         // حماية الصفحة
@@ -1266,6 +1266,7 @@
                     endDate: calculateEndDate(item.startDate, item.duration),
                     paymentType: item.paymentType,
                     paymentNotes: item.paymentNotes,
+                    isActive: true, // سيتم التحقق من التاريخ لاحقاً
                     enrolledAt: firebase.firestore.FieldValue.serverTimestamp()
                 }));
                 
@@ -1277,36 +1278,61 @@
                 if (!currentUserId) {
                     // إنشاء مستخدم جديد
                     
-                    // حفظ معلومات الأدمن الحالي
-                    const adminEmail = firebase.auth().currentUser.email;
+                    // الحل الصحيح لمشكلة تسجيل الخروج
+                    // استخدام Admin SDK أو حل بديل
                     
-                    // إنشاء حساب جديد في Firebase Auth
-                    const userCredential = await firebase.auth().createUserWithEmailAndPassword(userData.email, password);
-                    userId = userCredential.user.uid;
-                    
-                    // إضافة معلومات الإنشاء
+                    // حفظ البيانات أولاً في Firestore مع ID مؤقت
+                    const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    userData.tempId = tempId;
+                    userData.password = password; // حفظ مؤقت للكلمة السر (سيتم حذفها)
                     userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-                    userData.createdBy = adminEmail;
+                    userData.createdBy = firebase.auth().currentUser.email;
+                    userData.status = 'pending'; // في انتظار إنشاء الحساب
                     
-                    // حفظ في Firestore
-                    await firebase.firestore().collection('users').doc(userId).set(userData);
+                    // حفظ في Firestore أولاً
+                    await firebase.firestore().collection('pendingUsers').doc(tempId).set(userData);
                     
-                    // إعادة تسجيل دخول الأدمن
-                    await firebase.auth().signInWithEmailAndPassword('admin@fouad-academy.com', 'Admin@123456');
+                    // عرض رسالة نجاح مع التعليمات
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'تم حفظ البيانات',
+                        html: `
+                            <div style="text-align: right;">
+                                <p style="margin-bottom: 1rem;">تم حفظ بيانات المستخدم بنجاح!</p>
+                                
+                                <div style="background: #f5f5f5; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+                                    <h4 style="color: #f4c430; margin-bottom: 0.5rem;">بيانات الدخول:</h4>
+                                    <p><strong>البريد:</strong> ${userData.email}</p>
+                                    <p><strong>كلمة المرور:</strong> ${password}</p>
+                                </div>
+                                
+                                <p style="color: #666; font-size: 0.9rem;">
+                                    <i class="fas fa-info-circle"></i>
+                                    لإكمال إنشاء الحساب، يجب على المستخدم تسجيل الدخول لأول مرة
+                                </p>
+                                
+                                <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem;">
+                                    <button class="swal2-confirm swal2-styled" onclick="copyUserCredentials('${userData.email}', '${password}')">
+                                        <i class="fas fa-copy"></i> نسخ البيانات
+                                    </button>
+                                    <a href="https://wa.me/${userData.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`مرحباً،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\nالبريد: ${userData.email}\nكلمة المرور: ${password}\n\nالرابط: ${window.location.origin}/login.html`)}" 
+                                       target="_blank" 
+                                       class="swal2-confirm swal2-styled" 
+                                       style="background: #25D366; text-decoration: none;">
+                                        <i class="fab fa-whatsapp"></i> إرسال WhatsApp
+                                    </a>
+                                </div>
+                            </div>
+                        `,
+                        showConfirmButton: false,
+                        showCloseButton: true,
+                        width: 600
+                    });
                     
-                    // عرض بيانات الدخول إذا كان مطلوباً
-                    if (document.getElementById('sendCredentials').checked) {
-                        showCredentialsModal(userData.email, password, userData.whatsapp);
-                    } else {
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'تم إنشاء الحساب بنجاح',
-                            text: 'يمكن للمستخدم تسجيل الدخول الآن',
-                            confirmButtonColor: '#f4c430'
-                        }).then(() => {
-                            window.location.href = './users.html';
-                        });
-                    }
+                    // العودة لصفحة المستخدمين
+                    setTimeout(() => {
+                        window.location.href = './users.html';
+                    }, 500);
                     
                 } else {
                     // تحديث مستخدم موجود
@@ -1341,6 +1367,25 @@
                 saveBtn.disabled = false;
             }
         }
+
+        // دالة نسخ البيانات للنافذة المنبثقة
+        window.copyUserCredentials = function(email, password) {
+            const text = `البريد الإلكتروني: ${email}\nكلمة المرور: ${password}`;
+            navigator.clipboard.writeText(text).then(() => {
+                const Toast = Swal.mixin({
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 3000,
+                    timerProgressBar: true
+                });
+                
+                Toast.fire({
+                    icon: 'success',
+                    title: 'تم نسخ البيانات'
+                });
+            });
+        };
 
         // حفظ كمسودة (بدون تفعيل)
         async function saveAsDraft() {
