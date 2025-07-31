@@ -420,7 +420,7 @@
             });
         });
 
-        // معالج البريد الإلكتروني - التحقق من النوع (مع debounce)
+        // معالج البريد الإلكتروني - عرض المعلومات فقط (بدون تفعيل)
         let checkUserTimeout;
         document.getElementById('email').addEventListener('input', function() {
             const email = this.value.trim();
@@ -429,10 +429,10 @@
             clearTimeout(checkUserTimeout);
             
             if (email && email.includes('@')) {
-                // انتظار 500ms قبل التحقق
+                // انتظار 800ms قبل التحقق (إعطاء وقت أكثر للكتابة)
                 checkUserTimeout = setTimeout(() => {
-                    checkUserType(email);
-                }, 500);
+                    checkUserTypeDisplay(email); // تغيير اسم الدالة لتوضيح أنها للعرض فقط
+                }, 800);
             } else {
                 // إخفاء معلومات نوع المستخدم إذا لم يكن الإيميل صالح
                 const userTypeInfo = document.getElementById('userTypeInfo');
@@ -447,10 +447,10 @@
             await handleLogin();
         });
 
-        // التحقق من نوع المستخدم
-        async function checkUserType(email) {
+        // التحقق من نوع المستخدم للعرض فقط (بدون تفعيل)
+        async function checkUserTypeDisplay(email) {
             try {
-                console.log('🔍 فحص نوع المستخدم:', email);
+                console.log('🔍 فحص نوع المستخدم للعرض:', email);
 
                 // إخفاء معلومات نوع المستخدم
                 const userTypeInfo = document.getElementById('userTypeInfo');
@@ -459,10 +459,11 @@
                 // فحص إذا كان أدمن
                 if (email === 'admin@fouad-academy.com') {
                     showUserTypeInfo('admin', 'مرحباً أدمن الموقع! 👨‍💼');
+                    updateLoginButton('تسجيل الدخول');
                     return;
                 }
 
-                // فحص المستخدمين المعلقين أولاً
+                // فحص المستخدمين المعلقين أولاً (للعرض فقط)
                 const pendingQuery = await db.collection('pendingUsers')
                     .where('email', '==', email)
                     .get();
@@ -474,7 +475,7 @@
                     return;
                 }
 
-                // فحص المستخدمين الموجودين
+                // فحص المستخدمين الموجودين (للعرض فقط)
                 const userQuery = await db.collection('users')
                     .where('email', '==', email)
                     .get();
@@ -486,12 +487,14 @@
                     return;
                 }
 
-                // المستخدم غير موجود
+                // المستخدم غير موجود (للعرض فقط)
                 showUserTypeInfo('notfound', 'هذا البريد غير مسجل في النظام ❌');
+                updateLoginButton('تسجيل الدخول');
 
             } catch (error) {
                 console.error('خطأ في فحص المستخدم:', error);
                 // في حالة خطأ، لا نعرض شيء - المستخدم يمكنه المحاولة
+                updateLoginButton('تسجيل الدخول');
             }
         }
 
@@ -648,15 +651,69 @@
 
             console.log('🔐 كلمة المرور صحيحة، بدء التفعيل...');
 
-            // إنشاء حساب Firebase Auth
-            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
+            // فحص إذا كان الحساب موجود بالفعل في Firebase Auth
+            try {
+                // محاولة تسجيل دخول للتأكد من عدم وجود الحساب
+                await auth.signInWithEmailAndPassword(email, password);
+                
+                // إذا نجح تسجيل الدخول، معناه الحساب موجود بالفعل
+                console.log('✅ الحساب موجود بالفعل، تم تسجيل الدخول');
+                
+                // نقل البيانات إذا لم تكن منقولة
+                await transferUserDataIfNeeded(email, pendingData, pendingDoc);
+                return;
+                
+            } catch (signInError) {
+                // إذا فشل تسجيل الدخول، معناه الحساب غير موجود - ننشئه
+                if (signInError.code === 'auth/user-not-found' || 
+                    signInError.code === 'auth/invalid-login-credentials' ||
+                    signInError.code === 'auth/invalid-credential') {
+                    
+                    console.log('🆕 الحساب غير موجود، إنشاء حساب جديد...');
+                    
+                    // إنشاء حساب Firebase Auth جديد
+                    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                    const user = userCredential.user;
 
-            console.log('🔥 تم إنشاء حساب Firebase Auth:', user.uid);
+                    console.log('🔥 تم إنشاء حساب Firebase Auth جديد:', user.uid);
+                    
+                    // نقل البيانات
+                    await transferUserDataIfNeeded(email, pendingData, pendingDoc, user.uid);
+                    
+                } else {
+                    // خطأ آخر في Firebase Auth
+                    throw signInError;
+                }
+            }
+        }
+
+        // دالة مساعدة لنقل البيانات
+        async function transferUserDataIfNeeded(email, pendingData, pendingDoc, uid = null) {
+            // إذا لم يتم تمرير uid، احصل عليه من المستخدم الحالي
+            if (!uid && auth.currentUser) {
+                uid = auth.currentUser.uid;
+            }
+
+            if (!uid) {
+                console.error('لا يمكن الحصول على UID للمستخدم');
+                return;
+            }
+
+            // فحص إذا كانت البيانات موجودة بالفعل في المجموعة الرئيسية
+            const existingUser = await db.collection('users').doc(uid).get();
+            
+            if (existingUser.exists) {
+                console.log('📋 بيانات المستخدم موجودة بالفعل');
+                
+                // حذف من المستخدمين المعلقين فقط
+                await pendingDoc.ref.delete();
+                console.log('🗑️ تم حذف المستخدم من المعلقين');
+                return;
+            }
 
             // إعداد البيانات النهائية
             const finalUserData = {
-                uid: user.uid,
+                uid: uid,
                 name: pendingData.name,
                 email: pendingData.email,
                 whatsapp: pendingData.whatsapp,
@@ -686,13 +743,11 @@
             };
 
             // حفظ في المجموعة الرئيسية
-            await db.collection('users').doc(user.uid).set(finalUserData);
-
+            await db.collection('users').doc(uid).set(finalUserData);
             console.log('💾 تم حفظ المستخدم في المجموعة الرئيسية');
 
             // حذف من المستخدمين المعلقين
             await pendingDoc.ref.delete();
-
             console.log('🗑️ تم حذف المستخدم من المعلقين');
 
             // عرض رسالة ترحيب
@@ -712,8 +767,6 @@
                 confirmButtonText: 'ابدأ التعلم!',
                 confirmButtonColor: '#f4c430'
             });
-
-            // المستخدم سيتم توجيهه تلقائياً بواسطة onAuthStateChanged
         }
 
         // نسيان كلمة المرور
