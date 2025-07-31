@@ -56,21 +56,44 @@ function protectAdminPage() {
     });
 }
 
-// دوال إدارة الدورات
+// دوال إدارة الدورات - المحدثة
 const coursesDB = {
-    // إنشاء دورة جديدة
+    // إنشاء دورة جديدة مع استخدام slug كـ ID
     createCourse: async function(courseData) {
         try {
             const db = firebase.firestore();
-            const docRef = await db.collection('courses').add({
+            
+            // تأكد من وجود slug
+            let slug = courseData.slug;
+            if (!slug && courseData.title) {
+                slug = this.createSlug(courseData.title);
+            }
+            
+            // التحقق من عدم وجود دورة بنفس الـ slug
+            let finalSlug = slug;
+            let counter = 1;
+            
+            while (true) {
+                const existingDoc = await db.collection('courses').doc(finalSlug).get();
+                if (!existingDoc.exists) {
+                    break;
+                }
+                finalSlug = `${slug}-${counter}`;
+                counter++;
+            }
+            
+            // إضافة الدورة مع slug كـ ID
+            await db.collection('courses').doc(finalSlug).set({
                 ...courseData,
+                slug: finalSlug,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 status: 'draft',
                 views: 0,
                 enrollments: 0
             });
-            return docRef.id;
+            
+            return finalSlug;
         } catch (error) {
             console.error('Error creating course:', error);
             throw error;
@@ -142,14 +165,67 @@ const coursesDB = {
         }
     },
 
-    // إنشاء URL صديق للـ SEO
+    // إنشاء URL صديق للـ SEO - محدث ومحسن
     createSlug: function(title) {
-        return title
-            .toLowerCase()
-            .replace(/[^\w\s\u0600-\u06FF]/gi, '') // احتفظ بالأحرف العربية
-            .replace(/\s+/g, '-')
-            .replace(/-+/g, '-')
-            .trim();
+        // قاموس تحويل الحروف والكلمات العربية للإنجليزية
+        const arabicToEnglish = {
+            'ا': 'a', 'أ': 'a', 'إ': 'i', 'آ': 'aa', 'ء': 'a',
+            'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h',
+            'خ': 'kh', 'د': 'd', 'ذ': 'dh', 'ر': 'r', 'ز': 'z',
+            'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't',
+            'ظ': 'dh', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q',
+            'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h',
+            'و': 'w', 'ي': 'y', 'ة': 'h', 'ى': 'a',
+            ' ': '-',
+            // كلمات شائعة
+            'الذات': 'self',
+            'التطوير': 'development',
+            'النفس': 'psychology',
+            'الشخصية': 'personality',
+            'القيادة': 'leadership',
+            'النجاح': 'success',
+            'الحياة': 'life',
+            'التغيير': 'change',
+            'الهدف': 'goal',
+            'الإنجاز': 'achievement',
+            'الثقة': 'confidence',
+            'الإبداع': 'creativity',
+            'التواصل': 'communication',
+            'المهارات': 'skills',
+            'الفكر': 'thinking',
+            'العقل': 'mind',
+            'الروح': 'spirit',
+            'الطاقة': 'energy',
+            'التحفيز': 'motivation',
+            'الإلهام': 'inspiration'
+        };
+        
+        let slug = title.toLowerCase().trim();
+        
+        // استبدال الكلمات والحروف العربية
+        for (let [arabic, english] of Object.entries(arabicToEnglish)) {
+            slug = slug.replace(new RegExp(arabic, 'g'), english);
+        }
+        
+        // تنظيف إضافي
+        slug = slug
+            .replace(/[^\w\-]+/g, '') // إزالة الأحرف الغير مرغوبة
+            .replace(/\-\-+/g, '-')   // دمج الشرطات المتعددة
+            .replace(/^-+/, '')       // إزالة الشرطات من البداية
+            .replace(/-+$/, '');      // إزالة الشرطات من النهاية
+        
+        // إذا كان الناتج فارغ أو قصير جداً، استخدم fallback
+        if (!slug || slug.length < 3) {
+            const now = new Date();
+            slug = `course-${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+        }
+        
+        // اقتصر على 50 حرف
+        if (slug.length > 50) {
+            slug = slug.substring(0, 50).replace(/-[^-]*$/, '');
+        }
+        
+        return slug;
     }
 };
 
