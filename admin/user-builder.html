@@ -955,9 +955,6 @@
     <!-- Firebase Config -->
     <script src="../js/firebase-config.js"></script>
     
-    <!-- Process Pending Users -->
-    <script src="./process-pending-users.js"></script>
-    
     <script>
         // حماية الصفحة
         window.firebaseAuth.protectAdminPage();
@@ -1281,27 +1278,25 @@
                 if (!currentUserId) {
                     // إنشاء مستخدم جديد
                     
-                    // الحل الصحيح لمشكلة تسجيل الخروج
-                    // استخدام Admin SDK أو حل بديل
+                    // حل بسيط: حفظ البيانات مباشرة مع ID عشوائي
+                    const newUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                     
-                    // حفظ البيانات أولاً في Firestore مع ID مؤقت
-                    const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    userData.tempId = tempId;
-                    userData.password = password; // حفظ مؤقت للكلمة السر (سيتم حذفها)
+                    // إضافة معلومات الإنشاء
                     userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
                     userData.createdBy = firebase.auth().currentUser.email;
-                    userData.status = 'pending'; // في انتظار إنشاء الحساب
+                    userData.tempPassword = password; // حفظ مؤقت لعرضها
+                    userData.needsActivation = true; // تحتاج تفعيل
                     
-                    // حفظ في Firestore أولاً
-                    await firebase.firestore().collection('pendingUsers').doc(tempId).set(userData);
+                    // حفظ في Firestore مباشرة
+                    await firebase.firestore().collection('users').doc(newUserId).set(userData);
                     
-                    // عرض رسالة نجاح مع التعليمات
+                    // عرض رسالة نجاح مع البيانات
                     await Swal.fire({
                         icon: 'success',
-                        title: 'تم حفظ البيانات',
+                        title: 'تم حفظ بيانات المستخدم',
                         html: `
                             <div style="text-align: right;">
-                                <p style="margin-bottom: 1rem;">تم حفظ بيانات المستخدم بنجاح!</p>
+                                <p style="margin-bottom: 1rem;">تم حفظ البيانات بنجاح!</p>
                                 
                                 <div style="background: #f5f5f5; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
                                     <h4 style="color: #f4c430; margin-bottom: 0.5rem;">بيانات الدخول:</h4>
@@ -1309,16 +1304,16 @@
                                     <p><strong>كلمة المرور:</strong> ${password}</p>
                                 </div>
                                 
-                                <p style="color: #666; font-size: 0.9rem;">
-                                    <i class="fas fa-info-circle"></i>
-                                    لإكمال إنشاء الحساب، يجب على المستخدم تسجيل الدخول لأول مرة
+                                <p style="color: #ff9800; font-size: 0.9rem; margin-top: 1rem;">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    ملاحظة: يجب إنشاء الحساب يدوياً في Firebase Auth باستخدام هذه البيانات
                                 </p>
                                 
                                 <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem;">
                                     <button class="swal2-confirm swal2-styled" onclick="copyUserCredentials('${userData.email}', '${password}')">
                                         <i class="fas fa-copy"></i> نسخ البيانات
                                     </button>
-                                    <a href="https://wa.me/${userData.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`مرحباً،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\nالبريد: ${userData.email}\nكلمة المرور: ${password}\n\nالرابط: ${window.location.origin}/login.html`)}" 
+                                    <a href="https://wa.me/${userData.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`مرحباً ${userData.name}،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\nالبريد: ${userData.email}\nكلمة المرور: ${password}\n\nالرابط: ${window.location.origin.replace('/admin', '')}/login.html\n\nبرجاء تسجيل الدخول وتغيير كلمة المرور`)}" 
                                        target="_blank" 
                                        class="swal2-confirm swal2-styled" 
                                        style="background: #25D366; text-decoration: none;">
@@ -1332,10 +1327,12 @@
                         width: 600
                     });
                     
-                    // العودة لصفحة المستخدمين
-                    setTimeout(() => {
-                        window.location.href = './users.html';
-                    }, 500);
+                    // إزالة كلمة المرور المؤقتة بعد دقيقة
+                    setTimeout(async () => {
+                        await firebase.firestore().collection('users').doc(newUserId).update({
+                            tempPassword: firebase.firestore.FieldValue.delete()
+                        });
+                    }, 60000);
                     
                 } else {
                     // تحديث مستخدم موجود
