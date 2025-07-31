@@ -371,26 +371,73 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        let isNewUser = false;
-        let pendingUserData = null;
+        let currentUser = null;
+        let retryCount = 0;
+        const maxRetries = 3;
 
         // التحقق من وجود مستخدم مسجل دخول
         auth.onAuthStateChanged((user) => {
             if (user) {
+                console.log('✅ مستخدم مسجل دخول:', user.email);
+                
                 // توجيه المستخدم حسب نوعه
                 if (user.email === 'admin@fouad-academy.com') {
                     window.location.href = './admin/index.html';
                 } else {
                     window.location.href = './dashboard.html';
                 }
+            } else {
+                console.log('👤 لا يوجد مستخدم مسجل دخول');
             }
         });
 
-        // معالج البريد الإلكتروني - التحقق من النوع
-        document.getElementById('email').addEventListener('blur', async function() {
+        // فحص حالة الاتصال بالإنترنت
+        function checkConnection() {
+            if (!navigator.onLine) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'لا يوجد اتصال بالإنترنت',
+                    text: 'يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى',
+                    confirmButtonColor: '#f4c430'
+                });
+                return false;
+            }
+            return true;
+        }
+
+        // فحص الاتصال عند تحميل الصفحة
+        window.addEventListener('online', () => {
+            console.log('🌐 تم استعادة الاتصال بالإنترنت');
+        });
+
+        window.addEventListener('offline', () => {
+            console.log('⚠️ فقدان الاتصال بالإنترنت');
+            Swal.fire({
+                icon: 'warning',
+                title: 'انقطع الاتصال بالإنترنت',
+                text: 'يرجى التحقق من اتصالك والمحاولة مرة أخرى',
+                confirmButtonColor: '#f4c430'
+            });
+        });
+
+        // معالج البريد الإلكتروني - التحقق من النوع (مع debounce)
+        let checkUserTimeout;
+        document.getElementById('email').addEventListener('input', function() {
             const email = this.value.trim();
-            if (email) {
-                await checkUserType(email);
+            
+            // إلغاء التحقق السابق
+            clearTimeout(checkUserTimeout);
+            
+            if (email && email.includes('@')) {
+                // انتظار 500ms قبل التحقق
+                checkUserTimeout = setTimeout(() => {
+                    checkUserType(email);
+                }, 500);
+            } else {
+                // إخفاء معلومات نوع المستخدم إذا لم يكن الإيميل صالح
+                const userTypeInfo = document.getElementById('userTypeInfo');
+                userTypeInfo.classList.remove('show');
+                updateLoginButton('تسجيل الدخول');
             }
         });
 
@@ -421,9 +468,8 @@
                     .get();
 
                 if (!pendingQuery.empty) {
-                    pendingUserData = pendingQuery.docs[0].data();
-                    isNewUser = true;
-                    showUserTypeInfo('pending', `مرحباً ${pendingUserData.name}! هذا هو تسجيل الدخول الأول لك 🎉`);
+                    const pendingData = pendingQuery.docs[0].data();
+                    showUserTypeInfo('pending', `مرحباً ${pendingData.name}! هذا هو تسجيل الدخول الأول لك 🎉`);
                     updateLoginButton('تفعيل الحساب');
                     return;
                 }
@@ -435,7 +481,6 @@
 
                 if (!userQuery.empty) {
                     const userData = userQuery.docs[0].data();
-                    isNewUser = false;
                     showUserTypeInfo('existing', `مرحباً بعودتك ${userData.name}! 👋`);
                     updateLoginButton('تسجيل الدخول');
                     return;
@@ -446,6 +491,7 @@
 
             } catch (error) {
                 console.error('خطأ في فحص المستخدم:', error);
+                // في حالة خطأ، لا نعرض شيء - المستخدم يمكنه المحاولة
             }
         }
 
@@ -490,6 +536,13 @@
             loginBtn.innerHTML = '<span class="loading"></span> جاري التحقق...';
             loginBtn.disabled = true;
 
+            // فحص الاتصال أولاً
+            if (!checkConnection()) {
+                loginBtn.innerHTML = originalText;
+                loginBtn.disabled = false;
+                return;
+            }
+
             try {
                 const email = document.getElementById('email').value.trim();
                 const password = document.getElementById('password').value;
@@ -498,31 +551,63 @@
                     throw new Error('يرجى ملء جميع الحقول');
                 }
 
+                if (!email.includes('@') || !email.includes('.')) {
+                    throw new Error('يرجى إدخال بريد إلكتروني صالح');
+                }
+
+                if (password.length < 6) {
+                    throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+                }
+
                 console.log('🚀 بدء عملية تسجيل الدخول لـ:', email);
 
-                if (isNewUser && pendingUserData) {
-                    // تسجيل دخول مستخدم جديد (تفعيل)
-                    await activateNewUser(email, password);
-                } else {
-                    // تسجيل دخول عادي
-                    await regularLogin(email, password);
+                // محاولة تسجيل الدخول العادي أولاً
+                try {
+                    await auth.signInWithEmailAndPassword(email, password);
+                    console.log('✅ تم تسجيل الدخول بنجاح');
+                    retryCount = 0; // إعادة تعيين العداد عند النجاح
+                    return; // المستخدم سيتم توجيهه تلقائياً بواسطة onAuthStateChanged
+                } catch (signInError) {
+                    console.log('🔍 فشل تسجيل الدخول العادي، فحص المستخدمين المعلقين...');
+                    
+                    // إذا فشل تسجيل الدخول، ابحث في المستخدمين المعلقين
+                    if (signInError.code === 'auth/user-not-found' || 
+                        signInError.code === 'auth/invalid-login-credentials' ||
+                        signInError.code === 'auth/invalid-credential') {
+                        await handleNewUserActivation(email, password);
+                    } else {
+                        // خطأ آخر في Firebase Auth
+                        throw signInError;
+                    }
                 }
 
             } catch (error) {
                 console.error('❌ خطأ في تسجيل الدخول:', error);
                 
+                retryCount++;
                 let errorMessage = 'حدث خطأ في تسجيل الدخول';
                 
-                if (error.message) {
+                if (error.message && error.message.includes('يرجى')) {
                     errorMessage = error.message;
-                } else if (error.code === 'auth/user-not-found') {
-                    errorMessage = 'البريد الإلكتروني غير مسجل';
+                } else if (error.code === 'auth/user-not-found' || 
+                          error.code === 'auth/invalid-login-credentials' ||
+                          error.code === 'auth/invalid-credential') {
+                    errorMessage = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
                 } else if (error.code === 'auth/wrong-password') {
                     errorMessage = 'كلمة المرور غير صحيحة';
                 } else if (error.code === 'auth/invalid-email') {
                     errorMessage = 'البريد الإلكتروني غير صالح';
                 } else if (error.code === 'auth/too-many-requests') {
                     errorMessage = 'تم تجاوز عدد المحاولات المسموح. حاول لاحقاً';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMessage = 'مشكلة في الاتصال بالإنترنت. يرجى المحاولة مرة أخرى';
+                } else if (error.code === 'auth/timeout') {
+                    errorMessage = 'انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى';
+                }
+                
+                // إضافة اقتراح المحاولة مرة أخرى إذا كانت أقل من الحد الأقصى
+                if (retryCount < maxRetries && (error.code === 'auth/network-request-failed' || error.code === 'auth/timeout')) {
+                    errorMessage += ` (المحاولة ${retryCount}/${maxRetries})`;
                 }
                 
                 Swal.fire({
@@ -538,14 +623,30 @@
             }
         }
 
-        // تفعيل مستخدم جديد
-        async function activateNewUser(email, password) {
-            console.log('🆕 تفعيل مستخدم جديد');
+        // معالج تفعيل المستخدم الجديد
+        async function handleNewUserActivation(email, password) {
+            console.log('🆕 محاولة تفعيل مستخدم جديد');
+
+            // البحث عن المستخدم في pendingUsers
+            const pendingQuery = await db.collection('pendingUsers')
+                .where('email', '==', email)
+                .get();
+
+            if (pendingQuery.empty) {
+                throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة');
+            }
+
+            const pendingDoc = pendingQuery.docs[0];
+            const pendingData = pendingDoc.data();
+
+            console.log('✅ تم العثور على المستخدم المعلق');
 
             // التحقق من كلمة المرور
-            if (pendingUserData.password !== password) {
-                throw new Error('كلمة المرور غير صحيحة');
+            if (pendingData.password !== password) {
+                throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة');
             }
+
+            console.log('🔐 كلمة المرور صحيحة، بدء التفعيل...');
 
             // إنشاء حساب Firebase Auth
             const userCredential = await auth.createUserWithEmailAndPassword(email, password);
@@ -556,24 +657,24 @@
             // إعداد البيانات النهائية
             const finalUserData = {
                 uid: user.uid,
-                name: pendingUserData.name,
-                email: pendingUserData.email,
-                whatsapp: pendingUserData.whatsapp,
-                accountType: pendingUserData.accountType,
+                name: pendingData.name,
+                email: pendingData.email,
+                whatsapp: pendingData.whatsapp,
+                accountType: pendingData.accountType,
                 isActive: true,
                 
                 // المعلومات الإضافية
-                birthDate: pendingUserData.birthDate || null,
-                location: pendingUserData.location || null,
-                occupation: pendingUserData.occupation || null,
+                birthDate: pendingData.birthDate || null,
+                location: pendingData.location || null,
+                occupation: pendingData.occupation || null,
                 
                 // معلومات الإنشاء
-                createdAt: pendingUserData.createdAt,
-                createdBy: pendingUserData.createdBy,
+                createdAt: pendingData.createdAt,
+                createdBy: pendingData.createdBy,
                 activatedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 
                 // الدورات المخصصة
-                enrollments: pendingUserData.enrollments || [],
+                enrollments: pendingData.enrollments || [],
                 
                 // إحصائيات أولية
                 progress: {},
@@ -587,16 +688,12 @@
             // حفظ في المجموعة الرئيسية
             await db.collection('users').doc(user.uid).set(finalUserData);
 
-            // حذف من المستخدمين المعلقين
-            const pendingQuery = await db.collection('pendingUsers')
-                .where('email', '==', email)
-                .get();
-            
-            if (!pendingQuery.empty) {
-                await pendingQuery.docs[0].ref.delete();
-            }
+            console.log('💾 تم حفظ المستخدم في المجموعة الرئيسية');
 
-            console.log('✅ تم تفعيل المستخدم بنجاح');
+            // حذف من المستخدمين المعلقين
+            await pendingDoc.ref.delete();
+
+            console.log('🗑️ تم حذف المستخدم من المعلقين');
 
             // عرض رسالة ترحيب
             await Swal.fire({
@@ -607,7 +704,7 @@
                         <p>تم تفعيل حسابك بنجاح ✅</p>
                         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
                             <strong>📚 الدورات المخصصة لك:</strong><br>
-                            ${pendingUserData.enrollments?.map(e => `• ${e.title}`).join('<br>') || 'لا توجد دورات مخصصة'}
+                            ${pendingData.enrollments?.map(e => `• ${e.title}`).join('<br>') || 'لا توجد دورات مخصصة'}
                         </div>
                         <p>يمكنك الآن الوصول لجميع الدورات والمحتوى المخصص لك</p>
                     </div>
@@ -616,16 +713,6 @@
                 confirmButtonColor: '#f4c430'
             });
 
-            // المستخدم سيتم توجيهه تلقائياً بواسطة onAuthStateChanged
-        }
-
-        // تسجيل دخول عادي
-        async function regularLogin(email, password) {
-            console.log('🔑 تسجيل دخول عادي');
-            
-            await auth.signInWithEmailAndPassword(email, password);
-            console.log('✅ تم تسجيل الدخول بنجاح');
-            
             // المستخدم سيتم توجيهه تلقائياً بواسطة onAuthStateChanged
         }
 
