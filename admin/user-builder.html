@@ -833,6 +833,9 @@
         let availableCoursesData = [];
         let availableBundlesData = [];
         let assignedItems = new Map();
+        let editMode = false;
+        let currentUserId = null;
+        let currentUserAvatarUrl = null;
 
         // حماية الصفحة
         auth.onAuthStateChanged((user) => {
@@ -843,18 +846,30 @@
 
         // تهيئة الصفحة
         document.addEventListener('DOMContentLoaded', async function() {
+            // التحقق من وجود معرف المستخدم في URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const userId = urlParams.get('id');
+            
+            if (userId) {
+                editMode = true;
+                currentUserId = userId;
+                document.getElementById('pageTitle').textContent = 'تعديل بيانات المستخدم';
+                document.querySelector('.btn-success').innerHTML = '<i class="fas fa-save"></i> حفظ التعديلات';
+            }
+            
             showLoading(true);
             
             try {
                 // تحميل الدورات والمسارات المتاحة
                 await loadAvailableContent();
                 
+                // إذا كنا في وضع التعديل، تحميل بيانات المستخدم
+                if (editMode) {
+                    await loadUserData(userId);
+                }
+                
                 // إعداد النموذج
                 setupForm();
-                
-                // تعيين تاريخ اليوم كتاريخ بداية افتراضي
-                const today = new Date().toISOString().split('T')[0];
-                // يمكن إضافة هذا لاحقاً عند الحاجة
                 
             } catch (error) {
                 console.error('Error initializing page:', error);
@@ -863,6 +878,242 @@
                 showLoading(false);
             }
         });
+
+        // تحميل بيانات المستخدم للتعديل
+        async function loadUserData(userId) {
+            try {
+                console.log('🔍 جاري تحميل بيانات المستخدم:', userId);
+                
+                // جلب بيانات المستخدم من مجموعة users
+                const userDoc = await db.collection('users').doc(userId).get();
+                
+                if (!userDoc.exists) {
+                    throw new Error('المستخدم غير موجود');
+                }
+                
+                const userData = userDoc.data();
+                console.log('📋 بيانات المستخدم:', userData);
+                
+                // ملء الحقول الأساسية
+                document.getElementById('fullName').value = userData.name || '';
+                document.getElementById('email').value = userData.email || '';
+                document.getElementById('whatsapp').value = userData.whatsapp || userData.phone || '';
+                
+                // البريد الإلكتروني في وضع التعديل يصبح للقراءة فقط
+                document.getElementById('email').readOnly = true;
+                document.getElementById('emailHint').textContent = 'لا يمكن تغيير البريد الإلكتروني';
+                
+                // إخفاء حقل كلمة المرور في وضع التعديل
+                document.getElementById('password').parentElement.parentElement.style.display = 'none';
+                
+                // نوع الحساب
+                const accountType = userData.accountType || 'free';
+                document.querySelector(`input[name="accountType"][value="${accountType}"]`).checked = true;
+                
+                // الصورة الشخصية
+                if (userData.avatar) {
+                    currentUserAvatarUrl = userData.avatar;
+                    displayAvatar(userData.avatar);
+                    document.getElementById('removeAvatarBtn').style.display = 'inline-block';
+                }
+                
+                // المعلومات الإضافية
+                if (userData.birthDate) {
+                    document.getElementById('birthDate').value = userData.birthDate;
+                }
+                if (userData.location) {
+                    document.getElementById('location').value = userData.location;
+                }
+                if (userData.occupation) {
+                    document.getElementById('occupation').value = userData.occupation;
+                }
+                if (userData.adminNotes) {
+                    document.getElementById('adminNotes').value = userData.adminNotes;
+                }
+                
+                // حالة التفعيل
+                document.getElementById('activateAccount').checked = userData.isActive !== false;
+                
+                // تحميل الدورات المخصصة
+                if (userData.enrollments && userData.enrollments.length > 0) {
+                    console.log('📚 تحميل الدورات المخصصة:', userData.enrollments);
+                    
+                    userData.enrollments.forEach(enrollment => {
+                        // البحث عن الدورة/المسار في البيانات المحملة
+                        const item = [...availableCoursesData, ...availableBundlesData].find(i => i.id === enrollment.id);
+                        
+                        if (item) {
+                            assignedItems.set(enrollment.id, {
+                                ...item,
+                                startDate: enrollment.startDate || new Date().toISOString().split('T')[0],
+                                duration: enrollment.duration || 30,
+                                paymentType: enrollment.paymentType || 'cash',
+                                paymentNotes: enrollment.paymentNotes || ''
+                            });
+                        }
+                    });
+                    
+                    renderAvailableContent();
+                    renderAssignedContent();
+                }
+                
+                console.log('✅ تم تحميل بيانات المستخدم بنجاح');
+                
+            } catch (error) {
+                console.error('❌ خطأ في تحميل بيانات المستخدم:', error);
+                showError('حدث خطأ في تحميل بيانات المستخدم');
+                setTimeout(() => {
+                    window.location.href = './users.html';
+                }, 2000);
+            }
+        }
+
+        // تحديث دالة إنشاء/تعديل المستخدم
+        async function createUser() {
+            const saveBtn = document.querySelector('button[type="submit"]');
+            const originalText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<span class="loading"></span> جاري الحفظ...';
+            saveBtn.disabled = true;
+            
+            try {
+                // التحقق من صحة البيانات
+                const fullName = document.getElementById('fullName').value.trim();
+                const email = document.getElementById('email').value.trim();
+                const whatsapp = document.getElementById('whatsapp').value.trim();
+                
+                if (!fullName || !email || !whatsapp) {
+                    throw new Error('يرجى ملء جميع الحقول المطلوبة');
+                }
+                
+                // في وضع الإنشاء فقط، التحقق من كلمة المرور
+                if (!editMode) {
+                    const password = document.getElementById('password').value;
+                    if (!password || password.length < 6) {
+                        throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+                    }
+                }
+                
+                // جمع البيانات
+                const userData = {
+                    name: fullName,
+                    email: email,
+                    whatsapp: whatsapp,
+                    phone: whatsapp, // للتوافق مع البيانات القديمة
+                    accountType: document.querySelector('input[name="accountType"]:checked').value,
+                    isActive: document.getElementById('activateAccount').checked,
+                    
+                    // المعلومات الإضافية
+                    birthDate: document.getElementById('birthDate').value || null,
+                    location: document.getElementById('location').value || null,
+                    occupation: document.getElementById('occupation').value || null,
+                    adminNotes: document.getElementById('adminNotes').value || null,
+                    
+                    // معلومات التحديث
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                // معالجة الصورة الشخصية
+                const avatarInput = document.getElementById('avatarInput');
+                if (avatarInput.files.length > 0) {
+                    // رفع صورة جديدة
+                    const file = avatarInput.files[0];
+                    const storageRef = storage.ref(`avatars/${email}_${Date.now()}`);
+                    const uploadTask = await storageRef.put(file);
+                    userData.avatar = await uploadTask.ref.getDownloadURL();
+                } else if (currentUserAvatarUrl) {
+                    // الاحتفاظ بالصورة الحالية
+                    userData.avatar = currentUserAvatarUrl;
+                }
+                
+                // تحضير الدورات المخصصة
+                const now = new Date();
+                const enrollments = Array.from(assignedItems.values()).map(item => {
+                    const startDate = new Date(item.startDate);
+                    const endDate = new Date(startDate);
+                    endDate.setDate(endDate.getDate() + item.duration);
+                    
+                    return {
+                        id: item.id,
+                        type: item.type,
+                        title: item.title,
+                        courseName: item.title, // للتوافق
+                        startDate: item.startDate,
+                        endDate: endDate.toISOString().split('T')[0],
+                        duration: item.duration,
+                        paymentType: item.paymentType,
+                        paymentNotes: item.paymentNotes || '',
+                        isActive: true,
+                        enrolledAt: item.enrolledAt || now.toISOString()
+                    };
+                });
+                
+                userData.enrollments = enrollments;
+                
+                if (editMode) {
+                    // تحديث المستخدم الموجود
+                    await db.collection('users').doc(currentUserId).update(userData);
+                    
+                    console.log('✅ تم تحديث بيانات المستخدم:', currentUserId);
+                    
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'تم حفظ التعديلات بنجاح',
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+                    
+                    // العودة لصفحة المستخدمين
+                    setTimeout(() => {
+                        window.location.href = './users.html';
+                    }, 500);
+                    
+                } else {
+                    // إنشاء مستخدم جديد
+                    const password = document.getElementById('password').value;
+                    
+                    // إضافة معلومات الإنشاء
+                    userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+                    userData.createdBy = auth.currentUser.email;
+                    userData.status = 'pending';
+                    
+                    // حفظ في userCredentials
+                    const userCredentials = {
+                        ...userData,
+                        password: password,
+                        status: 'waiting_first_login'
+                    };
+                    
+                    await db.collection('userCredentials').doc(email).set(userCredentials);
+                    
+                    console.log('✅ تم إنشاء المستخدم الجديد:', email);
+                    
+                    // عرض رسالة نجاح
+                    if (document.getElementById('sendCredentials').checked) {
+                        await showCredentialsModal(email, password, whatsapp);
+                    } else {
+                        await Swal.fire({
+                            icon: 'success',
+                            title: 'تم إنشاء المستخدم بنجاح',
+                            text: 'تم حفظ بيانات المستخدم - سيتم تفعيل الحساب عند أول تسجيل دخول',
+                            timer: 2000,
+                            showConfirmButton: false
+                        });
+                        
+                        // العودة لصفحة المستخدمين
+                        setTimeout(() => {
+                            window.location.href = './users.html';
+                        }, 500);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('❌ خطأ في حفظ المستخدم:', error);
+                showError(error.message || 'حدث خطأ في حفظ البيانات');
+            } finally {
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }
+        }
 
         // تحميل الدورات والمسارات المتاحة
         async function loadAvailableContent() {
@@ -1114,140 +1365,6 @@
             });
         }
 
-        // إنشاء المستخدم
-        async function createUser() {
-            const saveBtn = document.querySelector('button[type="submit"]');
-            const originalText = saveBtn.innerHTML;
-            saveBtn.innerHTML = '<span class="loading"></span> جاري الإنشاء...';
-            saveBtn.disabled = true;
-            
-            try {
-                // التحقق من صحة البيانات
-                const fullName = document.getElementById('fullName').value.trim();
-                const email = document.getElementById('email').value.trim();
-                const password = document.getElementById('password').value;
-                const whatsapp = document.getElementById('whatsapp').value.trim();
-                
-                if (!fullName || !email || !password || !whatsapp) {
-                    throw new Error('يرجى ملء جميع الحقول المطلوبة');
-                }
-                
-                if (password.length < 6) {
-                    throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
-                }
-                
-                // جمع البيانات
-                const userData = {
-                    name: fullName,
-                    email: email,
-                    whatsapp: whatsapp,
-                    accountType: document.querySelector('input[name="accountType"]:checked').value,
-                    isActive: document.getElementById('activateAccount').checked,
-                    
-                    // المعلومات الإضافية
-                    birthDate: document.getElementById('birthDate').value || null,
-                    location: document.getElementById('location').value || null,
-                    occupation: document.getElementById('occupation').value || null,
-                    adminNotes: document.getElementById('adminNotes').value || null,
-                    
-                    // معلومات الإنشاء
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    createdBy: auth.currentUser.email,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-                    status: 'pending' // في انتظار أول تسجيل دخول
-                };
-                
-                // تحضير الدورات المخصصة
-                const now = new Date();
-                const enrollments = Array.from(assignedItems.values()).map(item => {
-                    const startDate = new Date(item.startDate);
-                    const endDate = new Date(startDate);
-                    endDate.setDate(endDate.getDate() + item.duration);
-                    
-                    return {
-                        id: item.id,
-                        type: item.type,
-                        title: item.title,
-                        startDate: item.startDate,
-                        endDate: endDate.toISOString().split('T')[0],
-                        duration: item.duration,
-                        paymentType: item.paymentType,
-                        paymentNotes: item.paymentNotes || '',
-                        isActive: true,
-                        enrolledAt: now.toISOString() // استخدام التاريخ العادي بدل serverTimestamp
-                    };
-                });
-                
-                userData.enrollments = enrollments;
-                
-                // حفظ بيانات اعتماد المستخدم الجديد
-                const userCredentials = {
-                    email: email,
-                    password: password,
-                    name: fullName,
-                    whatsapp: whatsapp,
-                    accountType: document.querySelector('input[name="accountType"]:checked').value,
-                    isActive: document.getElementById('activateAccount').checked,
-                    
-                    // المعلومات الإضافية
-                    birthDate: document.getElementById('birthDate').value || null,
-                    location: document.getElementById('location').value || null,
-                    occupation: document.getElementById('occupation').value || null,
-                    adminNotes: document.getElementById('adminNotes').value || null,
-                    
-                    // الدورات المخصصة
-                    enrollments: enrollments,
-                    
-                    // معلومات الإنشاء
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    createdBy: auth.currentUser.email,
-                    status: 'waiting_first_login'
-                };
-                
-                // حفظ في userCredentials باستخدام الإيميل كـ document ID
-                await db.collection('userCredentials').doc(email).set(userCredentials);
-                
-                console.log('✅ تم حفظ بيانات اعتماد المستخدم:', email);
-                
-                // عرض رسالة نجاح
-                if (document.getElementById('sendCredentials').checked) {
-                    await showCredentialsModal(email, password, whatsapp);
-                } else {
-                    await Swal.fire({
-                        icon: 'success',
-                        title: 'تم إنشاء المستخدم بنجاح',
-                        text: 'تم حفظ بيانات المستخدم - سيتم تفعيل الحساب عند أول تسجيل دخول',
-                        timer: 2000,
-                        showConfirmButton: false
-                    });
-                    
-                    // العودة لصفحة المستخدمين
-                    setTimeout(() => {
-                        window.location.href = './users.html';
-                    }, 500);
-                }
-                
-            } catch (error) {
-                console.error('❌ خطأ في إنشاء المستخدم:', error);
-                let errorMessage = 'حدث خطأ في إنشاء المستخدم';
-                
-                if (error.message) {
-                    errorMessage = error.message;
-                } else if (error.code === 'auth/email-already-in-use') {
-                    errorMessage = 'البريد الإلكتروني مستخدم بالفعل';
-                } else if (error.code === 'auth/weak-password') {
-                    errorMessage = 'كلمة المرور ضعيفة جداً';
-                } else if (error.code === 'auth/invalid-email') {
-                    errorMessage = 'البريد الإلكتروني غير صالح';
-                }
-                
-                showError(errorMessage);
-            } finally {
-                saveBtn.innerHTML = originalText;
-                saveBtn.disabled = false;
-            }
-        }
-
         // عرض نافذة بيانات الدخول
         async function showCredentialsModal(email, password, whatsapp) {
             const result = await Swal.fire({
@@ -1388,6 +1505,7 @@
             document.getElementById('avatarPreview').innerHTML = '<i class="fas fa-user"></i>';
             document.getElementById('avatarInput').value = '';
             document.getElementById('removeAvatarBtn').style.display = 'none';
+            currentUserAvatarUrl = null;
         }
 
         // Helper Functions
