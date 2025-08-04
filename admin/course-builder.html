@@ -2980,76 +2980,166 @@ function showContentTypes(moduleId) {
             });
         }
 
-        function editLesson(moduleId, lessonId) {
-            const module = courseData.modules.find(m => m.id === moduleId);
-            const lesson = module.lessons.find(l => l.id === lessonId);
+        async function editLesson(moduleId, lessonId) {
+    const module = courseData.modules.find(m => m.id === moduleId);
+    const lesson = module.lessons.find(l => l.id === lessonId);
+    
+    if (!lesson) return;
+    
+    // لو ده محتوى من المكتبة، نجيب تفاصيله
+    let libraryContent = null;
+    if (lesson.type === 'library-content' && lesson.libraryContentId) {
+        try {
+            const contentDoc = await db.collection('courseContentLibrary').doc(lesson.libraryContentId).get();
+            if (contentDoc.exists) {
+                libraryContent = contentDoc.data();
+            }
+        } catch (error) {
+            console.error('خطأ في جلب محتوى المكتبة:', error);
+        }
+    }
+    
+    // بناء HTML للتعديل حسب نوع المحتوى
+    let editFormHtml = `
+        <div class="form-group mb-3">
+            <label class="form-label">عنوان الدرس</label>
+            <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}">
+        </div>
+        <div class="form-group mb-3">
+            <label class="form-label">المدة (بالدقائق)</label>
+            <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration}" min="0">
+        </div>
+        <div class="form-group">
+            <label class="form-label">الوصف</label>
+            <textarea id="lessonDescription" class="form-control" rows="3">${lesson.description || ''}</textarea>
+        </div>
+    `;
+    
+    // إضافة تفاصيل المحتوى من المكتبة
+    if (libraryContent) {
+        editFormHtml += `
+            <hr class="my-4">
+            <h5 class="text-primary mb-3">📚 محتوى من المكتبة</h5>
+            <div class="alert alert-info">
+                <strong>النوع:</strong> ${lesson.libraryContentType}<br>
+                <strong>المحتوى الأصلي:</strong> ${libraryContent.name || 'غير محدد'}
+            </div>
+        `;
+        
+        // عرض تفاصيل حسب النوع
+        if (lesson.libraryContentType === 'educational-video' && libraryContent.videoData) {
+            editFormHtml += `
+                <div class="card bg-light p-3 mb-3">
+                    <h6>🎥 تفاصيل الفيديو:</h6>
+                    <p><strong>الرابط:</strong> <a href="${libraryContent.videoData.url}" target="_blank">${libraryContent.videoData.url}</a></p>
+                    ${libraryContent.videoData.keyPoints?.length ? `
+                        <p><strong>النقاط الرئيسية:</strong></p>
+                        <ul>${libraryContent.videoData.keyPoints.map(p => `<li>${p}</li>`).join('')}</ul>
+                    ` : ''}
+                </div>
+            `;
+        } else if (lesson.libraryContentType === 'quiz' && libraryContent.quizData) {
+            editFormHtml += `
+                <div class="card bg-light p-3 mb-3">
+                    <h6>❓ تفاصيل الاختبار:</h6>
+                    <p><strong>عدد الأسئلة:</strong> ${libraryContent.quizData.questions?.length || 0}</p>
+                    <p><strong>درجة النجاح:</strong> ${libraryContent.quizData.passingGrade || 70}%</p>
+                </div>
+            `;
+        }
+        
+        editFormHtml += `
+            <div class="alert alert-warning">
+                <i class="fas fa-info-circle"></i> لتعديل المحتوى الأساسي، اذهب إلى 
+                <a href="course-content-library.html" target="_blank">مكتبة المحتوى</a>
+            </div>
+        `;
+    }
+    
+    // عرض النافذة
+    Swal.fire({
+        title: 'تعديل الدرس',
+        html: editFormHtml,
+        confirmButtonText: 'حفظ التغييرات',
+        showCancelButton: true,
+        cancelButtonText: 'إلغاء',
+        width: '600px',
+        preConfirm: () => {
+            const title = document.getElementById('lessonTitle').value;
+            const duration = parseInt(document.getElementById('lessonDuration').value) || 0;
+            const description = document.getElementById('lessonDescription').value;
             
-            if (!lesson) return;
+            if (!title) {
+                Swal.showValidationMessage('يرجى إدخال عنوان الدرس');
+                return false;
+            }
+            
+            return { title, duration, description };
+        }
+    }).then((result) => {
+        if (result.isConfirmed) {
+            lesson.title = result.value.title;
+            lesson.duration = result.value.duration;
+            lesson.description = result.value.description;
+            
+            renderModules();
+            updateCurriculumStats();
+            autoSave();
             
             Swal.fire({
-                title: 'تعديل الدرس',
-                html: `
-                    <div class="form-group mb-3">
-                        <label class="form-label">عنوان الدرس</label>
-                        <input type="text" id="lessonTitle" class="form-control" value="${lesson.title}">
-                    </div>
-                    <div class="form-group mb-3">
-                        <label class="form-label">المدة (بالدقائق)</label>
-                        <input type="number" id="lessonDuration" class="form-control" value="${lesson.duration}" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">الوصف</label>
-                        <textarea id="lessonDescription" class="form-control" rows="3">${lesson.description || ''}</textarea>
-                    </div>
-                `,
-                confirmButtonText: 'حفظ التغييرات',
-                showCancelButton: true,
-                cancelButtonText: 'إلغاء',
-                preConfirm: () => {
-                    const title = document.getElementById('lessonTitle').value;
-                    const duration = parseInt(document.getElementById('lessonDuration').value) || 0;
-                    const description = document.getElementById('lessonDescription').value;
-                    
-                    if (!title) {
-                        Swal.showValidationMessage('يرجى إدخال عنوان الدرس');
-                        return false;
-                    }
-                    
-                    return { title, duration, description };
-                }
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    lesson.title = result.value.title;
-                    lesson.duration = result.value.duration;
-                    lesson.description = result.value.description;
-                    
-                    renderModules();
-                    updateCurriculumStats();
-                    autoSave();
-                }
+                icon: 'success',
+                title: 'تم التحديث',
+                text: 'تم حفظ التغييرات بنجاح',
+                timer: 2000,
+                showConfirmButton: false
             });
         }
+    });
+}
 
-        function deleteLesson(moduleId, lessonId) {
-            Swal.fire({
-                title: 'حذف الدرس؟',
-                text: 'لا يمكن التراجع عن هذا الإجراء',
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'نعم، احذف',
-                cancelButtonText: 'إلغاء',
-                confirmButtonColor: '#dc3545'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    const module = courseData.modules.find(m => m.id === moduleId);
-                    module.lessons = module.lessons.filter(l => l.id !== lessonId);
-                    
-                    renderModules();
-                    updateCurriculumStats();
-                    autoSave();
+        async function deleteLesson(moduleId, lessonId) {
+    const module = courseData.modules.find(m => m.id === moduleId);
+    const lesson = module.lessons.find(l => l.id === lessonId);
+    
+    Swal.fire({
+        title: 'حذف الدرس؟',
+        text: 'لا يمكن التراجع عن هذا الإجراء',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc3545'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            // لو كان محتوى من المكتبة، نقلل عدد الاستخدامات
+            if (lesson.type === 'library-content' && lesson.libraryContentId) {
+                try {
+                    await db.collection('courseContentLibrary').doc(lesson.libraryContentId).update({
+                        timesUsed: firebase.firestore.FieldValue.increment(-1)
+                    });
+                    console.log('تم تحديث عدد استخدامات المحتوى');
+                } catch (error) {
+                    console.error('خطأ في تحديث الاستخدامات:', error);
                 }
+            }
+            
+            // حذف الدرس
+            module.lessons = module.lessons.filter(l => l.id !== lessonId);
+            
+            renderModules();
+            updateCurriculumStats();
+            autoSave();
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'تم الحذف',
+                text: 'تم حذف الدرس بنجاح',
+                timer: 2000,
+                showConfirmButton: false
             });
         }
+    });
+}
 // ===============================
 // CONTENT LIBRARY INTEGRATION
 // ===============================
