@@ -247,6 +247,12 @@
         .content-actions {
             display: flex;
             gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .content-actions .btn {
+            flex: 1;
+            min-width: 100px;
         }
 
         /* Modal */
@@ -461,6 +467,16 @@
             color: white;
         }
 
+        .btn-info {
+            background: var(--info);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: white;
+        }
+
         .btn-large {
             padding: 1rem 2rem;
             font-size: 1.1rem;
@@ -560,6 +576,44 @@
             color: white;
         }
 
+        .notification.info {
+            background: var(--info);
+            color: white;
+        }
+
+        /* Content Details in Cards */
+        .content-details {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .content-details-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .content-details-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .content-details-value {
+            color: #333;
+        }
+
+        /* Preview Modal */
+        .preview-modal {
+            max-width: 1200px;
+        }
+
+        .preview-modal .modal-body {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .content-container {
@@ -581,6 +635,14 @@
                 border-radius: 0;
                 height: 100%;
                 max-height: 100%;
+            }
+
+            .content-actions {
+                flex-direction: column;
+            }
+
+            .content-actions .btn {
+                width: 100%;
             }
         }
     </style>
@@ -707,6 +769,47 @@
     </div>
 </div>
 
+<!-- Preview Modal -->
+<div id="previewModal" class="modal">
+    <div class="modal-content preview-modal">
+        <div class="modal-header">
+            <h2 id="previewTitle">معاينة المحتوى</h2>
+            <span class="close" onclick="closePreview()">&times;</span>
+        </div>
+        
+        <div class="modal-body">
+            <div id="previewContent">
+                <!-- سيتم ملؤها بمحتوى المعاينة -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>تعديل المحتوى</h2>
+            <span class="close" onclick="closeEditModal()">&times;</span>
+        </div>
+        
+        <div class="modal-body">
+            <div id="editForm">
+                <!-- سيتم ملؤها بنموذج التعديل -->
+            </div>
+            
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="closeEditModal()">
+                    إلغاء
+                </button>
+                <button class="btn btn-success" onclick="saveEditedContent()">
+                    💾 حفظ التغييرات
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Firebase Scripts -->
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth-compat.js"></script>
@@ -762,6 +865,7 @@ const contentTypes = [
 // Global State
 let allContent = [];
 let currentCreatingType = null;
+let currentEditingContent = null;
 let currentFormData = {};
 
 // Dynamic Lists State
@@ -770,6 +874,7 @@ let currentReviewQuestions = [];
 let currentQuizQuestions = [];
 let currentAssignmentCriteria = [];
 let currentDiscussionQuestions = [];
+let currentSurveyQuestions = [];
 
 // Authentication Check
 function checkAuth() {
@@ -855,6 +960,7 @@ async function loadContent() {
         
     } catch (error) {
         console.error('❌ خطأ في تحميل المحتوى:', error);
+        showNotification('خطأ في تحميل المحتوى: ' + error.message, 'error');
     }
 }
 
@@ -887,10 +993,30 @@ function displayContent() {
                         </span>
                     </div>
                     <p class="content-description">${content.description || 'لا يوجد وصف'}</p>
+                    
+                    <!-- Content Details -->
+                    <div class="content-details">
+                        <div class="content-details-item">
+                            <span class="content-details-label">المدة:</span>
+                            <span class="content-details-value">${content.duration || 15} دقيقة</span>
+                        </div>
+                        <div class="content-details-item">
+                            <span class="content-details-label">الاستخدامات:</span>
+                            <span class="content-details-value">${content.timesUsed || 0} مرة</span>
+                        </div>
+                        <div class="content-details-item">
+                            <span class="content-details-label">التقييم:</span>
+                            <span class="content-details-value">⭐ ${content.averageRating || 0}</span>
+                        </div>
+                        ${getContentSpecificDetails(content)}
+                    </div>
                 </div>
                 
                 <div class="content-card-body">
                     <div class="content-actions">
+                        <button class="btn btn-info" onclick="previewContent('${content.id}')">
+                            <span>👁️</span> معاينة
+                        </button>
                         <button class="btn btn-primary" onclick="editContent('${content.id}')">
                             <span>✏️</span> تعديل
                         </button>
@@ -909,6 +1035,64 @@ function displayContent() {
     container.innerHTML = html;
 }
 
+// Get Content Specific Details
+function getContentSpecificDetails(content) {
+    let details = '';
+    
+    switch(content.type) {
+        case 'educational-video':
+            if (content.videoData?.keyPoints?.length) {
+                details += `
+                    <div class="content-details-item">
+                        <span class="content-details-label">النقاط الرئيسية:</span>
+                        <span class="content-details-value">${content.videoData.keyPoints.length} نقطة</span>
+                    </div>
+                `;
+            }
+            if (content.videoData?.url) {
+                details += `
+                    <div class="content-details-item">
+                        <span class="content-details-label">الرابط:</span>
+                        <span class="content-details-value">متوفر</span>
+                    </div>
+                `;
+            }
+            break;
+            
+        case 'quiz':
+            if (content.quizData?.questions?.length) {
+                details += `
+                    <div class="content-details-item">
+                        <span class="content-details-label">الأسئلة:</span>
+                        <span class="content-details-value">${content.quizData.questions.length} سؤال</span>
+                    </div>
+                `;
+            }
+            if (content.quizData?.passingGrade) {
+                details += `
+                    <div class="content-details-item">
+                        <span class="content-details-label">درجة النجاح:</span>
+                        <span class="content-details-value">${content.quizData.passingGrade}%</span>
+                    </div>
+                `;
+            }
+            break;
+            
+        case 'assignment':
+            if (content.assignmentData?.criteria?.length) {
+                details += `
+                    <div class="content-details-item">
+                        <span class="content-details-label">معايير التقييم:</span>
+                        <span class="content-details-value">${content.assignmentData.criteria.length} معيار</span>
+                    </div>
+                `;
+            }
+            break;
+    }
+    
+    return details;
+}
+
 // Update Statistics
 function updateStats() {
     document.getElementById('totalContentCount').textContent = allContent.length;
@@ -919,6 +1103,19 @@ function updateStats() {
     });
     
     document.getElementById('activeUsageCount').textContent = activeUsage;
+    
+    // حساب متوسط التقييم
+    let totalRating = 0;
+    let ratedContent = 0;
+    allContent.forEach(content => {
+        if (content.averageRating && content.averageRating > 0) {
+            totalRating += content.averageRating;
+            ratedContent++;
+        }
+    });
+    
+    const avgRating = ratedContent > 0 ? (totalRating / ratedContent).toFixed(1) : '4.5';
+    document.getElementById('avgRating').textContent = avgRating;
 }
 
 // Filter by Type
@@ -973,7 +1170,7 @@ function backToTypeSelection() {
     currentCreatingType = null;
 }
 
-// Load Content Form
+// Load Content Form - نفس الكود الأصلي مع التحسينات
 function loadContentForm(typeId) {
     const container = document.getElementById('dynamicForm');
     const type = contentTypes.find(t => t.id === typeId);
@@ -1039,10 +1236,7 @@ function loadContentForm(typeId) {
     initializeDynamicLists();
 }
 
-// ===============================
-// TYPE-SPECIFIC FORM GENERATORS
-// ===============================
-
+// نفس دوال النماذج المختلفة من الكود الأصلي
 function getVideoForm() {
     return `
         <h4 style="color: var(--info); margin: 2rem 0 1rem;">🎥 إعدادات الفيديو</h4>
@@ -1375,548 +1569,1048 @@ function getSurveyForm() {
 }
 
 function getCustomForm() {
-    return `
-        <h4 style="color: var(--info); margin: 2rem 0 1rem;">🎨 محتوى مخصص</h4>
-        
-        <div class="form-group">
-            <label>نوع المحتوى المخصص</label>
-            <input type="text" id="customType" placeholder="مثال: تمرين تفاعلي، محاكاة، لعبة...">
-        </div>
-        
-        <div class="form-group">
-            <label>المحتوى الأساسي</label>
-            <textarea id="customContent" placeholder="اكتب المحتوى الأساسي..." rows="6"></textarea>
-        </div>
-        
-        <div class="form-group">
-            <label>تعليمات للطالب</label>
-            <textarea id="customInstructions" placeholder="تعليمات وإرشادات..." rows="3"></textarea>
-        </div>
-        
-        <div class="form-group">
-            <label>مواد مساعدة</label>
-            <textarea id="customMaterials" placeholder="روابط أو مواد إضافية..." rows="2"></textarea>
-        </div>
-    `;
+   return `
+       <h4 style="color: var(--info); margin: 2rem 0 1rem;">🎨 محتوى مخصص</h4>
+       
+       <div class="form-group">
+           <label>نوع المحتوى المخصص</label>
+           <input type="text" id="customType" placeholder="مثال: تمرين تفاعلي، محاكاة، لعبة...">
+       </div>
+       
+       <div class="form-group">
+           <label>المحتوى الأساسي</label>
+           <textarea id="customContent" placeholder="اكتب المحتوى الأساسي..." rows="6"></textarea>
+       </div>
+       
+       <div class="form-group">
+           <label>تعليمات للطالب</label>
+           <textarea id="customInstructions" placeholder="تعليمات وإرشادات..." rows="3"></textarea>
+       </div>
+       
+       <div class="form-group">
+           <label>مواد مساعدة</label>
+           <textarea id="customMaterials" placeholder="روابط أو مواد إضافية..." rows="2"></textarea>
+       </div>
+   `;
 }
 
 function getGenericForm() {
-    return `
-        <h4 style="color: var(--info); margin: 2rem 0 1rem;">📦 محتوى عام</h4>
-        
-        <div class="form-group">
-            <label>المحتوى</label>
-            <textarea id="genericContent" placeholder="اكتب المحتوى..." rows="6"></textarea>
-        </div>
-        
-        <div class="form-group">
-            <label>تعليمات</label>
-            <textarea id="genericInstructions" placeholder="تعليمات للطالب..." rows="3"></textarea>
-        </div>
-    `;
+   return `
+       <h4 style="color: var(--info); margin: 2rem 0 1rem;">📦 محتوى عام</h4>
+       
+       <div class="form-group">
+           <label>المحتوى</label>
+           <textarea id="genericContent" placeholder="اكتب المحتوى..." rows="6"></textarea>
+       </div>
+       
+       <div class="form-group">
+           <label>تعليمات</label>
+           <textarea id="genericInstructions" placeholder="تعليمات للطالب..." rows="3"></textarea>
+       </div>
+   `;
 }
 
 // ===============================
-// DYNAMIC LISTS MANAGEMENT
+// DYNAMIC LISTS MANAGEMENT - مُحسنة
 // ===============================
 
 function resetDynamicLists() {
-    currentKeyPoints = [];
-    currentReviewQuestions = [];
-    currentQuizQuestions = [];
-    currentAssignmentCriteria = [];
-    currentDiscussionQuestions = [];
+   currentKeyPoints = [];
+   currentReviewQuestions = [];
+   currentQuizQuestions = [];
+   currentAssignmentCriteria = [];
+   currentDiscussionQuestions = [];
+   currentSurveyQuestions = [];
 }
 
 function initializeDynamicLists() {
-    renderKeyPoints();
-    renderReviewQuestions();
-    renderQuizQuestions();
-    renderAssignmentCriteria();
-    renderDiscussionQuestions();
+   renderKeyPoints();
+   renderReviewQuestions();
+   renderQuizQuestions();
+   renderAssignmentCriteria();
+   renderDiscussionQuestions();
+   renderSurveyQuestions();
 }
 
 // Key Points
 function addKeyPoint() {
-    const input = document.getElementById('keyPointInput');
-    const value = input.value.trim();
-    
-    if (value) {
-        currentKeyPoints.push(value);
-        renderKeyPoints();
-        input.value = '';
-    }
+   const input = document.getElementById('keyPointInput');
+   const value = input.value.trim();
+   
+   if (value) {
+       currentKeyPoints.push(value);
+       renderKeyPoints();
+       input.value = '';
+   }
 }
 
 function removeKeyPoint(index) {
-    currentKeyPoints.splice(index, 1);
-    renderKeyPoints();
+   currentKeyPoints.splice(index, 1);
+   renderKeyPoints();
 }
 
 function renderKeyPoints() {
-    const container = document.getElementById('keyPointsList');
-    if (!container) return;
-    
-    if (currentKeyPoints.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد نقاط مضافة بعد</p>';
-        return;
-    }
-    
-    container.innerHTML = currentKeyPoints.map((point, index) => `
-        <div class="list-item">
-            <span>• ${point}</span>
-            <button class="remove-btn" onclick="removeKeyPoint(${index})">حذف</button>
-        </div>
-    `).join('');
+   const container = document.getElementById('keyPointsList');
+   if (!container) return;
+   
+   if (currentKeyPoints.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد نقاط مضافة بعد</p>';
+       return;
+   }
+   
+   container.innerHTML = currentKeyPoints.map((point, index) => `
+       <div class="list-item">
+           <span>• ${point}</span>
+           <button class="remove-btn" onclick="removeKeyPoint(${index})">حذف</button>
+       </div>
+   `).join('');
 }
 
 // Review Questions
 function addReviewQuestion() {
-    const input = document.getElementById('reviewQuestionInput');
-    const value = input.value.trim();
-    
-    if (value) {
-        currentReviewQuestions.push(value);
-        renderReviewQuestions();
-        input.value = '';
-    }
+   const input = document.getElementById('reviewQuestionInput');
+   const value = input.value.trim();
+   
+   if (value) {
+       currentReviewQuestions.push(value);
+       renderReviewQuestions();
+       input.value = '';
+   }
 }
 
 function removeReviewQuestion(index) {
-    currentReviewQuestions.splice(index, 1);
-    renderReviewQuestions();
+   currentReviewQuestions.splice(index, 1);
+   renderReviewQuestions();
 }
 
 function renderReviewQuestions() {
-    const container = document.getElementById('reviewQuestionsList');
-    if (!container) return;
-    
-    if (currentReviewQuestions.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
-        return;
-    }
-    
-    container.innerHTML = currentReviewQuestions.map((question, index) => `
-        <div class="list-item">
-            <span>❓ ${question}</span>
-            <button class="remove-btn" onclick="removeReviewQuestion(${index})">حذف</button>
-        </div>
-    `).join('');
+   const container = document.getElementById('reviewQuestionsList');
+   if (!container) return;
+   
+   if (currentReviewQuestions.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
+       return;
+   }
+   
+   container.innerHTML = currentReviewQuestions.map((question, index) => `
+       <div class="list-item">
+           <span>❓ ${question}</span>
+           <button class="remove-btn" onclick="removeReviewQuestion(${index})">حذف</button>
+       </div>
+   `).join('');
 }
 
-// Quiz Questions
+// Quiz Questions - مُحسنة مع حفظ أفضل
 function addQuizQuestion() {
-    const typeSelect = document.getElementById('questionType');
-    const type = typeSelect.value;
-    
-    let questionText = prompt('أدخل نص السؤال:');
-    if (!questionText) return;
-    
-    let question = {
-        type: type,
-        question: questionText,
-        options: [],
-        correctAnswer: null
-    };
-    
-    if (type === 'multiple') {
-        // Add options for multiple choice
-        for (let i = 1; i <= 4; i++) {
-            let option = prompt(`الخيار ${i}:`);
-            if (option) {
-                question.options.push(option);
-            }
-        }
-        
-        if (question.options.length > 0) {
-            let correctIndex = prompt(`رقم الإجابة الصحيحة (1-${question.options.length}):`);
-            question.correctAnswer = parseInt(correctIndex) - 1;
-        }
-    } else if (type === 'true-false') {
-        question.options = ['صحيح', 'خطأ'];
-        let isTrue = confirm('هل الإجابة الصحيحة هي "صحيح"؟');
-        question.correctAnswer = isTrue ? 0 : 1;
-    }
-    
-    currentQuizQuestions.push(question);
-    renderQuizQuestions();
+   const typeSelect = document.getElementById('questionType');
+   const type = typeSelect.value;
+   
+   let questionText = prompt('أدخل نص السؤال:');
+   if (!questionText || questionText.trim() === '') return;
+   
+   let question = {
+       type: type,
+       question: questionText.trim(),
+       options: [],
+       correctAnswer: null
+   };
+   
+   if (type === 'multiple') {
+       // Add options for multiple choice
+       for (let i = 1; i <= 4; i++) {
+           let option = prompt(`الخيار ${i} (اتركه فارغاً للتوقف):`);
+           if (option && option.trim() !== '') {
+               question.options.push(option.trim());
+           } else if (i <= 2) {
+               alert('يجب إضافة خيارين على الأقل');
+               return;
+           } else {
+               break;
+           }
+       }
+       
+       if (question.options.length > 0) {
+           let correctIndex = prompt(`رقم الإجابة الصحيحة (1-${question.options.length}):`);
+           correctIndex = parseInt(correctIndex);
+           if (correctIndex >= 1 && correctIndex <= question.options.length) {
+               question.correctAnswer = correctIndex - 1;
+           } else {
+               alert('رقم الإجابة الصحيحة غير صحيح');
+               return;
+           }
+       }
+   } else if (type === 'true-false') {
+       question.options = ['صحيح', 'خطأ'];
+       let isTrue = confirm('هل الإجابة الصحيحة هي "صحيح"؟');
+       question.correctAnswer = isTrue ? 0 : 1;
+   } else if (type === 'short-answer') {
+       let correctAnswer = prompt('الإجابة الصحيحة:');
+       if (correctAnswer && correctAnswer.trim() !== '') {
+           question.correctAnswer = correctAnswer.trim();
+       } else {
+           alert('يجب إدخال الإجابة الصحيحة');
+           return;
+       }
+   }
+   
+   currentQuizQuestions.push(question);
+   renderQuizQuestions();
 }
 
 function removeQuizQuestion(index) {
-    currentQuizQuestions.splice(index, 1);
-    renderQuizQuestions();
+   currentQuizQuestions.splice(index, 1);
+   renderQuizQuestions();
 }
 
 function renderQuizQuestions() {
-    const container = document.getElementById('quizQuestionsList');
-    if (!container) return;
-    
-    if (currentQuizQuestions.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
-        return;
-    }
-    
-    container.innerHTML = currentQuizQuestions.map((question, index) => `
-        <div class="quiz-question">
-            <div class="question-header">
-                <strong>السؤال ${index + 1}: ${question.question}</strong>
-                <button class="remove-btn" onclick="removeQuizQuestion(${index})">حذف</button>
-            </div>
-            <div class="question-options">
-                ${question.options.map((option, optIndex) => `
-                    <div class="option-item">
-                        <span ${optIndex === question.correctAnswer ? 'style="color: green; font-weight: bold;"' : ''}">
-                            ${optIndex + 1}. ${option} ${optIndex === question.correctAnswer ? '✓' : ''}
-                        </span>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-    `).join('');
+   const container = document.getElementById('quizQuestionsList');
+   if (!container) return;
+   
+   if (currentQuizQuestions.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
+       return;
+   }
+   
+   container.innerHTML = currentQuizQuestions.map((question, index) => `
+       <div class="quiz-question">
+           <div class="question-header">
+               <strong>السؤال ${index + 1}: ${question.question}</strong>
+               <button class="remove-btn" onclick="removeQuizQuestion(${index})">حذف</button>
+           </div>
+           <div class="question-options">
+               ${question.type === 'short-answer' ? 
+                   `<p style="color: #28a745;"><strong>الإجابة:</strong> ${question.correctAnswer}</p>` :
+                   question.options.map((option, optIndex) => `
+                       <div class="option-item">
+                           <span ${optIndex === question.correctAnswer ? 'style="color: green; font-weight: bold;"' : ''}">
+                               ${optIndex + 1}. ${option} ${optIndex === question.correctAnswer ? '✓' : ''}
+                           </span>
+                       </div>
+                   `).join('')
+               }
+           </div>
+       </div>
+   `).join('');
 }
 
 // Assignment Criteria
 function addAssignmentCriteria() {
-    const input = document.getElementById('criteriaInput');
-    const value = input.value.trim();
-    
-    if (value) {
-        currentAssignmentCriteria.push(value);
-        renderAssignmentCriteria();
-        input.value = '';
-    }
+   const input = document.getElementById('criteriaInput');
+   const value = input.value.trim();
+   
+   if (value) {
+       currentAssignmentCriteria.push(value);
+       renderAssignmentCriteria();
+       input.value = '';
+   }
 }
 
 function removeAssignmentCriteria(index) {
-    currentAssignmentCriteria.splice(index, 1);
-    renderAssignmentCriteria();
+   currentAssignmentCriteria.splice(index, 1);
+   renderAssignmentCriteria();
 }
 
 function renderAssignmentCriteria() {
-    const container = document.getElementById('assignmentCriteriaList');
-    if (!container) return;
-    
-    if (currentAssignmentCriteria.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد معايير مضافة بعد</p>';
-        return;
-    }
-    
-    container.innerHTML = currentAssignmentCriteria.map((criteria, index) => `
-        <div class="list-item">
-            <span>📋 ${criteria}</span>
-            <button class="remove-btn" onclick="removeAssignmentCriteria(${index})">حذف</button>
-        </div>
-    `).join('');
+   const container = document.getElementById('assignmentCriteriaList');
+   if (!container) return;
+   
+   if (currentAssignmentCriteria.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد معايير مضافة بعد</p>';
+       return;
+   }
+   
+   container.innerHTML = currentAssignmentCriteria.map((criteria, index) => `
+       <div class="list-item">
+           <span>📋 ${criteria}</span>
+           <button class="remove-btn" onclick="removeAssignmentCriteria(${index})">حذف</button>
+       </div>
+   `).join('');
 }
 
 // Discussion Questions
 function addDiscussionQuestion() {
-    const input = document.getElementById('discussionQuestionInput');
-    const value = input.value.trim();
-    
-    if (value) {
-        currentDiscussionQuestions.push(value);
-        renderDiscussionQuestions();
-        input.value = '';
-    }
+   const input = document.getElementById('discussionQuestionInput');
+   const value = input.value.trim();
+   
+   if (value) {
+       currentDiscussionQuestions.push(value);
+       renderDiscussionQuestions();
+       input.value = '';
+   }
 }
 
 function removeDiscussionQuestion(index) {
-    currentDiscussionQuestions.splice(index, 1);
-    renderDiscussionQuestions();
+   currentDiscussionQuestions.splice(index, 1);
+   renderDiscussionQuestions();
 }
 
 function renderDiscussionQuestions() {
-    const container = document.getElementById('discussionQuestionsList');
-    if (!container) return;
-    
-    if (currentDiscussionQuestions.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
-        return;
-    }
-    
-    container.innerHTML = currentDiscussionQuestions.map((question, index) => `
-        <div class="list-item">
-            <span>💭 ${question}</span>
-            <button class="remove-btn" onclick="removeDiscussionQuestion(${index})">حذف</button>
-        </div>
-    `).join('');
+   const container = document.getElementById('discussionQuestionsList');
+   if (!container) return;
+   
+   if (currentDiscussionQuestions.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
+       return;
+   }
+   
+   container.innerHTML = currentDiscussionQuestions.map((question, index) => `
+       <div class="list-item">
+           <span>💭 ${question}</span>
+           <button class="remove-btn" onclick="removeDiscussionQuestion(${index})">حذف</button>
+       </div>
+   `).join('');
 }
 
 // Case Questions (for case study)
 function addCaseQuestion() {
-    const input = document.getElementById('caseQuestionInput');
-    const value = input.value.trim();
-    
-    if (value) {
-        // Use currentDiscussionQuestions for case questions too
-        currentDiscussionQuestions.push(value);
-        renderCaseQuestions();
-        input.value = '';
-    }
+   const input = document.getElementById('caseQuestionInput');
+   const value = input.value.trim();
+   
+   if (value) {
+       currentDiscussionQuestions.push(value);
+       renderCaseQuestions();
+       input.value = '';
+   }
 }
 
 function renderCaseQuestions() {
-    const container = document.getElementById('caseQuestionsList');
-    if (!container) return;
-    
-    if (currentDiscussionQuestions.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
-        return;
-    }
-    
-    container.innerHTML = currentDiscussionQuestions.map((question, index) => `
-        <div class="list-item">
-            <span>🤔 ${question}</span>
-            <button class="remove-btn" onclick="removeDiscussionQuestion(${index})">حذف</button>
-        </div>
-    `).join('');
+   const container = document.getElementById('caseQuestionsList');
+   if (!container) return;
+   
+   if (currentDiscussionQuestions.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
+       return;
+   }
+   
+   container.innerHTML = currentDiscussionQuestions.map((question, index) => `
+       <div class="list-item">
+           <span>🤔 ${question}</span>
+           <button class="remove-btn" onclick="removeDiscussionQuestion(${index})">حذف</button>
+       </div>
+   `).join('');
 }
 
 // Survey Questions
-let currentSurveyQuestions = [];
-
 function addSurveyQuestion() {
-    const typeSelect = document.getElementById('surveyQuestionType');
-    const input = document.getElementById('surveyQuestionInput');
-    const type = typeSelect.value;
-    const question = input.value.trim();
-    
-    if (question) {
-        currentSurveyQuestions.push({
-            type: type,
-            question: question
-        });
-        renderSurveyQuestions();
-        input.value = '';
-    }
+   const typeSelect = document.getElementById('surveyQuestionType');
+   const input = document.getElementById('surveyQuestionInput');
+   const type = typeSelect.value;
+   const question = input.value.trim();
+   
+   if (question) {
+       currentSurveyQuestions.push({
+           type: type,
+           question: question
+       });
+       renderSurveyQuestions();
+       input.value = '';
+   }
 }
 
 function removeSurveyQuestion(index) {
-    currentSurveyQuestions.splice(index, 1);
-    renderSurveyQuestions();
+   currentSurveyQuestions.splice(index, 1);
+   renderSurveyQuestions();
 }
 
 function renderSurveyQuestions() {
-    const container = document.getElementById('surveyQuestionsList');
-    if (!container) return;
-    
-    if (currentSurveyQuestions.length === 0) {
-        container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
-        return;
-    }
-    
-    const typeIcons = {
-        rating: '⭐',
-        multiple: '☑️',
-        text: '📝',
-        yesno: '❓'
-    };
-    
-    container.innerHTML = currentSurveyQuestions.map((q, index) => `
-        <div class="list-item">
-            <span>${typeIcons[q.type]} ${q.question} (${q.type})</span>
-            <button class="remove-btn" onclick="removeSurveyQuestion(${index})">حذف</button>
-        </div>
-    `).join('');
+   const container = document.getElementById('surveyQuestionsList');
+   if (!container) return;
+   
+   if (currentSurveyQuestions.length === 0) {
+       container.innerHTML = '<p style="color: #666; text-align: center;">لا توجد أسئلة مضافة بعد</p>';
+       return;
+   }
+   
+   const typeIcons = {
+       rating: '⭐',
+       multiple: '☑️',
+       text: '📝',
+       yesno: '❓'
+   };
+   
+   container.innerHTML = currentSurveyQuestions.map((q, index) => `
+       <div class="list-item">
+           <span>${typeIcons[q.type]} ${q.question} (${q.type})</span>
+           <button class="remove-btn" onclick="removeSurveyQuestion(${index})">حذف</button>
+       </div>
+   `).join('');
 }
 
 // ===============================
-// SAVE CONTENT FUNCTION
+// SAVE CONTENT FUNCTION - مُصلحة بالكامل
 // ===============================
 
 async function saveContent() {
-    try {
-        // Collect basic data
-        const title = document.getElementById('contentTitle').value.trim();
-        const description = document.getElementById('contentDescription').value.trim();
-        const duration = parseInt(document.getElementById('contentDuration').value) || 15;
-        
-        if (!title) {
-            showNotification('من فضلك أدخل عنوان المحتوى', 'error');
-            return;
-        }
-        
-        // Collect type-specific data
-        const contentData = {
-            name: title,
-            description: description,
-            type: currentCreatingType,
-            duration: duration,
-            createdDate: firebase.firestore.FieldValue.serverTimestamp(),
-            lastModified: firebase.firestore.FieldValue.serverTimestamp(),
-            timesUsed: 0,
-            averageRating: 0
-        };
-        
-        // Add type-specific content
-        switch(currentCreatingType) {
-            case 'educational-video':
-                contentData.videoData = {
-                    url: document.getElementById('videoUrl').value,
-                    keyPoints: currentKeyPoints,
-                    reviewQuestions: currentReviewQuestions,
-                    notes: document.getElementById('videoNotes').value,
-                    trackWatchTime: document.getElementById('trackWatchTime').checked,
-                    preventSkipping: document.getElementById('preventSkipping').checked,
-                    showQuizAfter: document.getElementById('showQuizAfter').checked
-                };
-                break;
-                
-            case 'quiz':
-                contentData.quizData = {
-                    questionCount: parseInt(document.getElementById('questionCount').value),
-                    timeLimit: parseInt(document.getElementById('timeLimit').value) || null,
-                    passingGrade: parseInt(document.getElementById('passingGrade').value),
-                    showResults: document.getElementById('showResults').value,
-                    questions: currentQuizQuestions,
-                    shuffleQuestions: document.getElementById('shuffleQuestions').checked,
-                    allowRetake: document.getElementById('allowRetake').checked,
-                    showFeedback: document.getElementById('showFeedback').checked
-                };
-                break;
-                
-            case 'assignment':
-                contentData.assignmentData = {
-                    instructions: document.getElementById('assignmentInstructions').value,
-                    submissionType: document.getElementById('submissionType').value,
-                    criteria: currentAssignmentCriteria,
-                    dueDate: document.getElementById('dueDate').value || null,
-                    minWords: parseInt(document.getElementById('minWords').value) || null,
-                    notes: document.getElementById('assignmentNotes').value
-                };
-                break;
-                
-            case 'discussion':
-                contentData.discussionData = {
-                    topic: document.getElementById('discussionTopic').value,
-                    description: document.getElementById('discussionDesc').value,
-                    questions: currentDiscussionQuestions,
-                    rules: document.getElementById('discussionRules').value,
-                    minPosts: parseInt(document.getElementById('minPosts').value)
-                };
-                break;
-                
-            case 'presentation':
-                contentData.presentationData = {
-                    url: document.getElementById('presentationUrl').value,
-                    speakerNotes: document.getElementById('speakerNotes').value,
-                    slideCount: parseInt(document.getElementById('slideCount').value) || null
-                };
-                break;
-                
-            case 'exercise':
-                contentData.exerciseData = {
-                    objective: document.getElementById('exerciseObjective').value,
-                    steps: document.getElementById('exerciseSteps').value,
-                    requiredTools: document.getElementById('requiredTools').value,
-                    expectedOutput: document.getElementById('expectedOutput').value
-                };
-                break;
-                
-            case 'case-study':
-                contentData.caseStudyData = {
-                    description: document.getElementById('caseDescription').value,
-                    context: document.getElementById('caseContext').value,
-                    questions: currentDiscussionQuestions,
-                    suggestedSolutions: document.getElementById('suggestedSolutions').value
-                };
-                break;
-                
-            case 'survey':
-                contentData.surveyData = {
-                    purpose: document.getElementById('surveyPurpose').value,
-                    questions: currentSurveyQuestions,
-                    anonymous: document.getElementById('anonymousSurvey').checked,
-                    showResults: document.getElementById('showResults').checked
-                };
-                break;
-                
-            case 'custom':
-                contentData.customData = {
-                    customType: document.getElementById('customType').value,
-                    content: document.getElementById('customContent').value,
-                    instructions: document.getElementById('customInstructions').value,
-                    materials: document.getElementById('customMaterials').value
-                };
-                break;
-                
-            default:
-                contentData.genericData = {
-                    content: document.getElementById('genericContent')?.value || '',
-                    instructions: document.getElementById('genericInstructions')?.value || ''
-                };
-        }
-        
-        // Save to Firebase
-        const docRef = await db.collection('courseContentLibrary').add(contentData);
-        
-        showNotification('تم حفظ المحتوى بنجاح!', 'success');
-        
-        // Close modal and reload
-        closeContentCreator();
-        loadContent();
-        
-        console.log('✅ تم حفظ المحتوى بـ ID:', docRef.id);
-        
-    } catch (error) {
-        console.error('❌ خطأ في حفظ المحتوى:', error);
-        showNotification('خطأ في حفظ المحتوى: ' + error.message, 'error');
-    }
+   try {
+       // التحقق من البيانات الأساسية
+       const title = document.getElementById('contentTitle')?.value?.trim();
+       const description = document.getElementById('contentDescription')?.value?.trim();
+       const duration = parseInt(document.getElementById('contentDuration')?.value) || 15;
+       
+       if (!title) {
+           showNotification('من فضلك أدخل عنوان المحتوى', 'error');
+           return;
+       }
+       
+       // إنشاء البيانات الأساسية
+       const contentData = {
+           name: title,
+           description: description || '',
+           type: currentCreatingType,
+           duration: duration,
+           createdDate: firebase.firestore.FieldValue.serverTimestamp(),
+           lastModified: firebase.firestore.FieldValue.serverTimestamp(),
+           timesUsed: 0,
+           averageRating: 0,
+           isActive: true
+       };
+       
+       // جمع البيانات المخصصة حسب النوع
+       const specificData = collectTypeSpecificData(currentCreatingType);
+       if (specificData === null) {
+           // خطأ في جمع البيانات
+           return;
+       }
+       
+       // دمج البيانات المخصصة
+       Object.assign(contentData, specificData);
+       
+       console.log('📦 بيانات المحتوى للحفظ:', contentData);
+       
+       // الحفظ في Firebase
+       const docRef = await db.collection('courseContentLibrary').add(contentData);
+       
+       console.log('✅ تم حفظ المحتوى بـ ID:', docRef.id);
+       
+       // رسالة النجاح
+       showNotification('تم حفظ المحتوى بنجاح!', 'success');
+       
+       // إغلاق النافذة وإعادة التحميل
+       closeContentCreator();
+       await loadContent();
+       
+   } catch (error) {
+       console.error('❌ خطأ في حفظ المحتوى:', error);
+       showNotification('خطأ في حفظ المحتوى: ' + error.message, 'error');
+   }
+}
+
+// دالة جمع البيانات المخصصة - جديدة ومحسنة
+function collectTypeSpecificData(contentType) {
+   try {
+       switch(contentType) {
+           case 'educational-video':
+               const videoUrl = document.getElementById('videoUrl')?.value?.trim();
+               if (!videoUrl) {
+                   showNotification('من فضلك أدخل رابط الفيديو', 'error');
+                   return null;
+               }
+               
+               return {
+                   videoData: {
+                       url: videoUrl,
+                       keyPoints: [...currentKeyPoints],
+                       reviewQuestions: [...currentReviewQuestions],
+                       notes: document.getElementById('videoNotes')?.value?.trim() || '',
+                       trackWatchTime: document.getElementById('trackWatchTime')?.checked || false,
+                       preventSkipping: document.getElementById('preventSkipping')?.checked || false,
+                       showQuizAfter: document.getElementById('showQuizAfter')?.checked || false
+                   }
+               };
+               
+           case 'quiz':
+               if (currentQuizQuestions.length === 0) {
+                   showNotification('من فضلك أضف سؤال واحد على الأقل', 'error');
+                   return null;
+               }
+               
+               return {
+                   quizData: {
+                       questionCount: parseInt(document.getElementById('questionCount')?.value) || currentQuizQuestions.length,
+                       timeLimit: parseInt(document.getElementById('timeLimit')?.value) || null,
+                       passingGrade: parseInt(document.getElementById('passingGrade')?.value) || 70,
+                       showResults: document.getElementById('showResults')?.value || 'immediate',
+                       questions: [...currentQuizQuestions],
+                       shuffleQuestions: document.getElementById('shuffleQuestions')?.checked || false,
+                       allowRetake: document.getElementById('allowRetake')?.checked || true,
+                       showFeedback: document.getElementById('showFeedback')?.checked || true
+                   }
+               };
+               
+           case 'assignment':
+               const instructions = document.getElementById('assignmentInstructions')?.value?.trim();
+               if (!instructions) {
+                   showNotification('من فضلك أدخل تعليمات الواجب', 'error');
+                   return null;
+               }
+               
+               return {
+                   assignmentData: {
+                       instructions: instructions,
+                       submissionType: document.getElementById('submissionType')?.value || 'file',
+                       criteria: [...currentAssignmentCriteria],
+                       dueDate: document.getElementById('dueDate')?.value || null,
+                       minWords: parseInt(document.getElementById('minWords')?.value) || null,
+                       notes: document.getElementById('assignmentNotes')?.value?.trim() || ''
+                   }
+               };
+               
+           case 'discussion':
+               const topic = document.getElementById('discussionTopic')?.value?.trim();
+               if (!topic) {
+                   showNotification('من فضلك أدخل موضوع المناقشة', 'error');
+                   return null;
+               }
+               
+               return {
+                   discussionData: {
+                       topic: topic,
+                       description: document.getElementById('discussionDesc')?.value?.trim() || '',
+                       questions: [...currentDiscussionQuestions],
+                       rules: document.getElementById('discussionRules')?.value?.trim() || '',
+                       minPosts: parseInt(document.getElementById('minPosts')?.value) || 2
+                   }
+               };
+               
+           case 'presentation':
+               return {
+                   presentationData: {
+                       url: document.getElementById('presentationUrl')?.value?.trim() || '',
+                       speakerNotes: document.getElementById('speakerNotes')?.value?.trim() || '',
+                       slideCount: parseInt(document.getElementById('slideCount')?.value) || null
+                   }
+               };
+               
+           case 'exercise':
+               return {
+                   exerciseData: {
+                       objective: document.getElementById('exerciseObjective')?.value?.trim() || '',
+                       steps: document.getElementById('exerciseSteps')?.value?.trim() || '',
+                       requiredTools: document.getElementById('requiredTools')?.value?.trim() || '',
+                       expectedOutput: document.getElementById('expectedOutput')?.value?.trim() || ''
+                   }
+               };
+               
+           case 'case-study':
+               return {
+                   caseStudyData: {
+                       description: document.getElementById('caseDescription')?.value?.trim() || '',
+                       context: document.getElementById('caseContext')?.value?.trim() || '',
+                       questions: [...currentDiscussionQuestions],
+                       suggestedSolutions: document.getElementById('suggestedSolutions')?.value?.trim() || ''
+                   }
+               };
+               
+           case 'survey':
+               return {
+                   surveyData: {
+                       purpose: document.getElementById('surveyPurpose')?.value?.trim() || '',
+                       questions: [...currentSurveyQuestions],
+                       anonymous: document.getElementById('anonymousSurvey')?.checked || true,
+                       showResults: document.getElementById('showResults')?.checked || false
+                   }
+               };
+               
+           case 'custom':
+               return {
+                   customData: {
+                       customType: document.getElementById('customType')?.value?.trim() || '',
+                       content: document.getElementById('customContent')?.value?.trim() || '',
+                       instructions: document.getElementById('customInstructions')?.value?.trim() || '',
+                       materials: document.getElementById('customMaterials')?.value?.trim() || ''
+                   }
+               };
+               
+           default:
+               return {
+                   genericData: {
+                       content: document.getElementById('genericContent')?.value?.trim() || '',
+                       instructions: document.getElementById('genericInstructions')?.value?.trim() || ''
+                   }
+               };
+       }
+   } catch (error) {
+       console.error('خطأ في جمع البيانات المخصصة:', error);
+       showNotification('خطأ في معالجة البيانات', 'error');
+       return null;
+   }
 }
 
 // ===============================
-// CONTENT MANAGEMENT FUNCTIONS
+// PREVIEW FUNCTIONALITY - جديدة
+// ===============================
+
+function previewContent(contentId) {
+   const content = allContent.find(c => c.id === contentId);
+   if (!content) {
+       showNotification('المحتوى غير موجود', 'error');
+       return;
+   }
+   
+   const type = contentTypes.find(t => t.id === content.type);
+   
+   document.getElementById('previewTitle').textContent = `معاينة: ${content.name}`;
+   
+   let previewHtml = `
+       <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 10px; margin-bottom: 2rem;">
+           <h3>${type?.icon || '📦'} ${content.name}</h3>
+           <p style="color: #666; margin: 0.5rem 0;"><strong>النوع:</strong> ${type?.name || content.type}</p>
+           <p style="color: #666; margin: 0.5rem 0;"><strong>المدة:</strong> ${content.duration} دقيقة</p>
+           ${content.description ? `<p style="color: #666; margin: 0.5rem 0;"><strong>الوصف:</strong> ${content.description}</p>` : ''}
+       </div>
+   `;
+   
+   // إضافة المحتوى المخصص حسب النوع
+   previewHtml += generatePreviewContent(content);
+   
+   document.getElementById('previewContent').innerHTML = previewHtml;
+   document.getElementById('previewModal').style.display = 'block';
+}
+
+function generatePreviewContent(content) {
+   switch(content.type) {
+       case 'educational-video':
+           return `
+               <div class="preview-section">
+                   <h4>🎥 معاينة الفيديو التعليمي</h4>
+                   ${content.videoData?.url ? `
+                       <p><strong>الرابط:</strong> <a href="${content.videoData.url}" target="_blank">${content.videoData.url}</a></p>
+                   ` : ''}
+                   
+                   ${content.videoData?.keyPoints?.length ? `
+                       <div style="margin: 1rem 0;">
+                           <strong>النقاط الرئيسية:</strong>
+                           <ul style="margin-top: 0.5rem;">
+                               ${content.videoData.keyPoints.map(point => `<li>${point}</li>`).join('')}
+                           </ul>
+                       </div>
+                   ` : ''}
+                   
+                   ${content.videoData?.reviewQuestions?.length ? `
+                       <div style="margin: 1rem 0;">
+                           <strong>أسئلة المراجعة:</strong>
+                           <ol style="margin-top: 0.5rem;">
+                               ${content.videoData.reviewQuestions.map(q => `<li>${q}</li>`).join('')}
+                           </ol>
+                       </div>
+                   ` : ''}
+                   
+                   ${content.videoData?.notes ? `
+                       <div style="margin: 1rem 0;">
+                           <strong>ملاحظات:</strong>
+                           <p style="background: #fff; padding: 1rem; border-left: 3px solid var(--primary);">${content.videoData.notes}</p>
+                       </div>
+                   ` : ''}
+               </div>
+           `;
+           
+       case 'quiz':
+           return `
+               <div class="preview-section">
+                   <h4>❓ معاينة الاختبار</h4>
+                   <p><strong>عدد الأسئلة:</strong> ${content.quizData?.questions?.length || 0}</p>
+                   <p><strong>درجة النجاح:</strong> ${content.quizData?.passingGrade || 70}%</p>
+                   ${content.quizData?.timeLimit ? `<p><strong>الوقت المحدد:</strong> ${content.quizData.timeLimit} دقيقة</p>` : ''}
+                   
+                   ${content.quizData?.questions?.length ? `
+                       <div style="margin-top: 1.5rem;">
+                           <strong>الأسئلة:</strong>
+                           ${content.quizData.questions.map((q, index) => `
+                               <div style="background: #fff; padding: 1rem; margin: 1rem 0; border-radius: 8px; border-left: 3px solid var(--info);">
+                                   <p><strong>السؤال ${index + 1}:</strong> ${q.question}</p>
+                                   ${q.options?.length ? `
+                                       <ul style="margin-top: 0.5rem;">
+                                           ${q.options.map((option, optIndex) => `
+                                               <li style="${optIndex === q.correctAnswer ? 'color: green; font-weight: bold;' : ''}">${option} ${optIndex === q.correctAnswer ? '✓' : ''}</li>
+                                           `).join('')}
+                                       </ul>
+                                   ` : ''}
+                                   ${q.type === 'short-answer' ? `<p style="color: green;"><strong>الإجابة:</strong> ${q.correctAnswer}</p>` : ''}
+                               </div>
+                           `).join('')}
+                       </div>
+                   ` : ''}
+               </div>
+           `;
+           
+       case 'assignment':
+           return `
+               <div class="preview-section">
+                   <h4>📝 معاينة الواجب</h4>
+                   ${content.assignmentData?.instructions ? `
+                       <div style="margin: 1rem 0;">
+                           <strong>التعليمات:</strong>
+                           <p style="background: #fff; padding: 1rem; border-left: 3px solid var(--primary);">${content.assignmentData.instructions}</p>
+                       </div>
+                   ` : ''}
+                   
+                   <p><strong>نوع التسليم:</strong> ${content.assignmentData?.submissionType || 'غير محدد'}</p>
+                   
+                   ${content.assignmentData?.criteria?.length ? `
+                       <div style="margin: 1rem 0;">
+                           <strong>معايير التقييم:</strong>
+                           <ul style="margin-top: 0.5rem;">
+                               ${content.assignmentData.criteria.map(criteria => `<li>${criteria}</li>`).join('')}
+                           </ul>
+                       </div>
+                   ` : ''}
+               </div>
+           `;
+           
+       default:
+           return `
+               <div class="preview-section">
+                   <h4>📦 معاينة المحتوى</h4>
+                   <p>هذا النوع من المحتوى لا يدعم المعاينة التفصيلية بعد.</p>
+                   <p>البيانات المحفوظة: ${JSON.stringify(content, null, 2)}</p>
+               </div>
+           `;
+   }
+}
+
+function closePreview() {
+   document.getElementById('previewModal').style.display = 'none';
+}
+
+// ===============================
+// EDIT FUNCTIONALITY - جديدة ومتكاملة
 // ===============================
 
 async function editContent(contentId) {
-    showNotification('ميزة التعديل قيد التطوير', 'info');
+   try {
+       const content = allContent.find(c => c.id === contentId);
+       if (!content) {
+           showNotification('المحتوى غير موجود', 'error');
+           return;
+       }
+       
+       currentEditingContent = { ...content };
+       
+       // إعداد النموذج للتعديل
+       const editForm = document.getElementById('editForm');
+       editForm.innerHTML = generateEditForm(content);
+       
+       // عرض النافذة
+       document.getElementById('editModal').style.display = 'block';
+       
+       // تحميل البيانات في النموذج
+       loadContentDataIntoForm(content);
+       
+   } catch (error) {
+       console.error('خطأ في فتح التعديل:', error);
+       showNotification('خطأ في فتح التعديل', 'error');
+   }
 }
 
+function generateEditForm(content) {
+   const type = contentTypes.find(t => t.id === content.type);
+   
+   let formHtml = `
+       <h3 style="color: var(--primary); margin-bottom: 2rem;">
+           ${type?.icon || '📦'} تعديل ${type?.name || content.type}
+       </h3>
+       
+       <!-- المعلومات الأساسية -->
+       <div class="form-group">
+           <label>عنوان المحتوى *</label>
+           <input type="text" id="editContentTitle" value="${content.name || ''}" required>
+       </div>
+       
+       <div class="form-group">
+           <label>وصف المحتوى</label>
+           <textarea id="editContentDescription" rows="3">${content.description || ''}</textarea>
+       </div>
+       
+       <div class="form-group">
+           <label>المدة المتوقعة (بالدقائق)</label>
+           <input type="number" id="editContentDuration" value="${content.duration || 15}" min="1">
+       </div>
+   `;
+   
+   // إضافة الحقول المخصصة حسب النوع
+   formHtml += generateTypeSpecificEditForm(content);
+   
+   return formHtml;
+}
+
+function generateTypeSpecificEditForm(content) {
+   switch(content.type) {
+       case 'educational-video':
+           return `
+               <h4 style="color: var(--info); margin: 2rem 0 1rem;">🎥 إعدادات الفيديو</h4>
+               
+               <div class="form-group">
+                   <label>رابط الفيديو *</label>
+                   <input type="url" id="editVideoUrl" value="${content.videoData?.url || ''}" required>
+               </div>
+               
+               <div class="form-group">
+                   <label>ملاحظات إضافية</label>
+                   <textarea id="editVideoNotes" rows="3">${content.videoData?.notes || ''}</textarea>
+               </div>
+               
+               <div class="form-group">
+                   <label>إعدادات التشغيل</label>
+                   <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                       <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                           <input type="checkbox" id="editTrackWatchTime" ${content.videoData?.trackWatchTime ? 'checked' : ''}>
+                           <span>تتبع مدة المشاهدة</span>
+                       </label>
+                       <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                           <input type="checkbox" id="editPreventSkipping" ${content.videoData?.preventSkipping ? 'checked' : ''}>
+                           <span>منع تخطي الفيديو</span>
+                       </label>
+                       <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                           <input type="checkbox" id="editShowQuizAfter" ${content.videoData?.showQuizAfter ? 'checked' : ''}>
+                           <span>عرض أسئلة مراجعة بعد المشاهدة</span>
+                       </label>
+                   </div>
+               </div>
+           `;
+           
+       case 'quiz':
+           return `
+               <h4 style="color: var(--info); margin: 2rem 0 1rem;">❓ إعدادات الاختبار</h4>
+               
+               <div class="form-group">
+                   <label>الحد الزمني (بالدقائق)</label>
+                   <input type="number" id="editTimeLimit" value="${content.quizData?.timeLimit || ''}" placeholder="اتركه فارغاً لعدم تحديد وقت">
+               </div>
+               
+               <div class="form-group">
+                   <label>درجة النجاح (%)</label>
+                   <input type="number" id="editPassingGrade" value="${content.quizData?.passingGrade || 70}" min="0" max="100">
+               </div>
+               
+               <div class="form-group">
+                   <label>عرض النتائج</label>
+                   <select id="editShowResults">
+                       <option value="immediate" ${content.quizData?.showResults === 'immediate' ? 'selected' : ''}>فوري</option>
+                       <option value="after-submit" ${content.quizData?.showResults === 'after-submit' ? 'selected' : ''}>بعد التسليم</option>
+                       <option value="manual" ${content.quizData?.showResults === 'manual' ? 'selected' : ''}>يدوي</option>
+                   </select>
+               </div>
+               
+               <div class="form-group">
+                   <label>إعدادات إضافية</label>
+                   <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                       <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                           <input type="checkbox" id="editShuffleQuestions" ${content.quizData?.shuffleQuestions ? 'checked' : ''}>
+                           <span>ترتيب عشوائي للأسئلة</span>
+                       </label>
+                       <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                           <input type="checkbox" id="editAllowRetake" ${content.quizData?.allowRetake ? 'checked' : ''}>
+                           <span>السماح بإعادة المحاولة</span>
+                       </label>
+                       <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                           <input type="checkbox" id="editShowFeedback" ${content.quizData?.showFeedback ? 'checked' : ''}>
+                           <span>عرض التغذية الراجعة</span>
+                       </label>
+                   </div>
+               </div>
+           `;
+           
+       case 'assignment':
+           return `
+               <h4 style="color: var(--info); margin: 2rem 0 1rem;">📝 إعدادات الواجب</h4>
+               
+               <div class="form-group">
+                   <label>تعليمات الواجب *</label>
+                   <textarea id="editAssignmentInstructions" rows="5" required>${content.assignmentData?.instructions || ''}</textarea>
+               </div>
+               
+               <div class="form-group">
+                   <label>نوع التسليم المطلوب</label>
+                   <select id="editSubmissionType">
+                       <option value="file" ${content.assignmentData?.submissionType === 'file' ? 'selected' : ''}>رفع ملف</option>
+                       <option value="text" ${content.assignmentData?.submissionType === 'text' ? 'selected' : ''}>نص كتابي</option>
+                       <option value="link" ${content.assignmentData?.submissionType === 'link' ? 'selected' : ''}>رابط (مشروع أونلاين)</option>
+                       <option value="multiple" ${content.assignmentData?.submissionType === 'multiple' ? 'selected' : ''}>متعدد</option>
+                   </select>
+               </div>
+               
+               <div class="form-group">
+                   <label>الحد الأدنى للكلمات</label>
+                   <input type="number" id="editMinWords" value="${content.assignmentData?.minWords || ''}" placeholder="مثال: 500">
+               </div>
+               
+               <div class="form-group">
+                   <label>ملاحظات إضافية</label>
+                   <textarea id="editAssignmentNotes" rows="3">${content.assignmentData?.notes || ''}</textarea>
+               </div>
+           `;
+           
+       default:
+           return `
+               <div class="form-group">
+                   <label>محتوى إضافي</label>
+                   <textarea id="editGenericContent" rows="4">${JSON.stringify(content, null, 2)}</textarea>
+                   <small style="color: #666;">يمكنك تعديل البيانات الأساسية فقط لهذا النوع من المحتوى</small>
+               </div>
+           `;
+   }
+}
+
+function loadContentDataIntoForm(content) {
+   // البيانات محملة مسبقاً في generateEditForm
+   console.log('تم تحميل بيانات المحتوى في النموذج');
+}
+
+async function saveEditedContent() {
+   try {
+       if (!currentEditingContent) {
+           showNotification('خطأ: لا يوجد محتوى للتعديل', 'error');
+           return;
+       }
+       
+       // جمع البيانات المحدثة
+       const updatedData = {
+           name: document.getElementById('editContentTitle')?.value?.trim() || currentEditingContent.name,
+           description: document.getElementById('editContentDescription')?.value?.trim() || '',
+           duration: parseInt(document.getElementById('editContentDuration')?.value) || currentEditingContent.duration,
+           lastModified: firebase.firestore.FieldValue.serverTimestamp()
+       };
+       
+       // جمع البيانات المخصصة المحدثة
+       const specificData = collectEditedTypeSpecificData(currentEditingContent.type);
+       if (specificData) {
+           Object.assign(updatedData, specificData);
+       }
+       
+       console.log('📝 البيانات المحدثة:', updatedData);
+       
+       // التحديث في Firebase
+       await db.collection('courseContentLibrary')
+           .doc(currentEditingContent.id)
+           .update(updatedData);
+       
+       console.log('✅ تم تحديث المحتوى');
+       
+       // رسالة النجاح
+       showNotification('تم تحديث المحتوى بنجاح!', 'success');
+       
+       // إغلاق النافذة وإعادة التحميل
+       closeEditModal();
+       await loadContent();
+       
+   } catch (error) {
+       console.error('❌ خطأ في تحديث المحتوى:', error);
+       showNotification('خطأ في تحديث المحتوى: ' + error.message, 'error');
+   }
+}
+
+function collectEditedTypeSpecificData(contentType) {
+   switch(contentType) {
+       case 'educational-video':
+           const videoUrl = document.getElementById('editVideoUrl')?.value?.trim();
+           if (!videoUrl) {
+               showNotification('من فضلك أدخل رابط الفيديو', 'error');
+               return null;
+           }
+           
+           return {
+               videoData: {
+                   ...currentEditingContent.videoData,
+                   url: videoUrl,
+                   notes: document.getElementById('editVideoNotes')?.value?.trim() || '',
+                   trackWatchTime: document.getElementById('editTrackWatchTime')?.checked || false,
+                   preventSkipping: document.getElementById('editPreventSkipping')?.checked || false,
+                   showQuizAfter: document.getElementById('editShowQuizAfter')?.checked || false
+               }
+           };
+           
+       case 'quiz':
+           return {
+               quizData: {
+                   ...currentEditingContent.quizData,
+                   timeLimit: parseInt(document.getElementById('editTimeLimit')?.value) || null,
+                   passingGrade: parseInt(document.getElementById('editPassingGrade')?.value) || 70,
+                   showResults: document.getElementById('editShowResults')?.value || 'immediate',
+                   shuffleQuestions: document.getElementById('editShuffleQuestions')?.checked || false,
+                   allowRetake: document.getElementById('editAllowRetake')?.checked || true,
+                   showFeedback: document.getElementById('editShowFeedback')?.checked || true
+               }
+           };
+           
+       case 'assignment':
+           const instructions = document.getElementById('editAssignmentInstructions')?.value?.trim();
+           if (!instructions) {
+               showNotification('من فضلك أدخل تعليمات الواجب', 'error');
+               return null;
+           }
+           
+           return {
+               assignmentData: {
+                   ...currentEditingContent.assignmentData,
+                   instructions: instructions,
+                   submissionType: document.getElementById('editSubmissionType')?.value || 'file',
+                   minWords: parseInt(document.getElementById('editMinWords')?.value) || null,
+                   notes: document.getElementById('editAssignmentNotes')?.value?.trim() || ''
+               }
+           };
+           
+       default:
+           return null;
+   }
+}
+
+function closeEditModal() {
+   document.getElementById('editModal').style.display = 'none';
+   currentEditingContent = null;
+}
+
+// ===============================
+// DUPLICATE & DELETE - محسنة
+// ===============================
+
 async function duplicateContent(contentId) {
-    if (!confirm('هل تريد نسخ هذا المحتوى؟')) return;
-    
-    try {
-        const doc = await db.collection('courseContentLibrary').doc(contentId).get();
-        if (!doc.exists) {
-            throw new Error('المحتوى غير موجود');
-        }
-        
-        const contentData = doc.data();
-        
-        const copyData = {
-            ...contentData,
-            name: contentData.name + ' (نسخة)',
-            createdDate: firebase.firestore.FieldValue.serverTimestamp(),
-            lastModified: firebase.firestore.FieldValue.serverTimestamp(),
-            timesUsed: 0,
-            averageRating: 0
-        };
-        
-        await db.collection('courseContentLibrary').add(copyData);
-        
-        showNotification('تم نسخ المحتوى بنجاح', 'success');
-        loadContent();
-        
-    } catch (error) {
-        console.error('❌ خطأ في نسخ المحتوى:', error);
-        showNotification('خطأ في نسخ المحتوى', 'error');
-    }
+   if (!confirm('هل تريد نسخ هذا المحتوى؟')) return;
+   
+   try {
+       const doc = await db.collection('courseContentLibrary').doc(contentId).get();
+       if (!doc.exists) {
+           showNotification('المحتوى غير موجود', 'error');
+           return;
+       }
+       
+       const contentData = doc.data();
+       
+       const copyData = {
+           ...contentData,
+           name: contentData.name + ' (نسخة)',
+           createdDate: firebase.firestore.FieldValue.serverTimestamp(),
+           lastModified: firebase.firestore.FieldValue.serverTimestamp(),
+           timesUsed: 0,
+           averageRating: 0
+       };
+       
+       await db.collection('courseContentLibrary').add(copyData);
+       
+       showNotification('تم نسخ المحتوى بنجاح', 'success');
+       loadContent();
+       
+   } catch (error) {
+       console.error('❌ خطأ في نسخ المحتوى:', error);
+       showNotification('خطأ في نسخ المحتوى: ' + error.message, 'error');
+   }
 }
 
 async function deleteContent(contentId) {
-    if (!confirm('هل أنت متأكد من حذف هذا المحتوى؟ لا يمكن التراجع عن هذا الإجراء.')) return;
-    
-    try {
-        await db.collection('courseContentLibrary').doc(contentId).delete();
-        
-        showNotification('تم حذف المحتوى بنجاح', 'success');
-        loadContent();
-        
-    } catch (error) {
-        console.error('❌ خطأ في حذف المحتوى:', error);
-        showNotification('خطأ في حذف المحتوى', 'error');
-    }
+   const content = allContent.find(c => c.id === contentId);
+   const contentName = content?.name || 'هذا المحتوى';
+   
+   if (!confirm(`هل أنت متأكد من حذف "${contentName}"؟\n\nلا يمكن التراجع عن هذا الإجراء.`)) return;
+   
+   try {
+       await db.collection('courseContentLibrary').doc(contentId).delete();
+       
+       showNotification('تم حذف المحتوى بنجاح', 'success');
+       loadContent();
+       
+   } catch (error) {
+       console.error('❌ خطأ في حذف المحتوى:', error);
+       showNotification('خطأ في حذف المحتوى: ' + error.message, 'error');
+   }
 }
 
 // ===============================
@@ -1924,57 +2618,66 @@ async function deleteContent(contentId) {
 // ===============================
 
 function showNotification(message, type = 'success') {
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    
-    const icon = {
-        success: '✓',
-        error: '✗',
-        info: 'ℹ',
-        warning: '⚠'
-    };
-    
-    notification.innerHTML = `
-        <span>${icon[type] || icon.info}</span>
-        <span>${message}</span>
-    `;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.opacity = '1';
-        notification.style.transform = 'translateX(0)';
-    }, 10);
-    
-    setTimeout(() => {
-        notification.style.opacity = '0';
-        notification.style.transform = 'translateX(100%)';
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-    
-    notification.onclick = () => notification.remove();
+   const notification = document.createElement('div');
+   notification.className = `notification ${type}`;
+   
+   const icon = {
+       success: '✓',
+       error: '✗',
+       info: 'ℹ',
+       warning: '⚠'
+   };
+   
+   notification.innerHTML = `
+       <span>${icon[type] || icon.info}</span>
+       <span>${message}</span>
+   `;
+   
+   document.body.appendChild(notification);
+   
+   setTimeout(() => {
+       notification.style.opacity = '1';
+       notification.style.transform = 'translateX(0)';
+   }, 10);
+   
+   setTimeout(() => {
+       notification.style.opacity = '0';
+       notification.style.transform = 'translateX(100%)';
+       setTimeout(() => notification.remove(), 300);
+   }, 5000);
+   
+   notification.onclick = () => notification.remove();
 }
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 بدء تحميل منشئ المحتوى التعليمي...');
-    
-    // Check authentication
-    checkAuth();
-    
-    // Load content types and data
-    loadContentTypes();
-    loadContent();
-    
-    // Close modal when clicking outside
-    window.onclick = function(event) {
-        const modal = document.getElementById('contentCreatorModal');
-        if (event.target === modal) {
-            closeContentCreator();
-        }
-    }
-    
-    console.log('✅ تم تحميل منشئ المحتوى التعليمي بنجاح');
+   console.log('🚀 بدء تحميل منشئ المحتوى التعليمي المُحسن...');
+   
+   // Check authentication
+   checkAuth();
+   
+   // Load content types and data
+   loadContentTypes();
+   loadContent();
+   
+   // Close modals when clicking outside
+   window.onclick = function(event) {
+       const contentCreatorModal = document.getElementById('contentCreatorModal');
+       const previewModal = document.getElementById('previewModal');
+       const editModal = document.getElementById('editModal');
+       
+       if (event.target === contentCreatorModal) {
+           closeContentCreator();
+       }
+       if (event.target === previewModal) {
+           closePreview();
+       }
+       if (event.target === editModal) {
+           closeEditModal();
+       }
+   }
+   
+   console.log('✅ تم تحميل منشئ المحتوى التعليمي المُحسن بنجاح');
 });
 
 // Make functions globally available
@@ -1984,11 +2687,15 @@ window.selectContentType = selectContentType;
 window.backToTypeSelection = backToTypeSelection;
 window.saveContent = saveContent;
 window.filterByType = filterByType;
+window.previewContent = previewContent;
+window.closePreview = closePreview;
 window.editContent = editContent;
+window.closeEditModal = closeEditModal;
+window.saveEditedContent = saveEditedContent;
 window.duplicateContent = duplicateContent;
 window.deleteContent = deleteContent;
 
-console.log('🎓 منشئ المحتوى التعليمي المتكامل جاهز للعمل!');
+console.log('🎓 منشئ المحتوى التعليمي المتكامل والمُحسن جاهز للعمل!');
 </script>
 
 </body>
