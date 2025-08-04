@@ -2218,7 +2218,6 @@ if (courseData.id) {
                 courseData.slug = slug;
             }
             
-            autoSave();
         }
 
 
@@ -2294,22 +2293,23 @@ if (courseData.id) {
         }
 
         // دالة حفظ الـ Slug في Firebase
+// دالة حفظ الـ Slug في Firebase
 async function saveCourseSlug() {
     const titleInput = document.getElementById('courseTitle');
     const slugInput = document.getElementById('courseSlug');
     const saveBtn = document.getElementById('saveSlugBtn');
     
     // التأكد من وجود عنوان
-    if (!titleInput.value.trim()) {
+    if (!titleInput.value.trim() || titleInput.value.trim() === 'دورة جديدة') {
         Swal.fire({
             icon: 'error',
             title: 'خطأ',
-            text: 'من فضلك اكتب عنوان الدورة أولاً'
+            text: 'من فضلك اكتب عنوان صحيح للدورة أولاً'
         });
         return;
     }
     
-    // تحديث العنوان و الـ slug
+    // تحديث البيانات
     courseData.title = titleInput.value.trim();
     
     // إذا كان الـ slug فارغ، ولّده من العنوان
@@ -2327,21 +2327,27 @@ async function saveCourseSlug() {
     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
     
     try {
-        // حفظ الدورة بالعنوان والـ slug الصحيح
+        // حفظ الدورة - هيستخدم saveCourseData الجديدة
         await saveCourseData();
         
         // نجاح
         saveBtn.classList.remove('btn-primary');
         saveBtn.classList.add('btn-success');
-        saveBtn.innerHTML = '<i class="fas fa-check"></i> تم التثبيت';
+        saveBtn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ';
         saveBtn.disabled = false;
         
+        // رسالة نجاح مع عرض الـ ID
         Swal.fire({
             icon: 'success',
-            title: 'تم الحفظ',
-            text: `تم تثبيت الرابط: ${courseData.slug}`,
-            timer: 3000,
-            showConfirmButton: false
+            title: 'تم الحفظ بنجاح',
+            html: `
+                <div style="text-align: right;">
+                    <p><strong>العنوان:</strong> ${courseData.title}</p>
+                    <p><strong>الرابط:</strong> ${courseData.id || courseData.slug}</p>
+                </div>
+            `,
+            timer: 5000,
+            showConfirmButton: true
         });
         
         // إرجاع الزر لحالته الطبيعية بعد 3 ثواني
@@ -2352,7 +2358,7 @@ async function saveCourseSlug() {
         }, 3000);
         
     } catch (error) {
-        console.error('Error saving slug:', error);
+        console.error('Error saving:', error);
         saveBtn.classList.remove('btn-success');
         saveBtn.classList.add('btn-danger');
         saveBtn.innerHTML = '<i class="fas fa-times"></i> فشل الحفظ';
@@ -2361,7 +2367,7 @@ async function saveCourseSlug() {
         Swal.fire({
             icon: 'error',
             title: 'خطأ',
-            text: 'حدث خطأ أثناء حفظ الرابط'
+            text: 'حدث خطأ أثناء الحفظ: ' + error.message
         });
     }
 }
@@ -3123,19 +3129,15 @@ async function saveCourseSlug() {
         // FIREBASE INTEGRATION
         // ========================================
 async function saveCourseData() {
-    // 🔴 أضف الأسطر دي في الأول
-// منع الحفظ التلقائي فقط - السماح بالحفظ اليدوي
-if (!courseData.id && courseData.title === 'دورة جديدة') {
-    // تحقق هل المستخدم كتب عنوان جديد في الحقل
-    const currentTitle = document.getElementById('courseTitle')?.value?.trim();
-    if (!currentTitle || currentTitle === '' || currentTitle === 'دورة جديدة') {
-        console.log('منع حفظ دورة فاضية');
-        return Promise.resolve();
+    // منع حفظ دورة فارغة
+    if (!courseData.id) {
+        const currentTitle = document.getElementById('courseTitle')?.value?.trim();
+        if (!currentTitle || currentTitle === '' || currentTitle === 'دورة جديدة') {
+            console.log('منع حفظ دورة فارغة');
+            return Promise.resolve();
+        }
+        courseData.title = currentTitle;
     }
-    // لو المستخدم كتب عنوان، حدث البيانات
-    courseData.title = currentTitle;
-}
-    // 🔴 لحد هنا
     
     if (!firebase.firestore) {
         console.error('Firestore not initialized');
@@ -3146,9 +3148,27 @@ if (!courseData.id && courseData.title === 'دورة جديدة') {
         // Collect all form data
         collectFormData();
         
-        // Prepare data for saving
+        // معالجة الـ slug - نفس الكود القديم
+        let finalSlug = courseData.slug;
+        
+        const slugInput = document.getElementById('courseSlug');
+        if (slugInput && slugInput.value.trim()) {
+            finalSlug = slugInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+        }
+        
+        if (!finalSlug && courseData.title && courseData.title !== 'دورة جديدة') {
+            finalSlug = window.firebaseDB.courses.createSlug(courseData.title);
+        }
+        
+        if (!finalSlug) {
+            const now = new Date();
+            finalSlug = `course-${now.getTime()}`;
+        }
+        
+        // Prepare data for saving مع الـ slug الصحيح
         const dataToSave = {
             ...courseData,
+            slug: finalSlug,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
         
@@ -3167,10 +3187,21 @@ if (!courseData.id && courseData.title === 'دورة جديدة') {
             dataToSave.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             const newId = await window.firebaseDB.courses.createCourse(dataToSave);
             courseData.id = newId;
+            courseData.slug = newId; // مهم: الـ ID هو نفسه الـ slug
             
-            // Update URL
+            // تحديث حقل الـ slug في الواجهة
+            const slugPreview = document.getElementById('slugPreview');
+            if (slugPreview) {
+                slugPreview.textContent = newId;
+            }
+            
+            if (slugInput) {
+                slugInput.value = newId;
+            }
+            
+            // Update URL - مفعل مرة تانية
             const newUrl = `${window.location.pathname}?id=${newId}`;
-            //  window.history.replaceState({}, '', newUrl);
+            window.history.replaceState({}, '', newUrl);
         }
         
         return Promise.resolve();
