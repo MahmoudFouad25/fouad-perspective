@@ -240,3 +240,11 @@ window.firebaseAuth = {
 window.firebaseDB = {
     courses: coursesDB
 };
+
+// إضافة متغير db عام
+const db = firebase.firestore();
+
+// Export للاستخدام العام
+window.db = db;
+
+console.log('✅ Firestore database initialized and available globally');
