@@ -171,6 +171,18 @@
             transform: none;
         }
 
+        .btn-logout {
+            background: var(--danger);
+            color: white;
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn-logout:hover {
+            background: #e63636;
+        }
+
         .loading {
             display: inline-block;
             width: 20px;
@@ -241,6 +253,16 @@
             color: var(--warning);
         }
 
+        .logged-in-alert {
+            background: rgba(255, 152, 0, 0.1);
+            border: 1px solid var(--warning);
+            color: var(--warning);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
         @keyframes slideDown {
             from {
                 opacity: 0;
@@ -274,6 +296,17 @@
             <strong>للمستخدمين الجدد:</strong> استخدم البيانات التي وصلتك في رسالة WhatsApp
         </div>
         
+        <!-- Alert للمستخدم المسجل -->
+        <div class="logged-in-alert" id="loggedInAlert" style="display: none;">
+            <i class="fas fa-user-check"></i>
+            <strong>أنت مسجل دخول بالفعل!</strong>
+            <p id="currentUserEmail" style="margin: 0.5rem 0;"></p>
+            <button class="btn btn-logout" onclick="logoutAndStay()">
+                <i class="fas fa-sign-out-alt"></i>
+                تسجيل خروج
+            </button>
+        </div>
+        
         <form id="loginForm">
             <div class="form-group">
                 <label class="form-label">البريد الإلكتروني</label>
@@ -301,7 +334,7 @@
             <a href="#" onclick="forgotPassword()">نسيت كلمة المرور؟</a>
         </div>
         
-        <a href="./dashboard.html" class="back-link">
+        <a href="./index.html" class="back-link">
             <i class="fas fa-home"></i> العودة للصفحة الرئيسية
         </a>
     </div>
@@ -331,99 +364,52 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        let isProcessingLogin = false; // متغير لمنع التكرار
-        let authChangeTimeout = null; // timeout للـ auth changes
+        let isProcessingLogin = false;
+        let shouldAutoRedirect = false; // متغير للتحكم في التوجيه التلقائي
 
         // التحقق من وجود مستخدم مسجل دخول
         auth.onAuthStateChanged(async (user) => {
-            // مسح timeout السابق
-            if (authChangeTimeout) {
-                clearTimeout(authChangeTimeout);
+            if (user && shouldAutoRedirect) {
+                // توجيه فقط إذا كان المستخدم قام بتسجيل الدخول للتو
+                console.log('✅ تسجيل دخول ناجح، توجيه للوحة التحكم...');
+                window.location.href = './dashboard.html';
+            } else if (user && !shouldAutoRedirect) {
+                // إذا كان المستخدم مسجل دخول بالفعل، أظهر رسالة
+                console.log('👤 مستخدم مسجل دخول بالفعل:', user.email);
+                showLoggedInAlert(user.email);
             }
-            
-            // تأخير قصير عشان نتجنب الـ race conditions
-            authChangeTimeout = setTimeout(async () => {
-                await handleAuthStateChange(user);
-            }, 100);
         });
 
-        // معالج تغيير حالة المصادقة
-        async function handleAuthStateChange(user) {
-            // تجنب المعالجة المتكررة
-            if (isProcessingLogin) {
-                console.log('🔄 معالجة جارية، تجاهل...');
-                return;
-            }
+        // عرض تنبيه للمستخدم المسجل
+        function showLoggedInAlert(email) {
+            document.getElementById('loggedInAlert').style.display = 'block';
+            document.getElementById('currentUserEmail').textContent = email;
+            document.getElementById('loginForm').style.display = 'none';
+        }
 
-            if (user) {
-                console.log('✅ مستخدم مسجل دخول:', user.email);
+        // تسجيل خروج والبقاء في الصفحة
+        async function logoutAndStay() {
+            try {
+                await auth.signOut();
+                console.log('✅ تم تسجيل الخروج');
+                document.getElementById('loggedInAlert').style.display = 'none';
+                document.getElementById('loginForm').style.display = 'block';
                 
-                // توجيه الأدمن مباشرة
-                if (user.email === 'admin@fouad-academy.com') {
-                    console.log('👨‍💼 توجيه الأدمن...');
-                    window.location.href = './dashboard.html';
-                    return;
-                }
+                // مسح الحقول
+                document.getElementById('email').value = '';
+                document.getElementById('password').value = '';
                 
-                isProcessingLogin = true;
-                
-                try {
-                    // انتظار قصير عشان Firebase يستقر
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    
-                    console.log('🔍 فحص بيانات المستخدم...');
-                    
-                    // فحص إذا كان المستخدم موجود في users collection
-                    const userDoc = await db.collection('users').doc(user.uid).get();
-                    
-                    if (userDoc.exists) {
-                        // المستخدم موجود - توجيه للوحة التحكم
-                        console.log('👤 المستخدم موجود، توجيه للوحة التحكم...');
-                        // تأخير قصير عشان نتأكد إن كل حاجة جاهزة
-                        setTimeout(() => {
-                            window.location.href = './dashboard.html';
-                        }, 200);
-                        
-                    } else {
-                        // المستخدم مش موجود - فحص userCredentials
-                        console.log('🆕 مستخدم جديد - فحص البيانات المؤقتة...');
-                        
-                        const credentialDoc = await db.collection('userCredentials').doc(user.email).get();
-                        
-                        if (credentialDoc.exists) {
-                            // نقل البيانات
-                            console.log('📋 نقل بيانات المستخدم الجديد...');
-                            await transferUserDataSilent(user.uid, credentialDoc.data(), credentialDoc);
-                            
-                            // توجيه للوحة التحكم بعد النقل
-                            setTimeout(() => {
-                                window.location.href = './dashboard.html';
-                            }, 500);
-                            
-                        } else {
-                            // حالة غريبة - توجيه على أي حال
-                            console.warn('⚠️ بيانات غير مكتملة - توجيه للوحة التحكم');
-                            setTimeout(() => {
-                                window.location.href = './dashboard.html';
-                            }, 200);
-                        }
-                    }
-                    
-                } catch (error) {
-                    console.error('❌ خطأ في معالجة المصادقة:', error);
-                    
-                    // في حالة أي خطأ، جرب التوجيه للوحة التحكم
-                    console.log('🔄 توجيه رغم الخطأ...');
-                    setTimeout(() => {
-                        window.location.href = './dashboard.html';
-                    }, 200);
-                    
-                } finally {
-                    isProcessingLogin = false;
-                }
-            } else {
-                console.log('👤 لا يوجد مستخدم مسجل دخول');
-                isProcessingLogin = false;
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم تسجيل الخروج',
+                    text: 'يمكنك الآن تسجيل الدخول بحساب آخر',
+                    confirmButtonColor: '#f4c430',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+            } catch (error) {
+                console.error('❌ خطأ في تسجيل الخروج:', error);
+                showError('حدث خطأ في تسجيل الخروج');
             }
         }
 
@@ -433,12 +419,11 @@
             await handleLogin();
         });
 
-        // معالج تسجيل الدخول البسيط
+        // معالج تسجيل الدخول
         async function handleLogin() {
             const loginBtn = document.getElementById('loginBtn');
             const originalText = loginBtn.innerHTML;
             
-            // منع الضغط المتكرر
             if (isProcessingLogin) {
                 return;
             }
@@ -446,6 +431,7 @@
             loginBtn.innerHTML = '<span class="loading"></span> جاري التحقق...';
             loginBtn.disabled = true;
             isProcessingLogin = true;
+            shouldAutoRedirect = true; // تفعيل التوجيه التلقائي
 
             try {
                 const email = document.getElementById('email').value.trim();
@@ -462,11 +448,11 @@
 
                 console.log('🚀 محاولة تسجيل الدخول:', email);
 
-                // الطريقة الأولى: محاولة تسجيل الدخول العادي
+                // محاولة تسجيل الدخول العادي
                 try {
                     await auth.signInWithEmailAndPassword(email, password);
                     console.log('✅ تسجيل دخول عادي نجح');
-                    // onAuthStateChanged سيتولى الباقي
+                    // onAuthStateChanged سيتولى التوجيه
                     return;
                 } catch (signInError) {
                     console.log('❌ تسجيل الدخول العادي فشل:', signInError.code);
@@ -478,10 +464,8 @@
                         
                         console.log('🔍 محاولة البحث في المستخدمين الجدد...');
                         await tryActivateUser(email, password);
-                        // onAuthStateChanged سيتولى التوجيه
                         
                     } else {
-                        // خطأ آخر
                         throw signInError;
                     }
                 }
@@ -489,6 +473,7 @@
             } catch (error) {
                 console.error('❌ خطأ في تسجيل الدخول:', error);
                 showError(getErrorMessage(error));
+                shouldAutoRedirect = false; // إلغاء التوجيه في حالة الخطأ
             } finally {
                 loginBtn.innerHTML = originalText;
                 loginBtn.disabled = false;
@@ -501,7 +486,6 @@
             try {
                 console.log('🔍 البحث في userCredentials...');
                 
-                // البحث في بيانات اعتماد المستخدمين
                 const credentialDoc = await db.collection('userCredentials').doc(email).get();
 
                 if (!credentialDoc.exists) {
@@ -512,20 +496,17 @@
 
                 console.log('✅ تم العثور على بيانات الاعتماد');
 
-                // التحقق من كلمة المرور
                 if (credentialData.password !== password) {
                     throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة');
                 }
 
                 console.log('🔐 كلمة المرور صحيحة، بدء التفعيل...');
 
-                // إنشاء حساب Firebase Auth
                 const userCredential = await auth.createUserWithEmailAndPassword(email, password);
                 const user = userCredential.user;
 
                 console.log('🔥 تم إنشاء حساب Firebase Auth:', user.uid);
 
-                // نقل البيانات
                 await transferUserData(user.uid, credentialData, credentialDoc);
 
             } catch (activationError) {
@@ -534,52 +515,30 @@
             }
         }
 
-        // نقل بيانات المستخدم مع رسالة ترحيب
+        // نقل بيانات المستخدم
         async function transferUserData(uid, credentialData, credentialDoc) {
-            try {
-                // استخدام الدالة الصامتة
-                await transferUserDataSilent(uid, credentialData, credentialDoc);
-                
-                console.log('✅ تم نقل البيانات بنجاح، عرض رسالة الترحيب...');
-                
-                // عرض رسالة ترحيب مع توجيه مباشر
-                await showWelcomeMessage(credentialData);
-
-            } catch (error) {
-                console.error('❌ خطأ في نقل البيانات:', error);
-                // في حالة خطأ، وجه للوحة التحكم على أي حال
-                window.location.href = './dashboard.html';
-                throw error;
-            }
-        }
-        async function transferUserDataSilent(uid, credentialData, credentialDoc) {
             try {
                 console.log('📋 نقل بيانات المستخدم...');
 
-                // إعداد البيانات النهائية
                 const finalUserData = {
                     uid: uid,
                     name: credentialData.name,
                     email: credentialData.email,
                     whatsapp: credentialData.whatsapp,
                     accountType: credentialData.accountType || 'free',
-                    isActive: credentialData.isActive !== false, // افتراضياً true
+                    isActive: credentialData.isActive !== false,
                     
-                    // المعلومات الإضافية
                     birthDate: credentialData.birthDate || null,
                     location: credentialData.location || null,
                     occupation: credentialData.occupation || null,
                     adminNotes: credentialData.adminNotes || null,
                     
-                    // معلومات الإنشاء
                     createdAt: credentialData.createdAt || firebase.firestore.FieldValue.serverTimestamp(),
                     createdBy: credentialData.createdBy || 'admin',
                     activatedAt: firebase.firestore.FieldValue.serverTimestamp(),
                     
-                    // الدورات المخصصة
                     enrollments: credentialData.enrollments || [],
                     
-                    // إحصائيات أولية
                     progress: {},
                     completedCourses: [],
                     certificates: [],
@@ -588,15 +547,13 @@
                     status: 'active'
                 };
 
-                // حفظ في المجموعة الرئيسية
                 await db.collection('users').doc(uid).set(finalUserData);
                 console.log('💾 تم حفظ المستخدم في users collection');
 
-                // حذف من بيانات الاعتماد
                 await credentialDoc.ref.delete();
                 console.log('🗑️ تم حذف بيانات الاعتماد');
 
-                return true;
+                await showWelcomeMessage(credentialData);
 
             } catch (error) {
                 console.error('❌ خطأ في نقل البيانات:', error);
@@ -604,12 +561,11 @@
             }
         }
 
-        // عرض رسالة ترحيب (مبسطة)
+        // عرض رسالة ترحيب
         async function showWelcomeMessage(userData) {
             const enrollments = userData.enrollments || [];
             
-            // رسالة مبسطة بدون انتظار
-            Swal.fire({
+            await Swal.fire({
                 icon: 'success',
                 title: `مرحباً ${userData.name}!`,
                 html: `
@@ -626,12 +582,6 @@
                 allowOutsideClick: false,
                 allowEscapeKey: false
             });
-            
-            // توجيه مباشر بعد ثانيتين
-            setTimeout(() => {
-                console.log('🚀 توجيه للوحة التحكم من رسالة الترحيب...');
-                window.location.href = './dashboard.html';
-            }, 2000);
         }
 
         // رسائل الخطأ
