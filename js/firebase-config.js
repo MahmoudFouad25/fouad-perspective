@@ -587,6 +587,6 @@ const usersDB = {
     }
 };
 
-window.firebaseDB.users = usersDB;
 console.log('✅ Firestore database initialized and available globally');
+
 
