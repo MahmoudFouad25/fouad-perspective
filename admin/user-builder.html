@@ -701,7 +701,32 @@
                         <div class="form-feedback" id="lastNameFeedback"></div>
                     </div>
                 </div>
-
+<!-- إضافة هذا بعد حقل اسم العائلة -->
+<div class="form-group">
+    <label class="form-label" for="userSlug">
+        <i class="fas fa-fingerprint"></i>
+        معرف المستخدم (User ID)
+    </label>
+    <div class="input-group">
+        <input type="text" 
+               class="form-control" 
+               id="userSlug" 
+               placeholder="يتم توليده تلقائياً" 
+               dir="ltr" 
+               readonly>
+        <button class="btn btn-primary" type="button" onclick="saveUserSlug()" 
+                id="saveUserSlugBtn" style="min-width: 140px;">
+            <i class="fas fa-fingerprint"></i> تثبيت الـ ID
+        </button>
+    </div>
+    <div class="form-text">
+        <span class="text-danger">
+            <i class="fas fa-exclamation-circle"></i> 
+            مهم جداً: اضغط "تثبيت الـ ID" فور كتابة الاسم لحفظه في Firebase
+        </span>
+    </div>
+    <div class="form-text">سيستخدم كمعرف فريد: <span id="userSlugPreview">user-id</span></div>
+</div>
                 <!-- البريد الإلكتروني -->
                 <div class="form-group">
                     <label class="form-label required" for="email">
@@ -5928,6 +5953,154 @@ function validateBasicInfo() {
     return isValid;
 }
 
+    // دالة توليد User Slug (نفس منطق الدورات)
+function generateUserSlug(firstName, lastName, email) {
+    const fullName = `${firstName} ${lastName}`.trim();
+    
+    if (!fullName) {
+        // إذا لم يكن هناك اسم، استخدم الجزء الأول من الإيميل
+        const emailPart = email ? email.split('@')[0] : 'user';
+        const now = new Date();
+        return `${emailPart}-${now.getTime()}`;
+    }
+    
+    let slug = fullName
+        .toLowerCase()
+        .trim()
+        .replace(/[\u0600-\u06FF\u0750-\u077F]/g, (match) => {
+            const arabicToEnglish = {
+                'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h',
+                'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z', 'س': 's',
+                'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a',
+                'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm',
+                'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y'
+            };
+            return arabicToEnglish[match] || match;
+        })
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    
+    if (!slug) {
+        const now = new Date();
+        return `user-${now.getTime()}`;
+    }
+    
+    return slug;
+}
+
+// دالة تحديث User Slug عند تغيير الاسم
+function updateUserSlug() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const email = document.getElementById('email').value.trim();
+    
+    if (firstName || lastName) {
+        const suggestedSlug = generateUserSlug(firstName, lastName, email);
+        const slugInput = document.getElementById('userSlug');
+        
+        // فقط اقترح لو الحقل فاضي أو فيه slug قديم تلقائي
+        if (!slugInput.value || !currentUserId) {
+            slugInput.value = suggestedSlug;
+            document.getElementById('userSlugPreview').textContent = suggestedSlug;
+        }
+    }
+}
+
+// دالة حفظ User Slug في Firebase (نفس منطق الدورات)
+async function saveUserSlug() {
+    const firstNameInput = document.getElementById('firstName');
+    const lastNameInput = document.getElementById('lastName');
+    const emailInput = document.getElementById('email');
+    const slugInput = document.getElementById('userSlug');
+    const saveBtn = document.getElementById('saveUserSlugBtn');
+    
+    // التأكد من وجود اسم
+    if (!firstNameInput.value.trim() || !emailInput.value.trim()) {
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'من فضلك اكتب الاسم والإيميل أولاً'
+        });
+        return;
+    }
+    
+    // تحديث البيانات
+    const firstName = firstNameInput.value.trim();
+    const lastName = lastNameInput.value.trim();
+    const email = emailInput.value.trim();
+    const fullName = `${firstName} ${lastName}`.trim();
+    
+    // إذا كان الـ slug فارغ، ولّده من الاسم
+    if (!slugInput.value.trim()) {
+        const userSlug = generateUserSlug(firstName, lastName, email);
+        slugInput.value = userSlug;
+        document.getElementById('userSlugPreview').textContent = userSlug;
+    } else {
+        document.getElementById('userSlugPreview').textContent = slugInput.value.trim();
+    }
+    
+    try {
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+        saveBtn.disabled = true;
+        
+        // حفظ في Firebase (userCredentials للانتظار)
+        const userData = {
+            name: fullName,
+            email: email,
+            userSlug: slugInput.value.trim(),
+            firstName: firstName,
+            lastName: lastName,
+            status: 'draft', // مسودة في البداية
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        if (currentUserId) {
+            // تحديث موجود
+            await db.collection('userCredentials').doc(email).update({
+                userSlug: slugInput.value.trim(),
+                name: fullName,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } else {
+            // إنشاء جديد في منطقة الانتظار
+            await db.collection('userCredentials').doc(email).set(userData);
+            currentUserId = email; // استخدام الإيميل كـ ID مؤقت
+        }
+        
+        saveBtn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ';
+        saveBtn.classList.remove('btn-primary');
+        saveBtn.classList.add('btn-success');
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الحفظ!',
+            text: 'تم حفظ معرف المستخدم بنجاح',
+            timer: 2000,
+            timerProgressBar: true
+        });
+        
+        setTimeout(() => {
+            saveBtn.innerHTML = '<i class="fas fa-fingerprint"></i> تثبيت الـ ID';
+            saveBtn.classList.remove('btn-success');
+            saveBtn.classList.add('btn-primary');
+            saveBtn.disabled = false;
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Error saving user slug:', error);
+        saveBtn.innerHTML = '<i class="fas fa-times"></i> خطأ';
+        saveBtn.classList.add('btn-danger');
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ في حفظ المعرف: ' + error.message
+        });
+    }
+}
 // ==================== Helper Functions ====================
 function isValidEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -6816,7 +6989,10 @@ function setupEventListeners() {
     document.getElementById('saveDraftBtn').addEventListener('click', () => saveUser(true));
     document.getElementById('saveBtn').addEventListener('click', () => saveUser(false));
     document.getElementById('quickSaveBtn').addEventListener('click', quickSave);
-    
+    // إضافة هذا في setupEventListeners()
+document.getElementById('firstName').addEventListener('input', updateUserSlug);
+document.getElementById('lastName').addEventListener('input', updateUserSlug);
+document.getElementById('email').addEventListener('input', updateUserSlug);
     // Auto-save every 30 seconds
     setInterval(autoSave, 30000);
     
@@ -8096,6 +8272,7 @@ async function saveUser(isDraft = false) {
         const userData = {
             name: `${formData.basic.firstName} ${formData.basic.lastName}`.trim(),
             email: formData.basic.email,
+             userSlug: document.getElementById('userSlug')?.value || generateUserSlug(formData.basic.firstName, formData.basic.lastName, formData.basic.email),
             whatsapp: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
             phone: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
             avatar: formData.basic.avatar,
