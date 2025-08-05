@@ -701,6 +701,14 @@
                         <div class="form-feedback" id="lastNameFeedback"></div>
                     </div>
                 </div>
+                <!-- زر إنشاء معرف المستخدم -->
+<div class="form-group" id="generateSlugSection" style="display: none;">
+    <button type="button" class="btn btn-primary w-100" onclick="generateUserSlug()">
+        <i class="fas fa-fingerprint"></i>
+        إنشاء معرف المستخدم وبدء التسجيل
+    </button>
+    <div class="form-hint">سيتم إنشاء معرف فريد للمستخدم لا يمكن تغييره لاحقاً</div>
+</div>
 
                 <!-- البريد الإلكتروني -->
                 <div class="form-group">
@@ -5518,6 +5526,33 @@
     background: rgba(168, 85, 247, 0.1);
     color: #a855f7;
 }
+    /* Alert Styles */
+.alert {
+    padding: var(--spacing-md);
+    border-radius: var(--radius-sm);
+    margin: var(--spacing-md) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.alert-success {
+    background: rgba(var(--success-rgb), 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+.alert i {
+    font-size: var(--font-lg);
+}
+
+#generateSlugSection {
+    margin-top: var(--spacing-lg);
+    padding: var(--spacing-lg);
+    background: rgba(var(--primary-rgb), 0.05);
+    border-radius: var(--radius-lg);
+    border: 2px dashed var(--primary);
+}
 </style>
 <script>
 // ==================== Firebase Configuration ====================
@@ -5653,11 +5688,7 @@ async function loadInitialData() {
         // تحميل الدورات والمسارات المتاحة
         await loadAvailableContent();
         
-        // إذا كان في وضع التعديل، تحميل بيانات المستخدم
-        if (editMode && currentUserId) {
-            await loadUserData(currentUserId);
-        }
-        
+
     } catch (error) {
         console.error('خطأ في تحميل البيانات:', error);
         showError('حدث خطأ في تحميل البيانات');
@@ -6697,6 +6728,9 @@ function setupEventListeners() {
     
     // Avatar Upload
     document.getElementById('avatarInput').addEventListener('change', handleAvatarUpload);
+    // مراقبة حقول الاسم
+document.getElementById('firstName').addEventListener('input', checkNameFields);
+document.getElementById('lastName').addEventListener('input', checkNameFields);
     document.getElementById('avatarPreview').addEventListener('click', () => {
         document.getElementById('avatarInput').click();
     });
@@ -7614,6 +7648,79 @@ window.applyBulkSettingsConfirm = function() {
     showSuccess('تم تطبيق الإعدادات الجماعية');
 };
 
+    // ==================== Generate User Slug ====================
+window.generateUserSlug = async function() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    
+    if (!firstName || !lastName) {
+        showError('يجب إدخال الاسم الأول واسم العائلة');
+        return;
+    }
+    
+    try {
+        showLoading('جاري إنشاء معرف المستخدم...');
+        
+        // إنشاء slug
+        const baseSlug = coursesDB.createSlug(`${firstName}-${lastName}`);
+        let finalSlug = baseSlug;
+        let counter = 1;
+        
+        // التحقق من عدم وجود مستخدم بنفس المعرف
+        while (true) {
+            const existingDoc = await db.collection('users').doc(finalSlug).get();
+            if (!existingDoc.exists) {
+                break;
+            }
+            finalSlug = `${baseSlug}-${counter}`;
+            counter++;
+        }
+        
+        // تغيير الـ URL
+        window.history.pushState({}, '', `?id=${finalSlug}`);
+        
+        // تفعيل وضع التعديل
+        editMode = true;
+        currentUserId = finalSlug;
+        
+        // إخفاء الزر وإظهار رسالة
+        document.getElementById('generateSlugSection').style.display = 'none';
+        
+        // إضافة رسالة نجاح
+        const successDiv = document.createElement('div');
+        successDiv.className = 'alert alert-success';
+        successDiv.innerHTML = `
+            <i class="fas fa-check-circle"></i>
+            تم إنشاء معرف المستخدم: <strong>${finalSlug}</strong>
+        `;
+        document.getElementById('generateSlugSection').parentElement.appendChild(successDiv);
+        
+        // جعل الحقول للقراءة فقط
+        document.getElementById('firstName').readOnly = true;
+        document.getElementById('lastName').readOnly = true;
+        
+        hideLoading();
+        showSuccess('تم إنشاء معرف المستخدم بنجاح');
+        
+    } catch (error) {
+        console.error('خطأ في إنشاء المعرف:', error);
+        hideLoading();
+        showError('حدث خطأ في إنشاء معرف المستخدم');
+    }
+};
+
+// دالة لإظهار/إخفاء زر إنشاء المعرف
+function checkNameFields() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const generateSection = document.getElementById('generateSlugSection');
+    
+    if (firstName && lastName && !editMode) {
+        generateSection.style.display = 'block';
+    } else {
+        generateSection.style.display = 'none';
+    }
+}
 // ==================== Advanced Information Functions ====================
 
 // Load Countries
@@ -8079,10 +8186,16 @@ function collectFormData() {
 
 async function saveUser(isDraft = false) {
     try {
+        // التحقق من وجود معرف المستخدم
+        if (!editMode || !currentUserId) {
+            showError('يجب إنشاء معرف المستخدم أولاً');
+            document.getElementById('generateSlugSection').scrollIntoView();
+            return;
+        }
+        
         // التحقق من صحة البيانات
         if (!validateBasicInfo()) {
             showError('يرجى التحقق من البيانات الأساسية');
-            // الانتقال للتبويب الأول
             document.getElementById('basicTab').click();
             return;
         }
@@ -8094,6 +8207,7 @@ async function saveUser(isDraft = false) {
         
         // إعداد بيانات المستخدم
         const userData = {
+            id: currentUserId,
             name: `${formData.basic.firstName} ${formData.basic.lastName}`.trim(),
             email: formData.basic.email,
             whatsapp: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
@@ -8122,140 +8236,98 @@ async function saveUser(isDraft = false) {
             })),
             
             // المعلومات المتقدمة
-            birthDate: formData.advanced.birthDate || null,
-            gender: formData.advanced.gender || null,
-            nationality: formData.advanced.nationality || null,
-            country: formData.advanced.country || null,
-            city: formData.advanced.city || null,
-            timezone: formData.advanced.timezone || null,
+            birthDate: formData.advanced.birthDate,
+            gender: formData.advanced.gender,
+            nationality: formData.advanced.nationality,
+            country: formData.advanced.country,
+            city: formData.advanced.city,
+            timezone: formData.advanced.timezone,
             language: formData.advanced.language || 'ar',
-            address: formData.advanced.address || null,
-            occupation: formData.advanced.occupation || null,
-            company: formData.advanced.company || null,
-            education: formData.advanced.education || null,
-            experience: formData.advanced.experience || null,
+            address: formData.advanced.address,
+            occupation: formData.advanced.occupation,
+            company: formData.advanced.company,
+            education: formData.advanced.education,
+            experience: formData.advanced.experience,
             interests: formData.advanced.interests || [],
             notifications: formData.advanced.notifications || {},
-            adminNotes: formData.advanced.adminNotes || null,
+            adminNotes: formData.advanced.adminNotes,
             customFields: formData.advanced.customFields || [],
             
-            lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-            lastUpdatedBy: currentUser.email
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
         
-        if (editMode) {
-            // تحديث المستخدم الموجود
+        // التحقق من وجود المستخدم
+        const userDoc = await db.collection('users').doc(currentUserId).get();
+        
+        if (userDoc.exists) {
+            // تحديث مستخدم موجود
             await db.collection('users').doc(currentUserId).update(userData);
-            
-            // حفظ المعاملات المالية إذا كانت موجودة
-            if (userTransactions && userTransactions.length > 0) {
-                const batch = db.batch();
-                
-                // حفظ المعاملات المؤقتة في Firebase
-                for (const transaction of userTransactions) {
-                    if (transaction.id.startsWith('temp_')) {
-                        // إنشاء معاملة جديدة
-                        const transactionRef = db.collection('transactions').doc();
-                        const transactionData = { ...transaction };
-                        delete transactionData.id; // إزالة الـ ID المؤقت
-                        transactionData.userId = currentUserId;
-                        transactionData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-                        
-                        batch.set(transactionRef, transactionData);
-                    }
-                }
-                
-                // تنفيذ الدفعة
-                if (batch._mutations.length > 0) {
-                    await batch.commit();
-                    console.log('✅ تم حفظ المعاملات المالية');
-                }
-                
-                // تحديث محفظة المستخدم
-                await window.firebaseDB.transactions.updateUserWallet(currentUserId);
-            }
-            
-            hideLoading();
-            showSuccess('تم حفظ التعديلات بنجاح');
-            
-            // العودة لصفحة المستخدمين بعد ثانيتين
-            setTimeout(() => {
-                window.location.href = '/admin/users.html';
-            }, 2000);
-            
         } else {
             // إنشاء مستخدم جديد
             userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             userData.createdBy = currentUser.email;
-            userData.accountType = formData.basic.accountStatus === 'active' ? 'premium' : 'free';
             
-            // إعداد بيانات الاعتماد المؤقتة
-            const tempCredentials = {
-                // نسخ جميع بيانات المستخدم
-                ...userData,
+            // إنشاء حساب Firebase Auth
+            try {
+                const userCredential = await auth.createUserWithEmailAndPassword(
+                    formData.basic.email,
+                    formData.basic.password
+                );
                 
-                // إضافة كلمة المرور
-                password: formData.basic.password,
+                userData.authId = userCredential.user.uid;
                 
-                // حالة الانتظار
-                status: 'waiting_first_login',
-                tempUser: true,
+                // تحديث الملف الشخصي
+                await userCredential.user.updateProfile({
+                    displayName: userData.name
+                });
                 
-                // تاريخ الإنشاء
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            console.log('🔄 حفظ المستخدم في منطقة الانتظار...');
-            
-            // حفظ في userCredentials للانتظار
-            const newUserRef = await db.collection('userCredentials').doc(userData.email).set(tempCredentials);
-            
-            // حفظ المعاملات المالية المؤقتة إذا كانت موجودة
-            if (userTransactions && userTransactions.length > 0) {
-                console.log('💰 حفظ المعاملات المالية للمستخدم الجديد...');
-                
-                const batch = db.batch();
-                
-                for (const transaction of userTransactions) {
-                    const transactionRef = db.collection('transactions').doc();
-                    const transactionData = { ...transaction };
-                    delete transactionData.id; // إزالة الـ ID المؤقت
-                    transactionData.userId = userData.email; // استخدام الإيميل كمعرف مؤقت
-                    transactionData.tempUser = true; // تمييز المستخدمين المؤقتين
-                    transactionData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-                    
-                    batch.set(transactionRef, transactionData);
-                }
-                
-                // تنفيذ الدفعة
-                if (batch._mutations.length > 0) {
-                    await batch.commit();
-                    console.log('✅ تم حفظ المعاملات المالية للمستخدم الجديد');
-                }
+            } catch (authError) {
+                console.error('خطأ في إنشاء حساب Auth:', authError);
+                // يمكن المتابعة بدون Auth
             }
             
-            console.log('✅ تم حفظ المستخدم في منطقة الانتظار');
+            // حفظ في قاعدة البيانات
+            await db.collection('users').doc(currentUserId).set(userData);
+        }
+        
+        // حفظ المعاملات المالية
+        if (userTransactions && userTransactions.length > 0) {
+            for (const transaction of userTransactions) {
+                if (transaction.id && transaction.id.startsWith('temp_')) {
+                    const transactionData = { ...transaction };
+                    delete transactionData.id;
+                    transactionData.userId = currentUserId;
+                    
+                    await db.collection('transactions').add(transactionData);
+                }
+            }
+        }
+        
+        hideLoading();
+        
+        if (!isDraft) {
+            showSuccess('تم حفظ بيانات المستخدم بنجاح');
             
-            hideLoading();
-            
-            // عرض نافذة النجاح مع بيانات الدخول
-            await showSuccessWithCredentials(userData.email, formData.basic.password, userData.whatsapp);
+            // إظهار بيانات الدخول للمستخدمين الجدد
+            if (!userDoc.exists && formData.basic.password) {
+                await showSuccessWithCredentials(
+                    formData.basic.email,
+                    formData.basic.password,
+                    userData.whatsapp
+                );
+            } else {
+                setTimeout(() => {
+                    window.location.href = '/admin/users.html';
+                }, 2000);
+            }
+        } else {
+            showSuccess('تم حفظ المسودة');
         }
         
     } catch (error) {
         console.error('خطأ في حفظ المستخدم:', error);
         hideLoading();
-        
-        let errorMessage = 'حدث خطأ في حفظ البيانات';
-        if (error.code === 'auth/email-already-in-use') {
-            errorMessage = 'هذا البريد الإلكتروني مستخدم بالفعل';
-        } else if (error.code === 'permission-denied') {
-            errorMessage = 'ليس لديك صلاحية لإجراء هذه العملية';
-        } else if (error.message) {
-            errorMessage = error.message;
-        }
-        
-        showError(errorMessage);
+        showError(error.message || 'حدث خطأ في حفظ البيانات');
     }
 }
 
