@@ -591,6 +591,7 @@
 
                 <!-- Tab Panels Container -->
                 <div class="tab-panels">
+                    
 <!-- ==================== Basic Info Tab Panel ==================== -->
 <div class="tab-panel active" id="basicPanel" role="tabpanel" aria-labelledby="basicTab">
     <div class="panel-header">
@@ -701,7 +702,30 @@
                         <div class="form-feedback" id="lastNameFeedback"></div>
                     </div>
                 </div>
-
+<!-- معرف المستخدم الفريد -->
+<div class="form-group">
+    <label class="form-label" for="userId">
+        <i class="fas fa-fingerprint"></i>
+        معرف المستخدم (User ID)
+    </label>
+    <div class="input-group">
+        <input type="text" 
+               class="form-control" 
+               id="userId" 
+               placeholder="يتم توليده تلقائياً من الاسم"
+               readonly>
+        <button class="btn btn-primary" 
+                type="button" 
+                onclick="generateAndSaveUserId()"
+                id="saveUserIdBtn">
+            <i class="fas fa-save"></i> توليد وحفظ ID
+        </button>
+    </div>
+    <div class="form-text text-danger">
+        <i class="fas fa-exclamation-triangle"></i>
+        مهم: اضغط على الزر بعد كتابة الاسم والإيميل لتوليد وحفظ المعرف
+    </div>
+</div>
                 <!-- البريد الإلكتروني -->
                 <div class="form-group">
                     <label class="form-label required" for="email">
@@ -4766,6 +4790,28 @@
             display: flex;
             min-height: calc(100vh - 65px);
         }
+        /* أكواد User ID الجديدة */
+#userId {
+    font-family: monospace;
+    letter-spacing: 1px;
+    background-color: #f8f9fa;
+    border: 2px solid #e9ecef;
+}
+
+#saveUserIdBtn {
+    min-width: 150px;
+    white-space: nowrap;
+}
+
+#saveUserIdBtn.btn-success {
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+#userId:focus {
+    box-shadow: none;
+    border-color: var(--primary);
+}
 
         /* ==================== Sidebar ==================== */
         .sidebar {
@@ -5612,6 +5658,12 @@ function checkEditMode() {
         currentUserId = userId;
         updatePageForEditMode();
     }
+    if (userId) {
+    currentUserId = userId;
+}
+    if (userId) {
+    currentUserId = userId;
+}
 }
 
 function updatePageForEditMode() {
@@ -5673,6 +5725,7 @@ async function loadUserData(userId) {
         
         if (userDoc.exists) {
             userData = { id: userDoc.id, ...userDoc.data() };
+            currentUserId = userDoc.id; // حفظ المعرف الحالي
         } else {
             // البحث بالبريد الإلكتروني
             const usersQuery = await db.collection('users').where('email', '==', userId).limit(1).get();
@@ -5688,7 +5741,19 @@ async function loadUserData(userId) {
         
         // ملء البيانات في النموذج
         fillFormWithUserData(userData);
-        
+        // عرض المعرف في الحقل
+if (document.getElementById('userId')) {
+    document.getElementById('userId').value = currentUserId || userData.id;
+    
+    // تعطيل زر التوليد في وضع التعديل
+    const saveIdBtn = document.getElementById('saveUserIdBtn');
+    if (saveIdBtn) {
+        saveIdBtn.disabled = true;
+        saveIdBtn.innerHTML = '<i class="fas fa-lock"></i> محفوظ';
+        saveIdBtn.classList.remove('btn-primary');
+        saveIdBtn.classList.add('btn-secondary');
+    }
+}
         // تحميل المعاملات المالية
         await loadUserTransactions();
         
@@ -6137,6 +6202,103 @@ function showWarning(message) {
     });
 }
 
+    // ==================== User ID/Slug Generation ====================
+function generateUserId(firstName, lastName, email) {
+    const fullName = `${firstName} ${lastName}`.trim();
+    
+    // إذا لا يوجد اسم، استخدم البريد الإلكتروني
+    if (!fullName || fullName === ' ') {
+        const emailPart = email ? email.split('@')[0] : 'user';
+        const now = new Date();
+        return `${emailPart}-${now.getTime()}`;
+    }
+    
+    let slug = fullName
+        .toLowerCase()
+        .trim()
+        .replace(/[\u0600-\u06FF\u0750-\u077F]/g, (match) => {
+            const arabicToEnglish = {
+                'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h',
+                'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z', 'س': 's',
+                'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a',
+                'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm',
+                'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y'
+            };
+            return arabicToEnglish[match] || match;
+        })
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    
+    if (!slug) {
+        const now = new Date();
+        return `user-${now.getTime()}`;
+    }
+    
+    return slug;
+}
+
+// دالة للتحقق من توفر المعرف
+async function checkUserIdAvailability(userId) {
+    try {
+        const doc = await db.collection('users').doc(userId).get();
+        return !doc.exists;
+    } catch (error) {
+        console.error('خطأ في التحقق:', error);
+        return false;
+    }
+}
+
+// دالة توليد وحفظ المعرف
+async function generateAndSaveUserId() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const userIdInput = document.getElementById('userId');
+    const saveBtn = document.getElementById('saveUserIdBtn');
+    
+    if (!firstName || !email) {
+        showError('من فضلك اكتب الاسم والبريد الإلكتروني أولاً');
+        return;
+    }
+    
+    showLoading();
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري التوليد...';
+    
+    try {
+        let baseUserId = generateUserId(firstName, lastName, email);
+        let finalUserId = baseUserId;
+        let counter = 1;
+        
+        // التحقق من عدم تكرار المعرف
+        while (!(await checkUserIdAvailability(finalUserId))) {
+            finalUserId = `${baseUserId}-${counter}`;
+            counter++;
+        }
+        
+        // حفظ المعرف
+        userIdInput.value = finalUserId;
+        currentUserId = finalUserId;
+        
+        // تحديث حالة الزر
+        saveBtn.classList.remove('btn-primary');
+        saveBtn.classList.add('btn-success');
+        saveBtn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ';
+        saveBtn.disabled = true;
+        
+        hideLoading();
+        showSuccess('تم توليد وحفظ معرف المستخدم بنجاح');
+        
+    } catch (error) {
+        hideLoading();
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fas fa-save"></i> توليد وحفظ ID';
+        showError('حدث خطأ في توليد المعرف');
+        console.error(error);
+    }
+}
 // ==================== Utility Functions ====================
 function formatDate(date) {
     if (!date) return '-';
@@ -6672,7 +6834,99 @@ function applyFilters() {
     updateTransactionsDisplay(filteredTransactions);
 }
 
+// ==================== User ID/Slug Generation Functions ====================
+let currentUserId = null;
 
+function generateUserId(firstName, lastName, email) {
+    const fullName = `${firstName} ${lastName}`.trim();
+    
+    if (!fullName || fullName === ' ') {
+        const emailPart = email ? email.split('@')[0] : 'user';
+        const now = new Date();
+        return `${emailPart}-${now.getTime()}`;
+    }
+    
+    let slug = fullName
+        .toLowerCase()
+        .trim()
+        .replace(/[\u0600-\u06FF\u0750-\u077F]/g, (match) => {
+            const arabicToEnglish = {
+                'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h',
+                'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z', 'س': 's',
+                'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a',
+                'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm',
+                'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y'
+            };
+            return arabicToEnglish[match] || match;
+        })
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    
+    if (!slug) {
+        const now = new Date();
+        return `user-${now.getTime()}`;
+    }
+    
+    return slug;
+}
+
+async function checkUserIdAvailability(userId) {
+    try {
+        const doc = await firebase.firestore().collection('users').doc(userId).get();
+        return !doc.exists;
+    } catch (error) {
+        console.error('خطأ في التحقق:', error);
+        return false;
+    }
+}
+
+async function generateAndSaveUserId() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const userIdInput = document.getElementById('userId');
+    const saveBtn = document.getElementById('saveUserIdBtn');
+    
+    if (!firstName || !email) {
+        showError('من فضلك اكتب الاسم والبريد الإلكتروني أولاً');
+        return;
+    }
+    
+    showLoading();
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري التوليد...';
+    
+    try {
+        let baseUserId = generateUserId(firstName, lastName, email);
+        let finalUserId = baseUserId;
+        let counter = 1;
+        
+        while (!(await checkUserIdAvailability(finalUserId))) {
+            finalUserId = `${baseUserId}-${counter}`;
+            counter++;
+        }
+        
+        userIdInput.value = finalUserId;
+        currentUserId = finalUserId;
+        
+        saveBtn.classList.remove('btn-primary');
+        saveBtn.classList.add('btn-success');
+        saveBtn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ';
+        saveBtn.disabled = true;
+        
+        hideLoading();
+        showSuccess('تم توليد وحفظ معرف المستخدم بنجاح');
+        
+    } catch (error) {
+        hideLoading();
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fas fa-save"></i> توليد وحفظ ID';
+        showError('حدث خطأ في توليد المعرف');
+        console.error(error);
+    }
+}
 
 // ==================== Export Functions for Use in Other Parts ====================
 window.UserBuilder = {
@@ -8078,7 +8332,14 @@ function collectFormData() {
 // استبدل دالة saveUser في user-builder.html بهذا الكود المحدث
 
 async function saveUser(isDraft = false) {
-    try {
+     try {
+        // التحقق من المعرف
+        if (!currentUserId) {
+            showError('يجب توليد معرف المستخدم أولاً - اضغط على زر "توليد وحفظ ID"');
+            document.getElementById('basicTab').click();
+            document.getElementById('saveUserIdBtn').focus();
+            return;
+        }
         // التحقق من صحة البيانات
         if (!validateBasicInfo()) {
             showError('يرجى التحقق من البيانات الأساسية');
@@ -8208,8 +8469,12 @@ async function saveUser(isDraft = false) {
             console.log('🔄 حفظ المستخدم في منطقة الانتظار...');
             
             // حفظ في userCredentials للانتظار
-            const newUserRef = await db.collection('userCredentials').doc(userData.email).set(tempCredentials);
-            
+            // حفظ في userCredentials للانتظار باستخدام المعرف الفريد
+const newUserRef = await db.collection('userCredentials').doc(currentUserId).set({
+    ...tempCredentials,
+    userId: currentUserId,
+    slug: currentUserId
+});
             // حفظ المعاملات المالية المؤقتة إذا كانت موجودة
             if (userTransactions && userTransactions.length > 0) {
                 console.log('💰 حفظ المعاملات المالية للمستخدم الجديد...');
