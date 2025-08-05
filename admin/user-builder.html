@@ -5691,6 +5691,8 @@ window.copyGithubPath = async function() {
 };
 
 // ==================== Email Availability Check ====================
+// استبدل دالة checkEmailAvailability في user-builder.html بهذا الكود المحدث
+
 async function checkEmailAvailability() {
     const email = document.getElementById('email').value.trim();
     
@@ -5707,19 +5709,44 @@ async function checkEmailAvailability() {
     try {
         showLoading('جاري التحقق من البريد الإلكتروني...');
         
-        // البحث في users
-        const usersQuery = await db.collection('users').where('email', '==', email).limit(1).get();
+        // فحص في Firebase Auth أولاً
+        let authUserExists = false;
+        try {
+            await auth.fetchSignInMethodsForEmail(email);
+            authUserExists = true;
+        } catch (authError) {
+            if (authError.code !== 'auth/user-not-found') {
+                console.warn('خطأ في فحص Firebase Auth:', authError);
+            }
+        }
         
-        // البحث في userCredentials
+        // فحص في users collection
+        const usersQuery = await db.collection('users')
+            .where('email', '==', email)
+            .limit(1)
+            .get();
+        
+        // فحص في userCredentials (منطقة الانتظار)
         const credDoc = await db.collection('userCredentials').doc(email).get();
         
-        if (!usersQuery.empty || credDoc.exists) {
+        // تحديد حالة البريد الإلكتروني
+        if (authUserExists || !usersQuery.empty || credDoc.exists) {
             showFieldError('email', 'هذا البريد الإلكتروني مستخدم بالفعل');
             document.getElementById('email').classList.add('error');
+            
+            // تفاصيل إضافية عن مكان الاستخدام
+            let details = [];
+            if (authUserExists) details.push('مسجل في النظام');
+            if (!usersQuery.empty) details.push('مستخدم نشط');
+            if (credDoc.exists) details.push('في قائمة الانتظار');
+            
+            const feedback = document.getElementById('emailFeedback');
+            feedback.innerHTML = `هذا البريد مستخدم بالفعل (${details.join(', ')})`;
+            
         } else {
             clearFieldError('email');
             document.getElementById('email').classList.add('success');
-            document.getElementById('emailFeedback').textContent = 'البريد الإلكتروني متاح';
+            document.getElementById('emailFeedback').textContent = '✅ البريد الإلكتروني متاح';
             document.getElementById('emailFeedback').classList.add('show', 'success');
         }
         
@@ -6684,76 +6711,122 @@ async function saveFormData(isDraft = false) {
     }
 }
 
+// استبدل دالة collectFormData في user-builder.html بهذا الكود المحدث
+
 function collectFormData() {
-    // البيانات الأساسية
-    formData.basic = {
-        firstName: document.getElementById('firstName').value,
-        lastName: document.getElementById('lastName').value,
-        email: document.getElementById('email').value,
-        countryCode: document.getElementById('countryCode').value,
-        phoneNumber: document.getElementById('phoneNumber').value,
-        accountStatus: document.querySelector('input[name="accountStatus"]:checked').value,
-        avatar: formData.basic.avatarPath || null
-    };
-    
-    // كلمة المرور (في وضع الإنشاء فقط)
-    if (!editMode) {
-        formData.basic.password = document.getElementById('password').value;
+    try {
+        // البيانات الأساسية
+        formData.basic = {
+            firstName: document.getElementById('firstName')?.value || '',
+            lastName: document.getElementById('lastName')?.value || '',
+            email: document.getElementById('email')?.value || '',
+            countryCode: document.getElementById('countryCode')?.value || '+20',
+            phoneNumber: document.getElementById('phoneNumber')?.value || '',
+            accountStatus: document.querySelector('input[name="accountStatus"]:checked')?.value || 'active',
+            avatar: formData.basic?.avatarPath || null
+        };
+        
+        // كلمة المرور (في وضع الإنشاء فقط)
+        if (!editMode) {
+            const passwordField = document.getElementById('password');
+            formData.basic.password = passwordField?.value || '';
+        }
+        
+        // الأدوار والصلاحيات
+        const primaryRoleElement = document.querySelector('input[name="primaryRole"]:checked');
+        const permissionElements = document.querySelectorAll('input[name="permissions"]:checked');
+        const customRoleEnabled = document.getElementById('enableCustomRole')?.checked || false;
+        
+        formData.roles = {
+            primaryRole: primaryRoleElement?.value || 'student',
+            permissions: Array.from(permissionElements).map(cb => cb.value),
+            customRole: customRoleEnabled ? {
+                name: document.getElementById('customRoleName')?.value || '',
+                color: document.getElementById('customRoleColor')?.value || '#f4c430',
+                description: document.getElementById('customRoleDescription')?.value || ''
+            } : null
+        };
+        
+        // المعلومات المتقدمة
+        formData.advanced = {
+            // الشخصية
+            birthDate: document.getElementById('birthDate')?.value || null,
+            gender: document.getElementById('gender')?.value || null,
+            nationality: document.getElementById('nationality')?.value || null,
+            
+            // التواصل
+            country: document.getElementById('country')?.value || null,
+            city: document.getElementById('city')?.value || null,
+            timezone: document.getElementById('timezone')?.value || null,
+            language: document.getElementById('language')?.value || 'ar',
+            address: document.getElementById('address')?.value || null,
+            
+            // المهنية
+            occupation: document.getElementById('occupation')?.value || null,
+            company: document.getElementById('company')?.value || null,
+            education: document.getElementById('education')?.value || null,
+            experience: document.getElementById('experience')?.value || null,
+            interests: formData.advanced?.interests || [],
+            
+            // الإشعارات
+            notifications: {
+                emailNewCourse: document.getElementById('emailNewCourse')?.checked || false,
+                emailReminders: document.getElementById('emailReminders')?.checked || false,
+                emailPromotions: document.getElementById('emailPromotions')?.checked || false,
+                emailNewsletter: document.getElementById('emailNewsletter')?.checked || false,
+                whatsappReminders: document.getElementById('whatsappReminders')?.checked || false,
+                whatsappSupport: document.getElementById('whatsappSupport')?.checked || false,
+                whatsappProgress: document.getElementById('whatsappProgress')?.checked || false
+            },
+            
+            // ملاحظات الإدارة
+            adminNotes: document.getElementById('adminNotesEditor')?.innerHTML || null,
+            
+            // الحقول المخصصة
+            customFields: customFields || []
+        };
+        
+        console.log('✅ تم جمع بيانات النموذج:', formData);
+        
+    } catch (error) {
+        console.error('❌ خطأ في جمع بيانات النموذج:', error);
+        
+        // قيم افتراضية في حالة الخطأ
+        formData = {
+            basic: {
+                firstName: '',
+                lastName: '',
+                email: '',
+                countryCode: '+20',
+                phoneNumber: '',
+                accountStatus: 'active',
+                avatar: null,
+                password: ''
+            },
+            roles: {
+                primaryRole: 'student',
+                permissions: ['view_courses'],
+                customRole: null
+            },
+            courses: formData.courses || [],
+            advanced: {
+                notifications: {
+                    emailNewCourse: true,
+                    emailReminders: true,
+                    whatsappReminders: true,
+                    whatsappSupport: true
+                },
+                customFields: []
+            }
+        };
+        
+        throw error;
     }
-    
-    // الأدوار والصلاحيات
-    formData.roles = {
-        primaryRole: document.querySelector('input[name="primaryRole"]:checked').value,
-        permissions: Array.from(document.querySelectorAll('input[name="permissions"]:checked'))
-            .map(cb => cb.value),
-        customRole: document.getElementById('enableCustomRole').checked ? {
-            name: document.getElementById('customRoleName').value,
-            color: document.getElementById('customRoleColor').value,
-            description: document.getElementById('customRoleDescription').value
-        } : null
-    };
-    
-    // المعلومات المتقدمة
-    formData.advanced = {
-        // الشخصية
-        birthDate: document.getElementById('birthDate').value,
-        gender: document.getElementById('gender').value,
-        nationality: document.getElementById('nationality').value,
-        
-        // التواصل
-        country: document.getElementById('country').value,
-        city: document.getElementById('city').value,
-        timezone: document.getElementById('timezone').value,
-        language: document.getElementById('language').value,
-        address: document.getElementById('address').value,
-        
-        // المهنية
-        occupation: document.getElementById('occupation').value,
-        company: document.getElementById('company').value,
-        education: document.getElementById('education').value,
-        experience: document.getElementById('experience').value,
-        interests: formData.advanced.interests || [],
-        
-        // الإشعارات
-        notifications: {
-            emailNewCourse: document.getElementById('emailNewCourse').checked,
-            emailReminders: document.getElementById('emailReminders').checked,
-            emailPromotions: document.getElementById('emailPromotions').checked,
-            emailNewsletter: document.getElementById('emailNewsletter').checked,
-            whatsappReminders: document.getElementById('whatsappReminders').checked,
-            whatsappSupport: document.getElementById('whatsappSupport').checked,
-            whatsappProgress: document.getElementById('whatsappProgress').checked
-        },
-        
-        // ملاحظات الإدارة
-        adminNotes: document.getElementById('adminNotesEditor').innerHTML,
-        
-        // الحقول المخصصة
-        customFields: customFields
-    };
 }
 
 // ==================== Save User Functions ====================
+// استبدل دالة saveUser في user-builder.html بهذا الكود المحدث
+
 async function saveUser(isDraft = false) {
     try {
         // التحقق من صحة البيانات
@@ -6798,7 +6871,23 @@ async function saveUser(isDraft = false) {
                 enrolledAt: new Date().toISOString()
             })),
             
-            ...formData.advanced,
+            // المعلومات المتقدمة
+            birthDate: formData.advanced.birthDate || null,
+            gender: formData.advanced.gender || null,
+            nationality: formData.advanced.nationality || null,
+            country: formData.advanced.country || null,
+            city: formData.advanced.city || null,
+            timezone: formData.advanced.timezone || null,
+            language: formData.advanced.language || 'ar',
+            address: formData.advanced.address || null,
+            occupation: formData.advanced.occupation || null,
+            company: formData.advanced.company || null,
+            education: formData.advanced.education || null,
+            experience: formData.advanced.experience || null,
+            interests: formData.advanced.interests || [],
+            notifications: formData.advanced.notifications || {},
+            adminNotes: formData.advanced.adminNotes || null,
+            customFields: formData.advanced.customFields || [],
             
             lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
             lastUpdatedBy: currentUser.email
@@ -6820,18 +6909,30 @@ async function saveUser(isDraft = false) {
             // إنشاء مستخدم جديد
             userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             userData.createdBy = currentUser.email;
+            userData.accountType = formData.basic.accountStatus === 'active' ? 'premium' : 'free';
             
-            // حفظ في userCredentials للمصادقة
-            const credentials = {
+            // إعداد بيانات الاعتماد المؤقتة
+            const tempCredentials = {
+                // نسخ جميع بيانات المستخدم
                 ...userData,
+                
+                // إضافة كلمة المرور
                 password: formData.basic.password,
-                status: 'waiting_first_login'
+                
+                // حالة الانتظار
+                status: 'waiting_first_login',
+                tempUser: true,
+                
+                // تاريخ الإنشاء
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
-            await db.collection('userCredentials').doc(userData.email).set(credentials);
+            console.log('🔄 حفظ المستخدم في منطقة الانتظار...');
             
-            // حفظ في users
-            const newUserRef = await db.collection('users').add(userData);
+            // حفظ في userCredentials للانتظار
+            await db.collection('userCredentials').doc(userData.email).set(tempCredentials);
+            
+            console.log('✅ تم حفظ المستخدم في منطقة الانتظار');
             
             hideLoading();
             
@@ -6842,7 +6943,17 @@ async function saveUser(isDraft = false) {
     } catch (error) {
         console.error('خطأ في حفظ المستخدم:', error);
         hideLoading();
-        showError('حدث خطأ في حفظ البيانات: ' + error.message);
+        
+        let errorMessage = 'حدث خطأ في حفظ البيانات';
+        if (error.code === 'auth/email-already-in-use') {
+            errorMessage = 'هذا البريد الإلكتروني مستخدم بالفعل';
+        } else if (error.code === 'permission-denied') {
+            errorMessage = 'ليس لديك صلاحية لإجراء هذه العملية';
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        showError(errorMessage);
     }
 }
 
