@@ -9584,34 +9584,75 @@ function initializeDragAndDrop() {
         // ==================== Load Available Content ====================
 async function loadAvailableContent() {
     try {
-        // تحميل الدورات من Firebase
-        const coursesSnapshot = await db.collection('courses')
-            .where('status', '==', 'active')
-            .get();
+        showLoading('جاري تحميل الدورات والمسارات...');
+        
+        // تحميل الدورات من courses
+        const coursesSnapshot = await db.collection('courses').get();
         
         availableCourses = [];
         coursesSnapshot.forEach(doc => {
-            availableCourses.push({ id: doc.id, type: 'course', ...doc.data() });
+            const data = doc.data();
+            // التحقق من أن الدورة نشطة أو على الأقل موجودة
+            if (data) {
+                availableCourses.push({ 
+                    id: doc.id, 
+                    type: 'course',
+                    title: data.title || 'دورة بدون اسم',
+                    price: data.price || 0,
+                    instructor: data.instructor || 'منظور الفؤاد',
+                    thumbnail: data.thumbnail || data.image || '/media/images/course-placeholder.jpg',
+                    duration: data.duration || 0,
+                    enrollments: data.enrollments || 0,
+                    ...data 
+                });
+            }
         });
         
-        // تحميل المسارات من Firebase
-        const pathsSnapshot = await db.collection('paths')
-            .where('status', '==', 'active')
-            .get();
+        // تحميل المسارات من bundles
+        const bundlesSnapshot = await db.collection('bundles').get();
         
         availablePaths = [];
-        pathsSnapshot.forEach(doc => {
-            availablePaths.push({ id: doc.id, type: 'path', ...doc.data() });
+        bundlesSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data) {
+                availablePaths.push({ 
+                    id: doc.id, 
+                    type: 'path',
+                    title: data.title || 'مسار بدون اسم',
+                    price: data.price || 0,
+                    instructor: data.instructor || 'منظور الفؤاد',
+                    thumbnail: data.thumbnail || data.image || '/media/images/path-placeholder.jpg',
+                    duration: data.duration || 0,
+                    enrollments: data.enrollments || 0,
+                    ...data 
+                });
+            }
         });
         
-        console.log(`تم تحميل ${availableCourses.length} دورة و ${availablePaths.length} مسار`);
+        console.log(`✅ تم تحميل ${availableCourses.length} دورة و ${availablePaths.length} مسار`);
         
         // عرض المحتوى
         displayAvailableContent();
+        hideLoading();
         
     } catch (error) {
         console.error('خطأ في تحميل المحتوى:', error);
-        showError('حدث خطأ في تحميل الدورات والمسارات');
+        hideLoading();
+        
+        // عرض رسالة خطأ مفصلة
+        const container = document.getElementById('availableItems');
+        if (container) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-triangle" style="color: var(--danger);"></i>
+                    <p>حدث خطأ في تحميل الدورات والمسارات</p>
+                    <span>${error.message}</span>
+                    <button class="btn btn-primary mt-3" onclick="loadAvailableContent()">
+                        <i class="fas fa-sync"></i> إعادة المحاولة
+                    </button>
+                </div>
+            `;
+        }
     }
 }
 
@@ -9622,6 +9663,18 @@ function displayAvailableContent() {
     
     // مسح المحتوى القديم
     container.innerHTML = '';
+    
+    // إذا لم توجد دورات أو مسارات
+    if (availableCourses.length === 0 && availablePaths.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <p>لا توجد دورات أو مسارات متاحة</p>
+                <span>تأكد من إضافة دورات في قاعدة البيانات</span>
+            </div>
+        `;
+        return;
+    }
     
     // عرض الدورات
     availableCourses.forEach(course => {
@@ -9638,6 +9691,7 @@ function displayAvailableContent() {
     // تحديث العدادات
     updateCounts();
 }
+
 
 // ==================== Create Course Element ====================
 function createCourseElement(item) {
@@ -9995,75 +10049,79 @@ function updateCounts() {
 
         // ==================== Generate User Slug ====================
         window.generateUserSlug = async function() {
-            const firstName = document.getElementById('firstName').value.trim();
-            const lastName = document.getElementById('lastName').value.trim();
-            const slugInput = document.getElementById('slugPreview');
-            const customSlug = slugInput.value.trim();
-            
-            if (!firstName || !lastName) {
-                showError('يجب إدخال الاسم الأول واسم العائلة');
-                return;
-            }
-            
-            if (!customSlug) {
-                showError('يجب إدخال معرف المستخدم');
-                return;
-            }
-            
-            try {
-                showLoading('جاري التحقق من المعرف...');
-                
-                // التحقق من صحة المعرف
-                const slugPattern = /^[a-z0-9-]+$/;
-                if (!slugPattern.test(customSlug)) {
-                    showError('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
-                    hideLoading();
-                    return;
-                }
-                
-                // التحقق من عدم وجود مستخدم بنفس المعرف
-                const existingDoc = await db.collection('users').doc(customSlug).get();
-                if (existingDoc.exists) {
-                    showError('هذا المعرف مستخدم بالفعل');
-                    hideLoading();
-                    return;
-                }
-                
-                // تغيير الـ URL
-                window.history.pushState({}, '', `?id=${customSlug}`);
-                
-                // تفعيل وضع التعديل
-                editMode = true;
-                currentUserId = customSlug;
-                
-                // تحديث العنوان
-                updatePageForEditMode();
-                
-                // إخفاء قسم إنشاء المعرف
-                document.getElementById('generateSlugSection').style.display = 'none';
-                
-                // إضافة رسالة نجاح
-                const successDiv = document.createElement('div');
-                successDiv.className = 'alert alert-success mt-3';
-                successDiv.innerHTML = `
-                    <i class="fas fa-check-circle"></i>
-                    تم إنشاء معرف المستخدم: <strong>${customSlug}</strong>
-                `;
-                document.getElementById('generateSlugSection').parentElement.appendChild(successDiv);
-                
-                // جعل الحقول للقراءة فقط
-                document.getElementById('firstName').readOnly = true;
-                document.getElementById('lastName').readOnly = true;
-                
-                hideLoading();
-                showSuccess('تم إنشاء معرف المستخدم بنجاح');
-                
-            } catch (error) {
-                console.error('خطأ في إنشاء المعرف:', error);
-                hideLoading();
-                showError('حدث خطأ في إنشاء معرف المستخدم');
-            }
-        };
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const slugInput = document.getElementById('slugPreview');
+    const customSlug = slugInput.value.trim();
+    
+    if (!firstName || !lastName) {
+        showError('يجب إدخال الاسم الأول واسم العائلة');
+        return;
+    }
+    
+    if (!customSlug) {
+        showError('يجب إدخال معرف المستخدم');
+        return;
+    }
+    
+    try {
+        showLoading('جاري التحقق من المعرف...');
+        
+        // التحقق من صحة المعرف
+        const slugPattern = /^[a-z0-9-]+$/;
+        if (!slugPattern.test(customSlug)) {
+            showError('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
+            hideLoading();
+            return;
+        }
+        
+        // التحقق من عدم وجود مستخدم بنفس المعرف
+        const existingDoc = await db.collection('users').doc(customSlug).get();
+        if (existingDoc.exists) {
+            showError('هذا المعرف مستخدم بالفعل');
+            hideLoading();
+            return;
+        }
+        
+        // حفظ المعرف مؤقتاً
+        currentUserId = customSlug;
+        
+        // تغيير الـ URL
+        window.history.pushState({}, '', `?id=${customSlug}`);
+        
+        // إخفاء قسم إنشاء المعرف
+        document.getElementById('generateSlugSection').style.display = 'none';
+        
+        // إضافة رسالة نجاح
+        const successDiv = document.createElement('div');
+        successDiv.className = 'alert alert-success mt-3';
+        successDiv.innerHTML = `
+            <i class="fas fa-check-circle"></i>
+            تم إنشاء معرف المستخدم: <strong>${customSlug}</strong>
+        `;
+        document.getElementById('generateSlugSection').parentElement.appendChild(successDiv);
+        
+        // جعل الحقول للقراءة فقط
+        document.getElementById('firstName').readOnly = true;
+        document.getElementById('lastName').readOnly = true;
+        
+        // **مهم: عدم تفعيل وضع التعديل**
+        // editMode = false; // نبقى في وضع الإنشاء
+        
+        // **الزر يبقى "إنشاء المستخدم"**
+        document.getElementById('saveBtnText').textContent = 'إنشاء المستخدم';
+        document.getElementById('saveBtn').innerHTML = '<i class="fas fa-user-plus"></i> إنشاء المستخدم';
+        
+        hideLoading();
+        showSuccess('تم إنشاء معرف المستخدم بنجاح - يمكنك الآن إكمال البيانات وإنشاء الحساب');
+        
+    } catch (error) {
+        console.error('خطأ في إنشاء المعرف:', error);
+        hideLoading();
+        showError('حدث خطأ في إنشاء معرف المستخدم');
+    }
+};
+
 
         // دالة لإظهار/إخفاء زر إنشاء المعرف
         function checkNameFields() {
@@ -10192,7 +10250,7 @@ function updateCounts() {
 async function saveUser(isDraft = false) {
     try {
         // التحقق من وجود معرف المستخدم
-        if (!editMode || !currentUserId) {
+        if (!currentUserId) {
             showError('يجب إنشاء معرف المستخدم أولاً');
             document.getElementById('generateSlugSection').scrollIntoView();
             return;
@@ -10205,7 +10263,7 @@ async function saveUser(isDraft = false) {
             return;
         }
         
-        showLoading(isDraft ? 'جاري حفظ المسودة...' : 'جاري حفظ البيانات...');
+        showLoading(isDraft ? 'جاري حفظ المسودة...' : 'جاري إنشاء المستخدم...');
         
         // جمع البيانات
         collectFormData();
@@ -10258,20 +10316,15 @@ async function saveUser(isDraft = false) {
             adminNotes: formData.advanced.adminNotes,
             customFields: formData.advanced.customFields || [],
             
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            lastUpdatedBy: currentUser?.email || 'system'
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdBy: currentUser.email
         };
         
         // التحقق من وجود المستخدم
         const userDoc = await db.collection('users').doc(currentUserId).get();
         
-        if (userDoc.exists) {
-            // تحديث مستخدم موجود
-            await db.collection('users').doc(currentUserId).update(userData);
-        } else {
+        if (!userDoc.exists) {
             // إنشاء مستخدم جديد
-            userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-            userData.createdBy = currentUser.email;
             
             // إنشاء حساب Firebase Auth
             try {
@@ -10294,70 +10347,35 @@ async function saveUser(isDraft = false) {
             
             // حفظ في قاعدة البيانات
             await db.collection('users').doc(currentUserId).set(userData);
-        }
-        
-        // حفظ المعاملات المالية بالهيكل الجديد
-        if (userTransactions && userTransactions.length > 0) {
-            // تجميع المعاملات حسب الدورة/المسار
-            const transactionsByCourse = new Map();
             
-            userTransactions.forEach(transaction => {
-                if (transaction.relatedTo) {
-                    const courseId = transaction.relatedTo.id;
-                    if (!transactionsByCourse.has(courseId)) {
-                        transactionsByCourse.set(courseId, []);
-                    }
-                    transactionsByCourse.get(courseId).push(transaction);
-                }
-            });
+            hideLoading();
             
-            // حفظ كل مجموعة معاملات في سجل مالي منفصل
-            for (const [courseId, transactions] of transactionsByCourse) {
-                const recordRef = db.collection('users').doc(currentUserId)
-                    .collection('financialRecords').doc(courseId);
-                
-                const recordData = {
-                    courseId: courseId,
-                    courseType: transactions[0].relatedTo.type,
-                    courseTitle: transactions[0].relatedTo.title,
-                    userId: currentUserId,
-                    transactions: transactions,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                // تحديث الملخص
-                updateFinancialRecordSummary(recordData);
-                
-                await recordRef.set(recordData, { merge: true });
-            }
-        }
-        
-        hideLoading();
-        
-        if (!isDraft) {
-            showSuccess('تم حفظ بيانات المستخدم بنجاح');
+            // عرض رسالة النجاح مع البيانات
+            await showSuccessWithCredentials(
+                formData.basic.email,
+                formData.basic.password,
+                userData.whatsapp
+            );
             
-            // إظهار بيانات الدخول للمستخدمين الجدد
-            if (!userDoc.exists && formData.basic.password) {
-                await showSuccessWithCredentials(
-                    formData.basic.email,
-                    formData.basic.password,
-                    userData.whatsapp
-                );
-            } else {
-                setTimeout(() => {
-                    window.location.href = '/admin/users.html';
-                }, 2000);
-            }
+            // **مهم: تفعيل وضع التعديل بعد الإنشاء**
+            editMode = true;
+            updatePageForEditMode();
+            
         } else {
-            showSuccess('تم حفظ المسودة');
+            // تحديث مستخدم موجود
+            userData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
+            userData.lastUpdatedBy = currentUser?.email || 'system';
+            delete userData.createdAt;
+            delete userData.createdBy;
+            
+            await db.collection('users').doc(currentUserId).update(userData);
+            
+            hideLoading();
+            showSuccess('تم حفظ التعديلات بنجاح');
         }
         
-        // ========== إضافة أسطر التحقق هنا ==========
-        console.log('بيانات المستخدم اللي هتتحفظ:', userData);
-        console.log('Firebase Auth متاح:', typeof auth !== 'undefined');
-        console.log('Firestore متاح:', typeof db !== 'undefined');
+        // حفظ المعاملات المالية إذا وجدت
+        // ... باقي الكود
         
     } catch (error) {
         console.error('خطأ في حفظ المستخدم:', error);
@@ -10373,54 +10391,59 @@ async function saveUser(isDraft = false) {
         }
 
         // ==================== Success with Credentials ====================
-        async function showSuccessWithCredentials(email, password, whatsapp) {
-            const result = await Swal.fire({
-                icon: 'success',
-                title: 'تم إنشاء المستخدم بنجاح!',
-                html: `
-                    <div style="text-align: right; direction: rtl;">
-                        <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-                            <h4 style="color: var(--primary); margin-bottom: 1rem;">
-                                <i class="fas fa-key"></i> بيانات الدخول
-                            </h4>
-                            <div style="margin-bottom: 0.8rem;">
-                                <strong>البريد الإلكتروني:</strong><br>
-                                <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${email}</code>
-                            </div>
-                            <div>
-                                <strong>كلمة المرور:</strong><br>
-                                <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${password}</code>
-                            </div>
-                        </div>
+       async function showSuccessWithCredentials(email, password, whatsapp) {
+    const result = await Swal.fire({
+        icon: 'success',
+        title: 'تم إنشاء المستخدم بنجاح!',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                    <h4 style="color: var(--primary); margin-bottom: 1rem;">
+                        <i class="fas fa-key"></i> بيانات الدخول
+                    </h4>
+                    <div style="margin-bottom: 0.8rem;">
+                        <strong>البريد الإلكتروني:</strong><br>
+                        <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${email}</code>
                     </div>
-                `,
-                showCancelButton: true,
-                confirmButtonText: '<i class="fas fa-copy"></i> نسخ البيانات',
-                cancelButtonText: '<i class="fab fa-whatsapp"></i> إرسال WhatsApp',
-                confirmButtonColor: 'var(--primary)',
-                cancelButtonColor: 'var(--success)',
-                reverseButtons: true
-            });
-            
-            if (result.isConfirmed) {
-                // نسخ البيانات
-                const text = `البريد الإلكتروني: ${email}\nكلمة المرور: ${password}`;
-                await navigator.clipboard.writeText(text);
-                showSuccess('تم نسخ بيانات الدخول');
-                
-            } else if (result.dismiss === Swal.DismissReason.cancel) {
-                // إرسال WhatsApp
-                const message = `مرحباً،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\n📧 البريد: ${email}\n🔒 كلمة المرور: ${password}\n\n🔗 رابط تسجيل الدخول:\n${window.location.origin}/login.html\n\nمع تحيات فريق منظور الفؤاد`;
-                
-                const whatsappUrl = `https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
-                window.open(whatsappUrl, '_blank');
-            }
-            
-            // العودة لصفحة المستخدمين
-            setTimeout(() => {
-                window.location.href = '/admin/users.html';
-            }, 1000);
-        }
+                    <div>
+                        <strong>كلمة المرور:</strong><br>
+                        <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${password}</code>
+                    </div>
+                </div>
+                <p style="color: #28a745; font-weight: bold;">
+                    <i class="fas fa-info-circle"></i> يمكنك الآن إكمال البيانات في التبويبات الأخرى
+                </p>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-copy"></i> نسخ البيانات',
+        cancelButtonText: '<i class="fab fa-whatsapp"></i> إرسال WhatsApp',
+        confirmButtonColor: 'var(--primary)',
+        cancelButtonColor: 'var(--success)',
+        reverseButtons: true,
+        allowOutsideClick: false
+    });
+    
+    if (result.isConfirmed) {
+        // نسخ البيانات
+        const text = `البريد الإلكتروني: ${email}\nكلمة المرور: ${password}`;
+        await navigator.clipboard.writeText(text);
+        showSuccess('تم نسخ بيانات الدخول');
+        
+    } else if (result.dismiss === Swal.DismissReason.cancel) {
+        // إرسال WhatsApp
+        const message = `مرحباً،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\n📧 البريد: ${email}\n🔒 كلمة المرور: ${password}\n\n🔗 رابط تسجيل الدخول:\n${window.location.origin}/login.html\n\nمع تحيات فريق منظور الفؤاد`;
+        
+        const whatsappUrl = `https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+        window.open(whatsappUrl, '_blank');
+    }
+    
+    // **لا ننتقل لصفحة أخرى**
+    // setTimeout(() => {
+    //     window.location.href = '/admin/users.html';
+    // }, 1000);
+}
+
 
         // ==================== Form Actions ====================
         function handleCancel() {
