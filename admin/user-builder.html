@@ -366,7 +366,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-    <script src="../js/firebase-config.js"></script>
+    <script src="https://raw.githubusercontent.com/MahmoudFouad25/fouad-perspective/js/firebase-config.js"></script>
 </head>
 <body>
     <!-- ==================== Loading Overlay ==================== -->
@@ -5655,7 +5655,18 @@ let formData = {
 let customFields = [];
 let availableCourses = [];
 let availablePaths = [];
-
+// متغيرات المعاملات المالية
+let userTransactions = [];
+let userWallet = {
+    balance: {
+        total: 0,
+        paid: 0,
+        pending: 0,
+        grants: 0,
+        points: 0
+    },
+    upcomingPayments: []
+};
 // ==================== Page Initialization ====================
 document.addEventListener('DOMContentLoaded', async function() {
     try {
@@ -6270,16 +6281,6 @@ function debounce(func, wait) {
     };
 }
     // ==================== Financial Management Functions ====================
-let userTransactions = [];
-let userWallet = {
-    balance: {
-        total: 0,
-        paid: 0,
-        pending: 0,
-        points: 0
-    },
-    upcomingPayments: []
-};
 
 // تحديث نموذج المعاملة حسب النوع
 function updateTransactionForm() {
@@ -6467,37 +6468,61 @@ function resetTransactionForm() {
 
 // تحميل معاملات المستخدم
 async function loadUserTransactions() {
-    // التحقق من وجود معرف المستخدم
-    if (!currentUserId) {
-        console.log('لا يوجد معرف مستخدم بعد');
-        return;
-    }
-    
     try {
-        // باقي الكود كما هو...
-        console.log('📊 تحميل المعاملات المالية للمستخدم:', currentUserId);
+        console.log('📊 جاري تحميل المعاملات المالية...');
         
-        // جلب المعاملات من Firebase
-        const transactions = await window.firebaseDB.transactions.getUserTransactions(currentUserId);
-        userTransactions = transactions;
+        // تهيئة القيم الافتراضية
+        userTransactions = userTransactions || [];
+        userWallet = userWallet || {
+            balance: {
+                total: 0,
+                paid: 0,
+                pending: 0,
+                grants: 0,
+                points: 0
+            },
+            upcomingPayments: []
+        };
         
-        // جلب محفظة المستخدم
-        const wallet = await window.firebaseDB.transactions.getUserWallet(currentUserId);
-        userWallet = wallet;
+        // لو مفيش معرف مستخدم، خلاص كده
+        if (!currentUserId) {
+            console.log('مستخدم جديد - لا توجد معاملات سابقة');
+            updateFinancialSummary();
+            updateTransactionsDisplay();
+            updateUpcomingPayments();
+            return;
+        }
+        
+        // محاولة جلب المعاملات من Firebase (لو موجودة)
+        try {
+            const snapshot = await db.collection('transactions')
+                .where('userId', '==', currentUserId)
+                .get();
+            
+            if (!snapshot.empty) {
+                userTransactions = [];
+                snapshot.forEach(doc => {
+                    userTransactions.push({ id: doc.id, ...doc.data() });
+                });
+                console.log(`✅ تم تحميل ${userTransactions.length} معاملة`);
+            } else {
+                console.log('لا توجد معاملات سابقة لهذا المستخدم');
+            }
+        } catch (error) {
+            console.log('المعاملات غير متاحة حالياً');
+        }
         
         // تحديث الواجهة
         updateFinancialSummary();
         updateTransactionsDisplay();
         updateUpcomingPayments();
         
-        console.log('✅ تم تحميل البيانات المالية:', {
-            transactions: userTransactions.length,
-            wallet: userWallet
-        });
-        
     } catch (error) {
-        console.error('خطأ في تحميل المعاملات:', error);
-        showError('حدث خطأ في تحميل البيانات المالية');
+        console.error('خطأ:', error);
+        // حتى لو حصل خطأ، اعرض الواجهة فاضية
+        updateFinancialSummary();
+        updateTransactionsDisplay();
+        updateUpcomingPayments();
     }
 }
 
@@ -7331,6 +7356,26 @@ window.toggleCourseAssignment = function(courseId) {
         // إضافة للمخصص
         assignCourse(course);
         showSuccess(`تم إضافة "${course.title}"`);
+        // إضافة معاملة مالية تلقائية (لو الدورة بفلوس)
+if (course.price && course.price > 0) {
+    const transaction = {
+        id: 'temp_' + Date.now(),
+        userId: currentUserId || 'temp',
+        type: 'payment',
+        amount: course.price,
+        date: new Date().toISOString(),
+        status: 'pending',
+        notes: `رسوم ${course.type === 'path' ? 'مسار' : 'دورة'}: ${course.title}`,
+        relatedTo: {
+            type: course.type,
+            id: course.id,
+            title: course.title
+        }
+    };
+    
+    userTransactions.push(transaction);
+    console.log('تم إضافة معاملة مالية تلقائية');
+}
     }
     
     renderAvailableCourses();
