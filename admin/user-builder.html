@@ -6083,26 +6083,26 @@
                     },
                     
                     // خطة الدفع
-                    paymentPlan: {
-                        type: paymentOptions.paymentType, // full, installments, partial, grant, none
-                        totalInstallments: paymentOptions.installmentCount || 1,
-                        installmentFrequency: paymentOptions.frequency || 'monthly',
-                        firstPaymentAmount: paymentOptions.firstPayment || paymentOptions.finalPrice
-                    },
+                   paymentPlan: {
+    type: paymentOptions.paymentType,
+    totalInstallments: paymentOptions.installmentCount || 1,
+    installmentFrequency: paymentOptions.frequency || 'monthly',
+    firstPaymentAmount: paymentOptions.firstPayment || paymentOptions?.finalPrice || courseData.price || 0
+},
                     
                     // المعاملات
                     transactions: [], // سيتم ملؤها بالمعاملات
                     
                     // الملخص
                     summary: {
-                        totalAmount: paymentOptions.finalPrice,
-                        paidAmount: 0,
-                        pendingAmount: paymentOptions.finalPrice,
-                        remainingAmount: paymentOptions.finalPrice,
-                        completedInstallments: 0,
-                        status: 'active' // active, completed, cancelled
-                    },
-                    
+    totalAmount: paymentOptions?.finalPrice || courseData.price || 0,
+    paidAmount: 0,
+    pendingAmount: paymentOptions?.finalPrice || courseData.price || 0,
+    remainingAmount: paymentOptions?.finalPrice || courseData.price || 0,
+    completedInstallments: 0,
+    status: 'active'
+},
+                   
                     // التواريخ
                     enrollmentDate: new Date().toISOString(),
                     lastPaymentDate: null,
@@ -6920,15 +6920,72 @@ function loadMoreActivity() {
 
         // ==================== Edit Mode Functions ====================
         function checkEditMode() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const userId = urlParams.get('id');
-            
-            if (userId) {
-                editMode = true;
-                currentUserId = userId;
-                updatePageForEditMode();
-            }
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get('id');
+    
+    if (userId) {
+        editMode = true;
+        currentUserId = userId;
+        updatePageForEditMode();
+    } else {
+        // في وضع الإنشاء، إظهار قسم توليد المعرف
+        setupNameListeners();
+    }
+}
+
+// إضافة دالة جديدة
+function setupNameListeners() {
+    const firstNameInput = document.getElementById('firstName');
+    const lastNameInput = document.getElementById('lastName');
+    const generateSection = document.getElementById('generateSlugSection');
+    
+    function checkNames() {
+        const firstName = firstNameInput.value.trim();
+        const lastName = lastNameInput.value.trim();
+        
+        if (firstName && lastName) {
+            generateSection.style.display = 'block';
+            const suggestedSlug = generateSlugFromName(firstName, lastName);
+            document.getElementById('slugPreview').value = suggestedSlug;
+        } else {
+            generateSection.style.display = 'none';
         }
+    }
+    
+    firstNameInput.addEventListener('input', checkNames);
+    lastNameInput.addEventListener('input', checkNames);
+}
+
+function generateSlugFromName(firstName, lastName) {
+    const timestamp = Date.now().toString().slice(-4);
+    const cleanFirst = firstName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanLast = lastName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return `${cleanFirst}-${cleanLast}-${timestamp}`;
+}
+
+function generateUserSlug() {
+    const slug = document.getElementById('slugPreview').value;
+    if (!slug) {
+        showError('يجب إدخال معرف صحيح');
+        return;
+    }
+    
+    // تعيين المعرف
+    currentUserId = slug;
+    
+    // إخفاء القسم
+    document.getElementById('generateSlugSection').style.display = 'none';
+    
+    // تفعيل باقي الحقول
+    document.getElementById('email').removeAttribute('disabled');
+    document.getElementById('password').removeAttribute('disabled');
+    document.getElementById('confirmPassword').removeAttribute('disabled');
+    document.getElementById('phoneNumber').removeAttribute('disabled');
+    
+    showSuccess('تم تعيين معرف المستخدم بنجاح');
+        autoSaveTimer = setInterval(autoSave, 30000);
+
+}
         // ==================== Page Initialization ====================
 async function initializePage() {
     // تهيئة المحرر النصي للملاحظات
@@ -8521,7 +8578,37 @@ async function showPaymentOptionsDialog(course) {
             
             // تحديث عرض الدفعات القادمة
             updateUpcomingPaymentsDisplay();
-            
+            // في نهاية الدالة الموجودة، بعد updateUpcomingPaymentsDisplay();
+// تحديث قسم المنح والخصومات
+userTransactions.forEach(transaction => {
+    if (transaction.status === 'completed' && transaction.discount > 0) {
+        const discountAmount = (transaction.originalAmount || transaction.amount || 0) * (transaction.discount / 100);
+        totalGrants += discountAmount;
+    }
+});
+
+// تحديث العرض مرة تانية للمنح
+document.getElementById('totalGrants').textContent = `${totalGrants.toFixed(2)} جنيه`;
+            // إعادة حساب المنح والخصومات بشكل صحيح
+let recalculatedGrants = 0;
+
+userTransactions.forEach(transaction => {
+    if (transaction.status === 'completed') {
+        if (transaction.type === 'grant' || transaction.type === 'gift') {
+            recalculatedGrants += transaction.originalAmount || transaction.amount || 0;
+        } else if (transaction.discount > 0 && transaction.originalAmount) {
+            const discountAmount = transaction.originalAmount * (transaction.discount / 100);
+            recalculatedGrants += discountAmount;
+        }
+    }
+});
+
+// تحديث القيمة إذا كانت مختلفة
+if (recalculatedGrants > totalGrants) {
+    totalGrants = recalculatedGrants;
+    document.getElementById('totalGrants').textContent = `${totalGrants.toFixed(2)} جنيه`;
+    userWallet.balance.grants = totalGrants;
+}
             console.log('تم تحديث الملخص المالي:', userWallet);
         }
 
@@ -9715,7 +9802,7 @@ async function showPaymentOptionsDialog(course) {
             document.getElementById('saveDraftBtn').addEventListener('click', () => saveUser(true));
             document.getElementById('saveBtn').addEventListener('click', () => saveUser(false));
             document.getElementById('quickSaveBtn').addEventListener('click', quickSave);
-            
+
             // Auto-save every 30 seconds
             setInterval(autoSave, 30000);
             
@@ -10208,14 +10295,19 @@ async function showPaymentOptionsDialog(course) {
                             .collection('financialRecords').doc(courseId);
                         
                         const recordData = {
-                            courseId: courseId,
-                            courseType: transactions[0].relatedTo.type,
-                            courseTitle: transactions[0].relatedTo.title,
-                            userId: currentUserId,
-                            transactions: transactions,
-                            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                        };
+    courseId: courseId,
+    courseType: transactions[0].relatedTo.type,
+    courseTitle: transactions[0].relatedTo.title,
+    userId: currentUserId,
+    transactions: transactions,
+    pricing: {
+        originalPrice: transactions[0].originalAmount || transactions[0].amount || 0,
+        finalPrice: transactions.reduce((sum, t) => sum + (t.amount || 0), 0),
+        currency: 'EGP'
+    },
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+};
                         
                         // تحديث الملخص
                         updateFinancialRecordSummary(recordData);
