@@ -306,206 +306,210 @@
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
 <script>
-    // Firebase Configuration
-    const firebaseConfig = {
-        apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
-        authDomain: "fouad-perspective.firebaseapp.com",
-        projectId: "fouad-perspective",
-        storageBucket: "fouad-perspective.firebasestorage.app",
-        messagingSenderId: "1068763865336",
-        appId: "1:1068763865336:web:b791abcd22d536aedd5b0d",
-        measurementId: "G-RY1FYVB3Q9"
-    };
+// Firebase Configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+    authDomain: "fouad-perspective.firebaseapp.com",
+    projectId: "fouad-perspective",
+    storageBucket: "fouad-perspective.firebasestorage.app",
+    messagingSenderId: "1068763865336",
+    appId: "1:1068763865336:web:b791abcd22d536aedd5b0d",
+    measurementId: "G-RY1FYVB3Q9"
+};
 
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const db = firebase.firestore();
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
 
-    // معالج النموذج
-    document.getElementById('loginForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
+// معالج النموذج
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const loginBtn = document.getElementById('loginBtn');
+    const originalText = loginBtn.innerHTML;
+    
+    loginBtn.innerHTML = '<span class="loading"></span> جاري التحقق...';
+    loginBtn.disabled = true;
+
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    try {
+        console.log('🔍 محاولة تسجيل الدخول...');
         
-        const loginBtn = document.getElementById('loginBtn');
-        const originalText = loginBtn.innerHTML;
+        // البحث عن المستخدم في قاعدة البيانات أولاً
+        const usersQuery = await db.collection('users')
+            .where('email', '==', email)
+            .limit(1)
+            .get();
         
-        loginBtn.innerHTML = '<span class="loading"></span> جاري التحقق...';
-        loginBtn.disabled = true;
-
-        const email = document.getElementById('email').value.trim();
-        const password = document.getElementById('password').value;
-
+        if (usersQuery.empty) {
+            throw new Error('البريد الإلكتروني غير مسجل');
+        }
+        
+        const userDoc = usersQuery.docs[0];
+        const userData = userDoc.data();
+        const userId = userDoc.id;
+        
+        console.log('✅ تم العثور على المستخدم:', userId);
+        
+        // التحقق من حالة الحساب
+        if (userData.status === 'inactive' || userData.isActive === false) {
+            throw new Error('حسابك غير نشط. يرجى التواصل مع الإدارة');
+        }
+        
+        // محاولة تسجيل الدخول
         try {
-            // محاولة تسجيل الدخول
             const userCredential = await auth.signInWithEmailAndPassword(email, password);
             console.log('✅ تسجيل دخول ناجح');
-            
-            // البحث عن المستخدم في قاعدة البيانات بالإيميل
-            const usersQuery = await db.collection('users')
-                .where('email', '==', email)
-                .limit(1)
-                .get();
-            
-            if (!usersQuery.empty) {
-                const userData = usersQuery.docs[0].data();
-                const userId = usersQuery.docs[0].id;
-                
-                // التحقق من حالة الحساب
-                if (userData.status === 'inactive' || userData.isActive === false) {
-                    await auth.signOut();
-                    throw new Error('حسابك غير نشط. يرجى التواصل مع الإدارة');
-                }
-                
-                // حفظ معرف المستخدم
-                localStorage.setItem('userId', userId);
-                localStorage.setItem('userEmail', email);
-                
-                // التحقق من نوع المستخدم
-                if (userData.email === 'admin@fouad-academy.com' || userData.role === 'admin') {
-                    window.location.href = './admin/dashboard.html';
+        } catch (authError) {
+            // إذا فشل تسجيل الدخول، نتحقق من كلمة المرور المحفوظة
+            if (userData.tempPassword) {
+                const savedPassword = atob(userData.tempPassword);
+                if (password === savedPassword) {
+                    console.log('✅ تم التحقق من كلمة المرور المحفوظة');
+                    
+                    // إنشاء/تحديث حساب Auth
+                    try {
+                        await auth.createUserWithEmailAndPassword(email, password);
+                    } catch (createError) {
+                        if (createError.code === 'auth/email-already-in-use') {
+                            // المستخدم موجود، نحاول تسجيل الدخول مرة أخرى
+                            try {
+                                await auth.signInWithEmailAndPassword(email, password);
+                            } catch (retryError) {
+                                console.error('❌ فشل تسجيل الدخول:', retryError);
+                                throw new Error('كلمة المرور غير صحيحة');
+                            }
+                        } else {
+                            throw createError;
+                        }
+                    }
                 } else {
-                    window.location.href = './dashboard.html';
+                    throw new Error('كلمة المرور غير صحيحة');
                 }
             } else {
-                // المستخدم موجود في Auth لكن ليس في قاعدة البيانات
-                console.warn('⚠️ المستخدم غير موجود في قاعدة البيانات');
-                
-                // إنشاء ملف أساسي
-                await createBasicUserProfile(userCredential.user);
-                
-                window.location.href = './dashboard.html';
+                throw authError;
             }
-            
+        }
+        
+        // حفظ معلومات المستخدم
+        localStorage.setItem('userId', userId);
+        localStorage.setItem('userEmail', email);
+        localStorage.setItem('userName', userData.name || 'مستخدم');
+        
+        // التوجيه حسب نوع المستخدم
+        if (email === 'admin@fouad-academy.com' || userData.role === 'admin') {
+            console.log('🔐 توجيه للوحة الإدارة');
+            window.location.href = './admin/dashboard.html';
+        } else {
+            console.log('👤 توجيه للوحة المستخدم');
+            window.location.href = './dashboard.html';
+        }
+        
+    } catch (error) {
+        console.error('❌ خطأ في تسجيل الدخول:', error);
+        
+        loginBtn.innerHTML = originalText;
+        loginBtn.disabled = false;
+        
+        // رسائل الخطأ
+        let errorMessage = 'حدث خطأ في تسجيل الدخول';
+        
+        if (error.message) {
+            errorMessage = error.message;
+        } else if (error.code === 'auth/user-not-found') {
+            errorMessage = 'البريد الإلكتروني غير مسجل';
+        } else if (error.code === 'auth/wrong-password') {
+            errorMessage = 'كلمة المرور غير صحيحة';
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = 'البريد الإلكتروني غير صالح';
+        } else if (error.code === 'auth/too-many-requests') {
+            errorMessage = 'تم تجاوز عدد المحاولات. حاول لاحقاً';
+        } else if (error.code === 'auth/invalid-login-credentials' || 
+                   error.code === 'auth/invalid-credential') {
+            errorMessage = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
+        }
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: errorMessage,
+            confirmButtonColor: '#f4c430',
+            confirmButtonText: 'موافق'
+        });
+    }
+});
+
+// نسيان كلمة المرور
+async function forgotPassword() {
+    const { value: email } = await Swal.fire({
+        title: 'استعادة كلمة المرور',
+        input: 'email',
+        inputLabel: 'أدخل بريدك الإلكتروني',
+        inputPlaceholder: 'example@email.com',
+        showCancelButton: true,
+        confirmButtonText: 'إرسال',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#f4c430',
+        inputValidator: (value) => {
+            if (!value) {
+                return 'يرجى إدخال البريد الإلكتروني';
+            }
+        }
+    });
+
+    if (email) {
+        try {
+            await auth.sendPasswordResetEmail(email);
+            Swal.fire({
+                icon: 'success',
+                title: 'تم الإرسال!',
+                text: 'تم إرسال رابط استعادة كلمة المرور لبريدك الإلكتروني',
+                confirmButtonColor: '#f4c430'
+            });
         } catch (error) {
-            console.error('❌ خطأ في تسجيل الدخول:', error);
+            console.error('خطأ في إرسال رابط الاستعادة:', error);
             
-            loginBtn.innerHTML = originalText;
-            loginBtn.disabled = false;
-            
-            // رسائل الخطأ
-            let errorMessage = 'حدث خطأ في تسجيل الدخول';
-            
+            let errorMsg = 'حدث خطأ في إرسال رابط الاستعادة';
             if (error.code === 'auth/user-not-found') {
-                errorMessage = 'البريد الإلكتروني غير مسجل';
-            } else if (error.code === 'auth/wrong-password') {
-                errorMessage = 'كلمة المرور غير صحيحة';
-            } else if (error.code === 'auth/invalid-email') {
-                errorMessage = 'البريد الإلكتروني غير صالح';
-            } else if (error.code === 'auth/too-many-requests') {
-                errorMessage = 'تم تجاوز عدد المحاولات. حاول لاحقاً';
-            } else if (error.code === 'auth/invalid-login-credentials' || error.code === 'auth/invalid-credential') {
-                errorMessage = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
-            } else if (error.message) {
-                errorMessage = error.message;
+                errorMsg = 'البريد الإلكتروني غير مسجل';
             }
             
             Swal.fire({
                 icon: 'error',
                 title: 'خطأ',
-                text: errorMessage,
-                confirmButtonColor: '#f4c430',
-                confirmButtonText: 'موافق'
+                text: errorMsg,
+                confirmButtonColor: '#f4c430'
             });
         }
-    });
-
-    // إنشاء ملف مستخدم أساسي
-    async function createBasicUserProfile(firebaseUser) {
-        try {
-            // إنشاء معرف فريد للمستخدم
-            const userId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            
-            const basicUserData = {
-                id: userId,
-                authId: firebaseUser.uid,
-                name: firebaseUser.displayName || 'مستخدم جديد',
-                email: firebaseUser.email,
-                
-                accountType: 'free',
-                isActive: true,
-                status: 'active',
-                
-                role: 'student',
-                permissions: ['view_courses'],
-                
-                language: 'ar',
-                
-                enrollments: [],
-                progress: {},
-                completedCourses: [],
-                certificates: [],
-                totalWatchTime: 0,
-                
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                activatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            await db.collection('users').doc(userId).set(basicUserData);
-            
-            // حفظ معرف المستخدم
-            localStorage.setItem('userId', userId);
-            localStorage.setItem('userEmail', firebaseUser.email);
-            
-            console.log('✅ تم إنشاء ملف المستخدم الأساسي');
-
-        } catch (error) {
-            console.error('❌ خطأ في إنشاء الملف الأساسي:', error);
-        }
     }
+}
 
-    // نسيان كلمة المرور
-    async function forgotPassword() {
-        const { value: email } = await Swal.fire({
-            title: 'استعادة كلمة المرور',
-            input: 'email',
-            inputLabel: 'أدخل بريدك الإلكتروني',
-            inputPlaceholder: 'example@email.com',
-            showCancelButton: true,
-            confirmButtonText: 'إرسال',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#f4c430',
-            inputValidator: (value) => {
-                if (!value) {
-                    return 'يرجى إدخال البريد الإلكتروني';
-                }
-            }
-        });
+// عرض تلميح للمستخدمين الجدد
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('new') === 'true') {
+    document.getElementById('newUserAlert').style.display = 'block';
+}
 
-        if (email) {
-            try {
-                await auth.sendPasswordResetEmail(email);
-                Swal.fire({
-                    icon: 'success',
-                    title: 'تم الإرسال!',
-                    text: 'تم إرسال رابط استعادة كلمة المرور لبريدك الإلكتروني',
-                    confirmButtonColor: '#f4c430'
-                });
-            } catch (error) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'خطأ',
-                    text: 'حدث خطأ في إرسال رابط الاستعادة',
-                    confirmButtonColor: '#f4c430'
-                });
-            }
-        }
+// التحقق من حالة تسجيل الدخول
+auth.onAuthStateChanged((user) => {
+    if (user) {
+        console.log('🔐 المستخدم مسجل دخول:', user.email);
+    } else {
+        console.log('🚪 لا يوجد مستخدم مسجل دخول');
     }
+});
 
-    // عرض تلميح للمستخدمين الجدد
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('new') === 'true') {
-        document.getElementById('newUserAlert').style.display = 'block';
-    }
+// معالج الأخطاء العامة
+window.addEventListener('error', function(e) {
+    console.error('خطأ في الصفحة:', e.error);
+});
 
-    // معالج الأخطاء العامة
-    window.addEventListener('error', function(e) {
-        console.error('خطأ في الصفحة:', e.error);
-    });
-
-    window.addEventListener('unhandledrejection', function(e) {
-        console.error('خطأ غير معالج:', e.reason);
-    });
+window.addEventListener('unhandledrejection', function(e) {
+    console.error('خطأ غير معالج:', e.reason);
+});
 </script>
 </body>
 </html>
