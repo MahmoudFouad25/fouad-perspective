@@ -6434,7 +6434,7 @@ function sortCourses(sortBy) {
     items.forEach(item => container.appendChild(item));
 }
 
-async function assignCourse(course, settings = {}) {
+function assignCourse(course, settings = {}) {
     // التحقق من عدم وجود الدورة مسبقاً
     if (formData.courses.some(c => c.id === course.id)) {
         showWarning('هذه الدورة/المسار مضاف بالفعل');
@@ -6459,16 +6459,12 @@ async function assignCourse(course, settings = {}) {
     renderAssignedCourses();
     updateCounts();
     
-    // 🔥 الإصلاح المطلوب: انتظار النتيجة
+    // **الجزء المهم: إذا كانت دورة مدفوعة، اعرض خيارات الدفع**
     if (courseData.price > 0 && !courseData.isFree) {
-        try {
-            const paymentOptions = await showPaymentOptionsDialog(course);
-            if (paymentOptions) {
-                await createPaymentTransactions(course, paymentOptions);
-            }
-        } catch (error) {
-            console.error('خطأ في عرض خيارات الدفع:', error);
-        }
+        // تأخير بسيط عشان الـ UI يتحدث الأول
+        setTimeout(() => {
+            showPaymentOptionsDialog(course);
+        }, 300);
     }
 }
 
@@ -7590,159 +7586,181 @@ function initializeDragAndDrop() {
 
         // ==================== دالة showPaymentOptionsDialog المطورة ====================
         async function showPaymentOptionsDialog(course) {
-            const { value: paymentOptions } = await Swal.fire({
-                title: 'إعداد طريقة الدفع',
-                html: `
-                    <div style="text-align: right; direction: rtl;">
-                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                            <h4 style="margin: 0 0 10px 0; color: #333;">${course.title}</h4>
-                            <p style="margin: 0; font-size: 20px; font-weight: bold;">
-                                السعر الأصلي: <span style="color: #f4c430;">${course.price} جنيه</span>
-                            </p>
-                        </div>
-                        
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                                <i class="fas fa-credit-card"></i> نوع المعاملة:
-                            </label>
-                            <select id="swal-payment-type" class="swal2-input" style="width: 100%; padding: 10px;">
-                                <option value="payment">💰 دفعة مالية</option>
-                                <option value="grant">🎓 منحة دراسية</option>
-                                <option value="gift">🎁 هدية/مكافأة</option>
-                                <option value="group-offer">👥 عرض ضمن مجموعة</option>
-                                <option value="recommendation">⭐ توصية خاصة</option>
-                                <option value="none">🆓 مجاني بالكامل</option>
-                            </select>
-                        </div>
-
-                        <div id="swal-payment-plan-section" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                                <i class="fas fa-calendar-alt"></i> خطة الدفع:
-                            </label>
-                            <select id="swal-payment-plan" class="swal2-input" style="width: 100%; padding: 10px;">
-                                <option value="full">دفعة واحدة كاملة</option>
-                                <option value="installments">تقسيط على دفعات</option>
-                                <option value="partial">دفعة جزئية</option>
-                            </select>
-                        </div>
-                        
-                        <!-- قسم الأقساط -->
-                        <div id="swal-installment-details" style="display:none; background: #e8f4f8; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                            <h5 style="margin: 0 0 15px 0; color: #2196f3;">
-                                <i class="fas fa-calendar-alt"></i> تفاصيل الأقساط
-                            </h5>
-                            
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px;">عدد الأقساط:</label>
-                                <input type="number" id="swal-installment-count" class="swal2-input" 
-                                       value="3" min="2" max="12" style="width: 100%;"
-                                       onchange="updateInstallmentPreview()">
-                            </div>
-                            
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px;">
-                                    قيمة الدفعة الأولى (اختياري):
-                                </label>
-                                <input type="number" id="swal-first-payment" class="swal2-input" 
-                                       placeholder="اتركه فارغ للتقسيم المتساوي" style="width: 100%;"
-                                       onchange="updateInstallmentPreview()">
-                            </div>
-
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px;">
-                                    حالة القسط الأول:
-                                </label>
-                                <select id="swal-first-status" class="swal2-input" style="width: 100%;">
-                                    <option value="pending">معلق (لم يدفع بعد)</option>
-                                    <option value="completed">مكتمل (تم الدفع)</option>
-                                </select>
-                            </div>
-                            
-                            <div id="installment-preview" style="background: white; padding: 15px; border-radius: 5px; margin-top: 15px;">
-                                <!-- سيتم ملؤه بواسطة JavaScript -->
-                            </div>
-                        </div>
-                        
-                        <!-- قسم الدفعة الجزئية -->
-                        <div id="swal-partial-details" style="display:none; background: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                            <h5 style="margin: 0 0 15px 0; color: #856404;">
-                                <i class="fas fa-hand-holding-usd"></i> الدفعة الجزئية
-                            </h5>
-                            <div>
-                                <label style="display: block; margin-bottom: 5px;">المبلغ المدفوع:</label>
-                                <input type="number" id="swal-partial-amount" class="swal2-input" 
-                                       placeholder="أدخل المبلغ" style="width: 100%;"
-                                       onchange="updatePartialPreview()">
-                            </div>
-                            <div style="margin-bottom: 10px;">
-                                <label style="display: block; margin-bottom: 5px;">حالة الدفعة:</label>
-                                <select id="swal-partial-status" class="swal2-input" style="width: 100%;">
-                                    <option value="pending">معلقة</option>
-                                    <option value="completed">مكتملة</option>
-                                </select>
-                            </div>
-                            <div id="partial-preview" style="margin-top: 10px; color: #856404;">
-                                <!-- سيتم ملؤه بواسطة JavaScript -->
-                            </div>
-                        </div>
-
-                        <!-- قسم طريقة الدفع -->
-                        <div id="swal-payment-method-section" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                                <i class="fas fa-money-bill"></i> طريقة الدفع:
-                            </label>
-                            <select id="swal-payment-method" class="swal2-input" style="width: 100%; padding: 10px;">
-                                <option value="">اختر طريقة الدفع</option>
-                                <option value="vodafone">📱 فودافون كاش</option>
-                                <option value="instapay">💳 InstaPay</option>
-                                <option value="bank">🏦 تحويل بنكي</option>
-                                <option value="western">💸 ويسترن يونيون</option>
-                                <option value="cash">💵 نقدي</option>
-                                <option value="other">📝 أخرى</option>
-                            </select>
-                        </div>
-                        
-                        <!-- قسم الخصم -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                                <i class="fas fa-percentage"></i> نسبة الخصم:
-                            </label>
-                            <div style="display: flex; gap: 10px; align-items: center;">
-                                <input type="range" id="swal-discount-range" min="0" max="100" value="0" 
-                                       style="flex: 1;" oninput="updateDiscountValue(this.value)">
-                                <input type="number" id="swal-discount" class="swal2-input" 
-                                       placeholder="0" min="0" max="100" value="0" 
-                                       style="width: 80px;" oninput="updateDiscountRange(this.value)">
-                                <span>%</span>
-                            </div>
-                        </div>
-                        
-                        <!-- معاينة السعر النهائي -->
-                        <div style="background: #d4edda; padding: 20px; border-radius: 8px; text-align: center;">
-                            <h4 style="margin: 0 0 10px 0; color: #155724;">السعر النهائي</h4>
-                            <p style="margin: 0; font-size: 32px; font-weight: bold; color: #155724;">
-                                <span id="swal-final-price">${course.price}</span> جنيه
-                            </p>
-                            <p id="swal-discount-amount" style="margin: 5px 0 0 0; color: #721c24; display: none;">
-                                (خصم: <span></span> جنيه)
-                            </p>
-                        </div>
+    const { value: paymentOptions } = await Swal.fire({
+        title: `<i class="fas fa-money-bill-wave"></i> إعداد طريقة الدفع`,
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div class="payment-dialog-header">
+                    <h4>${course.title}</h4>
+                    <p>السعر الأصلي: <strong>${course.price} جنيه</strong></p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="swal-payment-type">نوع الدفع</label>
+                    <select id="swal-payment-type" class="swal2-input" onchange="updatePaymentDialogOptions()">
+                        <option value="full">دفعة واحدة كاملة</option>
+                        <option value="installments">تقسيط</option>
+                        <option value="partial">دفعة جزئية</option>
+                        <option value="grant">منحة دراسية</option>
+                        <option value="none">بدون دفع (تجريبي/مجاني)</option>
+                    </select>
+                </div>
+                
+                <div id="installment-options" style="display: none;">
+                    <div class="form-group">
+                        <label for="swal-installment-count">عدد الأقساط</label>
+                        <input type="number" id="swal-installment-count" class="swal2-input" 
+                               min="2" max="12" value="3" onchange="calculateInstallmentAmount()">
                     </div>
-                `,
-                confirmButtonText: '✅ تأكيد وإنشاء المعاملات',
-                cancelButtonText: '❌ إلغاء',
-                showCancelButton: true,
-                confirmButtonColor: '#28a745',
-                width: '700px',
-                didOpen: () => {
-                    // ربط الأحداث
-                    const paymentType = document.getElementById('swal-payment-type');
-                    const paymentPlan = document.getElementById('swal-payment-plan');
-                    const installmentDetails = document.getElementById('swal-installment-details');
-                    const partialDetails = document.getElementById('swal-partial-details');
-                    const paymentPlanSection = document.getElementById('swal-payment-plan-section');
-                    const paymentMethodSection = document.getElementById('swal-payment-method-section');
-                    
+                    <div class="form-group">
+                        <label for="swal-first-payment">الدفعة الأولى (%)</label>
+                        <input type="number" id="swal-first-payment" class="swal2-input" 
+                               min="0" max="100" value="30" onchange="calculateInstallmentAmount()">
+                    </div>
+                    <div id="installment-preview" class="alert alert-info mt-3"></div>
+                </div>
+                
+                <div id="discount-section" class="form-group">
+                    <label for="swal-discount">نسبة الخصم (%)</label>
+                    <input type="number" id="swal-discount" class="swal2-input" 
+                           min="0" max="100" value="0" onchange="calculateFinalPrice()">
+                </div>
+                
+                <div id="grant-options" style="display: none;">
+                    <div class="form-group">
+                        <label for="swal-grant-type">نوع المنحة</label>
+                        <select id="swal-grant-type" class="swal2-input">
+                            <option value="full">منحة كاملة 100%</option>
+                            <option value="partial">منحة جزئية</option>
+                            <option value="excellence">منحة تفوق</option>
+                            <option value="social">منحة اجتماعية</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="swal-grant-percentage">نسبة المنحة (%)</label>
+                        <input type="number" id="swal-grant-percentage" class="swal2-input" 
+                               min="0" max="100" value="100">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="swal-notes">ملاحظات</label>
+                    <textarea id="swal-notes" class="swal2-textarea" 
+                              placeholder="ملاحظات إضافية..."></textarea>
+                </div>
+                
+                <div class="payment-summary mt-4 p-3" style="background: #f8f9fa; border-radius: 8px;">
+                    <h5>ملخص المعاملة</h5>
+                    <div id="payment-summary-content">
+                        <p>السعر النهائي: <strong id="final-price">${course.price} جنيه</strong></p>
+                    </div>
+                </div>
+            </div>
+        `,
+        width: '600px',
+        showCancelButton: true,
+        confirmButtonText: 'إنشاء المعاملات',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: 'var(--primary)',
+        didOpen: () => {
+            // تهيئة القيم
+            window.currentCoursePrice = course.price;
+            updatePaymentDialogOptions();
+            calculateFinalPrice();
+        },
+        preConfirm: () => {
+            const paymentType = document.getElementById('swal-payment-type').value;
+            const discount = parseFloat(document.getElementById('swal-discount').value) || 0;
+            const notes = document.getElementById('swal-notes').value;
+            
+            let paymentData = {
+                paymentType,
+                discount,
+                notes,
+                originalPrice: course.price
+            };
+            
+            if (paymentType === 'installments') {
+                paymentData.installmentCount = parseInt(document.getElementById('swal-installment-count').value);
+                paymentData.firstPaymentPercentage = parseFloat(document.getElementById('swal-first-payment').value);
+            } else if (paymentType === 'grant') {
+                paymentData.grantType = document.getElementById('swal-grant-type').value;
+                paymentData.grantPercentage = parseFloat(document.getElementById('swal-grant-percentage').value);
+            }
+            
+            // حساب السعر النهائي
+            let finalPrice = course.price;
+            if (paymentType === 'grant') {
+                finalPrice = course.price * (1 - paymentData.grantPercentage / 100);
+            } else if (discount > 0) {
+                finalPrice = course.price * (1 - discount / 100);
+            }
+            
+            paymentData.finalPrice = finalPrice;
+            
+            return paymentData;
+        }
+    });
+    
+    if (paymentOptions) {
+        await createPaymentTransactions(course, paymentOptions);
+    }
+}
+
+// دوال مساعدة للنافذة
+window.updatePaymentDialogOptions = function() {
+    const paymentType = document.getElementById('swal-payment-type').value;
+    
+    document.getElementById('installment-options').style.display = 
+        paymentType === 'installments' ? 'block' : 'none';
+    
+    document.getElementById('grant-options').style.display = 
+        paymentType === 'grant' ? 'block' : 'none';
+    
+    document.getElementById('discount-section').style.display = 
+        paymentType === 'grant' || paymentType === 'none' ? 'none' : 'block';
+    
+    calculateInstallmentAmount();
+    calculateFinalPrice();
+};
+
+window.calculateInstallmentAmount = function() {
+    const paymentType = document.getElementById('swal-payment-type').value;
+    if (paymentType !== 'installments') return;
+    
+    const installmentCount = parseInt(document.getElementById('swal-installment-count').value);
+    const firstPaymentPercentage = parseFloat(document.getElementById('swal-first-payment').value);
+    const discount = parseFloat(document.getElementById('swal-discount').value) || 0;
+    
+    const finalPrice = window.currentCoursePrice * (1 - discount / 100);
+    const firstPayment = finalPrice * (firstPaymentPercentage / 100);
+    const remainingAmount = finalPrice - firstPayment;
+    const monthlyPayment = remainingAmount / (installmentCount - 1);
+    
+    document.getElementById('installment-preview').innerHTML = `
+        <strong>تفاصيل الأقساط:</strong><br>
+        الدفعة الأولى: ${firstPayment.toFixed(2)} جنيه<br>
+        باقي الأقساط: ${(installmentCount - 1)} قسط × ${monthlyPayment.toFixed(2)} جنيه
+    `;
+};
+
+window.calculateFinalPrice = function() {
+    const paymentType = document.getElementById('swal-payment-type').value;
+    const discount = parseFloat(document.getElementById('swal-discount').value) || 0;
+    
+    let finalPrice = window.currentCoursePrice;
+    
+    if (paymentType === 'grant') {
+        const grantPercentage = parseFloat(document.getElementById('swal-grant-percentage')?.value) || 100;
+        finalPrice = window.currentCoursePrice * (1 - grantPercentage / 100);
+    } else if (paymentType === 'none') {
+        finalPrice = 0;
+    } else {
+        finalPrice = window.currentCoursePrice * (1 - discount / 100);
+    }
+    
+    document.getElementById('final-price').textContent = `${finalPrice.toFixed(2)} جنيه`;
+};
                     // دالة محلية لتحديث السعر
                     window.updatePricePreview = function() {
                         const discount = parseFloat(document.getElementById('swal-discount').value) || 0;
@@ -7905,53 +7923,63 @@ function initializeDragAndDrop() {
             return paymentOptions;
         }
 // ==================== دالة createPaymentTransactions بالهيكل الجديد ====================
-     async function createPaymentTransactions(course, paymentOptions) {
+async function createPaymentTransactions(course, paymentOptions) {
     if (!paymentOptions) return;
     
     try {
         showLoading('جاري إنشاء المعاملات المالية...');
         
-        console.log('🔥 إنشاء معاملات للدورة:', course.title, paymentOptions);
+        console.log('إنشاء معاملات للدورة:', course.title, paymentOptions);
         
-        // إنشاء المعاملات حسب نوع الدفع
-        const transactions = [];
         const baseAmount = paymentOptions.finalPrice;
+        const today = new Date();
         
         switch (paymentOptions.paymentType) {
             case 'full':
-                const fullTransaction = TransactionStructure.createTransaction({
+                // معاملة واحدة كاملة
+                const fullPayment = {
+                    id: `temp_${Date.now()}_1`,
                     userId: currentUserId || 'temp',
-                    type: paymentOptions.transactionType || 'payment',
+                    type: 'payment',
                     amount: baseAmount,
-                    dueDate: new Date().toISOString(),
-                    paymentMethod: paymentOptions.paymentMethod,
-                    status: paymentOptions.transactionType === 'grant' ? 'completed' : 'pending',
+                    createdAt: today.toISOString(),
+                    dueDate: today.toISOString(),
+                    status: 'pending',
+                    paymentMethod: 'pending',
+                    reference: `${currentUserId || 'NEW'}-${course.id}-FULL`,
+                    notes: paymentOptions.notes || '',
+                    originalAmount: paymentOptions.originalPrice,
+                    discount: paymentOptions.discount,
                     relatedTo: {
                         type: course.type,
                         id: course.id,
                         title: course.title
-                    },
-                    notes: `دفعة كاملة للدورة: ${course.title}`,
-                    discount: paymentOptions.discount,
-                    originalAmount: course.price
-                });
-                transactions.push(fullTransaction);
+                    }
+                };
+                userTransactions.push(fullPayment);
                 break;
                 
             case 'installments':
-                const installmentCount = paymentOptions.installmentCount || 3;
-                const firstPayment = paymentOptions.firstPayment || (baseAmount / installmentCount);
-                const remainingAmount = baseAmount - firstPayment;
-                const regularInstallment = installmentCount > 1 ? remainingAmount / (installmentCount - 1) : 0;
+                // أقساط متعددة
+                const installmentCount = paymentOptions.installmentCount;
+                const firstPaymentAmount = baseAmount * (paymentOptions.firstPaymentPercentage / 100);
+                const remainingAmount = baseAmount - firstPaymentAmount;
+                const monthlyAmount = remainingAmount / (installmentCount - 1);
                 
-                // القسط الأول
-                const firstInstallment = TransactionStructure.createTransaction({
+                // الدفعة الأولى
+                userTransactions.push({
+                    id: `temp_${Date.now()}_1`,
                     userId: currentUserId || 'temp',
                     type: 'payment',
-                    amount: firstPayment,
-                    dueDate: new Date().toISOString(),
-                    paymentMethod: paymentOptions.paymentMethod,
-                    status: paymentOptions.firstStatus || 'pending',
+                    amount: firstPaymentAmount,
+                    createdAt: today.toISOString(),
+                    dueDate: today.toISOString(),
+                    status: 'pending',
+                    paymentMethod: 'pending',
+                    reference: `${currentUserId || 'NEW'}-${course.id}-INST-1`,
+                    notes: `الدفعة الأولى (${paymentOptions.firstPaymentPercentage}%)`,
+                    originalAmount: paymentOptions.originalPrice,
+                    discount: paymentOptions.discount,
                     relatedTo: {
                         type: course.type,
                         id: course.id,
@@ -7959,27 +7987,28 @@ function initializeDragAndDrop() {
                     },
                     installmentInfo: {
                         number: 1,
-                        total: installmentCount,
-                        frequency: 'monthly'
-                    },
-                    notes: `القسط الأول (1/${installmentCount}) للدورة: ${course.title}`,
-                    discount: paymentOptions.discount,
-                    originalAmount: course.price
+                        total: installmentCount
+                    }
                 });
-                transactions.push(firstInstallment);
                 
                 // باقي الأقساط
                 for (let i = 2; i <= installmentCount; i++) {
-                    const dueDate = new Date();
+                    const dueDate = new Date(today);
                     dueDate.setMonth(dueDate.getMonth() + (i - 1));
                     
-                    const installment = TransactionStructure.createTransaction({
+                    userTransactions.push({
+                        id: `temp_${Date.now()}_${i}`,
                         userId: currentUserId || 'temp',
                         type: 'payment',
-                        amount: regularInstallment,
+                        amount: monthlyAmount,
+                        createdAt: today.toISOString(),
                         dueDate: dueDate.toISOString(),
-                        paymentMethod: paymentOptions.paymentMethod,
                         status: 'pending',
+                        paymentMethod: 'pending',
+                        reference: `${currentUserId || 'NEW'}-${course.id}-INST-${i}`,
+                        notes: `قسط ${i} من ${installmentCount}`,
+                        originalAmount: paymentOptions.originalPrice,
+                        discount: paymentOptions.discount,
                         relatedTo: {
                             type: course.type,
                             id: course.id,
@@ -7987,111 +8016,85 @@ function initializeDragAndDrop() {
                         },
                         installmentInfo: {
                             number: i,
-                            total: installmentCount,
-                            frequency: 'monthly'
-                        },
-                        notes: `القسط ${i}/${installmentCount} للدورة: ${course.title}`,
-                        discount: paymentOptions.discount,
-                        originalAmount: course.price
+                            total: installmentCount
+                        }
                     });
-                    transactions.push(installment);
-                }
-                break;
-                
-            case 'partial':
-                const partialAmount = paymentOptions.partialAmount;
-                const remaining = baseAmount - partialAmount;
-                
-                // الدفعة الأولى
-                const partialTransaction = TransactionStructure.createTransaction({
-                    userId: currentUserId || 'temp',
-                    type: 'payment',
-                    amount: partialAmount,
-                    dueDate: new Date().toISOString(),
-                    paymentMethod: paymentOptions.paymentMethod,
-                    status: paymentOptions.partialStatus || 'pending',
-                    relatedTo: {
-                        type: course.type,
-                        id: course.id,
-                        title: course.title
-                    },
-                    notes: `دفعة جزئية للدورة: ${course.title}`,
-                    discount: paymentOptions.discount,
-                    originalAmount: course.price
-                });
-                transactions.push(partialTransaction);
-                
-                // المبلغ المتبقي
-                if (remaining > 0) {
-                    const remainingTransaction = TransactionStructure.createTransaction({
-                        userId: currentUserId || 'temp',
-                        type: 'payment',
-                        amount: remaining,
-                        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                        paymentMethod: 'pending',
-                        status: 'pending',
-                        relatedTo: {
-                            type: course.type,
-                            id: course.id,
-                            title: course.title
-                        },
-                        notes: `المبلغ المتبقي للدورة: ${course.title}`,
-                        discount: paymentOptions.discount,
-                        originalAmount: course.price
-                    });
-                    transactions.push(remainingTransaction);
                 }
                 break;
                 
             case 'grant':
-            case 'none':
-                const grantTransaction = TransactionStructure.createTransaction({
+                // منحة
+                const grantAmount = paymentOptions.originalPrice * (paymentOptions.grantPercentage / 100);
+                userTransactions.push({
+                    id: `temp_${Date.now()}_grant`,
                     userId: currentUserId || 'temp',
-                    type: paymentOptions.transactionType || 'grant',
-                    amount: baseAmount,
-                    dueDate: new Date().toISOString(),
-                    paymentMethod: 'grant',
+                    type: 'grant',
+                    amount: grantAmount,
+                    createdAt: today.toISOString(),
+                    dueDate: today.toISOString(),
                     status: 'completed',
+                    paymentMethod: 'grant',
+                    reference: `${currentUserId || 'NEW'}-${course.id}-GRANT`,
+                    notes: `منحة ${paymentOptions.grantType} بنسبة ${paymentOptions.grantPercentage}%`,
+                    originalAmount: paymentOptions.originalPrice,
+                    discount: paymentOptions.grantPercentage,
                     relatedTo: {
                         type: course.type,
                         id: course.id,
                         title: course.title
-                    },
-                    notes: `منحة دراسية كاملة للدورة: ${course.title}`,
-                    discount: 100,
-                    originalAmount: course.price
+                    }
                 });
-                transactions.push(grantTransaction);
+                
+                // إذا كانت منحة جزئية، أضف معاملة للباقي
+                if (paymentOptions.grantPercentage < 100) {
+                    const remainingAmount = paymentOptions.originalPrice * (1 - paymentOptions.grantPercentage / 100);
+                    userTransactions.push({
+                        id: `temp_${Date.now()}_remaining`,
+                        userId: currentUserId || 'temp',
+                        type: 'payment',
+                        amount: remainingAmount,
+                        createdAt: today.toISOString(),
+                        dueDate: today.toISOString(),
+                        status: 'pending',
+                        paymentMethod: 'pending',
+                        reference: `${currentUserId || 'NEW'}-${course.id}-REMAINING`,
+                        notes: 'المبلغ المتبقي بعد المنحة',
+                        originalAmount: paymentOptions.originalPrice,
+                        discount: 0,
+                        relatedTo: {
+                            type: course.type,
+                            id: course.id,
+                            title: course.title
+                        }
+                    });
+                }
+                break;
+                
+            case 'none':
+                // مجاني/تجريبي - لا معاملات
+                console.log('دورة مجانية/تجريبية - لا توجد معاملات');
                 break;
         }
         
-        // 🔥 إضافة المعاملات للمصفوفة العامة
-        transactions.forEach(transaction => {
-            userTransactions.push(transaction);
-        });
-        
-        console.log(`✅ تم إنشاء ${transactions.length} معاملة`);
-        console.log('📊 إجمالي المعاملات:', userTransactions.length);
-        
-        // 🔥 تحديث العرض فوراً
-        updateFinancialSummary();
-        updateTransactionsDisplay();
-        updateUpcomingPaymentsDisplay();
-        
-        // حفظ في Firebase إذا كان في وضع التعديل
-        if (editMode && currentUserId) {
-            try {
-                await saveUserTransactions();
-            } catch (saveError) {
-                console.error('خطأ في حفظ المعاملات:', saveError);
-            }
+        // تحديث العرض في تبويب المعاملات
+        if (document.getElementById('financialTab')) {
+            updateFinancialSummary();
+            updateTransactionsDisplay();
+            updateUpcomingPaymentsDisplay();
         }
         
         hideLoading();
-        showSuccess(`تم إنشاء ${transactions.length} معاملة مالية بنجاح`);
+        
+        const transactionCount = userTransactions.filter(t => 
+            t.relatedTo && t.relatedTo.id === course.id
+        ).length;
+        
+        if (transactionCount > 0) {
+            showSuccess(`تم إنشاء ${transactionCount} معاملة مالية للدورة "${course.title}"`);
+        }
         
     } catch (error) {
-        console.error('❌ خطأ في إنشاء المعاملات:', error);
+        console.error('خطأ في إنشاء المعاملات:', error);
         hideLoading();
         showError('حدث خطأ في إنشاء المعاملات المالية');
     }
