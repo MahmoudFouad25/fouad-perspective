@@ -328,12 +328,12 @@
             color: white;
         }
 
-        .status-expired {
-            background: rgba(255, 68, 68, 0.9);
+        .status-completed {
+            background: rgba(33, 150, 243, 0.9);
             color: white;
         }
 
-        .status-upcoming {
+        .status-pending {
             background: rgba(255, 152, 0, 0.9);
             color: white;
         }
@@ -429,16 +429,16 @@
             gap: 0.5rem;
         }
 
-        .payment-free {
+        .payment-active {
             color: var(--success);
         }
 
-        .payment-cash {
-            color: var(--primary);
+        .payment-pending {
+            color: var(--warning);
         }
 
-        .payment-installment {
-            color: var(--warning);
+        .payment-completed {
+            color: var(--info);
         }
 
         .course-notes {
@@ -623,15 +623,15 @@
                 النشطة
                 <span class="tab-badge" id="activeTabCount">0</span>
             </button>
-            <button class="tab-btn" onclick="filterContent('upcoming')">
-                <i class="fas fa-clock"></i>
-                قريباً
-                <span class="tab-badge" id="upcomingCount">0</span>
+            <button class="tab-btn" onclick="filterContent('completed')">
+                <i class="fas fa-check-circle"></i>
+                المكتملة
+                <span class="tab-badge" id="completedTabCount">0</span>
             </button>
-            <button class="tab-btn" onclick="filterContent('expired')">
-                <i class="fas fa-times-circle"></i>
-                منتهية
-                <span class="tab-badge" id="expiredCount">0</span>
+            <button class="tab-btn" onclick="filterContent('pending')">
+                <i class="fas fa-clock"></i>
+                المعلقة
+                <span class="tab-badge" id="pendingCount">0</span>
             </button>
         </div>
     </div>
@@ -648,8 +648,7 @@
                 <option value="recent">الأحدث أولاً</option>
                 <option value="name">الاسم أبجدياً</option>
                 <option value="progress">التقدم</option>
-                <option value="start-date">تاريخ البداية</option>
-                <option value="end-date">تاريخ النهاية</option>
+                <option value="payment">حالة الدفع</option>
             </select>
         </div>
     </div>
@@ -658,16 +657,16 @@
     <div class="content-container">
         <div class="courses-grid" id="coursesGrid">
             <!-- Loading State -->
-            <div class="loading-container">
+            <div class="loading-container" style="grid-column: 1 / -1;">
                 <div class="spinner"></div>
             </div>
         </div>
     </div>
 
     <!-- Firebase Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     
     <script>
         // Firebase Configuration
@@ -682,28 +681,25 @@
         };
 
         // Initialize Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-
+        firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
 
         let currentUser = null;
         let userData = null;
-        let enrollments = [];
-        let filteredEnrollments = [];
+        let userId = null;
+        let allCourses = [];
+        let filteredCourses = [];
         let currentFilter = 'all';
+
+        // استرجاع معرف المستخدم من localStorage
+        userId = localStorage.getItem('userId');
 
         // حماية الصفحة
         auth.onAuthStateChanged(async (user) => {
-            if (!user) {
+            if (!user || !userId) {
+                console.log('❌ لا يوجد مستخدم مسجل دخول');
                 window.location.href = './login.html';
-                return;
-            }
-
-            if (user.email === 'admin@fouad-academy.com') {
-                window.location.href = './admin/index.html';
                 return;
             }
 
@@ -715,12 +711,11 @@
         // تحميل بيانات المستخدم
         async function loadUserData() {
             try {
-                const userDoc = await db.collection('users').doc(currentUser.uid).get();
+                const userDoc = await db.collection('users').doc(userId).get();
                 
                 if (userDoc.exists) {
                     userData = userDoc.data();
-                    enrollments = userData.enrollments || [];
-                    processEnrollments();
+                    console.log('✅ تم تحميل بيانات المستخدم');
                 } else {
                     console.error('بيانات المستخدم غير موجودة');
                     window.location.href = './login.html';
@@ -731,59 +726,98 @@
             }
         }
 
-        // معالجة بيانات التسجيلات
-        function processEnrollments() {
-            const now = new Date();
-            
-            enrollments.forEach(enrollment => {
-                const startDate = new Date(enrollment.startDate);
-                const endDate = new Date(enrollment.endDate);
-                
-                // تحديد الحالة
-                if (now < startDate) {
-                    enrollment.status = 'upcoming';
-                    enrollment.statusText = 'قريباً';
-                    enrollment.statusClass = 'status-upcoming';
-                    enrollment.statusIcon = 'fa-clock';
-                } else if (now > endDate) {
-                    enrollment.status = 'expired';
-                    enrollment.statusText = 'منتهية';
-                    enrollment.statusClass = 'status-expired';
-                    enrollment.statusIcon = 'fa-times-circle';
-                } else {
-                    enrollment.status = 'active';
-                    enrollment.statusText = 'نشطة';
-                    enrollment.statusClass = 'status-active';
-                    enrollment.statusIcon = 'fa-play-circle';
-                }
-                
-                // حساب الأيام المتبقية أو المنقضية
-                if (enrollment.status === 'active') {
-                    enrollment.daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
-                } else if (enrollment.status === 'upcoming') {
-                    enrollment.daysUntilStart = Math.ceil((startDate - now) / (1000 * 60 * 60 * 24));
-                }
-                
-                // التقدم
-                enrollment.progress = userData.progress?.[enrollment.id] || 0;
-            });
-            
-            filteredEnrollments = [...enrollments];
-        }
-
         // تهيئة الصفحة
         async function initializePage() {
+            await loadAllCourses();
             updateStatistics();
             updateTabCounts();
             renderCourses();
             setupSearch();
         }
 
+        // تحميل جميع الدورات
+        async function loadAllCourses() {
+            try {
+                console.log('📚 تحميل الدورات...');
+                
+                // جلب السجلات المالية
+                const financialRecordsSnapshot = await db.collection('users')
+                    .doc(userId)
+                    .collection('financialRecords')
+                    .get();
+                
+                allCourses = [];
+                
+                for (const doc of financialRecordsSnapshot.docs) {
+                    const record = doc.data();
+                    const courseId = doc.id;
+                    
+                    // جلب بيانات الدورة من مجموعة courses
+                    let courseDetails = null;
+                    try {
+                        const courseDoc = await db.collection('courses').doc(courseId).get();
+                        if (courseDoc.exists) {
+                            courseDetails = courseDoc.data();
+                        }
+                    } catch (error) {
+                        console.error('خطأ في جلب بيانات الدورة:', courseId, error);
+                    }
+                    
+                    // تحديد الحالة
+                    let status;
+                    if (record.summary?.status === 'completed') {
+                        status = 'completed';
+                    } else if (record.summary?.status === 'active') {
+                        status = 'active';
+                    } else {
+                        status = 'pending';
+                    }
+                    
+                    // حساب التقدم
+                    const learningProgress = userData.progress?.[courseId]?.percentage || 0;
+                    const paymentProgress = record.summary?.totalAmount > 0 ? 
+                        (record.summary.paidAmount / record.summary.totalAmount * 100) : 0;
+                    
+                    allCourses.push({
+                        id: courseId,
+                        title: record.courseTitle || courseDetails?.title || 'دورة غير معنونة',
+                        type: record.courseType || 'course',
+                        status: status,
+                        createdAt: record.createdAt?.toDate() || new Date(),
+                        
+                        // معلومات الدفع
+                        paymentPlan: record.paymentPlan,
+                        pricing: record.pricing,
+                        summary: record.summary,
+                        nextPaymentDate: record.nextPaymentDate,
+                        
+                        // التقدم
+                        learningProgress: learningProgress,
+                        paymentProgress: paymentProgress,
+                        completedLessons: userData.progress?.[courseId]?.completedLessons || [],
+                        
+                        // معلومات إضافية من تفاصيل الدورة
+                        description: courseDetails?.description,
+                        instructor: courseDetails?.instructorName,
+                        duration: courseDetails?.duration,
+                        lessonsCount: courseDetails?.lessonsCount || 0
+                    });
+                }
+                
+                filteredCourses = [...allCourses];
+                console.log('✅ تم تحميل', allCourses.length, 'دورة');
+                
+            } catch (error) {
+                console.error('خطأ في تحميل الدورات:', error);
+                showError('حدث خطأ في تحميل الدورات');
+            }
+        }
+
         // تحديث الإحصائيات
         function updateStatistics() {
-            const total = enrollments.length;
-            const active = enrollments.filter(e => e.status === 'active').length;
-            const completed = userData.completedCourses?.length || 0;
+            const total = allCourses.length;
+            const active = allCourses.filter(c => c.status === 'active').length;
+            const completed = allCourses.filter(c => c.status === 'completed').length;
             
             document.getElementById('totalCount').textContent = total;
             document.getElementById('activeCount').textContent = active;
@@ -792,26 +826,26 @@
 
         // تحديث عدادات التبويبات
         function updateTabCounts() {
-            const all = enrollments.length;
-            const courses = enrollments.filter(e => e.type === 'course').length;
-            const bundles = enrollments.filter(e => e.type === 'bundle').length;
-            const active = enrollments.filter(e => e.status === 'active').length;
-            const upcoming = enrollments.filter(e => e.status === 'upcoming').length;
-            const expired = enrollments.filter(e => e.status === 'expired').length;
+            const all = allCourses.length;
+            const courses = allCourses.filter(c => c.type === 'course').length;
+            const bundles = allCourses.filter(c => c.type === 'bundle').length;
+            const active = allCourses.filter(c => c.status === 'active').length;
+            const completed = allCourses.filter(c => c.status === 'completed').length;
+            const pending = allCourses.filter(c => c.status === 'pending').length;
             
             document.getElementById('allCount').textContent = all;
             document.getElementById('coursesCount').textContent = courses;
             document.getElementById('bundlesCount').textContent = bundles;
             document.getElementById('activeTabCount').textContent = active;
-            document.getElementById('upcomingCount').textContent = upcoming;
-            document.getElementById('expiredCount').textContent = expired;
+            document.getElementById('completedTabCount').textContent = completed;
+            document.getElementById('pendingCount').textContent = pending;
         }
 
         // عرض الدورات والمسارات
         function renderCourses() {
             const coursesGrid = document.getElementById('coursesGrid');
             
-            if (filteredEnrollments.length === 0) {
+            if (filteredCourses.length === 0) {
                 let emptyMessage = 'لا توجد دورات أو مسارات';
                 let emptyIcon = 'fa-inbox';
                 
@@ -824,12 +858,12 @@
                 } else if (currentFilter === 'active') {
                     emptyMessage = 'لا توجد دورات نشطة حالياً';
                     emptyIcon = 'fa-play-circle';
-                } else if (currentFilter === 'upcoming') {
-                    emptyMessage = 'لا توجد دورات قادمة';
+                } else if (currentFilter === 'completed') {
+                    emptyMessage = 'لا توجد دورات مكتملة';
+                    emptyIcon = 'fa-check-circle';
+                } else if (currentFilter === 'pending') {
+                    emptyMessage = 'لا توجد دورات معلقة';
                     emptyIcon = 'fa-clock';
-                } else if (currentFilter === 'expired') {
-                    emptyMessage = 'لا توجد دورات منتهية';
-                    emptyIcon = 'fa-times-circle';
                 }
                 
                 coursesGrid.innerHTML = `
@@ -844,84 +878,103 @@
                 return;
             }
             
-            const coursesHtml = filteredEnrollments.map(enrollment => createCourseCard(enrollment)).join('');
+            const coursesHtml = filteredCourses.map(course => createCourseCard(course)).join('');
             coursesGrid.innerHTML = coursesHtml;
         }
 
         // إنشاء بطاقة الدورة/المسار
-        function createCourseCard(enrollment) {
+        function createCourseCard(course) {
             // معلومات الدفع
             let paymentInfo = '';
             let paymentClass = '';
-            if (enrollment.paymentType === 'free') {
-                paymentInfo = '<i class="fas fa-gift"></i> مجاني';
-                paymentClass = 'payment-free';
-            } else if (enrollment.paymentType === 'installment') {
-                paymentInfo = '<i class="fas fa-credit-card"></i> أقساط';
-                paymentClass = 'payment-installment';
+            
+            if (course.summary?.status === 'completed') {
+                paymentInfo = '<i class="fas fa-check-circle"></i> مكتمل الدفع';
+                paymentClass = 'payment-completed';
+            } else if (course.summary?.paidAmount > 0) {
+                const remaining = course.summary.remainingAmount || 0;
+                paymentInfo = `<i class="fas fa-coins"></i> متبقي: ${remaining} جنيه`;
+                paymentClass = 'payment-pending';
             } else {
-                paymentInfo = '<i class="fas fa-dollar-sign"></i> مدفوع';
-                paymentClass = 'payment-cash';
+                paymentInfo = '<i class="fas fa-hourglass-half"></i> في انتظار الدفع';
+                paymentClass = 'payment-pending';
             }
 
             // معلومات التوقيت
             let timeInfo = '';
-            if (enrollment.status === 'active' && enrollment.daysLeft) {
-                timeInfo = `<div style="color: var(--info); font-size: 0.8rem; margin-top: 0.5rem;">
-                    <i class="fas fa-hourglass-half"></i> ${enrollment.daysLeft} يوم متبقي
-                </div>`;
-            } else if (enrollment.status === 'upcoming' && enrollment.daysUntilStart) {
-                timeInfo = `<div style="color: var(--warning); font-size: 0.8rem; margin-top: 0.5rem;">
-                    <i class="fas fa-calendar-plus"></i> يبدأ خلال ${enrollment.daysUntilStart} يوم
-                </div>`;
+            if (course.nextPaymentDate) {
+                const nextDate = new Date(course.nextPaymentDate);
+                const daysUntil = Math.ceil((nextDate - new Date()) / (1000 * 60 * 60 * 24));
+                if (daysUntil > 0 && daysUntil <= 7) {
+                    timeInfo = `<div style="color: var(--warning); font-size: 0.8rem; margin-top: 0.5rem;">
+                        <i class="fas fa-bell"></i> الدفعة القادمة خلال ${daysUntil} يوم
+                    </div>`;
+                }
             }
 
             // تحديد إمكانية الدخول
-            const canAccess = enrollment.status === 'active';
-            const buttonText = enrollment.status === 'upcoming' ? 'قريباً' : 
-                              enrollment.status === 'expired' ? 'منتهية' : 
-                              enrollment.type === 'bundle' ? 'بدء المسار' : 'بدء الدورة';
+            const canAccess = course.status === 'active' || course.status === 'completed';
+            const buttonText = course.status === 'pending' ? 'معلق' : 
+                              course.type === 'bundle' ? 'بدء المسار' : 'بدء الدورة';
+
+            // حالة الدورة
+            let statusText, statusClass;
+            if (course.status === 'completed') {
+                statusText = 'مكتملة';
+                statusClass = 'status-completed';
+            } else if (course.status === 'active') {
+                statusText = 'نشطة';
+                statusClass = 'status-active';
+            } else {
+                statusText = 'معلقة';
+                statusClass = 'status-pending';
+            }
+
+            // اختيار التقدم المناسب
+            const progress = course.learningProgress > 0 ? course.learningProgress : course.paymentProgress;
 
             return `
                 <div class="course-card">
                     <div class="course-header">
                         <div class="default-course-image">
-                            <i class="fas fa-${enrollment.type === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
+                            <i class="fas fa-${course.type === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
                         </div>
                         
-                        <span class="course-type-badge ${enrollment.type === 'bundle' ? 'badge-bundle' : 'badge-course'}">
-                            <i class="fas fa-${enrollment.type === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
-                            ${enrollment.type === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
+                        <span class="course-type-badge ${course.type === 'bundle' ? 'badge-bundle' : 'badge-course'}">
+                            <i class="fas fa-${course.type === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
+                            ${course.type === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
                         </span>
                         
-                        <span class="course-status ${enrollment.statusClass}">
-                            <i class="fas ${enrollment.statusIcon}"></i> ${enrollment.statusText}
+                        <span class="course-status ${statusClass}">
+                            <i class="fas fa-${getStatusIcon(course.status)}"></i> ${statusText}
                         </span>
                         
                         <div class="course-progress-overlay">
                             <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${enrollment.progress}%"></div>
+                                <div class="progress-fill" style="width: ${progress}%"></div>
                             </div>
-                            <div class="progress-text">التقدم: ${Math.round(enrollment.progress)}%</div>
+                            <div class="progress-text">التقدم: ${Math.round(progress)}%</div>
                         </div>
                     </div>
                     
                     <div class="course-content">
-                        <h3 class="course-title">${enrollment.title}</h3>
+                        <h3 class="course-title">${course.title}</h3>
                         
                         <div class="course-dates">
                             <div class="date-item">
-                                <span><i class="fas fa-play"></i> البداية:</span>
-                                <span>${new Date(enrollment.startDate).toLocaleDateString('ar-SA')}</span>
+                                <span><i class="fas fa-play"></i> تاريخ البداية:</span>
+                                <span>${course.createdAt.toLocaleDateString('ar-SA')}</span>
                             </div>
-                            <div class="date-item">
-                                <span><i class="fas fa-stop"></i> النهاية:</span>
-                                <span>${new Date(enrollment.endDate).toLocaleDateString('ar-SA')}</span>
-                            </div>
-                            ${enrollment.duration ? `
+                            ${course.paymentPlan?.type === 'installments' ? `
                                 <div class="date-item">
-                                    <span><i class="fas fa-clock"></i> المدة:</span>
-                                    <span>${enrollment.duration} يوم</span>
+                                    <span><i class="fas fa-credit-card"></i> الأقساط:</span>
+                                    <span>${course.summary?.completedInstallments || 0} / ${course.paymentPlan.totalInstallments}</span>
+                                </div>
+                            ` : ''}
+                            ${course.instructor ? `
+                                <div class="date-item">
+                                    <span><i class="fas fa-user"></i> المدرب:</span>
+                                    <span>${course.instructor}</span>
                                 </div>
                             ` : ''}
                         </div>
@@ -930,9 +983,9 @@
                             ${paymentInfo}
                         </div>
                         
-                        ${enrollment.paymentNotes ? `
+                        ${course.description ? `
                             <div class="course-notes">
-                                <i class="fas fa-sticky-note"></i> ${enrollment.paymentNotes}
+                                <i class="fas fa-info-circle"></i> ${course.description.substring(0, 100)}...
                             </div>
                         ` : ''}
                         
@@ -941,11 +994,11 @@
                         <div class="course-actions">
                             <button class="btn btn-primary" 
                                     ${canAccess ? '' : 'disabled'} 
-                                    onclick="${canAccess ? `openContent('${enrollment.id}', '${enrollment.type}')` : 'void(0)'}">
-                                <i class="fas fa-${canAccess ? 'play' : enrollment.status === 'upcoming' ? 'clock' : 'times'}"></i>
+                                    onclick="${canAccess ? `openContent('${course.id}', '${course.type}')` : 'void(0)'}">
+                                <i class="fas fa-${canAccess ? 'play' : course.status === 'pending' ? 'clock' : 'lock'}"></i>
                                 ${buttonText}
                             </button>
-                            <button class="btn btn-secondary" onclick="showDetails('${enrollment.id}')">
+                            <button class="btn btn-secondary" onclick="showDetails('${course.id}')">
                                 <i class="fas fa-info-circle"></i>
                                 التفاصيل
                             </button>
@@ -953,6 +1006,16 @@
                     </div>
                 </div>
             `;
+        }
+
+        // دالة مساعدة للحصول على أيقونة الحالة
+        function getStatusIcon(status) {
+            const icons = {
+                'active': 'play-circle',
+                'completed': 'check-circle',
+                'pending': 'clock'
+            };
+            return icons[status] || 'circle';
         }
 
         // فلترة المحتوى
@@ -968,22 +1031,22 @@
             // تطبيق الفلتر
             switch(filter) {
                 case 'all':
-                    filteredEnrollments = [...enrollments];
+                    filteredCourses = [...allCourses];
                     break;
                 case 'course':
-                    filteredEnrollments = enrollments.filter(e => e.type === 'course');
+                    filteredCourses = allCourses.filter(c => c.type === 'course');
                     break;
                 case 'bundle':
-                    filteredEnrollments = enrollments.filter(e => e.type === 'bundle');
+                    filteredCourses = allCourses.filter(c => c.type === 'bundle');
                     break;
                 case 'active':
-                    filteredEnrollments = enrollments.filter(e => e.status === 'active');
+                    filteredCourses = allCourses.filter(c => c.status === 'active');
                     break;
-                case 'upcoming':
-                    filteredEnrollments = enrollments.filter(e => e.status === 'upcoming');
+                case 'completed':
+                    filteredCourses = allCourses.filter(c => c.status === 'completed');
                     break;
-                case 'expired':
-                    filteredEnrollments = enrollments.filter(e => e.status === 'expired');
+                case 'pending':
+                    filteredCourses = allCourses.filter(c => c.status === 'pending');
                     break;
             }
             
@@ -997,19 +1060,23 @@
             
             switch(sortBy) {
                 case 'recent':
-                    filteredEnrollments.sort((a, b) => new Date(b.enrolledAt) - new Date(a.enrolledAt));
+                    filteredCourses.sort((a, b) => b.createdAt - a.createdAt);
                     break;
                 case 'name':
-                    filteredEnrollments.sort((a, b) => a.title.localeCompare(b.title, 'ar'));
+                    filteredCourses.sort((a, b) => a.title.localeCompare(b.title, 'ar'));
                     break;
                 case 'progress':
-                    filteredEnrollments.sort((a, b) => b.progress - a.progress);
+                    filteredCourses.sort((a, b) => {
+                        const progressA = a.learningProgress > 0 ? a.learningProgress : a.paymentProgress;
+                        const progressB = b.learningProgress > 0 ? b.learningProgress : b.paymentProgress;
+                        return progressB - progressA;
+                    });
                     break;
-                case 'start-date':
-                    filteredEnrollments.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-                    break;
-                case 'end-date':
-                    filteredEnrollments.sort((a, b) => new Date(a.endDate) - new Date(b.endDate));
+                case 'payment':
+                    filteredCourses.sort((a, b) => {
+                        const statusOrder = { 'pending': 0, 'active': 1, 'completed': 2 };
+                        return statusOrder[a.status] - statusOrder[b.status];
+                    });
                     break;
             }
             
@@ -1030,22 +1097,22 @@
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             
             if (!searchTerm) {
-                // إذا لم يكن هناك بحث، اعرض النتائج المفلترة فقط
                 renderCourses();
                 return;
             }
             
             // تطبيق البحث على النتائج المفلترة
-            const searchResults = filteredEnrollments.filter(enrollment => 
-                enrollment.title.toLowerCase().includes(searchTerm) ||
-                enrollment.type.toLowerCase().includes(searchTerm) ||
-                enrollment.statusText.toLowerCase().includes(searchTerm)
+            const searchResults = filteredCourses.filter(course => 
+                course.title.toLowerCase().includes(searchTerm) ||
+                course.type.toLowerCase().includes(searchTerm) ||
+                course.status.toLowerCase().includes(searchTerm) ||
+                (course.instructor && course.instructor.toLowerCase().includes(searchTerm))
             );
             
-            const originalFiltered = filteredEnrollments;
-            filteredEnrollments = searchResults;
+            const originalFiltered = filteredCourses;
+            filteredCourses = searchResults;
             renderCourses();
-            filteredEnrollments = originalFiltered;
+            filteredCourses = originalFiltered;
         }
 
         // فتح المحتوى (دورة أو مسار)
@@ -1058,55 +1125,65 @@
         }
 
         // عرض تفاصيل المحتوى
-        function showDetails(contentId) {
-            const enrollment = enrollments.find(e => e.id === contentId);
+        async function showDetails(courseId) {
+            const course = allCourses.find(c => c.id === courseId);
             
-            if (!enrollment) return;
+            if (!course) return;
             
-            const startDate = new Date(enrollment.startDate).toLocaleDateString('ar-SA');
-            const endDate = new Date(enrollment.endDate).toLocaleDateString('ar-SA');
+            const createdDate = course.createdAt.toLocaleDateString('ar-SA');
             
             let paymentText = '';
-            if (enrollment.paymentType === 'free') {
-                paymentText = '<span style="color: var(--success);">مجاني</span>';
-            } else if (enrollment.paymentType === 'installment') {
-                paymentText = '<span style="color: var(--warning);">أقساط</span>';
+            if (course.summary?.status === 'completed') {
+                paymentText = '<span style="color: var(--success);">مكتمل الدفع</span>';
+            } else if (course.summary?.paidAmount > 0) {
+                paymentText = `<span style="color: var(--warning);">
+                    مدفوع: ${course.summary.paidAmount} جنيه<br>
+                    متبقي: ${course.summary.remainingAmount} جنيه
+                </span>`;
             } else {
-                paymentText = '<span style="color: var(--primary);">مدفوع</span>';
+                paymentText = '<span style="color: var(--danger);">في انتظار الدفع</span>';
             }
             
             Swal.fire({
-                title: enrollment.title,
+                title: course.title,
                 html: `
                     <div style="text-align: right; direction: rtl;">
                         <div style="margin-bottom: 1rem;">
-                            <strong>النوع:</strong> ${enrollment.type === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
+                            <strong>النوع:</strong> ${course.type === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
                         </div>
                         <div style="margin-bottom: 1rem;">
-                            <strong>الحالة:</strong> ${enrollment.statusText}
+                            <strong>الحالة:</strong> ${course.status === 'active' ? 'نشطة' : course.status === 'completed' ? 'مكتملة' : 'معلقة'}
                         </div>
                         <div style="margin-bottom: 1rem;">
-                            <strong>تاريخ البداية:</strong> ${startDate}
+                            <strong>تاريخ البداية:</strong> ${createdDate}
                         </div>
-                        <div style="margin-bottom: 1rem;">
-                            <strong>تاريخ النهاية:</strong> ${endDate}
-                        </div>
-                        ${enrollment.duration ? `
+                        ${course.instructor ? `
                             <div style="margin-bottom: 1rem;">
-                                <strong>مدة الصلاحية:</strong> ${enrollment.duration} يوم
+                                <strong>المدرب:</strong> ${course.instructor}
+                            </div>
+                        ` : ''}
+                        ${course.duration ? `
+                            <div style="margin-bottom: 1rem;">
+                                <strong>المدة:</strong> ${course.duration}
                             </div>
                         ` : ''}
                         <div style="margin-bottom: 1rem;">
-                            <strong>نوع الدفع:</strong> ${paymentText}
+                            <strong>حالة الدفع:</strong> ${paymentText}
                         </div>
-                        ${enrollment.paymentNotes ? `
+                        ${course.paymentPlan?.type === 'installments' ? `
                             <div style="margin-bottom: 1rem;">
-                                <strong>ملاحظات الدفع:</strong> ${enrollment.paymentNotes}
+                                <strong>خطة الدفع:</strong> أقساط شهرية<br>
+                                <strong>الأقساط المكتملة:</strong> ${course.summary?.completedInstallments || 0} من ${course.paymentPlan.totalInstallments}
                             </div>
                         ` : ''}
                         <div style="margin-bottom: 1rem;">
-                            <strong>التقدم:</strong> ${Math.round(enrollment.progress)}%
+                            <strong>التقدم التعليمي:</strong> ${Math.round(course.learningProgress)}%
                         </div>
+                        ${course.nextPaymentDate ? `
+                            <div style="margin-bottom: 1rem;">
+                                <strong>الدفعة القادمة:</strong> ${new Date(course.nextPaymentDate).toLocaleDateString('ar-SA')}
+                            </div>
+                        ` : ''}
                     </div>
                 `,
                 confirmButtonText: 'إغلاق',
