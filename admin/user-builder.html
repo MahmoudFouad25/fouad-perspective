@@ -7900,183 +7900,221 @@ async function showPaymentOptionsDialog(course) {
     
     return paymentOptions;
 }
+
 // ==================== دالة createPaymentTransactions بالهيكل الجديد ====================
-async function createPaymentTransactions(course, paymentOptions) {
-    if (!paymentOptions) return;
-    
-    try {
-        showLoading('جاري إنشاء المعاملات المالية...');
-        
-        console.log('إنشاء معاملات للدورة:', course.title, paymentOptions);
-        
-        const baseAmount = paymentOptions.finalPrice;
-        const today = new Date();
-        
-        switch (paymentOptions.paymentType) {
-            case 'full':
-                // معاملة واحدة كاملة
-                const fullPayment = {
-                    id: `temp_${Date.now()}_1`,
-                    userId: currentUserId || 'temp',
-                    type: 'payment',
-                    amount: baseAmount,
-                    createdAt: today.toISOString(),
-                    dueDate: today.toISOString(),
-                    status: 'pending',
-                    paymentMethod: 'pending',
-                    reference: `${currentUserId || 'NEW'}-${course.id}-FULL`,
-                    notes: paymentOptions.notes || '',
-                    originalAmount: paymentOptions.originalPrice,
-                    discount: paymentOptions.discount,
-                    relatedTo: {
-                        type: course.type,
-                        id: course.id,
-                        title: course.title
-                    }
-                };
-                userTransactions.push(fullPayment);
-                break;
+        async function createPaymentTransactions(course, paymentOptions) {
+            if (!paymentOptions) return;
+            
+            try {
+                showLoading('جاري إنشاء المعاملات المالية...');
                 
-            case 'installments':
-                // أقساط متعددة
-                const installmentCount = paymentOptions.installmentCount;
-                const firstPaymentAmount = baseAmount * (paymentOptions.firstPaymentPercentage / 100);
-                const remainingAmount = baseAmount - firstPaymentAmount;
-                const monthlyAmount = remainingAmount / (installmentCount - 1);
+                // إنشاء السجل المالي للدورة
+                const financialRecord = CourseFinancialStructure.createCourseFinancialRecord(
+                    course.id,
+                    course,
+                    paymentOptions
+                );
                 
-                // الدفعة الأولى
-                userTransactions.push({
-                    id: `temp_${Date.now()}_1`,
-                    userId: currentUserId || 'temp',
-                    type: 'payment',
-                    amount: firstPaymentAmount,
-                    createdAt: today.toISOString(),
-                    dueDate: today.toISOString(),
-                    status: 'pending',
-                    paymentMethod: 'pending',
-                    reference: `${currentUserId || 'NEW'}-${course.id}-INST-1`,
-                    notes: `الدفعة الأولى (${paymentOptions.firstPaymentPercentage}%)`,
-                    originalAmount: paymentOptions.originalPrice,
-                    discount: paymentOptions.discount,
-                    relatedTo: {
-                        type: course.type,
-                        id: course.id,
-                        title: course.title
-                    },
-                    installmentInfo: {
-                        number: 1,
-                        total: installmentCount
-                    }
-                });
+                // إنشاء المعاملات حسب نوع الدفع
+                const transactions = [];
+                const baseAmount = paymentOptions.finalPrice;
                 
-                // باقي الأقساط
-                for (let i = 2; i <= installmentCount; i++) {
-                    const dueDate = new Date(today);
-                    dueDate.setMonth(dueDate.getMonth() + (i - 1));
-                    
-                    userTransactions.push({
-                        id: `temp_${Date.now()}_${i}`,
-                        userId: currentUserId || 'temp',
-                        type: 'payment',
-                        amount: monthlyAmount,
-                        createdAt: today.toISOString(),
-                        dueDate: dueDate.toISOString(),
-                        status: 'pending',
-                        paymentMethod: 'pending',
-                        reference: `${currentUserId || 'NEW'}-${course.id}-INST-${i}`,
-                        notes: `قسط ${i} من ${installmentCount}`,
-                        originalAmount: paymentOptions.originalPrice,
-                        discount: paymentOptions.discount,
-                        relatedTo: {
-                            type: course.type,
-                            id: course.id,
-                            title: course.title
-                        },
-                        installmentInfo: {
-                            number: i,
-                            total: installmentCount
+                switch (paymentOptions.paymentType) {
+                    case 'full':
+                        // دفعة واحدة كاملة
+                        const fullTransaction = TransactionStructure.createTransaction({
+                            userId: currentUserId,
+                            type: paymentOptions.transactionType || 'payment',
+                            amount: baseAmount,
+                            dueDate: new Date().toISOString(),
+                            paymentMethod: paymentOptions.paymentMethod,
+                            status: paymentOptions.transactionType === 'grant' ? 'completed' : 'pending',
+                            relatedTo: {
+                                type: course.type,
+                                id: course.id,
+                                title: course.title
+                            },
+                            notes: `دفعة كاملة للدورة: ${course.title}`,
+                            discount: paymentOptions.discount,
+                            originalAmount: course.price
+                        });
+                        transactions.push(fullTransaction);
+                        break;
+                        
+                    case 'installments':
+                        // أقساط متعددة
+                        const installmentCount = paymentOptions.installmentCount;
+                        const firstPayment = paymentOptions.firstPayment || (baseAmount / installmentCount);
+                        const remainingAmount = baseAmount - firstPayment;
+                        const regularInstallment = installmentCount > 1 ? remainingAmount / (installmentCount - 1) : 0;
+                        
+                        // القسط الأول
+                        const firstInstallment = TransactionStructure.createTransaction({
+                            userId: currentUserId,
+                            type: 'payment',
+                            amount: firstPayment,
+                            dueDate: new Date().toISOString(),
+                            paymentMethod: paymentOptions.paymentMethod,
+                            status: paymentOptions.firstStatus || 'pending',
+                            relatedTo: {
+                                type: course.type,
+                                id: course.id,
+                                title: course.title
+                            },
+                            installmentInfo: {
+                                number: 1,
+                                total: installmentCount,
+                                frequency: 'monthly'
+                            },
+                            notes: `القسط الأول (1/${installmentCount}) للدورة: ${course.title}`,
+                            discount: paymentOptions.discount,
+                            originalAmount: course.price
+                        });
+                        transactions.push(firstInstallment);
+                        
+                        // باقي الأقساط
+                        for (let i = 2; i <= installmentCount; i++) {
+                            const dueDate = new Date();
+                            dueDate.setMonth(dueDate.getMonth() + (i - 1));
+                            
+                            const installment = TransactionStructure.createTransaction({
+                                userId: currentUserId,
+                                type: 'payment',
+                                amount: regularInstallment,
+                                dueDate: dueDate.toISOString(),
+                                paymentMethod: paymentOptions.paymentMethod,
+                                status: 'pending',
+                                relatedTo: {
+                                    type: course.type,
+                                    id: course.id,
+                                    title: course.title
+                                },
+                                installmentInfo: {
+                                    number: i,
+                                    total: installmentCount,
+                                    frequency: 'monthly'
+                                },
+                                notes: `القسط ${i}/${installmentCount} للدورة: ${course.title}`,
+                                discount: paymentOptions.discount,
+                                originalAmount: course.price
+                            });
+                            transactions.push(installment);
                         }
+                        break;
+                        
+                    case 'partial':
+                        // دفعة جزئية
+                        const partialAmount = paymentOptions.partialAmount;
+                        const remaining = baseAmount - partialAmount;
+                        
+                        // الدفعة الأولى
+                        const partialTransaction = TransactionStructure.createTransaction({
+                            userId: currentUserId,
+                            type: 'payment',
+                            amount: partialAmount,
+                            dueDate: new Date().toISOString(),
+                            paymentMethod: paymentOptions.paymentMethod,
+                            status: paymentOptions.partialStatus || 'pending',
+                            relatedTo: {
+                                type: course.type,
+                                id: course.id,
+                                title: course.title
+                            },
+                            notes: `دفعة جزئية للدورة: ${course.title}`,
+                            partialPayment: {
+                                paid: partialAmount,
+                                remaining: remaining,
+                                total: baseAmount
+                            },
+                            discount: paymentOptions.discount,
+                            originalAmount: course.price
+                        });
+                        transactions.push(partialTransaction);
+                        
+                        // المبلغ المتبقي
+                        if (remaining > 0) {
+                            const remainingTransaction = TransactionStructure.createTransaction({
+                                userId: currentUserId,
+                                type: 'payment',
+                                amount: remaining,
+                                dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                                paymentMethod: 'pending',
+                                status: 'pending',
+                                relatedTo: {
+                                    type: course.type,
+                                    id: course.id,
+                                    title: course.title
+                                },
+                                notes: `المبلغ المتبقي للدورة: ${course.title}`,
+                                partialPayment: {
+                                    paid: 0,
+                                    remaining: remaining,
+                                    total: baseAmount
+                                },
+                                discount: paymentOptions.discount,
+                                originalAmount: course.price
+                            });
+                            transactions.push(remainingTransaction);
+                        }
+                        break;
+                        
+                    case 'grant':
+                    case 'none':
+                        // منحة دراسية أو مجاني
+                        const grantTransaction = TransactionStructure.createTransaction({
+                            userId: currentUserId,
+                            type: paymentOptions.transactionType || 'grant',
+                            amount: baseAmount,
+                            dueDate: new Date().toISOString(),
+                            paymentMethod: 'grant',
+                            status: 'completed',
+                            relatedTo: {
+                                type: course.type,
+                                id: course.id,
+                                title: course.title
+                            },
+                            notes: `منحة دراسية كاملة للدورة: ${course.title}`,
+                            discount: 100,
+                            originalAmount: course.price,
+                            grantDetails: {
+                                reason: 'منحة دراسية',
+                                approvedBy: currentUser?.email || 'system',
+                                approvedAt: new Date().toISOString()
+                            }
+                        });
+                        transactions.push(grantTransaction);
+                        break;
+                }
+                
+                // إضافة المعاملات للسجل المالي
+                financialRecord.transactions = transactions;
+                
+                // تحديث ملخص السجل المالي
+                updateFinancialRecordSummary(financialRecord);
+                
+                // حفظ في Firebase أو محلياً
+                if (editMode && currentUserId) {
+                    // حفظ في Firebase بالهيكل الجديد
+                    await saveFinancialRecordToFirebase(financialRecord);
+                } else {
+                    // إضافة مؤقتة للعرض
+                    transactions.forEach(transaction => {
+                        userTransactions.push(transaction);
                     });
                 }
-                break;
                 
-            case 'grant':
-                // منحة
-                const grantAmount = paymentOptions.originalPrice * (paymentOptions.grantPercentage / 100);
-                userTransactions.push({
-                    id: `temp_${Date.now()}_grant`,
-                    userId: currentUserId || 'temp',
-                    type: 'grant',
-                    amount: grantAmount,
-                    createdAt: today.toISOString(),
-                    dueDate: today.toISOString(),
-                    status: 'completed',
-                    paymentMethod: 'grant',
-                    reference: `${currentUserId || 'NEW'}-${course.id}-GRANT`,
-                    notes: `منحة ${paymentOptions.grantType} بنسبة ${paymentOptions.grantPercentage}%`,
-                    originalAmount: paymentOptions.originalPrice,
-                    discount: paymentOptions.grantPercentage,
-                    relatedTo: {
-                        type: course.type,
-                        id: course.id,
-                        title: course.title
-                    }
-                });
+                // تحديث العرض
+                await loadUserTransactions();
                 
-                // إذا كانت منحة جزئية، أضف معاملة للباقي
-                if (paymentOptions.grantPercentage < 100) {
-                    const remainingAmount = paymentOptions.originalPrice * (1 - paymentOptions.grantPercentage / 100);
-                    userTransactions.push({
-                        id: `temp_${Date.now()}_remaining`,
-                        userId: currentUserId || 'temp',
-                        type: 'payment',
-                        amount: remainingAmount,
-                        createdAt: today.toISOString(),
-                        dueDate: today.toISOString(),
-                        status: 'pending',
-                        paymentMethod: 'pending',
-                        reference: `${currentUserId || 'NEW'}-${course.id}-REMAINING`,
-                        notes: 'المبلغ المتبقي بعد المنحة',
-                        originalAmount: paymentOptions.originalPrice,
-                        discount: 0,
-                        relatedTo: {
-                            type: course.type,
-                            id: course.id,
-                            title: course.title
-                        }
-                    });
-                }
-                break;
+                hideLoading();
+                showSuccess(`تم إنشاء ${transactions.length} معاملة مالية بنجاح`);
                 
-            case 'none':
-                // مجاني/تجريبي - لا معاملات
-                console.log('دورة مجانية/تجريبية - لا توجد معاملات');
-                break;
+            } catch (error) {
+                console.error('خطأ في إنشاء المعاملات:', error);
+                hideLoading();
+                showError('حدث خطأ في إنشاء المعاملات المالية');
+            }
         }
-        
-        // تحديث العرض في تبويب المعاملات
-        if (document.getElementById('financialTab')) {
-            updateFinancialSummary();
-            updateTransactionsDisplay();
-            updateUpcomingPaymentsDisplay();
-        }
-        
-        hideLoading();
-        
-        const transactionCount = userTransactions.filter(t => 
-            t.relatedTo && t.relatedTo.id === course.id
-        ).length;
-        
-        if (transactionCount > 0) {
-            showSuccess(`تم إنشاء ${transactionCount} معاملة مالية للدورة "${course.title}"`);
-        }
-        
-    } catch (error) {
-        console.error('خطأ في إنشاء المعاملات:', error);
-        hideLoading();
-        showError('حدث خطأ في إنشاء المعاملات المالية');
-    }
-}
 
         // ==================== حفظ السجل المالي في Firebase ====================
         async function saveFinancialRecordToFirebase(financialRecord) {
@@ -9179,6 +9217,7 @@ async function createPaymentTransactions(course, paymentOptions) {
                 }
             }
         }
+
 // ==================== قسم بيان الاستثمار ====================
         
         // تحميل بيان الاستثمار
@@ -9531,6 +9570,7 @@ async function createPaymentTransactions(course, paymentOptions) {
             };
             return labels[status] || status;
         }
+
 // ==================== دوال التحكم في أقسام المعلومات المتقدمة ====================
         function toggleSection(section) {
             const content = document.getElementById(section + 'Content');
@@ -9547,175 +9587,6 @@ async function createPaymentTransactions(course, paymentOptions) {
                 icon.classList.add('fa-chevron-up');
             }
         }
-        // ==================== Load Available Content ====================
-async function loadAvailableContent() {
-    try {
-        showLoading('جاري تحميل الدورات والمسارات...');
-        
-        // تحميل الدورات من courses
-        const coursesSnapshot = await db.collection('courses').get();
-        
-        availableCourses = [];
-        coursesSnapshot.forEach(doc => {
-            const data = doc.data();
-            // التحقق من أن الدورة نشطة أو على الأقل موجودة
-            if (data) {
-                availableCourses.push({ 
-                    id: doc.id, 
-                    type: 'course',
-                    title: data.title || 'دورة بدون اسم',
-                    price: data.price || 0,
-                    instructor: data.instructor || 'منظور الفؤاد',
-                    thumbnail: data.thumbnail || data.image || '/media/images/course-placeholder.jpg',
-                    duration: data.duration || 0,
-                    enrollments: data.enrollments || 0,
-                    ...data 
-                });
-            }
-        });
-        
-        // تحميل المسارات من bundles
-        const bundlesSnapshot = await db.collection('bundles').get();
-        
-        availablePaths = [];
-        bundlesSnapshot.forEach(doc => {
-            const data = doc.data();
-            if (data) {
-                availablePaths.push({ 
-                    id: doc.id, 
-                    type: 'path',
-                    title: data.title || 'مسار بدون اسم',
-                    price: data.price || 0,
-                    instructor: data.instructor || 'منظور الفؤاد',
-                    thumbnail: data.thumbnail || data.image || '/media/images/path-placeholder.jpg',
-                    duration: data.duration || 0,
-                    enrollments: data.enrollments || 0,
-                    ...data 
-                });
-            }
-        });
-        
-        console.log(`✅ تم تحميل ${availableCourses.length} دورة و ${availablePaths.length} مسار`);
-        
-        // عرض المحتوى
-        displayAvailableContent();
-        hideLoading();
-        
-    } catch (error) {
-        console.error('خطأ في تحميل المحتوى:', error);
-        hideLoading();
-        
-        // عرض رسالة خطأ مفصلة
-        const container = document.getElementById('availableItems');
-        if (container) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-exclamation-triangle" style="color: var(--danger);"></i>
-                    <p>حدث خطأ في تحميل الدورات والمسارات</p>
-                    <span>${error.message}</span>
-                    <button class="btn btn-primary mt-3" onclick="loadAvailableContent()">
-                        <i class="fas fa-sync"></i> إعادة المحاولة
-                    </button>
-                </div>
-            `;
-        }
-    }
-}
-
-// ==================== Display Available Content ====================
-function displayAvailableContent() {
-    const container = document.getElementById('availableItems');
-    if (!container) return;
-    
-    // مسح المحتوى القديم
-    container.innerHTML = '';
-    
-    // إذا لم توجد دورات أو مسارات
-    if (availableCourses.length === 0 && availablePaths.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-inbox"></i>
-                <p>لا توجد دورات أو مسارات متاحة</p>
-                <span>تأكد من إضافة دورات في قاعدة البيانات</span>
-            </div>
-        `;
-        return;
-    }
-    
-    // عرض الدورات
-    availableCourses.forEach(course => {
-        const courseElement = createCourseElement(course);
-        container.appendChild(courseElement);
-    });
-    
-    // عرض المسارات
-    availablePaths.forEach(path => {
-        const pathElement = createCourseElement(path);
-        container.appendChild(pathElement);
-    });
-    
-    // تحديث العدادات
-    updateCounts();
-}
-
-
-// ==================== Create Course Element ====================
-function createCourseElement(item) {
-    const div = document.createElement('div');
-    div.className = 'course-item';
-    div.setAttribute('data-id', item.id);
-    div.setAttribute('data-type', item.type);
-    
-    div.innerHTML = `
-        <div class="item-header">
-            <div class="item-type-badge ${item.type}">
-                <i class="fas fa-${item.type === 'course' ? 'graduation-cap' : 'route'}"></i>
-                <span>${item.type === 'course' ? 'دورة' : 'مسار'}</span>
-            </div>
-            <button class="item-action-btn add-btn" onclick="assignCourseFromButton('${item.id}')">
-                <i class="fas fa-plus"></i>
-            </button>
-        </div>
-        
-        <div class="item-thumbnail">
-            <img src="${item.thumbnail || '/media/images/course-placeholder.jpg'}" alt="${item.title}">
-            <div class="item-price">
-                <span class="price-value">${item.price || 0}</span>
-                <span class="price-currency">جنيه</span>
-            </div>
-        </div>
-        
-        <div class="item-content">
-            <h4 class="item-title">${item.title}</h4>
-            <p class="item-instructor">
-                <i class="fas fa-user-tie"></i>
-                <span>${item.instructor || 'منظور الفؤاد'}</span>
-            </p>
-            <div class="item-meta">
-                <span class="meta-item">
-                    <i class="fas fa-clock"></i>
-                    <span class="duration">${item.duration || '0'} ساعة</span>
-                </span>
-                <span class="meta-item">
-                    <i class="fas fa-users"></i>
-                    <span class="students-count">${item.enrollments || 0}</span>
-                </span>
-            </div>
-        </div>
-    `;
-    
-    return div;
-}
-
-// ==================== Update Counts ====================
-function updateCounts() {
-    document.getElementById('allCount').textContent = availableCourses.length + availablePaths.length;
-    document.getElementById('coursesCount').textContent = availableCourses.length;
-    document.getElementById('pathsCount').textContent = availablePaths.length;
-    document.getElementById('selectedCount').textContent = formData.courses.length;
-    document.getElementById('assignedCoursesCount').textContent = formData.courses.filter(c => c.type === 'course').length;
-    document.getElementById('assignedPathsCount').textContent = formData.courses.filter(c => c.type === 'path').length;
-}
 
         // ==================== Event Listeners Setup ====================
         function setupEventListeners() {
@@ -10015,79 +9886,75 @@ function updateCounts() {
 
         // ==================== Generate User Slug ====================
         window.generateUserSlug = async function() {
-    const firstName = document.getElementById('firstName').value.trim();
-    const lastName = document.getElementById('lastName').value.trim();
-    const slugInput = document.getElementById('slugPreview');
-    const customSlug = slugInput.value.trim();
-    
-    if (!firstName || !lastName) {
-        showError('يجب إدخال الاسم الأول واسم العائلة');
-        return;
-    }
-    
-    if (!customSlug) {
-        showError('يجب إدخال معرف المستخدم');
-        return;
-    }
-    
-    try {
-        showLoading('جاري التحقق من المعرف...');
-        
-        // التحقق من صحة المعرف
-        const slugPattern = /^[a-z0-9-]+$/;
-        if (!slugPattern.test(customSlug)) {
-            showError('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
-            hideLoading();
-            return;
-        }
-        
-        // التحقق من عدم وجود مستخدم بنفس المعرف
-        const existingDoc = await db.collection('users').doc(customSlug).get();
-        if (existingDoc.exists) {
-            showError('هذا المعرف مستخدم بالفعل');
-            hideLoading();
-            return;
-        }
-        
-        // حفظ المعرف مؤقتاً
-        currentUserId = customSlug;
-        
-        // تغيير الـ URL
-        window.history.pushState({}, '', `?id=${customSlug}`);
-        
-        // إخفاء قسم إنشاء المعرف
-        document.getElementById('generateSlugSection').style.display = 'none';
-        
-        // إضافة رسالة نجاح
-        const successDiv = document.createElement('div');
-        successDiv.className = 'alert alert-success mt-3';
-        successDiv.innerHTML = `
-            <i class="fas fa-check-circle"></i>
-            تم إنشاء معرف المستخدم: <strong>${customSlug}</strong>
-        `;
-        document.getElementById('generateSlugSection').parentElement.appendChild(successDiv);
-        
-        // جعل الحقول للقراءة فقط
-        document.getElementById('firstName').readOnly = true;
-        document.getElementById('lastName').readOnly = true;
-        
-        // **مهم: عدم تفعيل وضع التعديل**
-        // editMode = false; // نبقى في وضع الإنشاء
-        
-        // **الزر يبقى "إنشاء المستخدم"**
-        document.getElementById('saveBtnText').textContent = 'إنشاء المستخدم';
-        document.getElementById('saveBtn').innerHTML = '<i class="fas fa-user-plus"></i> إنشاء المستخدم';
-        
-        hideLoading();
-        showSuccess('تم إنشاء معرف المستخدم بنجاح - يمكنك الآن إكمال البيانات وإنشاء الحساب');
-        
-    } catch (error) {
-        console.error('خطأ في إنشاء المعرف:', error);
-        hideLoading();
-        showError('حدث خطأ في إنشاء معرف المستخدم');
-    }
-};
-
+            const firstName = document.getElementById('firstName').value.trim();
+            const lastName = document.getElementById('lastName').value.trim();
+            const slugInput = document.getElementById('slugPreview');
+            const customSlug = slugInput.value.trim();
+            
+            if (!firstName || !lastName) {
+                showError('يجب إدخال الاسم الأول واسم العائلة');
+                return;
+            }
+            
+            if (!customSlug) {
+                showError('يجب إدخال معرف المستخدم');
+                return;
+            }
+            
+            try {
+                showLoading('جاري التحقق من المعرف...');
+                
+                // التحقق من صحة المعرف
+                const slugPattern = /^[a-z0-9-]+$/;
+                if (!slugPattern.test(customSlug)) {
+                    showError('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
+                    hideLoading();
+                    return;
+                }
+                
+                // التحقق من عدم وجود مستخدم بنفس المعرف
+                const existingDoc = await db.collection('users').doc(customSlug).get();
+                if (existingDoc.exists) {
+                    showError('هذا المعرف مستخدم بالفعل');
+                    hideLoading();
+                    return;
+                }
+                
+                // تغيير الـ URL
+                window.history.pushState({}, '', `?id=${customSlug}`);
+                
+                // تفعيل وضع التعديل
+                editMode = true;
+                currentUserId = customSlug;
+                
+                // تحديث العنوان
+                updatePageForEditMode();
+                
+                // إخفاء قسم إنشاء المعرف
+                document.getElementById('generateSlugSection').style.display = 'none';
+                
+                // إضافة رسالة نجاح
+                const successDiv = document.createElement('div');
+                successDiv.className = 'alert alert-success mt-3';
+                successDiv.innerHTML = `
+                    <i class="fas fa-check-circle"></i>
+                    تم إنشاء معرف المستخدم: <strong>${customSlug}</strong>
+                `;
+                document.getElementById('generateSlugSection').parentElement.appendChild(successDiv);
+                
+                // جعل الحقول للقراءة فقط
+                document.getElementById('firstName').readOnly = true;
+                document.getElementById('lastName').readOnly = true;
+                
+                hideLoading();
+                showSuccess('تم إنشاء معرف المستخدم بنجاح');
+                
+            } catch (error) {
+                console.error('خطأ في إنشاء المعرف:', error);
+                hideLoading();
+                showError('حدث خطأ في إنشاء معرف المستخدم');
+            }
+        };
 
         // دالة لإظهار/إخفاء زر إنشاء المعرف
         function checkNameFields() {
@@ -10211,296 +10078,179 @@ function updateCounts() {
                 throw error;
             }
         }
-// دالة حفظ المعاملات المالية
-async function saveUserTransactions() {
-    try {
-        console.log('جاري حفظ المعاملات المالية...');
-        
-        // تجميع المعاملات حسب الدورة/المسار
-        const transactionsByCourse = new Map();
-        
-        userTransactions.forEach(transaction => {
-            if (transaction.relatedTo) {
-                const courseId = transaction.relatedTo.id;
-                if (!transactionsByCourse.has(courseId)) {
-                    transactionsByCourse.set(courseId, []);
-                }
-                transactionsByCourse.get(courseId).push(transaction);
-            }
-        });
-        
-        // حفظ كل مجموعة معاملات في سجل مالي منفصل
-        for (const [courseId, transactions] of transactionsByCourse) {
-            const recordRef = db.collection('users').doc(currentUserId)
-                .collection('financialRecords').doc(courseId);
-            
-            // جلب السجل الموجود إن وجد
-            const existingRecord = await recordRef.get();
-            
-            let recordData;
-            if (existingRecord.exists) {
-                // تحديث السجل الموجود
-                recordData = existingRecord.data();
-                // دمج المعاملات الجديدة مع القديمة
-                const existingTransactionIds = new Set(recordData.transactions.map(t => t.id));
-                const newTransactions = transactions.filter(t => !existingTransactionIds.has(t.id));
-                recordData.transactions = [...recordData.transactions, ...newTransactions];
-            } else {
-                // إنشاء سجل جديد
-                recordData = {
-                    courseId: courseId,
-                    courseType: transactions[0].relatedTo.type,
-                    courseTitle: transactions[0].relatedTo.title,
-                    userId: currentUserId,
-                    transactions: transactions,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-            }
-            
-            // تحديث الملخص
-            updateFinancialRecordSummary(recordData);
-            
-            // إضافة وقت التحديث
-            recordData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-            
-            // حفظ في Firebase
-            await recordRef.set(recordData, { merge: true });
-            
-            console.log(`✅ تم حفظ ${transactions.length} معاملة للدورة ${courseId}`);
-        }
-        
-        // حفظ المعاملات غير المرتبطة بدورات (إن وجدت)
-        const unrelatedTransactions = userTransactions.filter(t => !t.relatedTo);
-        if (unrelatedTransactions.length > 0) {
-            const generalRecordRef = db.collection('users').doc(currentUserId)
-                .collection('financialRecords').doc('general');
-            
-            await generalRecordRef.set({
-                userId: currentUserId,
-                transactions: unrelatedTransactions,
-                type: 'general',
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-            
-            console.log(`✅ تم حفظ ${unrelatedTransactions.length} معاملة عامة`);
-        }
-        
-        console.log('✅ تم حفظ جميع المعاملات المالية بنجاح');
-        
-    } catch (error) {
-        console.error('خطأ في حفظ المعاملات المالية:', error);
-        throw error;
-    }
-}
 
-// تأكد من أن دالة createPaymentTransactions تضيف المعاملات بشكل صحيح
-
-    // ==================== حفظ المستخدم ====================
-// تعديل دالة saveUser للتعامل مع الخطأ
-async function saveUser(isDraft = false) {
-    try {
-        // التحقق من وجود معرف المستخدم
-        if (!currentUserId) {
-            showError('يجب إنشاء معرف المستخدم أولاً');
-            document.getElementById('generateSlugSection').scrollIntoView();
-            return;
-        }
-        
-        // التحقق من صحة البيانات
-        if (!validateBasicInfo()) {
-            showError('يرجى التحقق من البيانات الأساسية');
-            document.getElementById('basicTab').click();
-            return;
-        }
-        
-        showLoading(isDraft ? 'جاري حفظ المسودة...' : 'جاري إنشاء المستخدم...');
-        
-        // جمع البيانات
-        collectFormData();
-        
-        // إعداد بيانات المستخدم
-        const userData = {
-            id: currentUserId,
-            name: `${formData.basic.firstName} ${formData.basic.lastName}`.trim(),
-            email: formData.basic.email,
-            whatsapp: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
-            phone: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
-            avatar: formData.basic.avatar,
-            
-            isActive: formData.basic.accountStatus === 'active',
-            status: formData.basic.accountStatus,
-            
-            role: formData.roles.primaryRole,
-            permissions: formData.roles.permissions,
-            customRole: formData.roles.customRole,
-            
-            enrollments: formData.courses.map(course => ({
-                id: course.id,
-                type: course.type,
-                title: course.title,
-                startDate: course.startDate,
-                endDate: course.endDate,
-                accessType: course.accessType,
-                price: course.isFree ? 0 : course.customPrice,
-                currency: course.currency,
-                isFree: course.isFree,
-                notes: course.notes,
-                enrolledAt: new Date().toISOString()
-            })),
-            
-            // المعلومات المتقدمة
-            birthDate: formData.advanced.birthDate,
-            gender: formData.advanced.gender,
-            nationality: formData.advanced.nationality,
-            country: formData.advanced.country,
-            city: formData.advanced.city,
-            timezone: formData.advanced.timezone,
-            language: formData.advanced.language || 'ar',
-            address: formData.advanced.address,
-            occupation: formData.advanced.occupation,
-            company: formData.advanced.company,
-            education: formData.advanced.education,
-            experience: formData.advanced.experience,
-            interests: formData.advanced.interests || [],
-            notifications: formData.advanced.notifications || {},
-            adminNotes: formData.advanced.adminNotes,
-            customFields: formData.advanced.customFields || [],
-            
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            createdBy: currentUser.email
-        };
-        
-        // التحقق من وجود المستخدم
-        const userDoc = await db.collection('users').doc(currentUserId).get();
-        
-        if (!userDoc.exists) {
-            // إنشاء مستخدم جديد
-            let authCreated = false;
-            let userCredential = null;
-            
-            // محاولة إنشاء حساب Firebase Auth
+        // ==================== حفظ المستخدم ====================
+        async function saveUser(isDraft = false) {
             try {
-                userCredential = await auth.createUserWithEmailAndPassword(
-                    formData.basic.email,
-                    formData.basic.password
-                );
+                // التحقق من وجود معرف المستخدم
+                if (!editMode || !currentUserId) {
+                    showError('يجب إنشاء معرف المستخدم أولاً');
+                    document.getElementById('generateSlugSection').scrollIntoView();
+                    return;
+                }
                 
-                userData.authId = userCredential.user.uid;
-                authCreated = true;
+                // التحقق من صحة البيانات
+                if (!validateBasicInfo()) {
+                    showError('يرجى التحقق من البيانات الأساسية');
+                    document.getElementById('basicTab').click();
+                    return;
+                }
                 
-                // تحديث الملف الشخصي
-                await userCredential.user.updateProfile({
-                    displayName: userData.name
-                });
+                showLoading(isDraft ? 'جاري حفظ المسودة...' : 'جاري حفظ البيانات...');
                 
-            } catch (authError) {
-                console.error('خطأ في إنشاء حساب Auth:', authError);
+                // جمع البيانات
+                collectFormData();
                 
-                // معالجة الأخطاء المختلفة
-                if (authError.code === 'auth/email-already-in-use') {
-                    // البريد مستخدم بالفعل - نحاول جلب المستخدم
+                // إعداد بيانات المستخدم
+                const userData = {
+                    id: currentUserId,
+                    name: `${formData.basic.firstName} ${formData.basic.lastName}`.trim(),
+                    email: formData.basic.email,
+                    whatsapp: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
+                    phone: `${formData.basic.countryCode}${formData.basic.phoneNumber}`,
+                    avatar: formData.basic.avatar,
+                    
+                    isActive: formData.basic.accountStatus === 'active',
+                    status: formData.basic.accountStatus,
+                    
+                    role: formData.roles.primaryRole,
+                    permissions: formData.roles.permissions,
+                    customRole: formData.roles.customRole,
+                    
+                    enrollments: formData.courses.map(course => ({
+                        id: course.id,
+                        type: course.type,
+                        title: course.title,
+                        startDate: course.startDate,
+                        endDate: course.endDate,
+                        accessType: course.accessType,
+                        price: course.isFree ? 0 : course.customPrice,
+                        currency: course.currency,
+                        isFree: course.isFree,
+                        notes: course.notes,
+                        enrolledAt: new Date().toISOString()
+                    })),
+                    
+                    // المعلومات المتقدمة
+                    birthDate: formData.advanced.birthDate,
+                    gender: formData.advanced.gender,
+                    nationality: formData.advanced.nationality,
+                    country: formData.advanced.country,
+                    city: formData.advanced.city,
+                    timezone: formData.advanced.timezone,
+                    language: formData.advanced.language || 'ar',
+                    address: formData.advanced.address,
+                    occupation: formData.advanced.occupation,
+                    company: formData.advanced.company,
+                    education: formData.advanced.education,
+                    experience: formData.advanced.experience,
+                    interests: formData.advanced.interests || [],
+                    notifications: formData.advanced.notifications || {},
+                    adminNotes: formData.advanced.adminNotes,
+                    customFields: formData.advanced.customFields || [],
+                    
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    lastUpdatedBy: currentUser?.email || 'system'
+                };
+                
+                // التحقق من وجود المستخدم
+                const userDoc = await db.collection('users').doc(currentUserId).get();
+                
+                if (userDoc.exists) {
+                    // تحديث مستخدم موجود
+                    await db.collection('users').doc(currentUserId).update(userData);
+                } else {
+                    // إنشاء مستخدم جديد
+                    userData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+                    userData.createdBy = currentUser.email;
+                    
+                    // إنشاء حساب Firebase Auth
                     try {
-                        // البحث عن المستخدم في قاعدة البيانات بالبريد
-                        const existingUserQuery = await db.collection('users')
-                            .where('email', '==', formData.basic.email)
-                            .limit(1)
-                            .get();
+                        const userCredential = await auth.createUserWithEmailAndPassword(
+                            formData.basic.email,
+                            formData.basic.password
+                        );
                         
-                        if (!existingUserQuery.empty) {
-                            // المستخدم موجود بالفعل
-                            hideLoading();
-                            
-                            const existingUser = existingUserQuery.docs[0];
-                            const result = await Swal.fire({
-                                icon: 'warning',
-                                title: 'البريد الإلكتروني مستخدم بالفعل',
-                                html: `
-                                    <p>هذا البريد مسجل باسم: <strong>${existingUser.data().name}</strong></p>
-                                    <p>معرف المستخدم: <strong>${existingUser.id}</strong></p>
-                                    <p>هل تريد الذهاب لصفحة تعديل هذا المستخدم؟</p>
-                                `,
-                                showCancelButton: true,
-                                confirmButtonText: 'نعم، اذهب للتعديل',
-                                cancelButtonText: 'لا، البقاء هنا'
-                            });
-                            
-                            if (result.isConfirmed) {
-                                window.location.href = `?id=${existingUser.id}`;
-                            }
-                            return;
-                        }
+                        userData.authId = userCredential.user.uid;
                         
-                        // إذا لم نجد المستخدم في قاعدة البيانات، نتابع بدون Auth
-                        console.log('البريد مستخدم في Auth لكن ليس في قاعدة البيانات - سنتابع بدون Auth');
+                        // تحديث الملف الشخصي
+                        await userCredential.user.updateProfile({
+                            displayName: userData.name
+                        });
                         
-                    } catch (searchError) {
-                        console.error('خطأ في البحث عن المستخدم:', searchError);
+                    } catch (authError) {
+                        console.error('خطأ في إنشاء حساب Auth:', authError);
+                        // يمكن المتابعة بدون Auth
                     }
                     
-                } else if (authError.code === 'auth/weak-password') {
-                    hideLoading();
-                    showError('كلمة المرور ضعيفة جداً. يجب أن تكون 6 أحرف على الأقل');
-                    return;
-                } else if (authError.code === 'auth/invalid-email') {
-                    hideLoading();
-                    showError('البريد الإلكتروني غير صحيح');
-                    return;
+                    // حفظ في قاعدة البيانات
+                    await db.collection('users').doc(currentUserId).set(userData);
                 }
                 
-                // في حالة أي خطأ آخر، نتابع بدون Auth
-                console.warn('سيتم إنشاء المستخدم بدون حساب Auth');
+                // حفظ المعاملات المالية بالهيكل الجديد
+                if (userTransactions && userTransactions.length > 0) {
+                    // تجميع المعاملات حسب الدورة/المسار
+                    const transactionsByCourse = new Map();
+                    
+                    userTransactions.forEach(transaction => {
+                        if (transaction.relatedTo) {
+                            const courseId = transaction.relatedTo.id;
+                            if (!transactionsByCourse.has(courseId)) {
+                                transactionsByCourse.set(courseId, []);
+                            }
+                            transactionsByCourse.get(courseId).push(transaction);
+                        }
+                    });
+                    
+                    // حفظ كل مجموعة معاملات في سجل مالي منفصل
+                    for (const [courseId, transactions] of transactionsByCourse) {
+                        const recordRef = db.collection('users').doc(currentUserId)
+                            .collection('financialRecords').doc(courseId);
+                        
+                        const recordData = {
+                            courseId: courseId,
+                            courseType: transactions[0].relatedTo.type,
+                            courseTitle: transactions[0].relatedTo.title,
+                            userId: currentUserId,
+                            transactions: transactions,
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        };
+                        
+                        // تحديث الملخص
+                        updateFinancialRecordSummary(recordData);
+                        
+                        await recordRef.set(recordData, { merge: true });
+                    }
+                }
+                
+                hideLoading();
+                
+                if (!isDraft) {
+                    showSuccess('تم حفظ بيانات المستخدم بنجاح');
+                    
+                    // إظهار بيانات الدخول للمستخدمين الجدد
+                    if (!userDoc.exists && formData.basic.password) {
+                        await showSuccessWithCredentials(
+                            formData.basic.email,
+                            formData.basic.password,
+                            userData.whatsapp
+                        );
+                    } else {
+                        setTimeout(() => {
+                            window.location.href = '/admin/users.html';
+                        }, 2000);
+                    }
+                } else {
+                    showSuccess('تم حفظ المسودة');
+                }
+                
+            } catch (error) {
+                console.error('خطأ في حفظ المستخدم:', error);
+                hideLoading();
+                showError(error.message || 'حدث خطأ في حفظ البيانات');
             }
-            
-            // حفظ في قاعدة البيانات
-            await db.collection('users').doc(currentUserId).set(userData);
-            
-            // حفظ المعاملات المالية إذا وجدت
-            if (userTransactions && userTransactions.length > 0) {
-                await saveUserTransactions();
-            }
-            
-            hideLoading();
-            
-            // عرض رسالة النجاح
-            if (authCreated && formData.basic.password) {
-                await showSuccessWithCredentials(
-                    formData.basic.email,
-                    formData.basic.password,
-                    userData.whatsapp
-                );
-            } else {
-                showSuccess('تم إنشاء المستخدم بنجاح (بدون حساب دخول)');
-            }
-            
-            // تفعيل وضع التعديل بعد الإنشاء
-            editMode = true;
-            updatePageForEditMode();
-            
-        } else {
-            // تحديث مستخدم موجود
-            userData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-            userData.lastUpdatedBy = currentUser?.email || 'system';
-            delete userData.createdAt;
-            delete userData.createdBy;
-            
-            await db.collection('users').doc(currentUserId).update(userData);
-            
-            // حفظ المعاملات المالية
-            if (userTransactions && userTransactions.length > 0) {
-                await saveUserTransactions();
-            }
-            
-            hideLoading();
-            showSuccess('تم حفظ التعديلات بنجاح');
         }
-        
-    } catch (error) {
-        console.error('خطأ في حفظ المستخدم:', error);
-        hideLoading();
-        showError(error.message || 'حدث خطأ في حفظ البيانات');
-    }
-}
 
         // ==================== Quick Save ====================
         async function quickSave() {
@@ -10509,59 +10259,54 @@ async function saveUser(isDraft = false) {
         }
 
         // ==================== Success with Credentials ====================
-       async function showSuccessWithCredentials(email, password, whatsapp) {
-    const result = await Swal.fire({
-        icon: 'success',
-        title: 'تم إنشاء المستخدم بنجاح!',
-        html: `
-            <div style="text-align: right; direction: rtl;">
-                <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-                    <h4 style="color: var(--primary); margin-bottom: 1rem;">
-                        <i class="fas fa-key"></i> بيانات الدخول
-                    </h4>
-                    <div style="margin-bottom: 0.8rem;">
-                        <strong>البريد الإلكتروني:</strong><br>
-                        <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${email}</code>
+        async function showSuccessWithCredentials(email, password, whatsapp) {
+            const result = await Swal.fire({
+                icon: 'success',
+                title: 'تم إنشاء المستخدم بنجاح!',
+                html: `
+                    <div style="text-align: right; direction: rtl;">
+                        <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                            <h4 style="color: var(--primary); margin-bottom: 1rem;">
+                                <i class="fas fa-key"></i> بيانات الدخول
+                            </h4>
+                            <div style="margin-bottom: 0.8rem;">
+                                <strong>البريد الإلكتروني:</strong><br>
+                                <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${email}</code>
+                            </div>
+                            <div>
+                                <strong>كلمة المرور:</strong><br>
+                                <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${password}</code>
+                            </div>
+                        </div>
                     </div>
-                    <div>
-                        <strong>كلمة المرور:</strong><br>
-                        <code style="background: white; padding: 0.5rem; display: block; margin-top: 0.3rem;">${password}</code>
-                    </div>
-                </div>
-                <p style="color: #28a745; font-weight: bold;">
-                    <i class="fas fa-info-circle"></i> يمكنك الآن إكمال البيانات في التبويبات الأخرى
-                </p>
-            </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: '<i class="fas fa-copy"></i> نسخ البيانات',
-        cancelButtonText: '<i class="fab fa-whatsapp"></i> إرسال WhatsApp',
-        confirmButtonColor: 'var(--primary)',
-        cancelButtonColor: 'var(--success)',
-        reverseButtons: true,
-        allowOutsideClick: false
-    });
-    
-    if (result.isConfirmed) {
-        // نسخ البيانات
-        const text = `البريد الإلكتروني: ${email}\nكلمة المرور: ${password}`;
-        await navigator.clipboard.writeText(text);
-        showSuccess('تم نسخ بيانات الدخول');
-        
-    } else if (result.dismiss === Swal.DismissReason.cancel) {
-        // إرسال WhatsApp
-        const message = `مرحباً،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\n📧 البريد: ${email}\n🔒 كلمة المرور: ${password}\n\n🔗 رابط تسجيل الدخول:\n${window.location.origin}/login.html\n\nمع تحيات فريق منظور الفؤاد`;
-        
-        const whatsappUrl = `https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
-        window.open(whatsappUrl, '_blank');
-    }
-    
-    // **لا ننتقل لصفحة أخرى**
-    // setTimeout(() => {
-    //     window.location.href = '/admin/users.html';
-    // }, 1000);
-}
-
+                `,
+                showCancelButton: true,
+                confirmButtonText: '<i class="fas fa-copy"></i> نسخ البيانات',
+                cancelButtonText: '<i class="fab fa-whatsapp"></i> إرسال WhatsApp',
+                confirmButtonColor: 'var(--primary)',
+                cancelButtonColor: 'var(--success)',
+                reverseButtons: true
+            });
+            
+            if (result.isConfirmed) {
+                // نسخ البيانات
+                const text = `البريد الإلكتروني: ${email}\nكلمة المرور: ${password}`;
+                await navigator.clipboard.writeText(text);
+                showSuccess('تم نسخ بيانات الدخول');
+                
+            } else if (result.dismiss === Swal.DismissReason.cancel) {
+                // إرسال WhatsApp
+                const message = `مرحباً،\n\nتم إنشاء حساب لك في منظور الفؤاد\n\nبيانات الدخول:\n📧 البريد: ${email}\n🔒 كلمة المرور: ${password}\n\n🔗 رابط تسجيل الدخول:\n${window.location.origin}/login.html\n\nمع تحيات فريق منظور الفؤاد`;
+                
+                const whatsappUrl = `https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+                window.open(whatsappUrl, '_blank');
+            }
+            
+            // العودة لصفحة المستخدمين
+            setTimeout(() => {
+                window.location.href = '/admin/users.html';
+            }, 1000);
+        }
 
         // ==================== Form Actions ====================
         function handleCancel() {
@@ -10614,6 +10359,961 @@ async function saveUser(isDraft = false) {
                 }
             });
         }
+// ==================== Load Available Content ====================
+async function loadAvailableContent() {
+    try {
+        showLoading('جاري تحميل الدورات والمسارات...');
+        
+        // تحميل الدورات
+        const coursesSnapshot = await db.collection('courses')
+            .where('isActive', '==', true)
+            .orderBy('order', 'asc')
+            .get();
+        
+        availableCourses = coursesSnapshot.docs.map(doc => ({
+            id: doc.id,
+            type: 'course',
+            ...doc.data()
+        }));
+        
+        // تحميل المسارات
+        const pathsSnapshot = await db.collection('paths')
+            .where('isActive', '==', true)
+            .orderBy('order', 'asc')
+            .get();
+        
+        availablePaths = pathsSnapshot.docs.map(doc => ({
+            id: doc.id,
+            type: 'path',
+            ...doc.data()
+        }));
+        
+        // حفظ في الكاش
+        DataCache.set('courses', 'all', [...availableCourses, ...availablePaths]);
+        
+        // عرض العناصر
+        renderAvailableItems();
+        updateCounts();
+        
+        hideLoading();
+        
+    } catch (error) {
+        console.error('خطأ في تحميل المحتوى:', error);
+        hideLoading();
+        showError('حدث خطأ في تحميل الدورات والمسارات');
+    }
+}
+
+// ==================== Render Available Items ====================
+function renderAvailableItems() {
+    const container = document.getElementById('availableItems');
+    const allItems = [...availableCourses, ...availablePaths];
+    
+    if (allItems.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <p>لا توجد دورات أو مسارات متاحة</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = allItems.map(item => createItemElement(item)).join('');
+    
+    // إضافة الأحداث
+    container.querySelectorAll('.add-btn').forEach(btn => {
+        btn.addEventListener('click', handleAddCourse);
+    });
+    
+    // تهيئة السحب والإفلات
+    initializeDragAndDropForItems();
+}
+
+// ==================== Create Item Element ====================
+function createItemElement(item) {
+    const isAssigned = formData.courses.some(c => c.id === item.id);
+    
+    return `
+        <div class="course-item ${isAssigned ? 'assigned' : ''}" 
+             data-id="${item.id}" 
+             data-type="${item.type}"
+             draggable="true">
+            <div class="item-header">
+                <div class="item-type-badge ${item.type}">
+                    <i class="fas fa-${item.type === 'course' ? 'graduation-cap' : 'route'}"></i>
+                    <span>${item.type === 'course' ? 'دورة' : 'مسار'}</span>
+                </div>
+                <button class="item-action-btn ${isAssigned ? 'remove-btn' : 'add-btn'}">
+                    <i class="fas fa-${isAssigned ? 'check' : 'plus'}"></i>
+                </button>
+            </div>
+            
+            <div class="item-thumbnail">
+                <img src="${item.thumbnail || '/images/course-placeholder.jpg'}" alt="${item.title}">
+                <div class="item-price">
+                    <span class="price-value">${item.price || 0}</span>
+                    <span class="price-currency">جنيه</span>
+                </div>
+            </div>
+            
+            <div class="item-content">
+                <h4 class="item-title">${item.title}</h4>
+                <p class="item-instructor">
+                    <i class="fas fa-user-tie"></i>
+                    <span>${item.instructor || 'غير محدد'}</span>
+                </p>
+                <div class="item-meta">
+                    <span class="meta-item">
+                        <i class="fas fa-clock"></i>
+                        <span class="duration">${item.duration || '0'} ساعة</span>
+                    </span>
+                    <span class="meta-item">
+                        <i class="fas fa-users"></i>
+                        <span class="students-count">${item.studentsCount || 0}</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ==================== Handle Add Course (مع النظام المالي) ====================
+async function handleAddCourse(event) {
+    const btn = event.currentTarget;
+    const courseItem = btn.closest('.course-item');
+    const courseId = courseItem.dataset.id;
+    const courseType = courseItem.dataset.type;
+    
+    // جلب بيانات الدورة
+    const course = [...availableCourses, ...availablePaths].find(c => c.id === courseId);
+    if (!course) return;
+    
+    // إظهار نافذة خيارات الدفع
+    const paymentOptions = await showPaymentOptionsDialog(course);
+    
+    if (paymentOptions) {
+        // إضافة الدورة مع خيارات الدفع
+        assignCourse(course, paymentOptions);
+        
+        // إنشاء المعاملات المالية
+        await createPaymentTransactions(course, paymentOptions);
+        
+        // تحديث العرض
+        renderAvailableItems();
+        renderAssignedCourses();
+        updateCounts();
+        
+        showSuccess('تم تخصيص الدورة وإنشاء المعاملات المالية');
+    }
+}
+
+// ==================== Assign Course ====================
+function assignCourse(course, paymentOptions = {}) {
+    // التحقق من عدم التكرار
+    if (formData.courses.some(c => c.id === course.id)) {
+        showWarning('هذه الدورة مخصصة بالفعل');
+        return;
+    }
+    
+    // إضافة للدورات المخصصة
+    const assignedCourse = {
+        id: course.id,
+        type: course.type,
+        title: course.title,
+        price: course.price,
+        instructor: course.instructor,
+        thumbnail: course.thumbnail,
+        
+        // خيارات التخصيص
+        startDate: paymentOptions.startDate || new Date().toISOString().split('T')[0],
+        endDate: paymentOptions.endDate || null,
+        accessType: paymentOptions.accessType || 'full',
+        
+        // البيانات المالية
+        isFree: paymentOptions.discount === 100 || paymentOptions.transactionType === 'grant',
+        customPrice: paymentOptions.finalPrice || course.price,
+        currency: 'EGP',
+        discount: paymentOptions.discount || 0,
+        paymentType: paymentOptions.paymentType || 'full',
+        transactionType: paymentOptions.transactionType || 'payment',
+        
+        notes: paymentOptions.notes || '',
+        assignedAt: new Date().toISOString()
+    };
+    
+    formData.courses.push(assignedCourse);
+}
+
+// ==================== Render Assigned Courses ====================
+function renderAssignedCourses() {
+    const container = document.getElementById('assignedItems');
+    
+    if (formData.courses.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <p>لم يتم تخصيص أي دورات بعد</p>
+                <span>اختر من القائمة المجاورة</span>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = formData.courses.map((course, index) => `
+        <div class="assigned-item" data-index="${index}">
+            <div class="assigned-item-header">
+                <div class="assigned-item-info">
+                    <div class="item-type-icon ${course.type}">
+                        <i class="fas fa-${course.type === 'course' ? 'graduation-cap' : 'route'}"></i>
+                    </div>
+                    <div>
+                        <h4 class="assigned-item-title">${course.title}</h4>
+                        <p class="assigned-item-type">
+                            ${course.type === 'course' ? 'دورة تدريبية' : 'مسار تدريبي'}
+                            ${course.isFree ? '<span class="badge badge-success">مجاني</span>' : ''}
+                            ${course.discount > 0 ? `<span class="badge badge-warning">خصم ${course.discount}%</span>` : ''}
+                        </p>
+                    </div>
+                </div>
+                <button class="remove-btn" onclick="removeCourse(${index})">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="assigned-item-settings">
+                <!-- تواريخ الوصول -->
+                <div class="setting-group">
+                    <label class="setting-label">
+                        <i class="fas fa-calendar-alt"></i>
+                        فترة الوصول
+                    </label>
+                    <div class="date-inputs">
+                        <input type="date" 
+                               class="date-input start-date" 
+                               value="${course.startDate}"
+                               onchange="updateCourseDate(${index}, 'startDate', this.value)">
+                        <span class="date-separator">إلى</span>
+                        <input type="date" 
+                               class="date-input end-date" 
+                               value="${course.endDate || ''}"
+                               onchange="updateCourseDate(${index}, 'endDate', this.value)">
+                    </div>
+                </div>
+                
+                <!-- نوع الوصول -->
+                <div class="setting-group">
+                    <label class="setting-label">
+                        <i class="fas fa-key"></i>
+                        نوع الوصول
+                    </label>
+                    <select class="setting-select access-type" 
+                            value="${course.accessType}"
+                            onchange="updateCourseAccess(${index}, this.value)">
+                        <option value="full" ${course.accessType === 'full' ? 'selected' : ''}>وصول كامل</option>
+                        <option value="limited" ${course.accessType === 'limited' ? 'selected' : ''}>وصول محدود</option>
+                        <option value="preview" ${course.accessType === 'preview' ? 'selected' : ''}>معاينة فقط</option>
+                    </select>
+                </div>
+                
+                <!-- معلومات السعر -->
+                <div class="setting-group">
+                    <label class="setting-label">
+                        <i class="fas fa-tag"></i>
+                        السعر والدفع
+                    </label>
+                    <div class="price-info">
+                        <span>السعر الأصلي: <strong>${course.price} جنيه</strong></span>
+                        ${course.discount > 0 ? `<span>الخصم: <strong>${course.discount}%</strong></span>` : ''}
+                        <span>السعر النهائي: <strong class="text-success">${course.customPrice} جنيه</strong></span>
+                        <span>نوع الدفع: <strong>${getPaymentTypeLabel(course.paymentType)}</strong></span>
+                    </div>
+                </div>
+                
+                <!-- ملاحظات -->
+                <div class="setting-group">
+                    <label class="setting-label">
+                        <i class="fas fa-sticky-note"></i>
+                        ملاحظات
+                    </label>
+                    <textarea class="setting-textarea" 
+                              rows="2" 
+                              placeholder="ملاحظات خاصة بهذا التخصيص..."
+                              onchange="updateCourseNotes(${index}, this.value)">${course.notes || ''}</textarea>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ==================== Update Course Functions ====================
+function updateCourseDate(index, field, value) {
+    formData.courses[index][field] = value;
+    autoSave();
+}
+
+function updateCourseAccess(index, value) {
+    formData.courses[index].accessType = value;
+    autoSave();
+}
+
+function updateCourseNotes(index, value) {
+    formData.courses[index].notes = value;
+    autoSave();
+}
+
+function removeCourse(index) {
+    const course = formData.courses[index];
+    
+    Swal.fire({
+        title: 'هل أنت متأكد؟',
+        text: `سيتم إزالة "${course.title}" من القائمة`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc3545'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            formData.courses.splice(index, 1);
+            renderAssignedCourses();
+            renderAvailableItems();
+            updateCounts();
+            showSuccess('تم إزالة الدورة');
+        }
+    });
+}
+
+// ==================== Search and Filter Functions ====================
+function filterCourses(searchTerm = '') {
+    const allItems = [...availableCourses, ...availablePaths];
+    const clearBtn = document.getElementById('clearSearch');
+    
+    if (searchTerm) {
+        clearBtn.style.display = 'block';
+        const filtered = allItems.filter(item => 
+            item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            item.instructor?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        renderFilteredItems(filtered);
+    } else {
+        clearBtn.style.display = 'none';
+        renderAvailableItems();
+    }
+}
+
+function filterByType(type) {
+    let filtered = [];
+    
+    switch (type) {
+        case 'all':
+            renderAvailableItems();
+            return;
+        case 'courses':
+            filtered = availableCourses;
+            break;
+        case 'paths':
+            filtered = availablePaths;
+            break;
+        case 'selected':
+            const selectedIds = formData.courses.map(c => c.id);
+            filtered = [...availableCourses, ...availablePaths].filter(item => 
+                selectedIds.includes(item.id)
+            );
+            break;
+    }
+    
+    renderFilteredItems(filtered);
+}
+
+function renderFilteredItems(items) {
+    const container = document.getElementById('availableItems');
+    
+    if (items.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <p>لا توجد نتائج</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = items.map(item => createItemElement(item)).join('');
+    
+    // إضافة الأحداث
+    container.querySelectorAll('.add-btn').forEach(btn => {
+        btn.addEventListener('click', handleAddCourse);
+    });
+}
+
+function sortCourses(sortBy) {
+    const allItems = [...availableCourses, ...availablePaths];
+    
+    switch (sortBy) {
+        case 'name':
+            allItems.sort((a, b) => a.title.localeCompare(b.title, 'ar'));
+            break;
+        case 'date':
+            allItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            break;
+        case 'price':
+            allItems.sort((a, b) => (b.price || 0) - (a.price || 0));
+            break;
+        case 'students':
+            allItems.sort((a, b) => (b.studentsCount || 0) - (a.studentsCount || 0));
+            break;
+    }
+    
+    availableCourses = allItems.filter(item => item.type === 'course');
+    availablePaths = allItems.filter(item => item.type === 'path');
+    
+    renderAvailableItems();
+}
+
+// ==================== Update Counts ====================
+function updateCounts() {
+    // تحديث عدادات التصنيفات
+    document.getElementById('allCount').textContent = availableCourses.length + availablePaths.length;
+    document.getElementById('coursesCount').textContent = availableCourses.length;
+    document.getElementById('pathsCount').textContent = availablePaths.length;
+    document.getElementById('selectedCount').textContent = formData.courses.length;
+    
+    // تحديث عدادات الدورات المخصصة
+    const assignedCourses = formData.courses.filter(c => c.type === 'course').length;
+    const assignedPaths = formData.courses.filter(c => c.type === 'path').length;
+    
+    document.getElementById('assignedCoursesCount').textContent = assignedCourses;
+    document.getElementById('assignedPathsCount').textContent = assignedPaths;
+}
+
+// ==================== Drag and Drop Functions ====================
+function initializeDragAndDrop() {
+    const dropZone = document.getElementById('dropZone');
+    const assignedContainer = document.getElementById('assignedItems');
+    
+    // Drop Zone Events
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+    });
+    
+    dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        
+        const courseId = e.dataTransfer.getData('courseId');
+        const courseType = e.dataTransfer.getData('courseType');
+        
+        if (courseId) {
+            const course = [...availableCourses, ...availablePaths].find(c => c.id === courseId);
+            if (course && !formData.courses.some(c => c.id === courseId)) {
+                const paymentOptions = await showPaymentOptionsDialog(course);
+                if (paymentOptions) {
+                    assignCourse(course, paymentOptions);
+                    await createPaymentTransactions(course, paymentOptions);
+                    renderAvailableItems();
+                    renderAssignedCourses();
+                    updateCounts();
+                }
+            }
+        }
+    });
+    
+    // Assigned Container Drop
+    assignedContainer.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        assignedContainer.classList.add('drag-over');
+    });
+    
+    assignedContainer.addEventListener('dragleave', () => {
+        assignedContainer.classList.remove('drag-over');
+    });
+    
+    assignedContainer.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        assignedContainer.classList.remove('drag-over');
+        
+        const courseId = e.dataTransfer.getData('courseId');
+        if (courseId) {
+            const course = [...availableCourses, ...availablePaths].find(c => c.id === courseId);
+            if (course && !formData.courses.some(c => c.id === courseId)) {
+                const paymentOptions = await showPaymentOptionsDialog(course);
+                if (paymentOptions) {
+                    assignCourse(course, paymentOptions);
+                    await createPaymentTransactions(course, paymentOptions);
+                    renderAvailableItems();
+                    renderAssignedCourses();
+                    updateCounts();
+                }
+            }
+        }
+    });
+}
+
+function initializeDragAndDropForItems() {
+    const items = document.querySelectorAll('.course-item[draggable="true"]');
+    
+    items.forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('courseId', item.dataset.id);
+            e.dataTransfer.setData('courseType', item.dataset.type);
+            item.classList.add('dragging');
+        });
+        
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+        });
+    });
+}
+
+// ==================== Bulk Actions ====================
+async function assignAllVisible() {
+    const visibleItems = document.querySelectorAll('.course-item:not(.assigned)');
+    const items = [];
+    
+    visibleItems.forEach(item => {
+        const courseId = item.dataset.id;
+        const course = [...availableCourses, ...availablePaths].find(c => c.id === courseId);
+        if (course) items.push(course);
+    });
+    
+    if (items.length === 0) {
+        showWarning('لا توجد دورات لإضافتها');
+        return;
+    }
+    
+    const result = await Swal.fire({
+        title: 'إضافة جميع الدورات المرئية',
+        text: `سيتم إضافة ${items.length} دورة/مسار. هل تريد المتابعة؟`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، أضف الكل',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (result.isConfirmed) {
+        showLoading('جاري إضافة الدورات...');
+        
+        for (const course of items) {
+            const paymentOptions = {
+                paymentType: 'full',
+                discount: 0,
+                finalPrice: course.price,
+                paymentMethod: 'pending',
+                transactionType: 'payment'
+            };
+            
+            assignCourse(course, paymentOptions);
+            await createPaymentTransactions(course, paymentOptions);
+        }
+        
+        renderAvailableItems();
+        renderAssignedCourses();
+        updateCounts();
+        hideLoading();
+        showSuccess(`تم إضافة ${items.length} دورة/مسار`);
+    }
+}
+
+async function removeAllAssigned() {
+    if (formData.courses.length === 0) {
+        showWarning('لا توجد دورات مخصصة');
+        return;
+    }
+    
+    const result = await Swal.fire({
+        title: 'إزالة جميع الدورات',
+        text: 'سيتم إزالة جميع الدورات المخصصة. هل أنت متأكد؟',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف الكل',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc3545'
+    });
+    
+    if (result.isConfirmed) {
+        formData.courses = [];
+        renderAssignedCourses();
+        renderAvailableItems();
+        updateCounts();
+        showSuccess('تم إزالة جميع الدورات');
+    }
+}
+
+async function applyBulkSettings() {
+    if (formData.courses.length === 0) {
+        showWarning('لا توجد دورات مخصصة');
+        return;
+    }
+    
+    document.getElementById('bulkSettingsModal').style.display = 'block';
+}
+
+function applyBulkSettingsConfirm() {
+    const duration = parseInt(document.getElementById('bulkDuration').value);
+    const durationUnit = document.getElementById('bulkDurationUnit').value;
+    const accessType = document.getElementById('bulkAccessType').value;
+    const discount = parseFloat(document.getElementById('bulkDiscount').value) || 0;
+    
+    // حساب تاريخ النهاية
+    const endDate = new Date();
+    switch (durationUnit) {
+        case 'days':
+            endDate.setDate(endDate.getDate() + duration);
+            break;
+        case 'weeks':
+            endDate.setDate(endDate.getDate() + (duration * 7));
+            break;
+        case 'months':
+            endDate.setMonth(endDate.getMonth() + duration);
+            break;
+        case 'years':
+            endDate.setFullYear(endDate.getFullYear() + duration);
+            break;
+    }
+    
+    // تطبيق الإعدادات على جميع الدورات
+    formData.courses.forEach(course => {
+        course.endDate = endDate.toISOString().split('T')[0];
+        course.accessType = accessType;
+        
+        if (discount > 0) {
+            course.discount = discount;
+            course.customPrice = course.price * (1 - discount / 100);
+        }
+    });
+    
+    renderAssignedCourses();
+    closeBulkSettings();
+    showSuccess('تم تطبيق الإعدادات على جميع الدورات');
+}
+
+// ==================== Helper Functions ====================
+function getPaymentTypeLabel(type) {
+    const labels = {
+        full: 'دفعة كاملة',
+        installments: 'أقساط',
+        partial: 'دفعة جزئية',
+        grant: 'منحة',
+        none: 'مجاني'
+    };
+    return labels[type] || type;
+}
+        // ==================== Initialize Notes Editor ====================
+function initializeNotesEditor() {
+    const editor = document.getElementById('adminNotesEditor');
+    if (editor) {
+        // إضافة placeholder
+        editor.setAttribute('contenteditable', 'true');
+        
+        // معالجة الأحداث
+        editor.addEventListener('input', () => {
+            autoSave();
+        });
+        
+        editor.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const text = e.clipboardData.getData('text/plain');
+            document.execCommand('insertText', false, text);
+        });
+    }
+}
+
+// ==================== Format Text in Editor ====================
+function formatText(command, value = null) {
+    document.execCommand(command, false, value);
+    document.getElementById('adminNotesEditor').focus();
+}
+
+function insertLink() {
+    const url = prompt('أدخل رابط URL:');
+    if (url) {
+        formatText('createLink', url);
+    }
+}
+
+function insertHighlight() {
+    formatText('backColor', '#ffff00');
+}
+
+// ==================== Load Countries ====================
+async function loadCountries() {
+    const countrySelect = document.getElementById('country');
+    if (!countrySelect) return;
+    
+    const countries = [
+        { code: 'EG', name: 'مصر' },
+        { code: 'SA', name: 'السعودية' },
+        { code: 'AE', name: 'الإمارات' },
+        { code: 'KW', name: 'الكويت' },
+        { code: 'QA', name: 'قطر' },
+        { code: 'OM', name: 'عمان' },
+        { code: 'BH', name: 'البحرين' },
+        { code: 'JO', name: 'الأردن' },
+        { code: 'LB', name: 'لبنان' },
+        { code: 'PS', name: 'فلسطين' },
+        { code: 'SY', name: 'سوريا' },
+        { code: 'IQ', name: 'العراق' },
+        { code: 'MA', name: 'المغرب' },
+        { code: 'DZ', name: 'الجزائر' },
+        { code: 'TN', name: 'تونس' },
+        { code: 'LY', name: 'ليبيا' },
+        { code: 'SD', name: 'السودان' },
+        { code: 'YE', name: 'اليمن' }
+    ];
+    
+    countrySelect.innerHTML = '<option value="">-- اختر الدولة --</option>';
+    countries.forEach(country => {
+        const option = document.createElement('option');
+        option.value = country.code;
+        option.textContent = country.name;
+        countrySelect.appendChild(option);
+    });
+}
+
+// ==================== Interest Tags Management ====================
+function addInterestTag(interest) {
+    if (!interest || formData.advanced.interests.includes(interest)) {
+        return;
+    }
+    
+    formData.advanced.interests.push(interest);
+    renderInterestTags();
+    autoSave();
+}
+
+function removeInterestTag(index) {
+    formData.advanced.interests.splice(index, 1);
+    renderInterestTags();
+    autoSave();
+}
+
+function renderInterestTags() {
+    const container = document.getElementById('interestsTags');
+    if (!container) return;
+    
+    container.innerHTML = formData.advanced.interests.map((interest, index) => `
+        <div class="tag-item">
+            <span>${interest}</span>
+            <button type="button" onclick="removeInterestTag(${index})">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+// ==================== Custom Fields Management ====================
+function addCustomField() {
+    document.getElementById('customFieldModal').style.display = 'block';
+}
+
+function saveCustomField() {
+    const label = document.getElementById('fieldLabel').value.trim();
+    const type = document.getElementById('fieldType').value;
+    const required = document.getElementById('fieldRequired').checked;
+    const options = type === 'select' ? 
+        document.getElementById('fieldOptions').value.split('\n').filter(o => o.trim()) : null;
+    
+    if (!label) {
+        showError('يجب إدخال اسم الحقل');
+        return;
+    }
+    
+    const field = {
+        id: 'field_' + Date.now(),
+        label,
+        type,
+        required,
+        options,
+        value: ''
+    };
+    
+    customFields.push(field);
+    addCustomFieldToForm(field);
+    closeCustomFieldModal();
+    showSuccess('تم إضافة الحقل');
+}
+
+function addCustomFieldToForm(field) {
+    const container = document.getElementById('customFieldsContainer');
+    const emptyState = document.getElementById('emptyCustomFields');
+    
+    if (customFields.length > 0) {
+        emptyState.style.display = 'none';
+    }
+    
+    const fieldElement = document.createElement('div');
+    fieldElement.className = 'custom-field-item';
+    fieldElement.dataset.fieldId = field.id;
+    
+    fieldElement.innerHTML = `
+        <div class="custom-field-icon">
+            <i class="fas fa-${getFieldIcon(field.type)}"></i>
+        </div>
+        <div class="custom-field-content">
+            <div class="custom-field-label">${field.label}</div>
+            <div class="custom-field-type">${getFieldTypeLabel(field.type)}</div>
+        </div>
+        <button class="custom-field-remove" onclick="removeCustomField('${field.id}')">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    
+    container.appendChild(fieldElement);
+}
+
+function removeCustomField(fieldId) {
+    customFields = customFields.filter(f => f.id !== fieldId);
+    
+    const element = document.querySelector(`[data-field-id="${fieldId}"]`);
+    if (element) element.remove();
+    
+    if (customFields.length === 0) {
+        document.getElementById('emptyCustomFields').style.display = 'block';
+    }
+    
+    showSuccess('تم حذف الحقل');
+}
+
+function getFieldIcon(type) {
+    const icons = {
+        text: 'font',
+        number: 'hashtag',
+        email: 'envelope',
+        date: 'calendar',
+        select: 'list',
+        textarea: 'align-left',
+        checkbox: 'check-square'
+    };
+    return icons[type] || 'font';
+}
+
+function getFieldTypeLabel(type) {
+    const labels = {
+        text: 'نص',
+        number: 'رقم',
+        email: 'بريد إلكتروني',
+        date: 'تاريخ',
+        select: 'قائمة منسدلة',
+        textarea: 'نص طويل',
+        checkbox: 'مربع اختيار'
+    };
+    return labels[type] || type;
+}
+
+// ==================== Permission Management ====================
+function updatePermissionsForRole(role) {
+    const permissions = {
+        student: ['view_courses'],
+        assistant: ['view_courses', 'download_materials', 'post_discussions', 'comment_discussions'],
+        'group-leader': ['view_courses', 'download_materials', 'manage_groups', 'view_reports'],
+        analyst: ['view_analytics', 'view_reports', 'view_progress_reports', 'export_data']
+    };
+    
+    // إلغاء تحديد جميع الصلاحيات
+    document.querySelectorAll('input[name="permissions"]').forEach(cb => {
+        cb.checked = false;
+    });
+    
+    // تحديد الصلاحيات حسب الدور
+    if (permissions[role]) {
+        permissions[role].forEach(perm => {
+            const checkbox = document.querySelector(`input[name="permissions"][value="${perm}"]`);
+            if (checkbox) checkbox.checked = true;
+        });
+    }
+    
+    updatePermissionsCounts();
+    updatePermissionsPreview();
+}
+
+function updatePermissionsCounts() {
+    const categories = ['content', 'communication', 'admin', 'analytics'];
+    
+    categories.forEach(category => {
+        const permissions = document.querySelectorAll(`#${category}Permissions input[type="checkbox"]`);
+        const checked = document.querySelectorAll(`#${category}Permissions input[type="checkbox"]:checked`);
+        document.getElementById(`${category}Count`).textContent = `${checked.length}/${permissions.length}`;
+    });
+    
+    // تحديث الإحصائيات العامة
+    const allPermissions = document.querySelectorAll('input[name="permissions"]');
+    const checkedPermissions = document.querySelectorAll('input[name="permissions"]:checked');
+    
+    document.getElementById('activePermissionsCount').textContent = checkedPermissions.length;
+    document.getElementById('inactivePermissionsCount').textContent = allPermissions.length - checkedPermissions.length;
+    
+    updatePermissionsPreview();
+}
+
+function updatePermissionsPreview() {
+    const checkedPermissions = document.querySelectorAll('input[name="permissions"]:checked');
+    const summaryList = document.getElementById('permissionsSummary');
+    const previewRole = document.getElementById('previewRoleName');
+    
+    // تحديث اسم الدور
+    const selectedRole = document.querySelector('input[name="primaryRole"]:checked');
+    if (selectedRole) {
+        const roleLabel = selectedRole.parentElement.querySelector('.role-name').textContent;
+        previewRole.textContent = roleLabel;
+    }
+    
+    // تحديث قائمة الصلاحيات
+    if (checkedPermissions.length === 0) {
+        summaryList.innerHTML = '<li>لا توجد صلاحيات محددة</li>';
+    } else {
+        summaryList.innerHTML = Array.from(checkedPermissions).map(cb => {
+            const label = cb.parentElement.querySelector('.permission-name').textContent;
+            return `<li>${label}</li>`;
+        }).join('');
+    }
+}
+
+function toggleCategory(category) {
+    const permissions = document.getElementById(category + 'Permissions');
+    const toggle = permissions.previousElementSibling.querySelector('.category-toggle');
+    
+    permissions.classList.toggle('collapsed');
+    
+    if (permissions.classList.contains('collapsed')) {
+        toggle.classList.remove('fa-chevron-down');
+        toggle.classList.add('fa-chevron-right');
+    } else {
+        toggle.classList.remove('fa-chevron-right');
+        toggle.classList.add('fa-chevron-down');
+    }
+}
+
+function selectAllPermissions() {
+    document.querySelectorAll('input[name="permissions"]').forEach(cb => {
+        cb.checked = true;
+    });
+    updatePermissionsCounts();
+}
+
+function deselectAllPermissions() {
+    document.querySelectorAll('input[name="permissions"]').forEach(cb => {
+        cb.checked = false;
+    });
+    updatePermissionsCounts();
+}
+
+// ==================== Activity Timeline ====================
+function loadMoreActivity() {
+    showLoading('جاري تحميل المزيد من النشاطات...');
+    
+    // هنا يمكن إضافة كود لتحميل المزيد من النشاطات من Firebase
+    
+    setTimeout(() => {
+        hideLoading();
+        showWarning('لا توجد نشاطات إضافية');
+    }, 1000);
+}
 
         // ==================== Auto Save Functions ====================
         function autoSave() {
@@ -10654,6 +11354,7 @@ async function saveUser(isDraft = false) {
             }
         }
 
+
         // ==================== Initialize on Load ====================
         // تحميل المسودة إذا كانت موجودة
         window.addEventListener('load', function() {
@@ -10693,45 +11394,6 @@ async function saveUser(isDraft = false) {
             }
         });
 
-        // 🔥 إضافة معالج عام لأزرار إضافة الدورات
-document.addEventListener('click', async function(e) {
-    // التحقق من النقر على زر الإضافة
-    if (e.target.classList.contains('add-btn') || 
-        e.target.closest('.item-action-btn.add-btn') ||
-        (e.target.tagName === 'I' && e.target.closest('.add-btn'))) {
-        
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const button = e.target.closest('.add-btn') || e.target;
-        const courseItem = button.closest('.course-item');
-        
-        if (courseItem) {
-            const courseId = courseItem.getAttribute('data-id');
-            console.log('🔥 النقر على زر إضافة الدورة:', courseId);
-            
-            await assignCourseFromButton(courseId);
-        }
-    }
-});
-
-// 🔥 تأكد من تحديث العرض عند فتح التبويب المالي
-document.addEventListener('DOMContentLoaded', function() {
-    const financialTabLink = document.querySelector('[data-tab="financial"]');
-    if (financialTabLink) {
-        financialTabLink.addEventListener('click', function() {
-            setTimeout(() => {
-                console.log('🔄 فتح التبويب المالي - تحديث العرض');
-                console.log('📊 عدد المعاملات الحالية:', userTransactions?.length || 0);
-                
-                updateFinancialSummary();
-                updateTransactionsDisplay();
-                updateUpcomingPaymentsDisplay();
-                loadCoursesForFilters();
-            }, 100);
-        });
-    }
-});
         // ==================== Export Functions ====================
         window.UserBuilder = {
             showLoading,
@@ -10749,7 +11411,6 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         console.log('✅ تم تحميل جميع الوظائف بنجاح');
-        
     </script>
 </body>
 </html>
