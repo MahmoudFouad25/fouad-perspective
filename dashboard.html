@@ -761,127 +761,239 @@
         }
 
         // تحميل الإحصائيات
-        async function loadStatistics() {
-            const enrollments = userData.enrollments || [];
-            const completedCourses = userData.completedCourses || [];
-            const totalWatchTime = Math.floor((userData.totalWatchTime || 0) / 3600); // تحويل للساعات
+        // تحميل الإحصائيات
+async function loadStatistics() {
+    try {
+        // جلب السجلات المالية (الدورات المخصصة)
+        const financialRecordsSnapshot = await db.collection('users')
+            .doc(userId)
+            .collection('financialRecords')
+            .get();
+        
+        const totalCourses = financialRecordsSnapshot.size;
+        const completedCourses = userData.completedCourses?.length || 0;
+        const totalWatchTime = Math.floor((userData.totalWatchTime || 0) / 3600);
+        
+        // حساب الدورات النشطة
+        let activeCourses = 0;
+        const now = new Date();
+        
+        financialRecordsSnapshot.forEach(doc => {
+            const record = doc.data();
+            const enrollmentDate = record.enrollmentDate?.toDate() || new Date(record.createdAt);
+            const lastPaymentDate = record.lastPaymentDate?.toDate() || enrollmentDate;
+            const nextPaymentDate = record.nextPaymentDate?.toDate();
             
-            // حساب الدورات النشطة
-            const now = new Date();
-            const activeCourses = enrollments.filter(enrollment => {
-                const startDate = new Date(enrollment.startDate);
-                const endDate = new Date(enrollment.endDate);
-                return startDate <= now && endDate >= now && enrollment.isActive !== false;
-            }).length;
+            // اعتبار الدورة نشطة إذا كان الدفع مستمر أو مكتمل
+            if (record.summary?.status === 'active' || record.summary?.status === 'completed') {
+                activeCourses++;
+            }
+        });
 
-            // تحديث الإحصائيات مع تأثير العد
-            animateCounter('totalCourses', enrollments.length);
-            animateCounter('activeCourses', activeCourses);
-            animateCounter('completedCourses', completedCourses.length);
-            animateCounter('totalWatchTime', totalWatchTime);
-        }
+        // تحديث الإحصائيات مع تأثير العد
+        animateCounter('totalCourses', totalCourses);
+        animateCounter('activeCourses', activeCourses);
+        animateCounter('completedCourses', completedCourses);
+        animateCounter('totalWatchTime', totalWatchTime);
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الإحصائيات:', error);
+    }
+}
 
         // تحميل الدورات
-        async function loadCourses() {
-            const coursesGrid = document.getElementById('coursesGrid');
-            const enrollments = userData.enrollments || [];
-            
-            if (enrollments.length === 0) {
-                coursesGrid.innerHTML = `
-                    <div class="empty-state" style="grid-column: 1 / -1;">
-                        <i class="fas fa-inbox"></i>
-                        <p>لم يتم تخصيص أي دورات لك بعد</p>
-                        <small>تواصل مع الإدارة لتخصيص المحتوى المناسب لك</small>
-                    </div>
-                `;
-                return;
-            }
-
-            // عرض أول 4 دورات
-            const coursesHtml = enrollments.slice(0, 4).map(enrollment => {
-                const now = new Date();
-                const startDate = new Date(enrollment.startDate);
-                const endDate = new Date(enrollment.endDate);
-                
-                let status, statusClass;
-                if (now < startDate) {
-                    status = 'قريباً';
-                    statusClass = 'status-upcoming';
-                } else if (now > endDate) {
-                    status = 'منتهية';
-                    statusClass = 'status-expired';
-                } else {
-                    status = 'نشطة';
-                    statusClass = 'status-active';
-                }
-
-                const progress = userData.progress?.[enrollment.id] || 0;
-
-                return `
-                    <div class="course-card" onclick="openCourse('${enrollment.id}', '${enrollment.type}')">
-                        <div class="course-header">
-                            <div>
-                                <div class="course-title">${enrollment.title}</div>
-                                <div class="course-type">
-                                    <i class="fas fa-${enrollment.type === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
-                                    ${enrollment.type === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
-                                </div>
-                            </div>
-                            <span class="course-status ${statusClass}">${status}</span>
-                        </div>
-                        
-                        <div class="course-dates">
-                            <i class="fas fa-calendar-alt"></i>
-                            ${startDate.toLocaleDateString('ar-SA')} - ${endDate.toLocaleDateString('ar-SA')}
-                        </div>
-                        
-                        <div class="course-progress">
-                            <div class="progress-header">
-                                <span>التقدم</span>
-                                <span>${Math.round(progress)}%</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${progress}%"></div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            coursesGrid.innerHTML = coursesHtml;
+        // تحميل الدورات
+async function loadCourses() {
+    const coursesGrid = document.getElementById('coursesGrid');
+    
+    try {
+        // جلب السجلات المالية
+        const financialRecordsSnapshot = await db.collection('users')
+            .doc(userId)
+            .collection('financialRecords')
+            .limit(4)
+            .get();
+        
+        if (financialRecordsSnapshot.empty) {
+            coursesGrid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <i class="fas fa-inbox"></i>
+                    <p>لم يتم تخصيص أي دورات لك بعد</p>
+                    <small>تواصل مع الإدارة لتخصيص المحتوى المناسب لك</small>
+                </div>
+            `;
+            return;
         }
 
-        // تحميل نظرة عامة على التقدم
-        async function loadProgressOverview() {
-            const progressContainer = document.getElementById('progressOverview');
-            const enrollments = userData.enrollments || [];
+        // عرض الدورات
+        const coursesHtml = [];
+        
+        for (const doc of financialRecordsSnapshot.docs) {
+            const record = doc.data();
+            const courseId = doc.id;
             
-            if (enrollments.length === 0) {
-                progressContainer.innerHTML = `
-                    <div class="empty-state">
-                        <p>لا توجد دورات لعرض التقدم</p>
-                    </div>
-                `;
-                return;
+            // جلب بيانات الدورة من مجموعة courses
+            let courseData = null;
+            try {
+                const courseDoc = await db.collection('courses').doc(courseId).get();
+                if (courseDoc.exists) {
+                    courseData = courseDoc.data();
+                }
+            } catch (error) {
+                console.error('خطأ في جلب بيانات الدورة:', courseId, error);
+            }
+            
+            // تحديد الحالة
+            let status, statusClass;
+            if (record.summary?.status === 'completed') {
+                status = 'مكتملة';
+                statusClass = 'status-active';
+            } else if (record.summary?.status === 'active') {
+                status = 'نشطة';
+                statusClass = 'status-active';
+            } else {
+                status = 'معلقة';
+                statusClass = 'status-upcoming';
             }
 
-            const progressHtml = enrollments.slice(0, 5).map(enrollment => {
-                const progress = userData.progress?.[enrollment.id] || 0;
-                return `
-                    <div class="progress-item">
+            // حساب التقدم
+            const paidAmount = record.summary?.paidAmount || 0;
+            const totalAmount = record.summary?.totalAmount || 1;
+            const paymentProgress = Math.min((paidAmount / totalAmount) * 100, 100);
+            
+            // استخدام تقدم التعلم إذا كان متاح
+            const learningProgress = userData.progress?.[courseId] || 0;
+            const progress = learningProgress > 0 ? learningProgress : paymentProgress;
+
+            coursesHtml.push(`
+                <div class="course-card" onclick="openCourse('${courseId}', '${record.courseType || 'course'}')">
+                    <div class="course-header">
+                        <div>
+                            <div class="course-title">${record.courseTitle || courseData?.title || 'دورة غير معنونة'}</div>
+                            <div class="course-type">
+                                <i class="fas fa-${record.courseType === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
+                                ${record.courseType === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
+                            </div>
+                        </div>
+                        <span class="course-status ${statusClass}">${status}</span>
+                    </div>
+                    
+                    <div class="course-dates">
+                        <i class="fas fa-calendar-alt"></i>
+                        ${getDateRange(record)}
+                    </div>
+                    
+                    <div class="course-progress">
                         <div class="progress-header">
-                            <span class="progress-title">${enrollment.title}</span>
-                            <span class="progress-percentage">${Math.round(progress)}%</span>
+                            <span>التقدم</span>
+                            <span>${Math.round(progress)}%</span>
                         </div>
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: ${progress}%"></div>
                         </div>
                     </div>
-                `;
-            }).join('');
-
-            progressContainer.innerHTML = progressHtml || '<div class="empty-state"><p>لا يوجد تقدم بعد</p></div>';
+                    
+                    ${record.summary?.pendingAmount > 0 ? `
+                        <div style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--warning);">
+                            <i class="fas fa-coins"></i>
+                            متبقي: ${record.summary.pendingAmount} جنيه
+                        </div>
+                    ` : ''}
+                </div>
+            `);
         }
+
+        coursesGrid.innerHTML = coursesHtml.join('');
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الدورات:', error);
+        coursesGrid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>خطأ في تحميل الدورات</p>
+            </div>
+        `;
+    }
+}
+
+// دالة مساعدة للحصول على نطاق التاريخ
+function getDateRange(record) {
+    const createdAt = record.createdAt?.toDate?.() || new Date();
+    const enrollmentDate = record.enrollmentDate?.toDate?.() || createdAt;
+    
+    // إذا كان هناك خطة دفع بالأقساط
+    if (record.paymentPlan?.type === 'installments') {
+        const totalMonths = record.paymentPlan.totalInstallments || 1;
+        const endDate = new Date(enrollmentDate);
+        endDate.setMonth(endDate.getMonth() + totalMonths);
+        
+        return `${enrollmentDate.toLocaleDateString('ar-SA')} - ${endDate.toLocaleDateString('ar-SA')}`;
+    }
+    
+    // للدورات المدفوعة بالكامل
+    return `بدأت في ${enrollmentDate.toLocaleDateString('ar-SA')}`;
+}
+        // تحميل نظرة عامة على التقدم
+        // تحميل نظرة عامة على التقدم
+async function loadProgressOverview() {
+    const progressContainer = document.getElementById('progressOverview');
+    
+    try {
+        // جلب السجلات المالية
+        const financialRecordsSnapshot = await db.collection('users')
+            .doc(userId)
+            .collection('financialRecords')
+            .limit(5)
+            .get();
+        
+        if (financialRecordsSnapshot.empty) {
+            progressContainer.innerHTML = `
+                <div class="empty-state">
+                    <p>لا توجد دورات لعرض التقدم</p>
+                </div>
+            `;
+            return;
+        }
+
+        const progressHtml = [];
+        
+        financialRecordsSnapshot.forEach(doc => {
+            const record = doc.data();
+            const courseId = doc.id;
+            
+            // حساب التقدم المالي
+            const paidAmount = record.summary?.paidAmount || 0;
+            const totalAmount = record.summary?.totalAmount || 1;
+            const financialProgress = Math.min((paidAmount / totalAmount) * 100, 100);
+            
+            // استخدام تقدم التعلم إذا كان متاح
+            const learningProgress = userData.progress?.[courseId] || 0;
+            const progress = learningProgress > 0 ? learningProgress : financialProgress;
+            
+            progressHtml.push(`
+                <div class="progress-item">
+                    <div class="progress-header">
+                        <span class="progress-title">${record.courseTitle || 'دورة غير معنونة'}</span>
+                        <span class="progress-percentage">${Math.round(progress)}%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress}%"></div>
+                    </div>
+                </div>
+            `);
+        });
+
+        progressContainer.innerHTML = progressHtml.join('') || '<div class="empty-state"><p>لا يوجد تقدم بعد</p></div>';
+        
+    } catch (error) {
+        console.error('خطأ في تحميل التقدم:', error);
+        progressContainer.innerHTML = `
+            <div class="empty-state">
+                <p>خطأ في تحميل التقدم</p>
+            </div>
+        `;
+    }
+}
 
         // تحميل النشاط الأخير
         async function loadRecentActivity() {
@@ -932,54 +1044,66 @@
         }
 
         // تهيئة مخطط التعلم
-        async function initializeLearningChart() {
-            const ctx = document.getElementById('learningChart').getContext('2d');
+        // تهيئة مخطط التعلم
+async function initializeLearningChart() {
+    const ctx = document.getElementById('learningChart').getContext('2d');
+    
+    try {
+        // جلب السجلات المالية
+        const financialRecordsSnapshot = await db.collection('users')
+            .doc(userId)
+            .collection('financialRecords')
+            .get();
+        
+        let active = 0, completed = 0, pending = 0;
+        
+        financialRecordsSnapshot.forEach(doc => {
+            const record = doc.data();
+            const status = record.summary?.status;
             
-            const enrollments = userData.enrollments || [];
-            const completedCourses = userData.completedCourses || [];
-            const now = new Date();
-            
-            const activeCourses = enrollments.filter(e => {
-                const startDate = new Date(e.startDate);
-                const endDate = new Date(e.endDate);
-                return startDate <= now && endDate >= now;
-            }).length;
-            
-            const expiredCourses = enrollments.filter(e => {
-                const endDate = new Date(e.endDate);
-                return endDate < now;
-            }).length;
+            if (status === 'completed') {
+                completed++;
+            } else if (status === 'active') {
+                active++;
+            } else {
+                pending++;
+            }
+        });
 
-            learningChart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['الدورات المكتملة', 'الدورات النشطة', 'الدورات المنتهية'],
-                    datasets: [{
-                        data: [completedCourses.length, activeCourses, expiredCourses],
-                        backgroundColor: [
-                            '#4caf50',
-                            '#f4c430',
-                            '#ff4444'
-                        ],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                color: '#e0e0e0',
-                                usePointStyle: true,
-                                padding: 20
-                            }
+        learningChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['الدورات المكتملة', 'الدورات النشطة', 'الدورات المعلقة'],
+                datasets: [{
+                    data: [completed, active, pending],
+                    backgroundColor: [
+                        '#4caf50',
+                        '#f4c430',
+                        '#ff4444'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: '#e0e0e0',
+                            usePointStyle: true,
+                            padding: 20
                         }
                     }
                 }
-            });
-        }
+            }
+        });
+        
+    } catch (error) {
+        console.error('خطأ في تهيئة المخطط:', error);
+    }
+}
 
         // تحريك العدادات
         function animateCounter(elementId, targetValue) {
