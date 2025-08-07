@@ -414,6 +414,7 @@
             display: flex;
             gap: 1rem;
             margin-top: 2rem;
+            flex-wrap: wrap;
         }
 
         .btn {
@@ -459,6 +460,19 @@
         @keyframes loading {
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
         }
 
         /* Responsive */
@@ -640,9 +654,9 @@
     </main>
 
     <!-- Firebase Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     
     <script>
         // Firebase Configuration
@@ -657,134 +671,66 @@
         };
 
         // Initialize Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-
+        firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
 
         let currentUser = null;
         let userData = null;
+        let userId = null;
         let learningChart = null;
-        let isLoadingUserData = false;
 
-        // حماية الصفحة مع معالجة محسنة
+        // استرجاع معرف المستخدم من localStorage
+        userId = localStorage.getItem('userId');
+        const userEmail = localStorage.getItem('userEmail');
+        const userName = localStorage.getItem('userName');
+
+        // حماية الصفحة
         auth.onAuthStateChanged(async (user) => {
-            if (!user) {
+            if (!user || !userId) {
                 console.log('❌ لا يوجد مستخدم مسجل دخول');
                 window.location.href = './login.html';
                 return;
             }
 
-            // توجيه الأدمن لصفحته
-            if (user.email === 'admin@fouad-academy.com') {
-                window.location.href = './admin/dashboard.html';
-                return;
-            }
-
-            // تجنب التحميل المتكرر
-            if (isLoadingUserData) {
-                console.log('🔄 تحميل البيانات جاري...');
-                return;
-            }
-
             currentUser = user;
             console.log('👤 مستخدم مسجل دخول:', user.email);
+            console.log('🔑 معرف المستخدم:', userId);
             
-            // محاولة تحميل البيانات مع retry
-            await loadUserDataWithRetry();
+            // تحميل بيانات المستخدم
+            await loadUserData();
         });
-
-        // تحميل بيانات المستخدم مع إعادة المحاولة
-        async function loadUserDataWithRetry(maxRetries = 3) {
-            isLoadingUserData = true;
-            
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    console.log(`🔄 محاولة تحميل البيانات (${attempt}/${maxRetries})...`);
-                    
-                    await loadUserData();
-                    
-                    if (userData) {
-                        console.log('✅ تم تحميل البيانات بنجاح');
-                        await initializeDashboard();
-                        isLoadingUserData = false;
-                        return;
-                    }
-                    
-                } catch (error) {
-                    console.error(`❌ فشل في المحاولة ${attempt}:`, error);
-                    
-                    if (attempt < maxRetries) {
-                        // انتظار قبل المحاولة التالية
-                        console.log(`⏳ انتظار ${attempt * 1000}ms قبل المحاولة التالية...`);
-                        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-                    }
-                }
-            }
-            
-            // فشل في كل المحاولات
-            console.error('❌ فشل في تحميل البيانات بعد عدة محاولات');
-            showErrorState();
-            isLoadingUserData = false;
-        }
 
         // تحميل بيانات المستخدم
         async function loadUserData() {
             try {
-                console.log('📋 تحميل بيانات المستخدم:', currentUser.uid);
+                console.log('📋 تحميل بيانات المستخدم:', userId);
                 
-                const userDoc = await db.collection('users').doc(currentUser.uid).get();
+                const userDoc = await db.collection('users').doc(userId).get();
                 
                 if (userDoc.exists) {
                     userData = userDoc.data();
-                    console.log('✅ تم تحميل بيانات المستخدم:', userData.name);
+                    console.log('✅ تم تحميل بيانات المستخدم:', userData);
+                    
+                    // تحديث معلومات المستخدم في الواجهة
                     updateUserInfo();
-                    return userData;
+                    
+                    // تهيئة لوحة التحكم
+                    await initializeDashboard();
                 } else {
-                    console.error('❌ بيانات المستخدم غير موجودة في Firestore');
-                    
-                    // محاولة فحص إذا كان المستخدم لسه في التفعيل
-                    const credentialDoc = await db.collection('userCredentials').doc(currentUser.email).get();
-                    
-                    if (credentialDoc.exists) {
-                        console.log('🔄 المستخدم لسه في مرحلة التفعيل، إعادة التوجيه...');
-                        window.location.href = './login.html';
-                        return null;
-                    }
-                    
-                    throw new Error('بيانات المستخدم غير موجودة');
+                    console.error('❌ بيانات المستخدم غير موجودة');
+                    showErrorState();
                 }
             } catch (error) {
                 console.error('❌ خطأ في تحميل بيانات المستخدم:', error);
-                throw error;
+                showErrorState();
             }
-        }
-
-        // عرض حالة خطأ
-        function showErrorState() {
-            document.querySelector('.main-container').innerHTML = `
-                <div style="text-align: center; padding: 4rem; color: var(--text-muted);">
-                    <i class="fas fa-exclamation-triangle" style="font-size: 4rem; color: var(--warning); margin-bottom: 2rem;"></i>
-                    <h2 style="color: var(--text); margin-bottom: 1rem;">مشكلة في تحميل البيانات</h2>
-                    <p style="margin-bottom: 2rem;">يرجى المحاولة مرة أخرى أو التواصل مع الدعم الفني</p>
-                    <div>
-                        <button class="btn btn-primary" onclick="window.location.reload()" style="margin: 0.5rem;">
-                            <i class="fas fa-refresh"></i> إعادة تحميل الصفحة
-                        </button>
-                        <button class="btn btn-secondary" onclick="logout()" style="margin: 0.5rem;">
-                            <i class="fas fa-sign-out-alt"></i> تسجيل الخروج
-                        </button>
-                    </div>
-                </div>
-            `;
         }
 
         // تحديث معلومات المستخدم في الواجهة
         function updateUserInfo() {
-            document.getElementById('userName').textContent = userData.name || 'مستخدم';
-            document.getElementById('userEmail').textContent = userData.email || '';
+            document.getElementById('userName').textContent = userData.name || userName || 'مستخدم';
+            document.getElementById('userEmail').textContent = userData.email || userEmail || '';
             
             // تحديث الأفاتار
             const userAvatar = document.getElementById('userAvatar');
@@ -795,11 +741,6 @@
 
         // تهيئة لوحة التحكم
         async function initializeDashboard() {
-            if (!userData) {
-                console.error('❌ لا توجد بيانات مستخدم لتهيئة لوحة التحكم');
-                return;
-            }
-            
             try {
                 console.log('🚀 تهيئة لوحة التحكم...');
                 
@@ -815,28 +756,8 @@
                 
             } catch (error) {
                 console.error('❌ خطأ في تهيئة لوحة التحكم:', error);
-                // عرض رسالة خطأ بدلاً من صفحة فارغة
                 showPartialErrorState();
             }
-        }
-
-        // عرض حالة خطأ جزئي
-        function showPartialErrorState() {
-            const elements = ['coursesGrid', 'progressOverview', 'activityList'];
-            elements.forEach(id => {
-                const element = document.getElementById(id);
-                if (element) {
-                    element.innerHTML = `
-                        <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                            <i class="fas fa-exclamation-circle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
-                            <p>خطأ في تحميل هذا القسم</p>
-                            <button class="btn btn-secondary" onclick="window.location.reload()" style="margin-top: 1rem;">
-                                <i class="fas fa-refresh"></i> إعادة المحاولة
-                            </button>
-                        </div>
-                    `;
-                }
-            });
         }
 
         // تحميل الإحصائيات
@@ -845,15 +766,12 @@
             const completedCourses = userData.completedCourses || [];
             const totalWatchTime = Math.floor((userData.totalWatchTime || 0) / 3600); // تحويل للساعات
             
-            // حساب الدورات والمسارات منفصلة
-            const individualCourses = enrollments.filter(e => e.type === 'course').length;
-            const bundles = enrollments.filter(e => e.type === 'bundle').length;
-            
             // حساب الدورات النشطة
             const now = new Date();
             const activeCourses = enrollments.filter(enrollment => {
+                const startDate = new Date(enrollment.startDate);
                 const endDate = new Date(enrollment.endDate);
-                return endDate >= now && enrollment.isActive;
+                return startDate <= now && endDate >= now && enrollment.isActive !== false;
             }).length;
 
             // تحديث الإحصائيات مع تأثير العد
@@ -861,74 +779,43 @@
             animateCounter('activeCourses', activeCourses);
             animateCounter('completedCourses', completedCourses.length);
             animateCounter('totalWatchTime', totalWatchTime);
-            
-            // إضافة معلومات إضافية في تلميحات
-            document.getElementById('totalCourses').setAttribute('title', 
-                `${individualCourses} دورة فردية و ${bundles} مسار تعليمي`);
         }
 
-        // تحميل الدورات والمسارات
+        // تحميل الدورات
         async function loadCourses() {
             const coursesGrid = document.getElementById('coursesGrid');
             const enrollments = userData.enrollments || [];
             
             if (enrollments.length === 0) {
                 coursesGrid.innerHTML = `
-                    <div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 2rem;">
-                        <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 1rem; display: block;"></i>
-                        <p>لم يتم تخصيص أي دورات أو مسارات لك بعد</p>
-                        <small style="display: block; margin-top: 0.5rem;">تواصل مع الإدارة لتخصيص المحتوى المناسب لك</small>
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <i class="fas fa-inbox"></i>
+                        <p>لم يتم تخصيص أي دورات لك بعد</p>
+                        <small>تواصل مع الإدارة لتخصيص المحتوى المناسب لك</small>
                     </div>
                 `;
                 return;
             }
 
-            // عرض أول 4 عناصر مع تفاصيل أكثر
+            // عرض أول 4 دورات
             const coursesHtml = enrollments.slice(0, 4).map(enrollment => {
                 const now = new Date();
                 const startDate = new Date(enrollment.startDate);
                 const endDate = new Date(enrollment.endDate);
                 
-                let status, statusClass, statusIcon;
+                let status, statusClass;
                 if (now < startDate) {
                     status = 'قريباً';
                     statusClass = 'status-upcoming';
-                    statusIcon = 'fa-clock';
                 } else if (now > endDate) {
                     status = 'منتهية';
                     statusClass = 'status-expired';
-                    statusIcon = 'fa-times-circle';
                 } else {
                     status = 'نشطة';
                     statusClass = 'status-active';
-                    statusIcon = 'fa-play-circle';
                 }
 
                 const progress = userData.progress?.[enrollment.id] || 0;
-                
-                // تحديد اللون حسب نوع الدفع
-                let paymentInfo = '';
-                if (enrollment.paymentType === 'free') {
-                    paymentInfo = '<span style="color: var(--success); font-size: 0.8rem;"><i class="fas fa-gift"></i> مجاني</span>';
-                } else if (enrollment.paymentType === 'installment') {
-                    paymentInfo = '<span style="color: var(--warning); font-size: 0.8rem;"><i class="fas fa-credit-card"></i> أقساط</span>';
-                } else {
-                    paymentInfo = '<span style="color: var(--primary); font-size: 0.8rem;"><i class="fas fa-dollar-sign"></i> مدفوع</span>';
-                }
-
-                // حساب الأيام المتبقية
-                let timeInfo = '';
-                if (status === 'نشطة') {
-                    const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
-                    timeInfo = `<div style="font-size: 0.8rem; color: var(--info); margin-top: 0.5rem;">
-                        <i class="fas fa-hourglass-half"></i> ${daysLeft} يوم متبقي
-                    </div>`;
-                } else if (status === 'قريباً') {
-                    const daysUntil = Math.ceil((startDate - now) / (1000 * 60 * 60 * 24));
-                    timeInfo = `<div style="font-size: 0.8rem; color: var(--warning); margin-top: 0.5rem;">
-                        <i class="fas fa-calendar-plus"></i> يبدأ خلال ${daysUntil} يوم
-                    </div>`;
-                }
 
                 return `
                     <div class="course-card" onclick="openCourse('${enrollment.id}', '${enrollment.type}')">
@@ -938,29 +825,15 @@
                                 <div class="course-type">
                                     <i class="fas fa-${enrollment.type === 'bundle' ? 'layer-group' : 'graduation-cap'}"></i>
                                     ${enrollment.type === 'bundle' ? 'مسار تعليمي' : 'دورة فردية'}
-                                    ${paymentInfo}
                                 </div>
                             </div>
-                            <span class="course-status ${statusClass}">
-                                <i class="fas ${statusIcon}"></i> ${status}
-                            </span>
+                            <span class="course-status ${statusClass}">${status}</span>
                         </div>
                         
                         <div class="course-dates">
                             <i class="fas fa-calendar-alt"></i>
                             ${startDate.toLocaleDateString('ar-SA')} - ${endDate.toLocaleDateString('ar-SA')}
-                            ${enrollment.duration ? `<span style="margin-right: 1rem; color: var(--text-muted);">
-                                <i class="fas fa-clock"></i> ${enrollment.duration} يوم
-                            </span>` : ''}
                         </div>
-                        
-                        ${timeInfo}
-                        
-                        ${enrollment.paymentNotes ? `
-                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; padding: 0.5rem; background: var(--lighter); border-radius: 4px;">
-                                <i class="fas fa-sticky-note"></i> ${enrollment.paymentNotes}
-                            </div>
-                        ` : ''}
                         
                         <div class="course-progress">
                             <div class="progress-header">
@@ -985,7 +858,7 @@
             
             if (enrollments.length === 0) {
                 progressContainer.innerHTML = `
-                    <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                    <div class="empty-state">
                         <p>لا توجد دورات لعرض التقدم</p>
                     </div>
                 `;
@@ -1007,14 +880,14 @@
                 `;
             }).join('');
 
-            progressContainer.innerHTML = progressHtml;
+            progressContainer.innerHTML = progressHtml || '<div class="empty-state"><p>لا يوجد تقدم بعد</p></div>';
         }
 
         // تحميل النشاط الأخير
         async function loadRecentActivity() {
             const activityList = document.getElementById('activityList');
             
-            // بيانات تجريبية للنشاط الأخير
+            // بيانات تجريبية للنشاط
             const activities = [
                 {
                     icon: 'fas fa-play',
@@ -1049,7 +922,7 @@
                     </div>
                     <div class="activity-content">
                         <div class="activity-title">${activity.title}</div>
-                        <div class="activity-description">${activity.description}</div>
+                        <div class="activity-description">${activity.description || ''}</div>
                         <div class="activity-time">${activity.time}</div>
                     </div>
                 </div>
@@ -1064,11 +937,18 @@
             
             const enrollments = userData.enrollments || [];
             const completedCourses = userData.completedCourses || [];
+            const now = new Date();
+            
             const activeCourses = enrollments.filter(e => {
+                const startDate = new Date(e.startDate);
                 const endDate = new Date(e.endDate);
-                return endDate >= new Date() && e.isActive;
+                return startDate <= now && endDate >= now;
             }).length;
-            const expiredCourses = enrollments.length - activeCourses - completedCourses.length;
+            
+            const expiredCourses = enrollments.filter(e => {
+                const endDate = new Date(e.endDate);
+                return endDate < now;
+            }).length;
 
             learningChart = new Chart(ctx, {
                 type: 'doughnut',
@@ -1123,7 +1003,7 @@
             requestAnimationFrame(updateCounter);
         }
 
-        // فتح الدورة أو المسار
+        // فتح الدورة
         function openCourse(courseId, courseType) {
             if (courseType === 'bundle') {
                 window.location.href = `./bundle-view.html?id=${courseId}`;
@@ -1135,11 +1015,51 @@
         // تسجيل الخروج
         async function logout() {
             try {
+                // مسح البيانات المحلية
+                localStorage.removeItem('userId');
+                localStorage.removeItem('userEmail');
+                localStorage.removeItem('userName');
+                
                 await auth.signOut();
                 window.location.href = './login.html';
             } catch (error) {
                 console.error('خطأ في تسجيل الخروج:', error);
             }
+        }
+
+        // عرض حالة الخطأ
+        function showErrorState() {
+            document.querySelector('.main-container').innerHTML = `
+                <div class="empty-state" style="padding: 4rem;">
+                    <i class="fas fa-exclamation-triangle" style="color: var(--warning);"></i>
+                    <h2 style="color: var(--text); margin: 1rem 0;">مشكلة في تحميل البيانات</h2>
+                    <p>يرجى المحاولة مرة أخرى أو التواصل مع الدعم الفني</p>
+                    <div style="margin-top: 2rem;">
+                        <button class="btn btn-primary" onclick="window.location.reload()">
+                            <i class="fas fa-refresh"></i> إعادة تحميل
+                        </button>
+                        <button class="btn btn-secondary" onclick="logout()">
+                            <i class="fas fa-sign-out-alt"></i> تسجيل الخروج
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // عرض حالة خطأ جزئي
+        function showPartialErrorState() {
+            const elements = ['coursesGrid', 'progressOverview', 'activityList'];
+            elements.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-circle"></i>
+                            <p>خطأ في تحميل هذا القسم</p>
+                        </div>
+                    `;
+                }
+            });
         }
 
         // معالج الأخطاء
