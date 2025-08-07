@@ -6434,7 +6434,7 @@ function sortCourses(sortBy) {
     items.forEach(item => container.appendChild(item));
 }
 
-function assignCourse(course, settings = {}) {
+async function assignCourse(course, settings = {}) {
     // التحقق من عدم وجود الدورة مسبقاً
     if (formData.courses.some(c => c.id === course.id)) {
         showWarning('هذه الدورة/المسار مضاف بالفعل');
@@ -6459,16 +6459,23 @@ function assignCourse(course, settings = {}) {
     renderAssignedCourses();
     updateCounts();
     
-    // إذا كانت دورة مدفوعة، اعرض خيارات الدفع
+    // 🔥 الإصلاح المطلوب: انتظار النتيجة
     if (courseData.price > 0 && !courseData.isFree) {
-        showPaymentOptionsDialog(course);
+        try {
+            const paymentOptions = await showPaymentOptionsDialog(course);
+            if (paymentOptions) {
+                await createPaymentTransactions(course, paymentOptions);
+            }
+        } catch (error) {
+            console.error('خطأ في عرض خيارات الدفع:', error);
+        }
     }
 }
 
-function assignCourseFromButton(courseId) {
+async function assignCourseFromButton(courseId) {
     const course = [...availableCourses, ...availablePaths].find(c => c.id === courseId);
     if (course) {
-        assignCourse(course);
+        await assignCourse(course); // 🔥 إضافة await
     }
 }
 
@@ -7898,219 +7905,197 @@ function initializeDragAndDrop() {
             return paymentOptions;
         }
 // ==================== دالة createPaymentTransactions بالهيكل الجديد ====================
-        async function createPaymentTransactions(course, paymentOptions) {
-            if (!paymentOptions) return;
-            
-            try {
-                showLoading('جاري إنشاء المعاملات المالية...');
+     async function createPaymentTransactions(course, paymentOptions) {
+    if (!paymentOptions) return;
+    
+    try {
+        showLoading('جاري إنشاء المعاملات المالية...');
+        
+        console.log('🔥 إنشاء معاملات للدورة:', course.title, paymentOptions);
+        
+        // إنشاء المعاملات حسب نوع الدفع
+        const transactions = [];
+        const baseAmount = paymentOptions.finalPrice;
+        
+        switch (paymentOptions.paymentType) {
+            case 'full':
+                const fullTransaction = TransactionStructure.createTransaction({
+                    userId: currentUserId || 'temp',
+                    type: paymentOptions.transactionType || 'payment',
+                    amount: baseAmount,
+                    dueDate: new Date().toISOString(),
+                    paymentMethod: paymentOptions.paymentMethod,
+                    status: paymentOptions.transactionType === 'grant' ? 'completed' : 'pending',
+                    relatedTo: {
+                        type: course.type,
+                        id: course.id,
+                        title: course.title
+                    },
+                    notes: `دفعة كاملة للدورة: ${course.title}`,
+                    discount: paymentOptions.discount,
+                    originalAmount: course.price
+                });
+                transactions.push(fullTransaction);
+                break;
                 
-                // إنشاء السجل المالي للدورة
-                const financialRecord = CourseFinancialStructure.createCourseFinancialRecord(
-                    course.id,
-                    course,
-                    paymentOptions
-                );
+            case 'installments':
+                const installmentCount = paymentOptions.installmentCount || 3;
+                const firstPayment = paymentOptions.firstPayment || (baseAmount / installmentCount);
+                const remainingAmount = baseAmount - firstPayment;
+                const regularInstallment = installmentCount > 1 ? remainingAmount / (installmentCount - 1) : 0;
                 
-                // إنشاء المعاملات حسب نوع الدفع
-                const transactions = [];
-                const baseAmount = paymentOptions.finalPrice;
+                // القسط الأول
+                const firstInstallment = TransactionStructure.createTransaction({
+                    userId: currentUserId || 'temp',
+                    type: 'payment',
+                    amount: firstPayment,
+                    dueDate: new Date().toISOString(),
+                    paymentMethod: paymentOptions.paymentMethod,
+                    status: paymentOptions.firstStatus || 'pending',
+                    relatedTo: {
+                        type: course.type,
+                        id: course.id,
+                        title: course.title
+                    },
+                    installmentInfo: {
+                        number: 1,
+                        total: installmentCount,
+                        frequency: 'monthly'
+                    },
+                    notes: `القسط الأول (1/${installmentCount}) للدورة: ${course.title}`,
+                    discount: paymentOptions.discount,
+                    originalAmount: course.price
+                });
+                transactions.push(firstInstallment);
                 
-                switch (paymentOptions.paymentType) {
-                    case 'full':
-                        // دفعة واحدة كاملة
-                        const fullTransaction = TransactionStructure.createTransaction({
-                            userId: currentUserId,
-                            type: paymentOptions.transactionType || 'payment',
-                            amount: baseAmount,
-                            dueDate: new Date().toISOString(),
-                            paymentMethod: paymentOptions.paymentMethod,
-                            status: paymentOptions.transactionType === 'grant' ? 'completed' : 'pending',
-                            relatedTo: {
-                                type: course.type,
-                                id: course.id,
-                                title: course.title
-                            },
-                            notes: `دفعة كاملة للدورة: ${course.title}`,
-                            discount: paymentOptions.discount,
-                            originalAmount: course.price
-                        });
-                        transactions.push(fullTransaction);
-                        break;
-                        
-                    case 'installments':
-                        // أقساط متعددة
-                        const installmentCount = paymentOptions.installmentCount;
-                        const firstPayment = paymentOptions.firstPayment || (baseAmount / installmentCount);
-                        const remainingAmount = baseAmount - firstPayment;
-                        const regularInstallment = installmentCount > 1 ? remainingAmount / (installmentCount - 1) : 0;
-                        
-                        // القسط الأول
-                        const firstInstallment = TransactionStructure.createTransaction({
-                            userId: currentUserId,
-                            type: 'payment',
-                            amount: firstPayment,
-                            dueDate: new Date().toISOString(),
-                            paymentMethod: paymentOptions.paymentMethod,
-                            status: paymentOptions.firstStatus || 'pending',
-                            relatedTo: {
-                                type: course.type,
-                                id: course.id,
-                                title: course.title
-                            },
-                            installmentInfo: {
-                                number: 1,
-                                total: installmentCount,
-                                frequency: 'monthly'
-                            },
-                            notes: `القسط الأول (1/${installmentCount}) للدورة: ${course.title}`,
-                            discount: paymentOptions.discount,
-                            originalAmount: course.price
-                        });
-                        transactions.push(firstInstallment);
-                        
-                        // باقي الأقساط
-                        for (let i = 2; i <= installmentCount; i++) {
-                            const dueDate = new Date();
-                            dueDate.setMonth(dueDate.getMonth() + (i - 1));
-                            
-                            const installment = TransactionStructure.createTransaction({
-                                userId: currentUserId,
-                                type: 'payment',
-                                amount: regularInstallment,
-                                dueDate: dueDate.toISOString(),
-                                paymentMethod: paymentOptions.paymentMethod,
-                                status: 'pending',
-                                relatedTo: {
-                                    type: course.type,
-                                    id: course.id,
-                                    title: course.title
-                                },
-                                installmentInfo: {
-                                    number: i,
-                                    total: installmentCount,
-                                    frequency: 'monthly'
-                                },
-                                notes: `القسط ${i}/${installmentCount} للدورة: ${course.title}`,
-                                discount: paymentOptions.discount,
-                                originalAmount: course.price
-                            });
-                            transactions.push(installment);
-                        }
-                        break;
-                        
-                    case 'partial':
-                        // دفعة جزئية
-                        const partialAmount = paymentOptions.partialAmount;
-                        const remaining = baseAmount - partialAmount;
-                        
-                        // الدفعة الأولى
-                        const partialTransaction = TransactionStructure.createTransaction({
-                            userId: currentUserId,
-                            type: 'payment',
-                            amount: partialAmount,
-                            dueDate: new Date().toISOString(),
-                            paymentMethod: paymentOptions.paymentMethod,
-                            status: paymentOptions.partialStatus || 'pending',
-                            relatedTo: {
-                                type: course.type,
-                                id: course.id,
-                                title: course.title
-                            },
-                            notes: `دفعة جزئية للدورة: ${course.title}`,
-                            partialPayment: {
-                                paid: partialAmount,
-                                remaining: remaining,
-                                total: baseAmount
-                            },
-                            discount: paymentOptions.discount,
-                            originalAmount: course.price
-                        });
-                        transactions.push(partialTransaction);
-                        
-                        // المبلغ المتبقي
-                        if (remaining > 0) {
-                            const remainingTransaction = TransactionStructure.createTransaction({
-                                userId: currentUserId,
-                                type: 'payment',
-                                amount: remaining,
-                                dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                                paymentMethod: 'pending',
-                                status: 'pending',
-                                relatedTo: {
-                                    type: course.type,
-                                    id: course.id,
-                                    title: course.title
-                                },
-                                notes: `المبلغ المتبقي للدورة: ${course.title}`,
-                                partialPayment: {
-                                    paid: 0,
-                                    remaining: remaining,
-                                    total: baseAmount
-                                },
-                                discount: paymentOptions.discount,
-                                originalAmount: course.price
-                            });
-                            transactions.push(remainingTransaction);
-                        }
-                        break;
-                        
-                    case 'grant':
-                    case 'none':
-                        // منحة دراسية أو مجاني
-                        const grantTransaction = TransactionStructure.createTransaction({
-                            userId: currentUserId,
-                            type: paymentOptions.transactionType || 'grant',
-                            amount: baseAmount,
-                            dueDate: new Date().toISOString(),
-                            paymentMethod: 'grant',
-                            status: 'completed',
-                            relatedTo: {
-                                type: course.type,
-                                id: course.id,
-                                title: course.title
-                            },
-                            notes: `منحة دراسية كاملة للدورة: ${course.title}`,
-                            discount: 100,
-                            originalAmount: course.price,
-                            grantDetails: {
-                                reason: 'منحة دراسية',
-                                approvedBy: currentUser?.email || 'system',
-                                approvedAt: new Date().toISOString()
-                            }
-                        });
-                        transactions.push(grantTransaction);
-                        break;
-                }
-                
-                // إضافة المعاملات للسجل المالي
-                financialRecord.transactions = transactions;
-                
-                // تحديث ملخص السجل المالي
-                updateFinancialRecordSummary(financialRecord);
-                
-                // حفظ في Firebase أو محلياً
-                if (editMode && currentUserId) {
-                    // حفظ في Firebase بالهيكل الجديد
-                    await saveFinancialRecordToFirebase(financialRecord);
-                } else {
-                    // إضافة مؤقتة للعرض
-                    transactions.forEach(transaction => {
-                        userTransactions.push(transaction);
+                // باقي الأقساط
+                for (let i = 2; i <= installmentCount; i++) {
+                    const dueDate = new Date();
+                    dueDate.setMonth(dueDate.getMonth() + (i - 1));
+                    
+                    const installment = TransactionStructure.createTransaction({
+                        userId: currentUserId || 'temp',
+                        type: 'payment',
+                        amount: regularInstallment,
+                        dueDate: dueDate.toISOString(),
+                        paymentMethod: paymentOptions.paymentMethod,
+                        status: 'pending',
+                        relatedTo: {
+                            type: course.type,
+                            id: course.id,
+                            title: course.title
+                        },
+                        installmentInfo: {
+                            number: i,
+                            total: installmentCount,
+                            frequency: 'monthly'
+                        },
+                        notes: `القسط ${i}/${installmentCount} للدورة: ${course.title}`,
+                        discount: paymentOptions.discount,
+                        originalAmount: course.price
                     });
+                    transactions.push(installment);
                 }
+                break;
                 
-                // تحديث العرض
-                await loadUserTransactions();
+            case 'partial':
+                const partialAmount = paymentOptions.partialAmount;
+                const remaining = baseAmount - partialAmount;
                 
-                hideLoading();
-                showSuccess(`تم إنشاء ${transactions.length} معاملة مالية بنجاح`);
+                // الدفعة الأولى
+                const partialTransaction = TransactionStructure.createTransaction({
+                    userId: currentUserId || 'temp',
+                    type: 'payment',
+                    amount: partialAmount,
+                    dueDate: new Date().toISOString(),
+                    paymentMethod: paymentOptions.paymentMethod,
+                    status: paymentOptions.partialStatus || 'pending',
+                    relatedTo: {
+                        type: course.type,
+                        id: course.id,
+                        title: course.title
+                    },
+                    notes: `دفعة جزئية للدورة: ${course.title}`,
+                    discount: paymentOptions.discount,
+                    originalAmount: course.price
+                });
+                transactions.push(partialTransaction);
                 
-            } catch (error) {
-                console.error('خطأ في إنشاء المعاملات:', error);
-                hideLoading();
-                showError('حدث خطأ في إنشاء المعاملات المالية');
+                // المبلغ المتبقي
+                if (remaining > 0) {
+                    const remainingTransaction = TransactionStructure.createTransaction({
+                        userId: currentUserId || 'temp',
+                        type: 'payment',
+                        amount: remaining,
+                        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        paymentMethod: 'pending',
+                        status: 'pending',
+                        relatedTo: {
+                            type: course.type,
+                            id: course.id,
+                            title: course.title
+                        },
+                        notes: `المبلغ المتبقي للدورة: ${course.title}`,
+                        discount: paymentOptions.discount,
+                        originalAmount: course.price
+                    });
+                    transactions.push(remainingTransaction);
+                }
+                break;
+                
+            case 'grant':
+            case 'none':
+                const grantTransaction = TransactionStructure.createTransaction({
+                    userId: currentUserId || 'temp',
+                    type: paymentOptions.transactionType || 'grant',
+                    amount: baseAmount,
+                    dueDate: new Date().toISOString(),
+                    paymentMethod: 'grant',
+                    status: 'completed',
+                    relatedTo: {
+                        type: course.type,
+                        id: course.id,
+                        title: course.title
+                    },
+                    notes: `منحة دراسية كاملة للدورة: ${course.title}`,
+                    discount: 100,
+                    originalAmount: course.price
+                });
+                transactions.push(grantTransaction);
+                break;
+        }
+        
+        // 🔥 إضافة المعاملات للمصفوفة العامة
+        transactions.forEach(transaction => {
+            userTransactions.push(transaction);
+        });
+        
+        console.log(`✅ تم إنشاء ${transactions.length} معاملة`);
+        console.log('📊 إجمالي المعاملات:', userTransactions.length);
+        
+        // 🔥 تحديث العرض فوراً
+        updateFinancialSummary();
+        updateTransactionsDisplay();
+        updateUpcomingPaymentsDisplay();
+        
+        // حفظ في Firebase إذا كان في وضع التعديل
+        if (editMode && currentUserId) {
+            try {
+                await saveUserTransactions();
+            } catch (saveError) {
+                console.error('خطأ في حفظ المعاملات:', saveError);
             }
         }
+        
+        hideLoading();
+        showSuccess(`تم إنشاء ${transactions.length} معاملة مالية بنجاح`);
+        
+    } catch (error) {
+        console.error('❌ خطأ في إنشاء المعاملات:', error);
+        hideLoading();
+        showError('حدث خطأ في إنشاء المعاملات المالية');
+    }
+}
 
         // ==================== حفظ السجل المالي في Firebase ====================
         async function saveFinancialRecordToFirebase(financialRecord) {
@@ -10329,47 +10314,7 @@ async function saveUserTransactions() {
 }
 
 // تأكد من أن دالة createPaymentTransactions تضيف المعاملات بشكل صحيح
-async function createPaymentTransactions(course, paymentOptions) {
-    if (!paymentOptions) return;
-    
-    try {
-        showLoading('جاري إنشاء المعاملات المالية...');
-        
-        console.log('إنشاء معاملات للدورة:', course.title, paymentOptions);
-        
-        // إنشاء المعاملات حسب نوع الدفع
-        const transactions = [];
-        const baseAmount = paymentOptions.finalPrice;
-        
-        // ... باقي كود إنشاء المعاملات ...
-        
-        // إضافة المعاملات للمصفوفة العامة
-        transactions.forEach(transaction => {
-            userTransactions.push(transaction);
-        });
-        
-        console.log(`✅ تم إنشاء ${transactions.length} معاملة`);
-        console.log('إجمالي المعاملات:', userTransactions.length);
-        
-        // تحديث العرض
-        updateFinancialSummary();
-        updateTransactionsDisplay();
-        updateUpcomingPaymentsDisplay();
-        
-        hideLoading();
-        showSuccess(`تم إنشاء ${transactions.length} معاملة مالية بنجاح`);
-        
-        // حفظ تلقائي
-        if (editMode && currentUserId) {
-            await saveUserTransactions();
-        }
-        
-    } catch (error) {
-        console.error('خطأ في إنشاء المعاملات:', error);
-        hideLoading();
-        showError('حدث خطأ في إنشاء المعاملات المالية');
-    }
-}
+
     // ==================== حفظ المستخدم ====================
 // تعديل دالة saveUser للتعامل مع الخطأ
 async function saveUser(isDraft = false) {
@@ -10767,6 +10712,45 @@ async function saveUser(isDraft = false) {
             }
         });
 
+        // 🔥 إضافة معالج عام لأزرار إضافة الدورات
+document.addEventListener('click', async function(e) {
+    // التحقق من النقر على زر الإضافة
+    if (e.target.classList.contains('add-btn') || 
+        e.target.closest('.item-action-btn.add-btn') ||
+        (e.target.tagName === 'I' && e.target.closest('.add-btn'))) {
+        
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const button = e.target.closest('.add-btn') || e.target;
+        const courseItem = button.closest('.course-item');
+        
+        if (courseItem) {
+            const courseId = courseItem.getAttribute('data-id');
+            console.log('🔥 النقر على زر إضافة الدورة:', courseId);
+            
+            await assignCourseFromButton(courseId);
+        }
+    }
+});
+
+// 🔥 تأكد من تحديث العرض عند فتح التبويب المالي
+document.addEventListener('DOMContentLoaded', function() {
+    const financialTabLink = document.querySelector('[data-tab="financial"]');
+    if (financialTabLink) {
+        financialTabLink.addEventListener('click', function() {
+            setTimeout(() => {
+                console.log('🔄 فتح التبويب المالي - تحديث العرض');
+                console.log('📊 عدد المعاملات الحالية:', userTransactions?.length || 0);
+                
+                updateFinancialSummary();
+                updateTransactionsDisplay();
+                updateUpcomingPaymentsDisplay();
+                loadCoursesForFilters();
+            }, 100);
+        });
+    }
+});
         // ==================== Export Functions ====================
         window.UserBuilder = {
             showLoading,
@@ -10784,6 +10768,7 @@ async function saveUser(isDraft = false) {
         };
 
         console.log('✅ تم تحميل جميع الوظائف بنجاح');
+        
     </script>
 </body>
 </html>
