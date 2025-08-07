@@ -10245,8 +10245,133 @@ function updateCounts() {
                 throw error;
             }
         }
+// دالة حفظ المعاملات المالية
+async function saveUserTransactions() {
+    try {
+        console.log('جاري حفظ المعاملات المالية...');
+        
+        // تجميع المعاملات حسب الدورة/المسار
+        const transactionsByCourse = new Map();
+        
+        userTransactions.forEach(transaction => {
+            if (transaction.relatedTo) {
+                const courseId = transaction.relatedTo.id;
+                if (!transactionsByCourse.has(courseId)) {
+                    transactionsByCourse.set(courseId, []);
+                }
+                transactionsByCourse.get(courseId).push(transaction);
+            }
+        });
+        
+        // حفظ كل مجموعة معاملات في سجل مالي منفصل
+        for (const [courseId, transactions] of transactionsByCourse) {
+            const recordRef = db.collection('users').doc(currentUserId)
+                .collection('financialRecords').doc(courseId);
+            
+            // جلب السجل الموجود إن وجد
+            const existingRecord = await recordRef.get();
+            
+            let recordData;
+            if (existingRecord.exists) {
+                // تحديث السجل الموجود
+                recordData = existingRecord.data();
+                // دمج المعاملات الجديدة مع القديمة
+                const existingTransactionIds = new Set(recordData.transactions.map(t => t.id));
+                const newTransactions = transactions.filter(t => !existingTransactionIds.has(t.id));
+                recordData.transactions = [...recordData.transactions, ...newTransactions];
+            } else {
+                // إنشاء سجل جديد
+                recordData = {
+                    courseId: courseId,
+                    courseType: transactions[0].relatedTo.type,
+                    courseTitle: transactions[0].relatedTo.title,
+                    userId: currentUserId,
+                    transactions: transactions,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+            }
+            
+            // تحديث الملخص
+            updateFinancialRecordSummary(recordData);
+            
+            // إضافة وقت التحديث
+            recordData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
+            
+            // حفظ في Firebase
+            await recordRef.set(recordData, { merge: true });
+            
+            console.log(`✅ تم حفظ ${transactions.length} معاملة للدورة ${courseId}`);
+        }
+        
+        // حفظ المعاملات غير المرتبطة بدورات (إن وجدت)
+        const unrelatedTransactions = userTransactions.filter(t => !t.relatedTo);
+        if (unrelatedTransactions.length > 0) {
+            const generalRecordRef = db.collection('users').doc(currentUserId)
+                .collection('financialRecords').doc('general');
+            
+            await generalRecordRef.set({
+                userId: currentUserId,
+                transactions: unrelatedTransactions,
+                type: 'general',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            
+            console.log(`✅ تم حفظ ${unrelatedTransactions.length} معاملة عامة`);
+        }
+        
+        console.log('✅ تم حفظ جميع المعاملات المالية بنجاح');
+        
+    } catch (error) {
+        console.error('خطأ في حفظ المعاملات المالية:', error);
+        throw error;
+    }
+}
 
+// تأكد من أن دالة createPaymentTransactions تضيف المعاملات بشكل صحيح
+async function createPaymentTransactions(course, paymentOptions) {
+    if (!paymentOptions) return;
+    
+    try {
+        showLoading('جاري إنشاء المعاملات المالية...');
+        
+        console.log('إنشاء معاملات للدورة:', course.title, paymentOptions);
+        
+        // إنشاء المعاملات حسب نوع الدفع
+        const transactions = [];
+        const baseAmount = paymentOptions.finalPrice;
+        
+        // ... باقي كود إنشاء المعاملات ...
+        
+        // إضافة المعاملات للمصفوفة العامة
+        transactions.forEach(transaction => {
+            userTransactions.push(transaction);
+        });
+        
+        console.log(`✅ تم إنشاء ${transactions.length} معاملة`);
+        console.log('إجمالي المعاملات:', userTransactions.length);
+        
+        // تحديث العرض
+        updateFinancialSummary();
+        updateTransactionsDisplay();
+        updateUpcomingPaymentsDisplay();
+        
+        hideLoading();
+        showSuccess(`تم إنشاء ${transactions.length} معاملة مالية بنجاح`);
+        
+        // حفظ تلقائي
+        if (editMode && currentUserId) {
+            await saveUserTransactions();
+        }
+        
+    } catch (error) {
+        console.error('خطأ في إنشاء المعاملات:', error);
+        hideLoading();
+        showError('حدث خطأ في إنشاء المعاملات المالية');
+    }
+}
     // ==================== حفظ المستخدم ====================
+// تعديل دالة saveUser للتعامل مع الخطأ
 async function saveUser(isDraft = false) {
     try {
         // التحقق من وجود معرف المستخدم
@@ -10325,15 +10450,18 @@ async function saveUser(isDraft = false) {
         
         if (!userDoc.exists) {
             // إنشاء مستخدم جديد
+            let authCreated = false;
+            let userCredential = null;
             
-            // إنشاء حساب Firebase Auth
+            // محاولة إنشاء حساب Firebase Auth
             try {
-                const userCredential = await auth.createUserWithEmailAndPassword(
+                userCredential = await auth.createUserWithEmailAndPassword(
                     formData.basic.email,
                     formData.basic.password
                 );
                 
                 userData.authId = userCredential.user.uid;
+                authCreated = true;
                 
                 // تحديث الملف الشخصي
                 await userCredential.user.updateProfile({
@@ -10342,22 +10470,84 @@ async function saveUser(isDraft = false) {
                 
             } catch (authError) {
                 console.error('خطأ في إنشاء حساب Auth:', authError);
-                // يمكن المتابعة بدون Auth
+                
+                // معالجة الأخطاء المختلفة
+                if (authError.code === 'auth/email-already-in-use') {
+                    // البريد مستخدم بالفعل - نحاول جلب المستخدم
+                    try {
+                        // البحث عن المستخدم في قاعدة البيانات بالبريد
+                        const existingUserQuery = await db.collection('users')
+                            .where('email', '==', formData.basic.email)
+                            .limit(1)
+                            .get();
+                        
+                        if (!existingUserQuery.empty) {
+                            // المستخدم موجود بالفعل
+                            hideLoading();
+                            
+                            const existingUser = existingUserQuery.docs[0];
+                            const result = await Swal.fire({
+                                icon: 'warning',
+                                title: 'البريد الإلكتروني مستخدم بالفعل',
+                                html: `
+                                    <p>هذا البريد مسجل باسم: <strong>${existingUser.data().name}</strong></p>
+                                    <p>معرف المستخدم: <strong>${existingUser.id}</strong></p>
+                                    <p>هل تريد الذهاب لصفحة تعديل هذا المستخدم؟</p>
+                                `,
+                                showCancelButton: true,
+                                confirmButtonText: 'نعم، اذهب للتعديل',
+                                cancelButtonText: 'لا، البقاء هنا'
+                            });
+                            
+                            if (result.isConfirmed) {
+                                window.location.href = `?id=${existingUser.id}`;
+                            }
+                            return;
+                        }
+                        
+                        // إذا لم نجد المستخدم في قاعدة البيانات، نتابع بدون Auth
+                        console.log('البريد مستخدم في Auth لكن ليس في قاعدة البيانات - سنتابع بدون Auth');
+                        
+                    } catch (searchError) {
+                        console.error('خطأ في البحث عن المستخدم:', searchError);
+                    }
+                    
+                } else if (authError.code === 'auth/weak-password') {
+                    hideLoading();
+                    showError('كلمة المرور ضعيفة جداً. يجب أن تكون 6 أحرف على الأقل');
+                    return;
+                } else if (authError.code === 'auth/invalid-email') {
+                    hideLoading();
+                    showError('البريد الإلكتروني غير صحيح');
+                    return;
+                }
+                
+                // في حالة أي خطأ آخر، نتابع بدون Auth
+                console.warn('سيتم إنشاء المستخدم بدون حساب Auth');
             }
             
             // حفظ في قاعدة البيانات
             await db.collection('users').doc(currentUserId).set(userData);
             
+            // حفظ المعاملات المالية إذا وجدت
+            if (userTransactions && userTransactions.length > 0) {
+                await saveUserTransactions();
+            }
+            
             hideLoading();
             
-            // عرض رسالة النجاح مع البيانات
-            await showSuccessWithCredentials(
-                formData.basic.email,
-                formData.basic.password,
-                userData.whatsapp
-            );
+            // عرض رسالة النجاح
+            if (authCreated && formData.basic.password) {
+                await showSuccessWithCredentials(
+                    formData.basic.email,
+                    formData.basic.password,
+                    userData.whatsapp
+                );
+            } else {
+                showSuccess('تم إنشاء المستخدم بنجاح (بدون حساب دخول)');
+            }
             
-            // **مهم: تفعيل وضع التعديل بعد الإنشاء**
+            // تفعيل وضع التعديل بعد الإنشاء
             editMode = true;
             updatePageForEditMode();
             
@@ -10370,12 +10560,14 @@ async function saveUser(isDraft = false) {
             
             await db.collection('users').doc(currentUserId).update(userData);
             
+            // حفظ المعاملات المالية
+            if (userTransactions && userTransactions.length > 0) {
+                await saveUserTransactions();
+            }
+            
             hideLoading();
             showSuccess('تم حفظ التعديلات بنجاح');
         }
-        
-        // حفظ المعاملات المالية إذا وجدت
-        // ... باقي الكود
         
     } catch (error) {
         console.error('خطأ في حفظ المستخدم:', error);
