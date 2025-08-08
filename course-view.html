@@ -1608,23 +1608,67 @@
         }
 
         // Initialize App
+// Initialize App
+document.addEventListener('DOMContentLoaded', async function() {
+    // التحقق من وجود userId في localStorage أولاً
+    userId = localStorage.getItem('userId');
+    courseId = getCourseIdFromURL();
+    
+    if (!userId) {
+        // إذا لم يكن موجود، نتحقق من Firebase Auth
         auth.onAuthStateChanged(async (user) => {
             if (!user) {
                 window.location.href = './login.html';
                 return;
             }
-
-            currentUser = user;
-            userId = localStorage.getItem('userId');
-            courseId = getCourseIdFromURL();
             
-            if (!courseId || !userId) {
-                showError('معرف الدورة غير صحيح');
-                return;
+            currentUser = user;
+            
+            // محاولة الحصول على userId من Firestore
+            try {
+                const usersSnapshot = await db.collection('users')
+                    .where('email', '==', user.email)
+                    .limit(1)
+                    .get();
+                
+                if (!usersSnapshot.empty) {
+                    userId = usersSnapshot.docs[0].id;
+                    localStorage.setItem('userId', userId);
+                    
+                    if (courseId) {
+                        await loadAllData();
+                    } else {
+                        showError('معرف الدورة غير صحيح');
+                    }
+                } else {
+                    showError('لم يتم العثور على بيانات المستخدم');
+                }
+            } catch (error) {
+                console.error('خطأ في جلب بيانات المستخدم:', error);
+                showError('حدث خطأ في تحميل البيانات');
             }
-
-            await loadAllData();
         });
+    } else {
+        // إذا كان userId موجود، نتابع مباشرة
+        if (!courseId) {
+            showError('معرف الدورة غير صحيح');
+            return;
+        }
+        
+        // نتحقق من حالة تسجيل الدخول
+        const unsubscribe = auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                currentUser = user;
+                await loadAllData();
+            } else {
+                // المستخدم غير مسجل دخول، لكن لديه userId
+                // ممكن يكون انتهت الجلسة
+                window.location.href = './login.html';
+            }
+            unsubscribe(); // إلغاء الاشتراك بعد أول تحقق
+        });
+    }
+});
 
         // Load All Required Data
         async function loadAllData() {
