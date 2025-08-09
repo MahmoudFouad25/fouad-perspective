@@ -4643,6 +4643,207 @@ function updateUIWithCourseData() {
             }
         `;
         document.head.appendChild(style);
+        // 2. JavaScript Functions للتعامل مع البيانات
+function collectPricingData() {
+    const pricingData = {
+        priceCategory: document.querySelector('input[name="priceCategory"]:checked')?.value || 'sprout',
+        basePrice: parseInt(document.getElementById('basePrice').value) || 0,
+        
+        // نظام الخصومات
+        discounts: {
+            earlyBird: document.getElementById('enableEarlyBird').checked ? {
+                enabled: true,
+                percentage: parseInt(document.getElementById('earlyBirdDiscount').value),
+                endDate: document.getElementById('earlyBirdEndDate').value,
+                conditions: document.getElementById('earlyBirdConditions').value
+            } : null,
+            
+            regular: document.getElementById('enableRegularDiscount').checked ? {
+                enabled: true,
+                percentage: parseInt(document.getElementById('regularDiscount').value),
+                endDate: document.getElementById('regularEndDate').value
+            } : null,
+            
+            groups: document.getElementById('enableGroupDiscount').checked ? {
+                enabled: true,
+                small: parseInt(document.getElementById('smallGroupDiscount').value),
+                medium: parseInt(document.getElementById('mediumGroupDiscount').value),
+                large: parseInt(document.getElementById('largeGroupDiscount').value)
+            } : null
+        },
+        
+        // خطط الدفع
+        paymentPlans: [],
+        
+        // المنح
+        grants: document.getElementById('enableGrants').checked ? {
+            enabled: true,
+            percentage: parseInt(document.getElementById('grantsPercentage').value),
+            applicationUrl: document.getElementById('grantApplicationUrl').value,
+            types: {
+                need: document.getElementById('grantNeed').checked,
+                excellence: document.getElementById('grantExcellence').checked,
+                service: document.getElementById('grantService').checked
+            }
+        } : null
+    };
+    
+    // جمع خطط الدفع
+    if (document.getElementById('enableFullPayment').checked) {
+        pricingData.paymentPlans.push({
+            id: 'full',
+            name: 'دفعة واحدة',
+            type: 'full',
+            discount: parseInt(document.getElementById('fullPaymentDiscount').value),
+            installments: 1
+        });
+    }
+    
+    if (document.getElementById('enableBiMonthly').checked) {
+        pricingData.paymentPlans.push({
+            id: 'bi-monthly',
+            name: 'دفعتين شهريتين',
+            type: 'installments',
+            installments: 2,
+            frequency: 'monthly'
+        });
+    }
+    
+    if (document.getElementById('enableQuarterly').checked) {
+        pricingData.paymentPlans.push({
+            id: 'quarterly',
+            name: '3 دفعات',
+            type: 'installments',
+            installments: 3,
+            frequency: 'custom',
+            schedule: [
+                { percentage: parseInt(document.getElementById('firstInstallment').value), dueAfter: 0 },
+                { percentage: parseInt(document.getElementById('secondInstallment').value), dueAfter: 30 },
+                { percentage: parseInt(document.getElementById('thirdInstallment').value), dueAfter: 60 }
+            ]
+        });
+    }
+    
+    if (document.getElementById('enableCustomPlan').checked) {
+        pricingData.paymentPlans.push({
+            id: 'custom',
+            name: 'خطة مخصصة',
+            type: 'custom',
+            requiresApproval: true
+        });
+    }
+    
+    return pricingData;
+}
+
+// 3. دالة حساب الأسعار مع الخصومات
+function calculatePriceWithDiscounts(basePrice, discounts, groupSize = 1) {
+    let finalPrice = basePrice;
+    let appliedDiscounts = [];
+    
+    // تحديد الخصم الأساسي المطبق
+    const today = new Date();
+    
+    if (discounts.earlyBird?.enabled && new Date(discounts.earlyBird.endDate) >= today) {
+        finalPrice = basePrice * (1 - discounts.earlyBird.percentage / 100);
+        appliedDiscounts.push({
+            type: 'earlyBird',
+            name: 'تسجيل مبكر',
+            percentage: discounts.earlyBird.percentage
+        });
+    } else if (discounts.regular?.enabled && new Date(discounts.regular.endDate) >= today) {
+        finalPrice = basePrice * (1 - discounts.regular.percentage / 100);
+        appliedDiscounts.push({
+            type: 'regular',
+            name: 'تسجيل عادي',
+            percentage: discounts.regular.percentage
+        });
+    }
+    
+    // تطبيق خصم المجموعات إن وجد
+    if (discounts.groups?.enabled && groupSize > 1) {
+        let groupDiscount = 0;
+        let groupType = '';
+        
+        if (groupSize >= 10) {
+            groupDiscount = discounts.groups.large;
+            groupType = 'مجموعة كبيرة';
+        } else if (groupSize >= 6) {
+            groupDiscount = discounts.groups.medium;
+            groupType = 'مجموعة متوسطة';
+        } else if (groupSize >= 3) {
+            groupDiscount = discounts.groups.small;
+            groupType = 'مجموعة صغيرة';
+        }
+        
+        if (groupDiscount > 0) {
+            finalPrice = finalPrice * (1 - groupDiscount / 100);
+            appliedDiscounts.push({
+                type: 'group',
+                name: groupType,
+                percentage: groupDiscount
+            });
+        }
+    }
+    
+    return {
+        originalPrice: basePrice,
+        finalPrice: Math.round(finalPrice),
+        totalDiscount: basePrice - Math.round(finalPrice),
+        appliedDiscounts: appliedDiscounts
+    };
+}
+
+// 4. معاينة الأسعار الحية
+function updatePricePreview() {
+    const basePrice = parseInt(document.getElementById('basePrice').value) || 0;
+    const pricingData = collectPricingData();
+    
+    // حساب الأسعار لكل سيناريو
+    const scenarios = [
+        { name: 'فردي - تسجيل مبكر', groupSize: 1, timing: 'early' },
+        { name: 'فردي - تسجيل عادي', groupSize: 1, timing: 'regular' },
+        { name: '3 أشخاص - تسجيل مبكر', groupSize: 3, timing: 'early' },
+        { name: '10 أشخاص - تسجيل مبكر', groupSize: 10, timing: 'early' }
+    ];
+    
+    let previewHTML = '<h4>معاينة الأسعار:</h4><div class="price-scenarios">';
+    
+    scenarios.forEach(scenario => {
+        const result = calculatePriceWithDiscounts(basePrice, pricingData.discounts, scenario.groupSize);
+        
+        previewHTML += `
+            <div class="scenario-card">
+                <h5>${scenario.name}</h5>
+                <p class="original-price">${result.originalPrice} ج.م</p>
+                <p class="final-price">${result.finalPrice} ج.م</p>
+                <p class="discount-info">وفر ${result.totalDiscount} ج.م</p>
+            </div>
+        `;
+    });
+    
+    previewHTML += '</div>';
+    
+    document.getElementById('pricePreview').innerHTML = previewHTML;
+}
+
+// 5. ربط الأحداث
+document.addEventListener('DOMContentLoaded', function() {
+    // مراقبة تغييرات الأسعار
+    document.getElementById('basePrice').addEventListener('input', updatePricePreview);
+    document.querySelectorAll('.discount-details input').forEach(input => {
+        input.addEventListener('input', updatePricePreview);
+    });
+    
+    // تحديث الدفعة الثالثة تلقائياً
+    ['firstInstallment', 'secondInstallment'].forEach(id => {
+        document.getElementById(id).addEventListener('input', function() {
+            const first = parseInt(document.getElementById('firstInstallment').value) || 0;
+            const second = parseInt(document.getElementById('secondInstallment').value) || 0;
+            document.getElementById('thirdInstallment').value = 100 - first - second;
+        });
+    });
+});
     </script>
 </body>
 </html>
