@@ -1247,54 +1247,74 @@ body {
 
     <script>
         // تهيئة Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHg0VrivE3C9A7jvzRu7lQgudLvcD_Fxk",
-            authDomain: "fouad-perspective.firebaseapp.com",
-            projectId: "fouad-perspective",
-            storageBucket: "fouad-perspective.appspot.com",
-            messagingSenderId: "564654107574",
-            appId: "1:564654107574:web:baebb660288b22f16213e6"
-        };
+// Firebase configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyDlzU8v79rMvEi1GdtKnPN9_-Aw8Bl9DVE",
+    authDomain: "fouad-personal-website-a10eb.firebaseapp.com",
+    projectId: "fouad-personal-website-a10eb",
+    storageBucket: "fouad-personal-website-a10eb.appspot.com",
+    messagingSenderId: "169418662085",
+    appId: "1:169418662085:web:ff893ca326b10c953eeba4"
+};
 
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-        // الحصول على معرف الدورة من URL
-        function getCourseId() {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('course');
-        }
+// تعريف الدالات
+function toggleModule(index) {
+    const moduleContent = document.getElementById(`module-${index}`);
+    const moduleHeader = moduleContent.previousElementSibling;
+    
+    if (moduleContent.classList.contains('active')) {
+        moduleContent.classList.remove('active');
+        moduleHeader.classList.remove('active');
+    } else {
+        document.querySelectorAll('.module-content').forEach(content => {
+            content.classList.remove('active');
+            content.previousElementSibling.classList.remove('active');
+        });
+        moduleContent.classList.add('active');
+        moduleHeader.classList.add('active');
+    }
+}
 
-        // تحميل بيانات الدورة
-        async function loadCourseData() {
-            const courseId = getCourseId();
-            
-            try {
-                // البحث بالـ slug أولاً
-                let snapshot = await db.collection('courses')
-                    .where('slug', '==', courseId)
-                    .limit(1)
-                    .get();
-                
-                // إذا لم نجد بالـ slug، نبحث بالـ id
-                if (snapshot.empty) {
-                    const doc = await db.collection('courses').doc(courseId).get();
-                    if (doc.exists) {
-                        displayCourse({ id: doc.id, ...doc.data() });
-                    } else {
-                        showError('الدورة غير موجودة');
-                    }
-                } else {
-                    const course = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-                    displayCourse(course);
-                }
-            } catch (error) {
-                console.error('Error loading course:', error);
-                showError('حدث خطأ في تحميل الدورة');
-            }
-        }
+function calculateModuleDuration(module) {
+    if (!module.lessons) return 0;
+    return module.lessons.reduce((total, lesson) => total + (lesson.duration || 0), 0);
+}
 
-        function formatDuration(minutes) {
+function getLessonIcon(type) {
+    const icons = {
+        'video': 'fa-video',
+        'text': 'fa-file-alt',
+        'quiz': 'fa-question-circle',
+        'assignment': 'fa-tasks',
+        'download': 'fa-download',
+        'library-content': 'fa-book'
+    };
+    return icons[type] || 'fa-file';
+}
+
+function enrollNow() {
+    Swal.fire({
+        title: 'جاري توجيهك لصفحة التسجيل...',
+        icon: 'info',
+        timer: 2000,
+        showConfirmButton: false
+    });
+}
+
+function applyForGrant() {
+    Swal.fire({
+        title: 'طلب منحة',
+        text: 'سيتم توجيهك لصفحة طلب المنحة',
+        icon: 'info',
+        confirmButtonText: 'موافق'
+    });
+}
+
+// دالة تحويل الدقائق لساعات ودقائق
+function formatDuration(minutes) {
     if (!minutes || minutes === 0) return '0 دقيقة';
     
     const hours = Math.floor(minutes / 60);
@@ -1308,30 +1328,188 @@ body {
         return `${hours} ساعة و ${remainingMinutes} دقيقة`;
     }
 }
-        // عرض بيانات الدورة
-        // عرض بيانات الدورة
+
+// دالة فتح الفيديو بملء الشاشة
+function openFullscreen() {
+    const iframe = document.getElementById('preview-video');
+    if (iframe) {
+        if (iframe.requestFullscreen) {
+            iframe.requestFullscreen();
+        } else if (iframe.webkitRequestFullscreen) {
+            iframe.webkitRequestFullscreen();
+        } else if (iframe.msRequestFullscreen) {
+            iframe.msRequestFullscreen();
+        }
+    }
+}
+
+// دالة تشغيل المعاينة
+async function playPreview(lessonId, lessonTitle, lessonDuration) {
+    const isMobile = window.innerWidth <= 768;
+    
+    let lessonData = null;
+    const courseModules = window.currentCourseData?.modules || [];
+    
+    courseModules.forEach(module => {
+        if (module.lessons) {
+            const found = module.lessons.find(l => l.id === lessonId);
+            if (found) lessonData = found;
+        }
+    });
+
+    if (!lessonData) {
+        Swal.fire('خطأ', 'لم يتم العثور على الدرس', 'error');
+        return;
+    }
+
+    if (lessonData.libraryContentId) {
+        try {
+            const contentDoc = await db.collection('courseContentLibrary')
+                .doc(lessonData.libraryContentId)
+                .get();
+            
+            if (contentDoc.exists) {
+                const contentData = contentDoc.data();
+                
+                let contentHtml = '';
+                
+                if (contentData.type === 'educational-video') {
+                    const videoUrl = contentData.videoData?.url || '';
+                    
+                    if (videoUrl) {
+                        let embedUrl = videoUrl;
+                        if (videoUrl.includes('youtu.be/')) {
+                            const videoId = videoUrl.split('youtu.be/')[1];
+                            embedUrl = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=1`;
+                        } else if (videoUrl.includes('youtube.com/watch?v=')) {
+                            const videoId = videoUrl.split('v=')[1].split('&')[0];
+                            embedUrl = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=1`;
+                        }
+                        
+                        contentHtml = `
+                            <div style="width: 100%; max-width: ${isMobile ? '100%' : '900px'}; margin: 0 auto;">
+                                <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); background: #000;">
+                                    <iframe 
+                                        id="preview-video"
+                                        src="${embedUrl}"
+                                        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;"
+                                        allowfullscreen
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share">
+                                    </iframe>
+                                </div>
+                                ${contentData.description ? `
+                                    <div style="margin-top: 20px; padding: 20px; background: rgba(255, 215, 0, 0.1); border-radius: 10px; text-align: right; border-right: 4px solid #FFD700;">
+                                        <h4 style="color: #FFD700; margin-bottom: 10px; font-weight: 600;">وصف الدرس:</h4>
+                                        <p style="color: rgba(255, 255, 255, 0.9); line-height: 1.8; margin: 0;">
+                                            ${contentData.description}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${isMobile ? `
+                                    <button onclick="openFullscreen()" style="
+                                        margin-top: 15px;
+                                        width: 100%;
+                                        padding: 12px;
+                                        background: linear-gradient(135deg, #FFD700, #FFA500);
+                                        color: #0A1628;
+                                        border: none;
+                                        border-radius: 25px;
+                                        font-weight: 700;
+                                        font-size: 1rem;
+                                        cursor: pointer;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        gap: 10px;
+                                    ">
+                                        <i class="fas fa-expand"></i>
+                                        مشاهدة بملء الشاشة
+                                    </button>
+                                ` : ''}
+                            </div>
+                        `;
+                    } else {
+                        contentHtml = `
+                            <div style="text-align: center; padding: 40px;">
+                                <i class="fas fa-video-slash" style="font-size: 4rem; color: #666; margin-bottom: 20px;"></i>
+                                <h3 style="color: #FFD700;">الفيديو غير متاح</h3>
+                                <p style="color: rgba(255, 255, 255, 0.7);">عذراً، لا يمكن تشغيل هذا الفيديو حالياً</p>
+                            </div>
+                        `;
+                    }
+                } else {
+                    contentHtml = `
+                        <div style="max-width: 800px; margin: 0 auto; padding: 30px;">
+                            <div style="background: rgba(255, 215, 0, 0.1); padding: 30px; border-radius: 10px; text-align: right;">
+                                <h3 style="color: #FFD700; margin-bottom: 20px;">${contentData.name || lessonTitle}</h3>
+                                <div style="line-height: 2; color: rgba(255, 255, 255, 0.9); font-size: 1.1rem;">
+                                    ${contentData.content || contentData.description || 'محتوى الدرس'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                Swal.fire({
+                    title: lessonTitle,
+                    html: contentHtml,
+                    width: isMobile ? '100%' : '95%',
+                    maxWidth: isMobile ? '100%' : '1000px',
+                    padding: isMobile ? '15px' : '30px',
+                    showCloseButton: true,
+                    showConfirmButton: false,
+                    background: '#0A1628',
+                    color: '#fff',
+                    customClass: {
+                        popup: 'lesson-preview-popup-dark',
+                        closeButton: 'swal2-close-styled',
+                        title: 'lesson-title-dark'
+                    }
+                });
+                
+            } else {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'خطأ',
+                    text: 'محتوى الدرس غير موجود',
+                    confirmButtonColor: '#FFD700',
+                    background: '#0A1628',
+                    color: '#fff'
+                });
+            }
+        } catch (error) {
+            console.error('Error loading content:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'خطأ',
+                text: 'حدث خطأ في تحميل المحتوى',
+                confirmButtonColor: '#FFD700',
+                background: '#0A1628',
+                color: '#fff'
+            });
+        }
+    }
+}
+
+// دالة عرض بيانات الدورة
 function displayCourse(course) {
-    // في بداية دالة displayCourse
-window.currentCourseData = course;
-    // إخفاء حالة التحميل وإظهار المحتوى
     const loadingState = document.getElementById('loading-state');
     const mainContainer = document.getElementById('main-container');
     
-    // تحقق من وجود العناصر قبل تعديلها
     if (loadingState) {
         loadingState.style.display = 'none';
     }
     if (mainContainer) {
         mainContainer.style.display = 'block';
     }
+    
+    window.currentCourseData = course;
 
-    // صورة الخلفية
     const courseHero = document.getElementById('course-hero');
     if (courseHero && course.thumbnailUrl) {
         courseHero.style.backgroundImage = `url('${course.thumbnailUrl}')`;
     }
 
-    // المعلومات الأساسية - مع التحقق من وجود كل عنصر
     const courseTitle = document.getElementById('course-title');
     if (courseTitle) {
         courseTitle.textContent = course.title || 'دورة بدون عنوان';
@@ -1357,7 +1535,6 @@ window.currentCourseData = course;
         courseStudents.textContent = `${course.enrollments || 0} طالب`;
     }
 
-    // السعر
     const priceBadge = document.getElementById('course-price-badge');
     const coursePrice = document.getElementById('course-price');
     const originalPrice = document.getElementById('original-price');
@@ -1377,7 +1554,6 @@ window.currentCourseData = course;
         }
     }
 
-    // الوصف
     const courseDescription = document.getElementById('course-description');
     if (courseDescription) {
         courseDescription.innerHTML = `
@@ -1386,7 +1562,6 @@ window.currentCourseData = course;
         `;
     }
 
-    // المدرب
     const instructorName = document.getElementById('instructor-name');
     if (instructorName) {
         instructorName.textContent = course.instructorName || 'محمود فؤاد';
@@ -1407,8 +1582,6 @@ window.currentCourseData = course;
         instructorImage.src = course.instructorImageUrl || course.instructorImage;
     }
 
-    // تحديث روابط السوشيال ميديا
-    // LinkedIn
     const linkedinLink = document.getElementById('instructor-linkedin');
     if (linkedinLink) {
         if (course.instructorLinkedIn) {
@@ -1419,7 +1592,6 @@ window.currentCourseData = course;
         }
     }
 
-    // Facebook (مأخوذ من حقل Twitter في قاعدة البيانات)
     const facebookLink = document.getElementById('instructor-facebook');
     if (facebookLink) {
         if (course.instructorTwitter) {
@@ -1430,7 +1602,6 @@ window.currentCourseData = course;
         }
     }
 
-    // Instagram (مأخوذ من حقل Website في قاعدة البيانات)
     const instagramLink = document.getElementById('instructor-instagram');
     if (instagramLink) {
         if (course.instructorWebsite) {
@@ -1441,28 +1612,24 @@ window.currentCourseData = course;
         }
     }
 
-    // المنهج
     if (course.modules) {
         displayCurriculum(course.modules);
     }
 
-    // الأهداف
     if (course.objectives) {
         displayObjectives(course.objectives);
     }
 
-    // المتطلبات
     if (course.requirements) {
         displayRequirements(course.requirements);
     }
 
-    // الدروس المجانية للمعاينة
     if (course.modules) {
         displayPreviewLessons(course.modules);
     }
 }
 
-        // عرض المنهج
+// دالة عرض المنهج
 function displayCurriculum(modules) {
     const container = document.getElementById('curriculum-list');
     
@@ -1531,85 +1698,67 @@ function displayCurriculum(modules) {
     }).join('');
 }
 
-// دالة تشغيل المعاينة من المنهج
-function playPreviewFromCurriculum(lessonId, lessonTitle, duration) {
-    playPreview(lessonId, lessonTitle);
+// دالة عرض الأهداف
+function displayObjectives(objectives) {
+    const container = document.getElementById('objectives-list');
+    
+    let objectivesList = [];
+    if (typeof objectives === 'string') {
+        objectivesList = objectives.split('\n').filter(obj => obj.trim());
+    } else if (Array.isArray(objectives)) {
+        objectivesList = objectives;
+    }
+    
+    if (objectivesList.length === 0) {
+        container.innerHTML = '<p>لم يتم تحديد أهداف لهذه الدورة بعد</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <ul class="objectives-list">
+            ${objectivesList.map(obj => `
+                <li class="objective-item">
+                    <i class="fas fa-check-circle"></i>
+                    <span>${obj}</span>
+                </li>
+            `).join('')}
+        </ul>
+    `;
 }
 
-        // حساب مدة الوحدة
-        function calculateModuleDuration(module) {
-            if (!module.lessons) return 0;
-            return module.lessons.reduce((total, lesson) => total + (lesson.duration || 0), 0);
-        }
+// دالة عرض المتطلبات
+function displayRequirements(requirements) {
+    const container = document.getElementById('requirements-list');
+    
+    let requirementsList = [];
+    if (typeof requirements === 'string') {
+        requirementsList = requirements.split('\n').filter(req => req.trim());
+    } else if (Array.isArray(requirements)) {
+        requirementsList = requirements;
+    }
+    
+    if (requirementsList.length === 0) {
+        container.innerHTML = '<p>لا توجد متطلبات مسبقة - فقط قلب مفتوح ورغبة في التحول</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <ul class="requirements-list">
+            ${requirementsList.map(req => `
+                <li class="requirement-item">
+                    <i class="fas fa-arrow-circle-left"></i>
+                    <span>${req}</span>
+                </li>
+            `).join('')}
+        </ul>
+    `;
+}
 
-        // أيقونة نوع الدرس
-        function getLessonIcon(type) {
-            const icons = {
-                'video': 'fa-video',
-                'quiz': 'fa-question-circle',
-                'assignment': 'fa-tasks',
-                'reading': 'fa-book-reader',
-                'library-content': 'fa-play-circle'
-            };
-            return icons[type] || 'fa-file';
-        }
-
-        // تبديل عرض الوحدة
-        function toggleModule(index) {
-            const header = document.querySelectorAll('.module-header')[index];
-            const content = document.getElementById(`module-${index}`);
-            
-            header.classList.toggle('active');
-            content.classList.toggle('active');
-        }
-
-        // عرض الأهداف
-        function displayObjectives(objectives) {
-            const container = document.getElementById('objectives-list');
-            
-            if (objectives.length === 0) {
-                container.innerHTML = '<p>ستتعلم كيف تعيش حياة أكثر وعياً وسلاماً</p>';
-                return;
-            }
-
-            container.innerHTML = `
-                <div style="display: grid; gap: 15px;">
-                    ${objectives.map(obj => `
-                        <div class="feature-item">
-                            <i class="fas fa-check-circle" style="color: var(--longing-5);"></i>
-                            <span>${obj}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-
-        // عرض المتطلبات
-        function displayRequirements(requirements) {
-            const container = document.getElementById('requirements-list');
-            
-            if (requirements.length === 0) {
-                return; // نبقي النص الافتراضي
-            }
-
-            container.innerHTML = `
-                <div style="display: grid; gap: 15px;">
-                    ${requirements.map(req => `
-                        <div class="feature-item">
-                            <i class="fas fa-check-circle" style="color: var(--longing-6);"></i>
-                            <span>${req}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-
-        // عرض دروس المعاينة
+// دالة عرض الدروس المجانية
 function displayPreviewLessons(modules) {
     const container = document.getElementById('preview-lessons');
     const previewLessons = [];
 
-    // جمع كل الدروس المتاحة للمعاينة المجانية
     modules.forEach(module => {
         if (module.lessons && module.lessons.length > 0) {
             module.lessons.forEach(lesson => {
@@ -1658,215 +1807,118 @@ function displayPreviewLessons(modules) {
     `).join('');
 }
 
-async function playPreview(lessonId, lessonTitle, lessonDuration) {
-    // تعريف isMobile في بداية الدالة
-    const isMobile = window.innerWidth <= 768;
+// تحميل بيانات الدورة
+async function loadCourseData() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const courseSlug = urlParams.get('course');
     
-    // نجيب بيانات الدرس من الموديولات
-    let lessonData = null;
-    const courseModules = window.currentCourseData?.modules || [];
-    
-    courseModules.forEach(module => {
-        if (module.lessons) {
-            const found = module.lessons.find(l => l.id === lessonId);
-            if (found) lessonData = found;
-        }
-    });
-
-    if (!lessonData) {
-        Swal.fire('خطأ', 'لم يتم العثور على الدرس', 'error');
+    if (!courseSlug) {
+        window.location.href = '/';
         return;
     }
-
-    // نجيب المحتوى من courseContentLibrary
-    if (lessonData.libraryContentId) {
-        try {
-            const contentDoc = await db.collection('courseContentLibrary')
-                .doc(lessonData.libraryContentId)
+    
+    try {
+        let courseDoc = await db.collection('courses')
+            .where('slug', '==', courseSlug)
+            .where('status', '==', 'published')
+            .get();
+        
+        if (!courseDoc.empty) {
+            const course = courseDoc.docs[0].data();
+            displayCourse(course);
+        } else {
+            courseDoc = await db.collection('courses')
+                .doc(courseSlug)
                 .get();
             
-            if (contentDoc.exists) {
-                const contentData = contentDoc.data();
-                
-                let contentHtml = '';
-                
-                // نعرض المحتوى حسب النوع
-                if (contentData.type === 'educational-video') {
-                    // الفيديو URL موجود في videoData.url
-                    const videoUrl = contentData.videoData?.url || '';
-                    
-                    if (videoUrl) {
-                        // تحويل رابط YouTube للـ embed format
-                        let embedUrl = videoUrl;
-                        if (videoUrl.includes('youtu.be/')) {
-                            const videoId = videoUrl.split('youtu.be/')[1];
-                            embedUrl = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=1`;
-                        } else if (videoUrl.includes('youtube.com/watch?v=')) {
-                            const videoId = videoUrl.split('v=')[1].split('&')[0];
-                            embedUrl = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=1`;
-                        }
-                        
-                        contentHtml = `
-                            <div style="width: 100%; max-width: ${isMobile ? '100%' : '900px'}; margin: 0 auto;">
-                                <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); background: #000;">
-                                    <iframe 
-                                        id="preview-video"
-                                        src="${embedUrl}"
-                                        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;"
-                                        allowfullscreen
-                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share">
-                                    </iframe>
-                                </div>
-                                ${contentData.description ? `
-                                    <div style="margin-top: 20px; padding: 20px; background: rgba(255, 215, 0, 0.1); border-radius: 10px; text-align: right; border-right: 4px solid #FFD700;">
-                                        <h4 style="color: #FFD700; margin-bottom: 10px; font-weight: 600;">وصف الدرس:</h4>
-                                        <p style="color: rgba(255, 255, 255, 0.9); line-height: 1.8; margin: 0;">
-                                            ${contentData.description}
-                                        </p>
-                                    </div>
-                                ` : ''}
-                                ${isMobile ? `
-                                    <button onclick="openFullscreen()" style="
-                                        margin-top: 15px;
-                                        width: 100%;
-                                        padding: 12px;
-                                        background: linear-gradient(135deg, #FFD700, #FFA500);
-                                        color: #0A1628;
-                                        border: none;
-                                        border-radius: 25px;
-                                        font-weight: 700;
-                                        font-size: 1rem;
-                                        cursor: pointer;
-                                        display: flex;
-                                        align-items: center;
-                                        justify-content: center;
-                                        gap: 10px;
-                                    ">
-                                        <i class="fas fa-expand"></i>
-                                        مشاهدة بملء الشاشة
-                                    </button>
-                                ` : ''}
-                            </div>
-                        `;
-                    } else {
-                        // لو مفيش فيديو URL
-                        contentHtml = `
-                            <div style="text-align: center; padding: 40px;">
-                                <i class="fas fa-video-slash" style="font-size: 4rem; color: #666; margin-bottom: 20px;"></i>
-                                <h3 style="color: #FFD700;">الفيديو غير متاح</h3>
-                                <p style="color: rgba(255, 255, 255, 0.7);">عذراً، لا يمكن تشغيل هذا الفيديو حالياً</p>
-                            </div>
-                        `;
-                    }
+            if (courseDoc.exists) {
+                const course = courseDoc.data();
+                if (course.status === 'published') {
+                    displayCourse(course);
                 } else {
-                    // محتوى آخر غير الفيديو
-                    contentHtml = `
-                        <div style="max-width: 800px; margin: 0 auto; padding: 30px;">
-                            <div style="background: rgba(255, 215, 0, 0.1); padding: 30px; border-radius: 10px; text-align: right;">
-                                <h3 style="color: #FFD700; margin-bottom: 20px;">${contentData.name || lessonTitle}</h3>
-                                <div style="line-height: 2; color: rgba(255, 255, 255, 0.9); font-size: 1.1rem;">
-                                    ${contentData.content || contentData.description || 'محتوى الدرس'}
-                                </div>
-                            </div>
-                        </div>
-                    `;
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'عذراً',
+                        text: 'هذه الدورة غير متاحة حالياً',
+                        confirmButtonText: 'العودة للرئيسية'
+                    }).then(() => {
+                        window.location.href = '/';
+                    });
                 }
-
-                Swal.fire({
-                    title: lessonTitle,
-                    html: contentHtml,
-                    width: isMobile ? '100%' : '95%',
-                    maxWidth: isMobile ? '100%' : '1000px',
-                    padding: isMobile ? '15px' : '30px',
-                    showCloseButton: true,
-                    showConfirmButton: false,
-                    background: '#0A1628',
-                    color: '#fff',
-                    customClass: {
-                        popup: 'lesson-preview-popup-dark',
-                        closeButton: 'swal2-close-styled',
-                        title: 'lesson-title-dark'
-                    }
-                });
-                
             } else {
                 Swal.fire({
                     icon: 'error',
                     title: 'خطأ',
-                    text: 'محتوى الدرس غير موجود',
-                    confirmButtonColor: '#FFD700',
-                    background: '#0A1628',
-                    color: '#fff'
+                    text: 'الدورة غير موجودة',
+                    confirmButtonText: 'العودة للرئيسية'
+                }).then(() => {
+                    window.location.href = '/';
                 });
             }
-        } catch (error) {
-            console.error('Error loading content:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'خطأ',
-                text: 'حدث خطأ في تحميل المحتوى',
-                confirmButtonColor: '#FFD700',
-                background: '#0A1628',
-                color: '#fff'
-            });
         }
+    } catch (error) {
+        console.error('Error loading content:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ في تحميل المحتوى',
+            confirmButtonText: 'إعادة المحاولة'
+        }).then(() => {
+            location.reload();
+        });
     }
 }
 
-// دالة فتح الفيديو بملء الشاشة
-function openFullscreen() {
-    const iframe = document.getElementById('preview-video');
-    if (iframe) {
-        if (iframe.requestFullscreen) {
-            iframe.requestFullscreen();
-        } else if (iframe.webkitRequestFullscreen) {
-            iframe.webkitRequestFullscreen();
-        } else if (iframe.msRequestFullscreen) {
-            iframe.msRequestFullscreen();
+// ================ كود الشريط الثابت الجديد ================
+document.addEventListener('DOMContentLoaded', function() {
+    const stickyNav = document.querySelector('.sticky-nav');
+    const heroSection = document.querySelector('.course-hero');
+    
+    let navOffset = 0;
+    let isSticky = false;
+    
+    function calculateNavOffset() {
+        if (!isSticky && heroSection) {
+            navOffset = heroSection.offsetHeight;
         }
     }
-}
-
-
-// دالة عرض محتوى الدرس
-function showLessonContent(lessonId) {
-    // مؤقتاً - رسالة توضيحية
-    Swal.fire({
-        icon: 'info',
-        title: 'محتوى الدرس',
-        text: 'سيتم هنا عرض محتوى الدرس التجريبي (فيديو، نص، إلخ)',
-        confirmButtonText: 'حسناً',
-        confirmButtonColor: '#FFD700'
-    });
-}
-
-
-        // التسجيل
-        function enrollNow() {
-            // الانتقال لصفحة التسجيل مع معرف الدورة
-            const courseId = getCourseId();
-            window.location.href = `enrollment.html?course=${courseId}`;
+    
+    function handleScroll() {
+        calculateNavOffset();
+        
+        if (window.pageYOffset >= navOffset) {
+            if (!isSticky) {
+                isSticky = true;
+                stickyNav.style.position = 'fixed';
+                stickyNav.style.top = '0';
+                stickyNav.style.left = '0';
+                stickyNav.style.right = '0';
+                stickyNav.style.width = '100%';
+                
+                document.body.style.paddingTop = stickyNav.offsetHeight + 'px';
+            }
+        } else {
+            if (isSticky) {
+                isSticky = false;
+                stickyNav.style.position = '';
+                stickyNav.style.top = '';
+                stickyNav.style.left = '';
+                stickyNav.style.right = '';
+                stickyNav.style.width = '';
+                
+                document.body.style.paddingTop = '';
+            }
         }
+    }
+    
+    window.addEventListener('scroll', handleScroll);
+    window.addEventListener('resize', calculateNavOffset);
+    
+    calculateNavOffset();
+    handleScroll();
+});
 
-        // التقدم للمنحة
-        function applyForGrant() {
-            // فتح نموذج المنحة
-            alert('سيتم فتح نموذج التقدم للمنحة');
-        }
-
-        // عرض الخطأ
-        function showError(message) {
-            document.getElementById('loading-state').innerHTML = `
-                <div style="text-align: center;">
-                    <i class="fas fa-exclamation-circle" style="font-size: 4rem; color: var(--gold-primary); margin-bottom: 20px;"></i>
-                    <h2 style="color: var(--gold-primary); margin-bottom: 10px;">عذراً</h2>
-                    <p style="color: var(--gold-light);">${message}</p>
-                    <a href="/" class="btn-primary" style="margin-top: 20px;">العودة للرئيسية</a>
-                </div>
-            `;
-        }
-
-        // تحديث الرابط النشط عند التمرير
+// تحديث الروابط النشطة
 window.addEventListener('scroll', function() {
     const sections = document.querySelectorAll('section[id]');
     const navLinks = document.querySelectorAll('.nav-link');
@@ -1888,23 +1940,19 @@ window.addEventListener('scroll', function() {
         }
     });
 });
-        // التنقل السلس
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                
-                // تحديث الرابط النشط
-                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-                this.classList.add('active');
-                
-                // التمرير للقسم
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
-        });
 
-        // بدء التطبيق
-        loadCourseData();
-    </script>
-</body>
-</html>
+// التنقل السلس
+document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', function(e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        this.classList.add('active');
+        
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+});
+
+// بدء التطبيق
+loadCourseData();
