@@ -4879,7 +4879,229 @@ function updateUIWithCourseData() {
             // Update UI
             document.getElementById('progressBar').style.width = progress + '%';
         }
+// دالة تبديل طرق الدفع
+function togglePaymentMethod(method) {
+    const methodContent = document.getElementById(method + 'Content');
+    const methodCheckbox = document.getElementById(method + 'Enabled');
+    
+    if (methodContent && methodCheckbox) {
+        methodContent.style.display = methodCheckbox.checked ? 'block' : 'none';
+    }
+}
 
+// دوال التسعير الإضافية المفقودة
+function renderPaymentPlans() {
+    const container = document.getElementById('paymentPlansList');
+    if (!container) return;
+    
+    if (!courseData.paymentPlans || courseData.paymentPlans.length === 0) {
+        container.innerHTML = '<p class="text-muted">لا توجد خطط دفع حالياً</p>';
+        return;
+    }
+    
+    container.innerHTML = courseData.paymentPlans.map((plan, index) => `
+        <div class="card mb-2">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5>${plan.name}</h5>
+                        <p class="mb-0">
+                            ${plan.installments} ${plan.installments === 1 ? 'دفعة' : 'دفعات'}
+                            ${plan.frequency ? ` - ${getFrequencyText(plan.frequency)}` : ''}
+                        </p>
+                    </div>
+                    <button class="btn btn-sm btn-danger" onclick="removePaymentPlan(${index})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function removePaymentPlan(index) {
+    courseData.paymentPlans.splice(index, 1);
+    renderPaymentPlans();
+    updatePricePreview();
+}
+
+function renderCoupons() {
+    const container = document.getElementById('couponsList');
+    if (!container) return;
+    
+    if (!courseData.coupons || courseData.coupons.length === 0) {
+        container.innerHTML = '<p class="text-muted">لا توجد كوبونات حالياً</p>';
+        return;
+    }
+    
+    container.innerHTML = courseData.coupons.map((coupon, index) => `
+        <div class="card mb-2">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="badge badge-primary">${coupon.code}</span>
+                        <span class="ms-2">
+                            ${coupon.type === 'percentage' ? `${coupon.value}%` : `${coupon.value} ${courseData.currency}`}
+                        </span>
+                    </div>
+                    <button class="btn btn-sm btn-danger" onclick="removeCoupon(${index})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addCoupon() {
+    const code = document.getElementById('couponCode').value.trim().toUpperCase();
+    const type = document.getElementById('couponType').value;
+    const value = parseFloat(document.getElementById('couponValue').value) || 0;
+    
+    if (!code || value === 0) {
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'يرجى إدخال كود الكوبون والقيمة'
+        });
+        return;
+    }
+    
+    const coupon = { code, type, value };
+    
+    if (!courseData.coupons) courseData.coupons = [];
+    courseData.coupons.push(coupon);
+    
+    // Clear inputs
+    document.getElementById('couponCode').value = '';
+    document.getElementById('couponValue').value = '';
+    
+    renderCoupons();
+    updatePricePreview();
+}
+
+function removeCoupon(index) {
+    courseData.coupons.splice(index, 1);
+    renderCoupons();
+    updatePricePreview();
+}
+
+function renderModules() {
+    const container = document.getElementById('modulesContainer');
+    if (!container) return;
+    
+    if (!courseData.modules || courseData.modules.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-book"></i>
+                <h3>لم تقم بإضافة أي وحدات بعد</h3>
+                <p>ابدأ ببناء منهج الدورة بإضافة الوحدات والدروس</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = courseData.modules.map((module, index) => `
+        <div class="module-card" data-module-id="${module.id}">
+            <div class="module-header">
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-grip-vertical drag-handle"></i>
+                    <input type="text" class="form-control ms-2" value="${module.title}"
+                           onchange="updateModuleTitle('${module.id}', this.value)"
+                           style="background: transparent; border: none; font-weight: 600;">
+                </div>
+                <div>
+                    <button class="btn btn-sm btn-outline-primary" onclick="toggleModule('${module.id}')">
+                        <i class="fas fa-chevron-${module.isExpanded ? 'up' : 'down'}"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteModule(${index})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="module-content" style="display: ${module.isExpanded ? 'block' : 'none'}">
+                <div class="mb-3">
+                    <textarea class="form-control" placeholder="وصف الوحدة (اختياري)"
+                              onchange="updateModuleDescription('${module.id}', this.value)">${module.description || ''}</textarea>
+                </div>
+                <div class="lessons-container" id="lessons-${module.id}">
+                    ${module.lessons && module.lessons.length > 0 ? renderLessons(module.lessons, module.id) : '<p class="text-muted">لا توجد دروس في هذه الوحدة</p>'}
+                </div>
+                <button class="btn btn-outline-primary btn-sm" onclick="showContentTypes('${module.id}')">
+                    <i class="fas fa-plus"></i> إضافة محتوى
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    // Initialize sortable
+    if (typeof initializeSortable === 'function') {
+        initializeSortable();
+    }
+}
+
+function updateCurriculumStats() {
+    const totalModules = courseData.modules ? courseData.modules.length : 0;
+    let totalLessons = 0;
+    let totalDuration = 0;
+    
+    if (courseData.modules) {
+        courseData.modules.forEach(module => {
+            if (module.lessons) {
+                totalLessons += module.lessons.length;
+                module.lessons.forEach(lesson => {
+                    totalDuration += lesson.duration || 0;
+                });
+            }
+        });
+    }
+    
+    const modulesElement = document.getElementById('totalModules');
+    const lessonsElement = document.getElementById('totalLessons');
+    const durationElement = document.getElementById('totalDuration');
+    
+    if (modulesElement) modulesElement.textContent = totalModules;
+    if (lessonsElement) lessonsElement.textContent = totalLessons;
+    if (durationElement) durationElement.textContent = totalDuration;
+    
+    courseData.totalLessons = totalLessons;
+    courseData.totalDuration = totalDuration;
+}
+
+function renderLessons(lessons, moduleId) {
+    if (!lessons || lessons.length === 0) {
+        return '<p class="text-muted">لا توجد دروس في هذه الوحدة</p>';
+    }
+    
+    return lessons.map((lesson, index) => `
+        <div class="lesson-item" data-lesson-id="${lesson.id}">
+            <div class="lesson-info">
+                <i class="fas fa-grip-vertical drag-handle"></i>
+                <div class="lesson-type-icon">
+                    <i class="fas fa-${getLessonIcon(lesson.type)}"></i>
+                </div>
+                <div>
+                    <div class="fw-semibold">${lesson.title}</div>
+                    <small class="text-muted">${lesson.duration} دقيقة</small>
+                </div>
+            </div>
+            <div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="editLesson('${moduleId}', '${lesson.id}')">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteLesson('${moduleId}', '${lesson.id}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+                <button class="btn btn-sm ${lesson.isFreePreview ? 'btn-success' : 'btn-outline-success'}" 
+                        onclick="toggleFreePreview('${moduleId}', '${lesson.id}')"
+                        title="${lesson.isFreePreview ? 'إلغاء المعاينة المجانية' : 'إتاحة كمعاينة مجانية'}">
+                    <i class="fas ${lesson.isFreePreview ? 'fa-eye' : 'fa-eye-slash'}"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+        
         // ========================================
         // FINAL ACTIONS
         // ========================================
