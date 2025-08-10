@@ -2883,7 +2883,7 @@ async function saveCourseSlug() {
     // تحديث البيانات
     courseData.title = titleInput.value.trim();
     
-    // إذا كان الـ slug فارغ، خذه من placeholder
+    // تحديد الـ slug
     if (!slugInput.value.trim()) {
         courseData.slug = slugInput.placeholder || generateSlug(courseData.title);
         slugInput.value = courseData.slug;
@@ -2898,23 +2898,61 @@ async function saveCourseSlug() {
     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
     
     try {
-        // حفظ الدورة
-        await saveCourseData();
+        // إذا كانت دورة جديدة - أنشئ ID الآن فقط
+        if (!courseData.id) {
+            // جمع البيانات
+            collectFormData();
+            
+            // تجهيز البيانات للحفظ
+            const dataToSave = {
+                ...courseData,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            // حذف القيم الغير معرفة
+            Object.keys(dataToSave).forEach(key => {
+                if (dataToSave[key] === undefined) {
+                    delete dataToSave[key];
+                }
+            });
+            
+            // إنشاء دورة جديدة
+            const newId = await window.firebaseDB.courses.createCourse(dataToSave);
+            courseData.id = newId;
+            
+            // تحديث URL
+            const newUrl = `${window.location.pathname}?id=${newId}`;
+            window.history.replaceState({}, '', newUrl);
+            
+            console.log('تم إنشاء دورة جديدة:', newId);
+            
+            // الآن بعد إنشاء ID، يمكن تفعيل الحفظ التلقائي
+            saveBtn.innerHTML = '<i class="fas fa-check"></i> تم إنشاء الدورة';
+            
+        } else {
+            // دورة موجودة - حدث البيانات فقط
+            await saveCourseData();
+            saveBtn.innerHTML = '<i class="fas fa-check"></i> تم التحديث';
+        }
         
         // نجاح
         saveBtn.classList.remove('btn-primary');
         saveBtn.classList.add('btn-success');
-        saveBtn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ';
         saveBtn.disabled = false;
         
         // رسالة نجاح
         Swal.fire({
             icon: 'success',
-            title: 'تم الحفظ بنجاح',
+            title: courseData.id ? 'تم الحفظ بنجاح' : 'تم إنشاء الدورة',
             html: `
                 <div style="text-align: right;">
                     <p><strong>العنوان:</strong> ${courseData.title}</p>
-                    <p><strong>الرابط:</strong> ${courseData.id || courseData.slug}</p>
+                    <p><strong>ID:</strong> ${courseData.id}</p>
+                    <p><strong>الرابط (Slug):</strong> ${courseData.slug}</p>
+                    <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+                        يمكنك تغيير الرابط (Slug) في أي وقت
+                    </p>
                 </div>
             `,
             timer: 5000,
@@ -2926,6 +2964,11 @@ async function saveCourseSlug() {
             saveBtn.classList.remove('btn-success');
             saveBtn.classList.add('btn-primary');
             saveBtn.innerHTML = '<i class="fas fa-link"></i> تثبيت الرابط';
+            
+            // تغيير نص الزر للدورات الموجودة
+            if (courseData.id) {
+                saveBtn.innerHTML = '<i class="fas fa-sync"></i> تحديث الرابط';
+            }
         }, 3000);
         
     } catch (error) {
@@ -4258,34 +4301,23 @@ document.getElementById('courseTitle').addEventListener('blur', (e) => {
         // AUTO-SAVE
         // ========================================
 function autoSave() {
+    // منع الحفظ التلقائي للدورات الجديدة
+    if (!courseData.id) {
+        console.log('تجاهل الحفظ التلقائي - لا يوجد ID بعد');
+        return;
+    }
+    
     // إلغاء أي حفظ سابق معلق
     clearTimeout(autoSaveTimeout);
     
     autoSaveTimeout = setTimeout(() => {
-        // التحقق من وجود عنوان على الأقل
-        const title = document.getElementById('courseTitle')?.value?.trim();
-        if (!title || title === 'دورة جديدة') {
-            console.log('تجاهل الحفظ التلقائي - لا يوجد عنوان');
-            return;
-        }
-        
         saveCourseData().then(() => {
             showAutoSaveIndicator();
             console.log('تم الحفظ التلقائي بنجاح');
         }).catch(error => {
             console.error('فشل الحفظ التلقائي:', error);
-            // يمكن إضافة إشعار للمستخدم هنا
-            Swal.fire({
-                icon: 'error',
-                title: 'خطأ في الحفظ',
-                text: 'فشل الحفظ التلقائي. يرجى المحاولة مرة أخرى.',
-                toast: true,
-                position: 'top-end',
-                timer: 3000,
-                showConfirmButton: false
-            });
         });
-    }, 2000); // تأخير 2 ثانية
+    }, 2000);
 }
 
         function showAutoSaveIndicator() {
@@ -4301,14 +4333,10 @@ function autoSave() {
         // FIREBASE INTEGRATION
         // ========================================
 async function saveCourseData() {
-    // تحسين منطق منع الحفظ
-    if (!courseData.id && !courseData.title) {
-        const currentTitle = document.getElementById('courseTitle')?.value?.trim();
-        if (!currentTitle || currentTitle === '' || currentTitle === 'دورة جديدة') {
-            console.log('منع حفظ دورة فارغة - لا يوجد عنوان');
-            return Promise.resolve();
-        }
-        courseData.title = currentTitle;
+    // منع الحفظ التلقائي للدورات الجديدة تماماً
+    if (!courseData.id) {
+        console.log('دورة جديدة - منع الحفظ التلقائي');
+        return Promise.resolve();
     }
     
     if (!firebase.firestore) {
@@ -4320,7 +4348,7 @@ async function saveCourseData() {
         // جمع كل البيانات من الفورم
         collectFormData();
         
-        // التأكد من وجود slug
+        // تحديث slug فقط (مش ID)
         let finalSlug = courseData.slug;
         const slugInput = document.getElementById('courseSlug');
         
@@ -4330,11 +4358,6 @@ async function saveCourseData() {
         
         if (!finalSlug && courseData.title && courseData.title !== 'دورة جديدة') {
             finalSlug = generateSlug(courseData.title);
-        }
-        
-        if (!finalSlug) {
-            const now = new Date();
-            finalSlug = `course-${now.getTime()}`;
         }
         
         // تجهيز البيانات للحفظ
@@ -4351,33 +4374,9 @@ async function saveCourseData() {
             }
         });
         
-        if (courseData.id) {
-            // تحديث دورة موجودة
-            await window.firebaseDB.courses.updateCourse(courseData.id, dataToSave);
-            console.log('تم تحديث الدورة:', courseData.id);
-        } else {
-            // إنشاء دورة جديدة
-            dataToSave.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-            const newId = await window.firebaseDB.courses.createCourse(dataToSave);
-            courseData.id = newId;
-            courseData.slug = newId;
-            
-            // تحديث الواجهة
-            const slugPreview = document.getElementById('slugPreview');
-            if (slugPreview) {
-                slugPreview.textContent = newId;
-            }
-            
-            if (slugInput) {
-                slugInput.value = newId;
-            }
-            
-            // تحديث URL
-            const newUrl = `${window.location.pathname}?id=${newId}`;
-            window.history.replaceState({}, '', newUrl);
-            
-            console.log('تم إنشاء دورة جديدة:', newId);
-        }
+        // تحديث دورة موجودة فقط
+        await window.firebaseDB.courses.updateCourse(courseData.id, dataToSave);
+        console.log('تم تحديث الدورة:', courseData.id);
         
         return Promise.resolve();
     } catch (error) {
@@ -4385,7 +4384,6 @@ async function saveCourseData() {
         return Promise.reject(error);
     }
 }
-
 function collectFormData() {
     // جمع البيانات الأساسية
     courseData.title = document.getElementById('courseTitle')?.value || 'دورة جديدة';
@@ -4639,6 +4637,13 @@ async function loadCourseData() {
     } else {
         console.log('دورة جديدة - لا يوجد ID');
     }
+    // في نهاية دالة loadCourseData بعد تحميل البيانات بنجاح
+if (courseData.id) {
+    const saveBtn = document.getElementById('saveSlugBtn');
+    if (saveBtn) {
+        saveBtn.innerHTML = '<i class="fas fa-sync"></i> تحديث الرابط';
+    }
+}
 }
 
 function updateUIWithCourseData() {
