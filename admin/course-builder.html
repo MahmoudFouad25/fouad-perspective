@@ -4237,17 +4237,7 @@ function autoSave() {
     
     autoSaveTimeout = setTimeout(() => {
         // جمع البيانات أولاً - مهم جداً
-        // جمع بيانات محددة فقط
-courseData.priceType = document.getElementById('priceType')?.value || 'free';
-courseData.currency = document.getElementById('currency')?.value || 'EGP';
-courseData.price = parseFloat(document.getElementById('price')?.value) || 0;
-courseData.salePrice = document.getElementById('salePrice')?.value ? parseFloat(document.getElementById('salePrice').value) : null;
-
-// خصم الدفع الكامل
-courseData.cashDiscount = {
-    enabled: document.getElementById('enableCashDiscount')?.checked || false,
-    percentage: parseFloat(document.getElementById('cashDiscountPercent')?.value) || 10
-};
+        collectFormData();
         
         saveCourseData().then(() => {
             showAutoSaveIndicator();
@@ -4258,18 +4248,6 @@ courseData.cashDiscount = {
     }, 1500); // قللنا الوقت لـ 1.5 ثانية
 }
 // دالة لتحديث كل شيء فوراً
-        function cleanDates() {
-    if (courseData.discounts) {
-        courseData.discounts.forEach(discount => {
-            if (discount.startDate === 'mm/dd/yyyy' || discount.startDate === '') {
-                discount.startDate = null;
-            }
-            if (discount.endDate === 'mm/dd/yyyy' || discount.endDate === '') {
-                discount.endDate = null;
-            }
-        });
-    }
-}
 function updateAndSave() {
     updatePricePreview();
     autoSave();
@@ -4364,7 +4342,45 @@ function collectFormData() {
     courseData.currency = document.getElementById('currency')?.value || 'EGP';
     courseData.price = parseFloat(document.getElementById('price')?.value) || 0;
     courseData.salePrice = document.getElementById('salePrice')?.value ? parseFloat(document.getElementById('salePrice').value) : null;
+    // العروض الزمنية
+courseData.discounts = [];
+document.querySelectorAll('#discountsList .card').forEach((card, index) => {
+    const nameInput = card.querySelector('input[placeholder="اسم العرض"]');
+    const percentageInput = card.querySelector('input[type="number"][min="0"][max="100"]');
+    const startDateInput = card.querySelector('input[type="date"]:first-of-type');
+    const endDateInput = card.querySelector('input[type="date"]:last-of-type');
+    
+    if (nameInput || percentageInput) {
+        const discount = {
+            id: 'discount_' + Date.now() + '_' + index,
+            name: nameInput?.value || '',
+            percentage: parseInt(percentageInput?.value) || 0,
+            startDate: startDateInput?.value || '',
+            endDate: endDateInput?.value || ''
+        };
+        
+        courseData.discounts.push(discount);
+    }
+});
 
+    // خصومات المجموعات
+courseData.groupDiscounts = [];
+document.querySelectorAll('#groupDiscountsList .card').forEach((card, index) => {
+    const nameInput = card.querySelector('input[placeholder="اسم عرض المجموعة"]');
+    const minSizeInput = card.querySelector('input[type="number"][min="2"]');
+    const percentageInput = card.querySelector('.input-group input[type="number"]');
+    
+    if (nameInput || percentageInput) {
+        const groupDiscount = {
+            id: 'group_' + Date.now() + '_' + index,
+            name: nameInput?.value || '',
+            minSize: parseInt(minSizeInput?.value) || 3,
+            percentage: parseInt(percentageInput?.value) || 0
+        };
+        
+        courseData.groupDiscounts.push(groupDiscount);
+    }
+});
     // خصم الدفع الكامل
 courseData.cashDiscount = {
     enabled: document.getElementById('enableCashDiscount')?.checked || false,
@@ -4616,14 +4632,6 @@ async function loadCourseData() {
 }
 
 function updateUIWithCourseData() {
-    // تنظيف البيانات الفاسدة
-if (courseData.discounts) {
-    courseData.discounts = courseData.discounts.map(discount => ({
-        ...discount,
-        startDate: (discount.startDate === 'mm/dd/yyyy' || !discount.startDate) ? null : discount.startDate,
-        endDate: (discount.endDate === 'mm/dd/yyyy' || !discount.endDate) ? null : discount.endDate
-    }));
-}
     // تحقق من وجود العناصر الأساسية أولاً
     if (!document.getElementById('courseTitle')) {
         console.log('العناصر لم تحمل بعد، سيتم المحاولة لاحقاً...');
@@ -5397,7 +5405,6 @@ function getFrequencyText(frequency) {
 }
 // معاينة الأسعار - الجدول الاحترافي الكامل
 function updatePricePreview() {
-    cleanDates();
     const basePrice = parseFloat(document.getElementById('price')?.value) || 0;
     const salePrice = parseFloat(document.getElementById('salePrice')?.value) || null;
     const currency = document.getElementById('currency')?.value || 'EGP';
@@ -5592,8 +5599,7 @@ function buildFullPricingTable(basePrice, salePrice, currency, discounts, groupD
         if (discount.percentage > 0) {
             html += `<span class="discount-badge">خصم ${discount.percentage}%</span>`;
         }
-        if ((discount.startDate && discount.startDate !== 'mm/dd/yyyy') || 
-    (discount.endDate && discount.endDate !== 'mm/dd/yyyy')) {
+        if (discount.startDate || discount.endDate) {
             html += `<div class="date-range">`;
             if (discount.startDate) html += `من ${formatDate(discount.startDate)}`;
             if (discount.startDate && discount.endDate) html += ` - `;
@@ -6316,32 +6322,29 @@ function renderDiscounts() {
     }
     
     container.innerHTML = courseData.discounts.map((discount, index) => `
-        <div class="card mb-2">
+        <div class="card mb-2" data-discount-index="${index}">
             <div class="card-body">
                 <div class="row align-items-center">
                     <div class="col-md-3">
-                        <input type="text" class="form-control" placeholder="اسم العرض"
-                               value="${discount.name || ''}" 
-                               oninput="courseData.discounts[${index}].name = this.value; updatePricePreview(); autoSave();">
+                        <input type="text" class="form-control discount-name" placeholder="اسم العرض"
+                               value="${discount.name || ''}" data-field="name" data-index="${index}">
                     </div>
                     <div class="col-md-2">
                         <div class="input-group">
-                            <input type="number" class="form-control" value="${discount.percentage || 0}"
-                                   min="0" max="100" 
-                                   oninput="courseData.discounts[${index}].percentage = parseInt(this.value) || 0; updatePricePreview(); autoSave();">
+                            <input type="number" class="form-control discount-percentage" 
+                                   value="${discount.percentage || 0}" min="0" max="100" 
+                                   data-field="percentage" data-index="${index}">
                             <span class="input-group-text">%</span>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <input type="date" class="form-control" 
-                               value="${discount.startDate && discount.startDate !== 'mm/dd/yyyy' ? discount.startDate : ''}"
-                               onchange="courseData.discounts[${index}].startDate = this.value || null; updatePricePreview(); autoSave();">
+                        <input type="date" class="form-control discount-start-date" 
+                               value="${discount.startDate || ''}" data-field="startDate" data-index="${index}">
                         <small class="text-muted">من تاريخ</small>
                     </div>
                     <div class="col-md-3">
-                        <input type="date" class="form-control" 
-                               value="${discount.endDate && discount.endDate !== 'mm/dd/yyyy' ? discount.endDate : ''}"
-                               onchange="courseData.discounts[${index}].endDate = this.value || null; updatePricePreview(); autoSave();">
+                        <input type="date" class="form-control discount-end-date" 
+                               value="${discount.endDate || ''}" data-field="endDate" data-index="${index}">
                         <small class="text-muted">إلى تاريخ</small>
                     </div>
                     <div class="col-md-1">
@@ -6353,6 +6356,60 @@ function renderDiscounts() {
             </div>
         </div>
     `).join('');
+    
+    // إضافة مستمعي الأحداث للحقول الجديدة
+    attachDiscountEventListeners();
+}
+
+// دالة جديدة لإضافة مستمعي الأحداث
+function attachDiscountEventListeners() {
+    // مستمع للاسم
+    document.querySelectorAll('.discount-name').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.discounts[index]) {
+                courseData.discounts[index].name = this.value;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
+    
+    // مستمع للنسبة
+    document.querySelectorAll('.discount-percentage').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.discounts[index]) {
+                courseData.discounts[index].percentage = parseInt(this.value) || 0;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
+    
+    // مستمع لتاريخ البداية
+    document.querySelectorAll('.discount-start-date').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.discounts[index]) {
+                courseData.discounts[index].startDate = this.value;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
+    
+    // مستمع لتاريخ النهاية
+    document.querySelectorAll('.discount-end-date').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.discounts[index]) {
+                courseData.discounts[index].endDate = this.value;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
 }
 
 function addDiscountTier() {
@@ -6361,27 +6418,22 @@ function addDiscountTier() {
         name: '',
         percentage: 0,
         startDate: null,
-        endDate: null
+endDate: null
     };
     
     if (!courseData.discounts) courseData.discounts = [];
     courseData.discounts.push(discount);
     
     renderDiscounts();
-    setTimeout(() => {
-        updatePricePreview();
-    }, 100);
+    updatePricePreview(); // مهم جداً
     autoSave();
 }
 
 function removeDiscount(index) {
     courseData.discounts.splice(index, 1);
     renderDiscounts();
-// أجّل التحديث شوية عشان الـ DOM يلحق يتحدث
-setTimeout(() => {
     updatePricePreview();
-    autoSave();
-}, 50);
+    autoSave(); // أضفنا السطر ده
 }
 
 // خصومات المجموعات
@@ -6415,23 +6467,23 @@ function renderGroupDiscounts() {
     }
     
     container.innerHTML = courseData.groupDiscounts.map((group, index) => `
-        <div class="card mb-2">
+        <div class="card mb-2" data-group-index="${index}">
             <div class="card-body">
                 <div class="row align-items-center">
                     <div class="col-md-4">
-                        <input type="text" class="form-control" placeholder="اسم عرض المجموعة"
-                               value="${group.name}" onchange="courseData.groupDiscounts[${index}].name = this.value; updatePricePreview(); autoSave();">
+                        <input type="text" class="form-control group-name" placeholder="اسم عرض المجموعة"
+                               value="${group.name || ''}" data-index="${index}">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">الحد الأدنى للمجموعة</label>
-                        <input type="number" class="form-control" value="${group.minSize}"
-                               min="2" onchange="courseData.groupDiscounts[${index}].minSize = parseInt(this.value) || 3; updatePricePreview(); autoSave();">
+                        <input type="number" class="form-control group-min-size" 
+                               value="${group.minSize || 3}" min="2" data-index="${index}">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">نسبة الخصم</label>
                         <div class="input-group">
-                            <input type="number" class="form-control" value="${group.percentage}"
-                                   min="0" max="100" onchange="courseData.groupDiscounts[${index}].percentage = parseInt(this.value) || 0; updatePricePreview(); autoSave();">
+                            <input type="number" class="form-control group-percentage" 
+                                   value="${group.percentage || 0}" min="0" max="100" data-index="${index}">
                             <span class="input-group-text">%</span>
                         </div>
                     </div>
@@ -6444,6 +6496,48 @@ function renderGroupDiscounts() {
             </div>
         </div>
     `).join('');
+    
+    // إضافة مستمعي الأحداث للمجموعات
+    attachGroupDiscountEventListeners();
+}
+
+// دالة مستمعي أحداث المجموعات
+function attachGroupDiscountEventListeners() {
+    // اسم المجموعة
+    document.querySelectorAll('.group-name').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.groupDiscounts[index]) {
+                courseData.groupDiscounts[index].name = this.value;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
+    
+    // الحد الأدنى
+    document.querySelectorAll('.group-min-size').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.groupDiscounts[index]) {
+                courseData.groupDiscounts[index].minSize = parseInt(this.value) || 3;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
+    
+    // النسبة
+    document.querySelectorAll('.group-percentage').forEach(input => {
+        input.addEventListener('change', function() {
+            const index = parseInt(this.dataset.index);
+            if (courseData.groupDiscounts[index]) {
+                courseData.groupDiscounts[index].percentage = parseInt(this.value) || 0;
+                updatePricePreview();
+                autoSave();
+            }
+        });
+    });
 }
 
 // برنامج المنح
