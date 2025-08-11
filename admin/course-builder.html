@@ -5359,6 +5359,7 @@ function getFrequencyText(frequency) {
 // معاينة الأسعار - الجدول الاحترافي الكامل
 function updatePricePreview() {
     const basePrice = parseFloat(document.getElementById('price')?.value) || 0;
+    const salePrice = parseFloat(document.getElementById('salePrice')?.value) || null;
     const currency = document.getElementById('currency')?.value || 'EGP';
     const container = document.getElementById('pricePreview');
     
@@ -5376,101 +5377,211 @@ function updatePricePreview() {
     const discounts = collectDiscounts();
     const groupDiscounts = collectGroupDiscounts();
     const paymentPlans = collectPaymentPlans();
-    const coupons = collectCoupons();
     const cashDiscountEnabled = document.getElementById('enableCashDiscount')?.checked || false;
     const cashDiscountPercent = parseFloat(document.getElementById('cashDiscountPercent')?.value) || 10;
     
-    // بناء جدول بسيط
+    // تحديد إذا كان في عروض أو لا
+    const hasDiscounts = discounts.length > 0;
+    const hasGroupDiscounts = groupDiscounts.length > 0;
+    const hasPaymentPlans = paymentPlans.length > 0;
+    const hasOffers = hasDiscounts || hasGroupDiscounts || hasPaymentPlans || cashDiscountEnabled;
+    
     let html = `
         <div class="pricing-table-wrapper">
             <h3 class="pricing-table-title">
                 <i class="fas fa-table"></i> جدول الأسعار
             </h3>
-            
+    `;
+    
+    // عرض السعر الأساسي بشكل بارز
+    html += `
+        <div style="text-align: center; margin-bottom: 20px; padding: 15px; background: rgba(255, 215, 0, 0.1); border-radius: 10px;">
+            <h4 style="color: var(--gold-primary); margin-bottom: 5px;">السعر الأساسي</h4>
+            <span style="font-size: 2rem; font-weight: bold; color: var(--white);">${formatPrice(basePrice, currency)}</span>
+        </div>
+    `;
+    
+    // لو مفيش أي عروض وفي سعر تخفيض فقط
+    if (!hasOffers && salePrice) {
+        html += `
             <div class="table-responsive">
                 <table class="pricing-table">
                     <thead>
                         <tr>
                             <th>وقت التسجيل</th>
                             <th>السعر الأساسي</th>
-    `;
-    
-    // إضافة عمود الدفع النقدي إذا كان مفعل
-    if (cashDiscountEnabled) {
-        html += `<th>دفع نقدي (خصم ${cashDiscountPercent}%)</th>`;
-    }
-    
-    // إضافة أعمدة خطط الدفع
-    paymentPlans.forEach(plan => {
-        html += `<th>${plan.name}</th>`;
-    });
-    
-    // إضافة أعمدة المجموعات
-    groupDiscounts.forEach(group => {
-        html += `<th>مجموعة ${group.minSize}+ (خصم ${group.percentage}%)</th>`;
-    });
-    
-    html += `
                         </tr>
                     </thead>
                     <tbody>
-    `;
-    
-    // صفوف العروض
-    if (discounts.length === 0) {
-        discounts.push({ name: 'السعر العادي', percentage: 0 });
-    }
-    
-    discounts.forEach((discount, index) => {
-        const priceAfterDiscount = roundPrice(basePrice * (1 - discount.percentage/100));
-        const rowClass = index === 0 ? 'discount-early-extra' : 
-                        index === 1 ? 'discount-early' : 'discount-regular';
-        
-        html += `<tr class="${rowClass}">`;
-        
-        // اسم العرض
-        html += `<td>${discount.name || 'السعر العادي'}`;
-        if (discount.percentage > 0) {
-            html += ` <span class="discount-badge">خصم ${discount.percentage}%</span>`;
-        }
-        html += `</td>`;
-        
-        // السعر الأساسي بعد خصم التوقيت
-        html += `<td>${formatPrice(priceAfterDiscount, currency)}</td>`;
-        
-        // السعر النقدي
-        if (cashDiscountEnabled) {
-            const cashPrice = roundPrice(priceAfterDiscount * (1 - cashDiscountPercent/100));
-            html += `<td>${formatPrice(cashPrice, currency)}</td>`;
-        }
-        
-        // خطط الدفع
-        paymentPlans.forEach(plan => {
-            const installmentAmount = roundPrice(priceAfterDiscount / plan.installments);
-            html += `<td>${plan.installments} × ${formatPrice(installmentAmount, currency)}</td>`;
-        });
-        
-        // المجموعات
-        groupDiscounts.forEach(group => {
-            const groupPrice = roundPrice(priceAfterDiscount * (1 - group.percentage/100));
-            html += `<td>${formatPrice(groupPrice, currency)}</td>`;
-        });
-        
-        html += `</tr>`;
-    });
-    
-    html += `
+                        <tr class="discount-regular">
+                            <td>السعر العادي</td>
+                            <td>
+                                <div style="text-decoration: line-through; color: #999;">${formatPrice(basePrice, currency)}</div>
+                                <div class="price-value">${formatPrice(salePrice, currency)}</div>
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
-    `;
+        `;
+    } 
+    // لو في عروض، بناء الجدول الكامل
+    else if (hasOffers) {
+        html += `
+            <div class="table-responsive">
+                <table class="pricing-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2">وقت التسجيل</th>
+                            <th colspan="${getIndividualColumnsCount(cashDiscountEnabled, paymentPlans)}">الفرد</th>
+        `;
+        
+        // إضافة أعمدة المجموعات لو موجودة
+        if (hasGroupDiscounts) {
+            groupDiscounts.forEach(group => {
+                const colspan = getGroupColumnsCount(cashDiscountEnabled, paymentPlans);
+                html += `<th colspan="${colspan}">مجموعة ${group.minSize}+ (خصم ${group.percentage}%)</th>`;
+            });
+        }
+        
+        html += `
+                        </tr>
+                        <tr>
+        `;
+        
+        // أعمدة الفرد
+        html += `<th>السعر الأساسي</th>`;
+        if (cashDiscountEnabled) {
+            html += `<th>دفع نقدي (خصم ${cashDiscountPercent}%)</th>`;
+        }
+        paymentPlans.forEach(plan => {
+            if (plan.installments > 1) {
+                html += `<th>${plan.installments} دفعات</th>`;
+            }
+        });
+        
+        // أعمدة المجموعات
+        if (hasGroupDiscounts) {
+            groupDiscounts.forEach(group => {
+                html += `<th>السعر بعد الخصم</th>`;
+                if (cashDiscountEnabled) {
+                    html += `<th>دفع نقدي (خصم ${cashDiscountPercent}%)</th>`;
+                }
+                paymentPlans.forEach(plan => {
+                    if (plan.installments > 1) {
+                        html += `<th>${plan.installments} دفعات</th>`;
+                    }
+                });
+            });
+        }
+        
+        html += `
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        // الصفوف - لو مفيش خصومات زمنية، نضيف صف واحد للسعر العادي
+        const rowsToShow = hasDiscounts ? discounts : [{
+            name: salePrice ? 'السعر بعد التخفيض' : 'السعر العادي',
+            percentage: 0
+        }];
+        
+        rowsToShow.forEach((discount, index) => {
+            const priceAfterDiscount = salePrice && !hasDiscounts ? salePrice : 
+                                      roundPrice(basePrice * (1 - discount.percentage/100));
+            
+            const rowClass = index === 0 ? 'discount-early-extra' : 
+                            index === 1 ? 'discount-early' : 'discount-regular';
+            
+            html += `<tr class="${rowClass}">`;
+            
+            // اسم العرض
+            html += `<td class="offer-name-cell">`;
+            html += `<div class="offer-name">${discount.name || 'السعر العادي'}</div>`;
+            if (discount.percentage > 0) {
+                html += `<span class="discount-badge">خصم ${discount.percentage}%</span>`;
+            }
+            if (discount.startDate || discount.endDate) {
+                html += `<div class="date-range">`;
+                if (discount.startDate) html += `من ${formatDate(discount.startDate)}`;
+                if (discount.startDate && discount.endDate) html += ` - `;
+                if (discount.endDate) html += `حتى ${formatDate(discount.endDate)}`;
+                html += `</div>`;
+            }
+            html += `</td>`;
+            
+            // أسعار الفرد
+            html += `<td class="individual-cell">${formatPrice(priceAfterDiscount, currency)}</td>`;
+            
+            if (cashDiscountEnabled) {
+                const cashPrice = roundPrice(priceAfterDiscount * (1 - cashDiscountPercent/100));
+                html += `<td class="cash-payment">${formatPrice(cashPrice, currency)}</td>`;
+            }
+            
+            paymentPlans.forEach(plan => {
+                if (plan.installments > 1) {
+                    const installmentAmount = roundPrice(priceAfterDiscount / plan.installments);
+                    html += `<td class="installment-payment">${plan.installments} × ${formatPrice(installmentAmount, currency)}</td>`;
+                }
+            });
+            
+            // أسعار المجموعات
+            if (hasGroupDiscounts) {
+                groupDiscounts.forEach(group => {
+                    const groupPrice = roundPrice(priceAfterDiscount * (1 - group.percentage/100));
+                    html += `<td class="group-cell">${formatPrice(groupPrice, currency)}</td>`;
+                    
+                    if (cashDiscountEnabled) {
+                        const groupCashPrice = roundPrice(groupPrice * (1 - cashDiscountPercent/100));
+                        html += `<td class="group-cell cash-payment">${formatPrice(groupCashPrice, currency)}</td>`;
+                    }
+                    
+                    paymentPlans.forEach(plan => {
+                        if (plan.installments > 1) {
+                            const groupInstallment = roundPrice(groupPrice / plan.installments);
+                            html += `<td class="group-cell installment-payment">${plan.installments} × ${formatPrice(groupInstallment, currency)}</td>`;
+                        }
+                    });
+                });
+            }
+            
+            html += `</tr>`;
+        });
+        
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+    // لو مفيش عروض خالص
+    else {
+        html += `
+            <div class="table-responsive">
+                <table class="pricing-table">
+                    <thead>
+                        <tr>
+                            <th>وقت التسجيل</th>
+                            <th>السعر الأساسي</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="discount-regular">
+                            <td>السعر العادي</td>
+                            <td class="price-value">${formatPrice(basePrice, currency)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
     
-    // إضافة الكوبونات إذا وجدت
+    // إضافة الكوبونات والمنح كالمعتاد
     if (coupons.length > 0) {
         html += buildCouponsTable(coupons, basePrice, currency);
     }
     
-    // إضافة معلومات المنح
     if (document.getElementById('enableGrants')?.checked) {
         html += buildGrantsInfo();
     }
@@ -5478,6 +5589,26 @@ function updatePricePreview() {
     html += `</div>`;
     
     container.innerHTML = html;
+}
+
+// دالة مساعدة لحساب عدد الأعمدة للفرد
+function getIndividualColumnsCount(cashDiscountEnabled, paymentPlans) {
+    let count = 1; // السعر الأساسي
+    if (cashDiscountEnabled) count++; // الدفع النقدي
+    paymentPlans.forEach(plan => {
+        if (plan.installments > 1) count++; // خطط الدفع
+    });
+    return count;
+}
+
+// دالة مساعدة لحساب عدد الأعمدة للمجموعة
+function getGroupColumnsCount(cashDiscountEnabled, paymentPlans) {
+    let count = 1; // السعر بعد خصم المجموعة
+    if (cashDiscountEnabled) count++; // الدفع النقدي
+    paymentPlans.forEach(plan => {
+        if (plan.installments > 1) count++; // خطط الدفع
+    });
+    return count;
 }
 
 // دالة مبسطة لمعلومات المنح
