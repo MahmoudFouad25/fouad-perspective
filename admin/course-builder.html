@@ -1354,6 +1354,27 @@ const additionalCSS = `
     text-align: center;
     color: #6b7280;
 }
+
+        /* صفوف الأقساط الفرعية */
+.sub-row {
+    background: rgba(255, 255, 255, 0.02);
+    font-size: 0.9rem;
+}
+
+.sub-row td {
+    padding: 8px !important;
+    border-top: none !important;
+}
+
+.individual-installments,
+.group-installments {
+    color: #9ca3af;
+}
+
+.active-plan {
+    color: #10b981;
+    text-align: center;
+}
 /* Library Content Styles */
 
         /* Library Content Styles */
@@ -5258,24 +5279,6 @@ function collectDiscounts() {
     return discounts;
 }
 
-function collectPaymentPlans() {
-    const plans = [];
-    const planElements = document.querySelectorAll('#paymentPlansList .payment-plan-item');
-    
-    planElements.forEach(element => {
-        const name = element.querySelector('.plan-name')?.textContent || '';
-        const installments = parseInt(element.querySelector('.installments-count')?.textContent) || 1;
-        const discountCheckbox = element.querySelector('input[type="checkbox"]');
-        const discount = discountCheckbox?.checked ? 
-            parseFloat(element.querySelector('.cash-discount-value')?.textContent) || 0 : 0;
-        
-        if (name) {
-            plans.push({ name, installments, discount });
-        }
-    });
-    
-    return plans;
-}
 
 function collectGroupDiscount() {
     const groupSection = document.querySelector('#groupDiscountSection');
@@ -5434,19 +5437,13 @@ function updatePricePreview() {
     // جمع البيانات
     const discounts = collectDiscounts();
     const groupDiscounts = collectGroupDiscounts();
-    const paymentPlans = collectPaymentPlans();
+    let paymentPlans = collectPaymentPlans();
     const coupons = collectCoupons();
     const cashDiscountEnabled = document.getElementById('enableCashDiscount')?.checked || false;
     const cashDiscountPercent = parseFloat(document.getElementById('cashDiscountPercent')?.value) || 10;
     
-    // إذا لم توجد خطط دفع، أضف خطة دفعة واحدة فقط
-    if (paymentPlans.length === 0) {
-        paymentPlans.push({
-            name: 'دفعة واحدة',
-            installments: 1,
-            isFullPayment: true
-        });
-    }
+    // إذا مفيش خطط دفع، نعرض سعر واحد بس
+    const hasPaymentPlans = paymentPlans.length > 0;
     
     // بناء الجدول
     let html = `
@@ -5461,8 +5458,20 @@ function updatePricePreview() {
                         <tr>
                             <th rowspan="2">وقت التسجيل</th>
                             <th rowspan="2">قيمة الاستثمار<br>للفرد</th>
-                            <th colspan="${paymentPlans.length}">طريقة الدفع</th>
     `;
+    
+    // لو فيه خطط دفع
+    if (hasPaymentPlans) {
+        // إضافة عمود الدفع الكامل لو مفعل خصم الكاش
+        if (cashDiscountEnabled) {
+            html += `<th>دفعة واحدة<br>(خصم ${cashDiscountPercent}%)</th>`;
+        }
+        
+        // أعمدة خطط الدفع
+        paymentPlans.forEach(plan => {
+            html += `<th>${plan.name}</th>`;
+        });
+    }
     
     // أعمدة المجموعات
     if (groupDiscounts.length > 0) {
@@ -5474,26 +5483,17 @@ function updatePricePreview() {
     
     html += `
                         </tr>
-                        <tr>
-    `;
-    
-    // أسماء خطط الدفع
-    paymentPlans.forEach(plan => {
-        html += `<th>${plan.name}</th>`;
-    });
-    
-    html += `
-                        </tr>
                     </thead>
                     <tbody>
     `;
     
-    // صفوف العروض الزمنية
+    // لكل عرض زمني
     discounts.forEach((discount, index) => {
         const discountedPrice = calculateDiscountedPrice(basePrice, discount.percentage);
         const rowClass = index === 0 ? 'discount-early-extra' : 
                         index === 1 ? 'discount-early' : 'discount-regular';
         
+        // الصف الأساسي
         html += `<tr class="${rowClass}">`;
         
         // عمود وقت التسجيل
@@ -5517,56 +5517,39 @@ function updatePricePreview() {
             </td>
         `;
         
-        // أعمدة طرق الدفع للحجز الفردي
-        paymentPlans.forEach(plan => {
-            if (plan.installments === 1) {
-                // دفعة واحدة
-                let finalPrice = discountedPrice;
-                if (cashDiscountEnabled) {
-                    finalPrice = roundPrice(discountedPrice * (1 - cashDiscountPercent/100));
-                    html += `
-                        <td class="cash-payment">
-                            <div class="price-value">${formatPrice(finalPrice, currency)}</div>
-                            <small class="discount-note">خصم ${cashDiscountPercent}%</small>
-                        </td>
-                    `;
-                } else {
-                    html += `
-                        <td>
-                            <div class="price-value">${formatPrice(finalPrice, currency)}</div>
-                        </td>
-                    `;
-                }
-            } else {
-                // أقساط
-                const installmentPrices = calculateInstallments(discountedPrice, plan.installments);
+        // خطط الدفع
+        if (hasPaymentPlans) {
+            // عمود الدفع الكامل بخصم (لو مفعل)
+            if (cashDiscountEnabled) {
+                const cashPrice = roundPrice(discountedPrice * (1 - cashDiscountPercent/100));
                 html += `
-                    <td class="installment-payment">
-                        <div class="installment-details">
-                `;
-                
-                if (installmentPrices.length === 1) {
-                    // نفس المبلغ لكل الأقساط
-                    html += `${plan.installments} × ${formatPrice(installmentPrices[0], currency)}`;
-                } else {
-                    // مبالغ مختلفة (40% - 30% - 30%)
-                    html += installmentPrices.map((amount, i) => 
-                        `${formatPrice(amount, currency)}`
-                    ).join(' + ');
-                }
-                
-                html += `
-                        </div>
+                    <td class="cash-payment">
+                        <div class="price-value">${formatPrice(cashPrice, currency)}</div>
                     </td>
                 `;
             }
-        });
-        
-        // عمود الحجز الفردي (إذا كان هناك خصومات مجموعات)
-        if (groupDiscounts.length > 0) {
-            html += `<td class="individual-cell">${formatPrice(discountedPrice, currency)}</td>`;
             
-            // أعمدة خصومات المجموعات
+            // أعمدة الأقساط
+            paymentPlans.forEach(plan => {
+                const installmentPrices = calculateInstallments(discountedPrice, plan.installments);
+                html += `<td>`;
+                
+                if (installmentPrices.length === 1) {
+                    html += `${plan.installments} × ${formatPrice(installmentPrices[0], currency)}`;
+                } else {
+                    html += installmentPrices.map(amount => formatPrice(amount, currency)).join(' + ');
+                }
+                
+                html += `</td>`;
+            });
+        }
+        
+        // المجموعات
+        if (groupDiscounts.length > 0) {
+            // الحجز الفردي
+            html += `<td>-</td>`;
+            
+            // خصومات المجموعات
             groupDiscounts.forEach(group => {
                 const groupPrice = roundPrice(discountedPrice * (1 - group.percentage/100));
                 html += `
@@ -5580,34 +5563,47 @@ function updatePricePreview() {
         
         html += `</tr>`;
         
-        // إضافة صفوف الأقساط للمجموعات إذا كان هناك أكثر من خطة دفع
-        if (groupDiscounts.length > 0 && paymentPlans.length > 1) {
-            paymentPlans.slice(1).forEach(plan => {
-                html += `<tr class="${rowClass} group-installment-row">`;
+        // صفوف الأقساط للمجموعات
+        if (groupDiscounts.length > 0 && hasPaymentPlans) {
+            // صف لكل خطة دفع
+            paymentPlans.forEach(plan => {
+                html += `<tr class="${rowClass} sub-row">`;
                 html += `<td colspan="2"></td>`; // خلايا فارغة
                 
-                // أعمدة الأقساط للحجز الفردي
+                // أعمدة الأقساط الفردية
+                if (cashDiscountEnabled) {
+                    html += `<td></td>`; // خلية فارغة للدفع الكامل
+                }
+                
                 paymentPlans.forEach(p => {
-                    if (p.installments === plan.installments && p.installments > 1) {
-                        const installmentPrices = calculateInstallments(discountedPrice, plan.installments);
-                        html += `<td class="installment-cell">${formatInstallmentText(installmentPrices, plan.installments, currency)}</td>`;
+                    if (p === plan) {
+                        html += `<td class="active-plan">✓</td>`;
                     } else {
                         html += `<td></td>`;
                     }
                 });
                 
                 // الحجز الفردي
-                html += `<td></td>`;
+                const installmentPrices = calculateInstallments(discountedPrice, plan.installments);
+                html += `<td class="individual-installments">`;
+                if (installmentPrices.length === 1) {
+                    html += `${plan.installments} × ${formatPrice(installmentPrices[0], currency)}`;
+                } else {
+                    html += installmentPrices.map(amount => formatPrice(amount, currency)).join(' + ');
+                }
+                html += `</td>`;
                 
                 // أقساط المجموعات
                 groupDiscounts.forEach(group => {
                     const groupPrice = roundPrice(discountedPrice * (1 - group.percentage/100));
-                    const installmentPrices = calculateInstallments(groupPrice, plan.installments);
-                    html += `
-                        <td class="group-installment-cell">
-                            <small>${formatInstallmentText(installmentPrices, plan.installments, currency)}</small>
-                        </td>
-                    `;
+                    const groupInstallments = calculateInstallments(groupPrice, plan.installments);
+                    html += `<td class="group-installments">`;
+                    if (groupInstallments.length === 1) {
+                        html += `${plan.installments} × ${formatPrice(groupInstallments[0], currency)}`;
+                    } else {
+                        html += groupInstallments.map(amount => formatPrice(amount, currency)).join(' + ');
+                    }
+                    html += `</td>`;
                 });
                 
                 html += `</tr>`;
@@ -5691,52 +5687,68 @@ function formatInstallmentText(prices, count, currency) {
 
 // دالة بناء جدول المنح
 function buildGrantsTable() {
-    const grantPlans = collectGrantPlans();
+    // جمع بيانات المنح من الحقول
+    const grantSeats = parseInt(document.getElementById('grantSeats')?.value) || 0;
+    const totalSeats = parseInt(document.getElementById('totalSeats')?.value) || 0;
     
-    if (grantPlans.length === 0) {
-        return `
-            <div class="grants-info mt-4">
-                <h4 class="sub-table-title">
-                    <i class="fas fa-hands-helping"></i> برنامج المنح الدراسية
-                </h4>
-                <div class="alert alert-info">
-                    <p>برنامج المنح متاح - يتم تصميم خطط مخصصة حسب كل حالة</p>
-                </div>
-            </div>
-        `;
-    }
+    // أنواع الدعم
+    const supportTypes = [];
+    if (document.getElementById('grantDiscount')?.checked) supportTypes.push('خصومات مرنة');
+    if (document.getElementById('grantInstallments')?.checked) supportTypes.push('تقسيط ميسر');
+    if (document.getElementById('grantDeferred')?.checked) supportTypes.push('تأجيل السداد');
+    if (document.getElementById('grantService')?.checked) supportTypes.push('خدمات مقابل المنحة');
+    
+    // معايير التقييم
+    const criteria = [];
+    if (document.getElementById('criteriaFinancial')?.checked) criteria.push('الحاجة المالية');
+    if (document.getElementById('criteriaMotivation')?.checked) criteria.push('الدافع والالتزام');
+    if (document.getElementById('criteriaImpact')?.checked) criteria.push('الأثر المتوقع');
+    if (document.getElementById('criteriaHistory')?.checked) criteria.push('التاريخ مع المنظور');
     
     let html = `
         <h4 class="sub-table-title mt-4">
-            <i class="fas fa-hands-helping"></i> خطط المنح المتاحة
+            <i class="fas fa-hands-helping"></i> برنامج المنح الدراسية
         </h4>
-        <div class="table-responsive">
-            <table class="sub-table grants-table">
-                <thead>
-                    <tr>
-                        <th>اسم المنحة</th>
-                        <th>نوع الدعم</th>
-                        <th>التفاصيل</th>
-                    </tr>
-                </thead>
-                <tbody>
     `;
     
-    grantPlans.forEach(plan => {
+    if (supportTypes.length > 0 || criteria.length > 0) {
         html += `
-            <tr>
-                <td>${plan.name}</td>
-                <td>${plan.type}</td>
-                <td>${plan.details}</td>
-            </tr>
+            <div class="table-responsive">
+                <table class="sub-table grants-table">
+                    <thead>
+                        <tr>
+                            <th>تفاصيل البرنامج</th>
+                            <th>القيمة</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>عدد المقاعد المتاحة</td>
+                            <td>${grantSeats} من أصل ${totalSeats} مقعد</td>
+                        </tr>
+                        <tr>
+                            <td>أنواع الدعم المتاحة</td>
+                            <td>${supportTypes.join(' • ') || 'غير محدد'}</td>
+                        </tr>
+                        <tr>
+                            <td>معايير التقييم</td>
+                            <td>${criteria.join(' • ') || 'غير محدد'}</td>
+                        </tr>
+                        <tr>
+                            <td>طريقة التقديم</td>
+                            <td>${document.getElementById('grantFormUrl')?.value ? 'استمارة إلكترونية' : 'نموذج مدمج في الموقع'}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         `;
-    });
-    
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
+    } else {
+        html += `
+            <div class="alert alert-info">
+                <p>برنامج المنح متاح - يتم تصميم خطط مخصصة حسب كل حالة</p>
+            </div>
+        `;
+    }
     
     return html;
 }
@@ -5947,14 +5959,7 @@ function collectPaymentPlans() {
         });
     });
     
-    // إضافة خطط افتراضية إذا لم توجد
-    if (plans.length === 0) {
-        plans.push(
-            { name: 'دفعة واحدة', installments: 1, isFullPayment: true },
-            { name: 'دفعتين', installments: 2, isFullPayment: false }
-        );
-    }
-    
+       
     return plans;
 }
 
