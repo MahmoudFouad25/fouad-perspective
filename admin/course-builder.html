@@ -5431,11 +5431,22 @@ function updatePricePreview() {
         return;
     }
     
-    // جمع البيانات الفعلية من الصفحة
+    // جمع البيانات
     const discounts = collectDiscounts();
     const groupDiscounts = collectGroupDiscounts();
     const paymentPlans = collectPaymentPlans();
     const coupons = collectCoupons();
+    const cashDiscountEnabled = document.getElementById('enableCashDiscount')?.checked || false;
+    const cashDiscountPercent = parseFloat(document.getElementById('cashDiscountPercent')?.value) || 10;
+    
+    // إذا لم توجد خطط دفع، أضف خطة دفعة واحدة فقط
+    if (paymentPlans.length === 0) {
+        paymentPlans.push({
+            name: 'دفعة واحدة',
+            installments: 1,
+            isFullPayment: true
+        });
+    }
     
     // بناء الجدول
     let html = `
@@ -5448,16 +5459,16 @@ function updatePricePreview() {
                 <table class="pricing-table">
                     <thead>
                         <tr>
-                            <th rowspan="2" style="vertical-align: middle;">وقت التسجيل</th>
-                            <th rowspan="2" style="vertical-align: middle;">قيمة الاستثمار للفرد</th>
-                            <th colspan="${paymentPlans.length}" style="text-align: center;">طريقة الدفع</th>
+                            <th rowspan="2">وقت التسجيل</th>
+                            <th rowspan="2">قيمة الاستثمار<br>للفرد</th>
+                            <th colspan="${paymentPlans.length}">طريقة الدفع</th>
     `;
     
-    // إضافة أعمدة المجموعات إذا كانت موجودة
+    // أعمدة المجموعات
     if (groupDiscounts.length > 0) {
-        html += `<th rowspan="2" style="vertical-align: middle;">الحجز الفردي</th>`;
+        html += `<th rowspan="2">الحجز<br>الفردي</th>`;
         groupDiscounts.forEach(group => {
-            html += `<th rowspan="2" style="vertical-align: middle;">خصم مجموعة<br>(${group.minSize}+ أشخاص)</th>`;
+            html += `<th rowspan="2">خصم مجموعة<br>(${group.minSize}+ أشخاص)<br>${group.percentage}%</th>`;
         });
     }
     
@@ -5466,7 +5477,7 @@ function updatePricePreview() {
                         <tr>
     `;
     
-    // صف العناوين الفرعية لخطط الدفع
+    // أسماء خطط الدفع
     paymentPlans.forEach(plan => {
         html += `<th>${plan.name}</th>`;
     });
@@ -5477,7 +5488,7 @@ function updatePricePreview() {
                     <tbody>
     `;
     
-    // إضافة صف لكل عرض زمني
+    // صفوف العروض الزمنية
     discounts.forEach((discount, index) => {
         const discountedPrice = calculateDiscountedPrice(basePrice, discount.percentage);
         const rowClass = index === 0 ? 'discount-early-extra' : 
@@ -5485,7 +5496,7 @@ function updatePricePreview() {
         
         html += `<tr class="${rowClass}">`;
         
-        // عمود اسم العرض والتاريخ
+        // عمود وقت التسجيل
         html += `
             <td class="offer-name-cell">
                 <div class="offer-name">${discount.name || 'السعر العادي'}</div>
@@ -5499,37 +5510,109 @@ function updatePricePreview() {
             </td>
         `;
         
-        // عمود السعر الأساسي بعد الخصم الزمني
+        // عمود قيمة الاستثمار
         html += `
             <td class="base-price-cell">
                 <div class="price-value">${formatPrice(discountedPrice, currency)}</div>
             </td>
         `;
         
-        // أعمدة خطط الدفع
+        // أعمدة طرق الدفع للحجز الفردي
         paymentPlans.forEach(plan => {
-            const planPrice = calculatePlanPrice(discountedPrice, plan);
-            html += `<td class="payment-cell">${planPrice}</td>`;
+            if (plan.installments === 1) {
+                // دفعة واحدة
+                let finalPrice = discountedPrice;
+                if (cashDiscountEnabled) {
+                    finalPrice = roundPrice(discountedPrice * (1 - cashDiscountPercent/100));
+                    html += `
+                        <td class="cash-payment">
+                            <div class="price-value">${formatPrice(finalPrice, currency)}</div>
+                            <small class="discount-note">خصم ${cashDiscountPercent}%</small>
+                        </td>
+                    `;
+                } else {
+                    html += `
+                        <td>
+                            <div class="price-value">${formatPrice(finalPrice, currency)}</div>
+                        </td>
+                    `;
+                }
+            } else {
+                // أقساط
+                const installmentPrices = calculateInstallments(discountedPrice, plan.installments);
+                html += `
+                    <td class="installment-payment">
+                        <div class="installment-details">
+                `;
+                
+                if (installmentPrices.length === 1) {
+                    // نفس المبلغ لكل الأقساط
+                    html += `${plan.installments} × ${formatPrice(installmentPrices[0], currency)}`;
+                } else {
+                    // مبالغ مختلفة (40% - 30% - 30%)
+                    html += installmentPrices.map((amount, i) => 
+                        `${formatPrice(amount, currency)}`
+                    ).join(' + ');
+                }
+                
+                html += `
+                        </div>
+                    </td>
+                `;
+            }
         });
         
-        // أعمدة المجموعات إذا كانت موجودة
+        // عمود الحجز الفردي (إذا كان هناك خصومات مجموعات)
         if (groupDiscounts.length > 0) {
-            // العمود الفردي
-            html += `<td class="individual-cell">-</td>`;
+            html += `<td class="individual-cell">${formatPrice(discountedPrice, currency)}</td>`;
             
             // أعمدة خصومات المجموعات
             groupDiscounts.forEach(group => {
-                const groupPrice = calculateGroupPrice(discountedPrice, group.percentage);
+                const groupPrice = roundPrice(discountedPrice * (1 - group.percentage/100));
                 html += `
                     <td class="group-cell">
                         <div class="price-value">${formatPrice(groupPrice, currency)}</div>
-                        <div class="group-note">للفرد في المجموعة</div>
+                        <small>للفرد</small>
                     </td>
                 `;
             });
         }
         
         html += `</tr>`;
+        
+        // إضافة صفوف الأقساط للمجموعات إذا كان هناك أكثر من خطة دفع
+        if (groupDiscounts.length > 0 && paymentPlans.length > 1) {
+            paymentPlans.slice(1).forEach(plan => {
+                html += `<tr class="${rowClass} group-installment-row">`;
+                html += `<td colspan="2"></td>`; // خلايا فارغة
+                
+                // أعمدة الأقساط للحجز الفردي
+                paymentPlans.forEach(p => {
+                    if (p.installments === plan.installments && p.installments > 1) {
+                        const installmentPrices = calculateInstallments(discountedPrice, plan.installments);
+                        html += `<td class="installment-cell">${formatInstallmentText(installmentPrices, plan.installments, currency)}</td>`;
+                    } else {
+                        html += `<td></td>`;
+                    }
+                });
+                
+                // الحجز الفردي
+                html += `<td></td>`;
+                
+                // أقساط المجموعات
+                groupDiscounts.forEach(group => {
+                    const groupPrice = roundPrice(discountedPrice * (1 - group.percentage/100));
+                    const installmentPrices = calculateInstallments(groupPrice, plan.installments);
+                    html += `
+                        <td class="group-installment-cell">
+                            <small>${formatInstallmentText(installmentPrices, plan.installments, currency)}</small>
+                        </td>
+                    `;
+                });
+                
+                html += `</tr>`;
+            });
+        }
     });
     
     html += `
@@ -5538,19 +5621,275 @@ function updatePricePreview() {
             </div>
     `;
     
-    // إضافة جدول الكوبونات إذا وُجدت
+    // جدول الكوبونات
     if (coupons.length > 0) {
         html += buildCouponsTable(coupons, basePrice, currency);
     }
     
-    // إضافة معلومات المنح إذا كانت مفعلة
+    // جدول المنح
     if (document.getElementById('enableGrants')?.checked) {
-        html += buildGrantsInfo();
+        html += buildGrantsTable();
     }
     
     html += `</div>`;
     
     container.innerHTML = html;
+}
+
+// دوال مساعدة محسّنة
+// دالة تقريب الأسعار
+function roundPrice(price) {
+    // تقريب لأقرب 10
+    return Math.round(price / 10) * 10;
+}
+
+// دالة حساب الأقساط
+function calculateInstallments(totalPrice, installmentCount) {
+    if (installmentCount === 1) return [totalPrice];
+    
+    if (installmentCount === 2) {
+        // 50% - 50%
+        const amount = roundPrice(totalPrice / 2);
+        return [amount, amount];
+    }
+    
+    if (installmentCount === 3) {
+        // 40% - 30% - 30%
+        const first = roundPrice(totalPrice * 0.4);
+        const remaining = totalPrice - first;
+        const second = roundPrice(remaining / 2);
+        const third = totalPrice - first - second;
+        return [first, second, third];
+    }
+    
+    // للأقساط الأكثر - توزيع متساوي
+    const amount = roundPrice(totalPrice / installmentCount);
+    const lastAmount = totalPrice - (amount * (installmentCount - 1));
+    const result = Array(installmentCount - 1).fill(amount);
+    result.push(lastAmount);
+    return result;
+}
+
+// دالة تنسيق نص الأقساط
+function formatInstallmentText(prices, count, currency) {
+    if (prices.length === 1) {
+        return `${count} × ${formatPrice(prices[0], currency)}`;
+    }
+    
+    // عرض مختصر للأقساط المختلفة
+    const first = formatPrice(prices[0], currency);
+    const others = prices.slice(1).map(p => formatPrice(p, currency));
+    
+    if (new Set(others).size === 1) {
+        // باقي الأقساط متساوية
+        return `${first} + ${prices.length - 1}×${others[0]}`;
+    }
+    
+    // كل الأقساط مختلفة
+    return prices.map(p => formatPrice(p, currency)).join(' + ');
+}
+
+// دالة بناء جدول المنح
+function buildGrantsTable() {
+    const grantPlans = collectGrantPlans();
+    
+    if (grantPlans.length === 0) {
+        return `
+            <div class="grants-info mt-4">
+                <h4 class="sub-table-title">
+                    <i class="fas fa-hands-helping"></i> برنامج المنح الدراسية
+                </h4>
+                <div class="alert alert-info">
+                    <p>برنامج المنح متاح - يتم تصميم خطط مخصصة حسب كل حالة</p>
+                </div>
+            </div>
+        `;
+    }
+    
+    let html = `
+        <h4 class="sub-table-title mt-4">
+            <i class="fas fa-hands-helping"></i> خطط المنح المتاحة
+        </h4>
+        <div class="table-responsive">
+            <table class="sub-table grants-table">
+                <thead>
+                    <tr>
+                        <th>اسم المنحة</th>
+                        <th>نوع الدعم</th>
+                        <th>التفاصيل</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    grantPlans.forEach(plan => {
+        html += `
+            <tr>
+                <td>${plan.name}</td>
+                <td>${plan.type}</td>
+                <td>${plan.details}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    return html;
+}
+function buildCouponsTable(coupons, basePrice, currency) {
+    let html = `
+        <h4 class="sub-table-title mt-4">
+            <i class="fas fa-tags"></i> كوبونات الخصم المتاحة
+        </h4>
+        <div class="table-responsive">
+            <table class="sub-table coupons-table">
+                <thead>
+                    <tr>
+                        <th>كود الكوبون</th>
+                        <th>نوع الخصم</th>
+                        <th>القيمة</th>
+                        <th>السعر بعد الخصم</th>
+                        <th>العدد المتاح</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    coupons.forEach(coupon => {
+        let finalPrice;
+        if (coupon.type === 'percentage') {
+            finalPrice = roundPrice(basePrice * (1 - coupon.value/100));
+        } else {
+            finalPrice = roundPrice(basePrice - coupon.value);
+        }
+        
+        html += `
+            <tr>
+                <td class="coupon-code">${coupon.code}</td>
+                <td>${coupon.type === 'percentage' ? 'نسبة مئوية' : 'مبلغ ثابت'}</td>
+                <td>${coupon.type === 'percentage' ? coupon.value + '%' : formatPrice(coupon.value, currency)}</td>
+                <td class="price-value">${formatPrice(finalPrice, currency)}</td>
+                <td>${coupon.limit || 'غير محدود'}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    return html;
+}
+
+function buildGrantsTable() {
+    const grantPlans = collectGrantPlans();
+    
+    if (grantPlans.length === 0) {
+        return `
+            <div class="grants-info mt-4">
+                <h4 class="sub-table-title">
+                    <i class="fas fa-hands-helping"></i> برنامج المنح الدراسية
+                </h4>
+                <div class="alert alert-info">
+                    <p>برنامج المنح متاح - يتم تصميم خطط مخصصة حسب كل حالة</p>
+                </div>
+            </div>
+        `;
+    }
+    
+    let html = `
+        <h4 class="sub-table-title mt-4">
+            <i class="fas fa-hands-helping"></i> خطط المنح المتاحة
+        </h4>
+        <div class="table-responsive">
+            <table class="sub-table grants-table">
+                <thead>
+                    <tr>
+                        <th>اسم المنحة</th>
+                        <th>نوع الدعم</th>
+                        <th>التفاصيل</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    grantPlans.forEach(plan => {
+        html += `
+            <tr>
+                <td>${plan.name}</td>
+                <td>${plan.type}</td>
+                <td>${plan.details}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    return html;
+}
+
+function collectGrantPlans() {
+    const plans = [];
+    
+    // التحقق من تفعيل المنح
+    if (!document.getElementById('enableGrants')?.checked) {
+        return plans;
+    }
+    
+    // جمع البيانات من الحقول الموجودة
+    const grantSeats = parseInt(document.getElementById('grantSeats')?.value) || 0;
+    const totalSeats = parseInt(document.getElementById('totalSeats')?.value) || 0;
+    
+    // أنواع الدعم المحددة
+    const supportTypes = [];
+    if (document.getElementById('grantDiscount')?.checked) {
+        supportTypes.push('خصومات مرنة');
+    }
+    if (document.getElementById('grantInstallments')?.checked) {
+        supportTypes.push('تقسيط ميسر');
+    }
+    if (document.getElementById('grantDeferred')?.checked) {
+        supportTypes.push('تأجيل السداد');
+    }
+    if (document.getElementById('grantService')?.checked) {
+        supportTypes.push('خدمات مقابل المنحة');
+    }
+    
+    // معايير التقييم
+    const criteria = [];
+    if (document.getElementById('criteriaFinancial')?.checked) {
+        criteria.push('الحاجة المالية');
+    }
+    if (document.getElementById('criteriaMotivation')?.checked) {
+        criteria.push('الدافع والالتزام');
+    }
+    if (document.getElementById('criteriaImpact')?.checked) {
+        criteria.push('الأثر المتوقع');
+    }
+    if (document.getElementById('criteriaHistory')?.checked) {
+        criteria.push('التاريخ مع المنظور');
+    }
+    
+    // إضافة خطة المنح إذا كانت مفعلة
+    if (supportTypes.length > 0 || criteria.length > 0) {
+        plans.push({
+            name: 'برنامج المنح المرن',
+            type: supportTypes.join(' • ') || 'دعم مخصص',
+            details: `${grantSeats} مقاعد من أصل ${totalSeats} • معايير: ${criteria.join(', ') || 'حسب الحالة'}`
+        });
+    }
+    
+    return plans;
 }
 
 // دوال مساعدة جديدة
@@ -5685,60 +6024,7 @@ function formatDate(dateString) {
     });
 }
 
-function buildCouponsTable(coupons, basePrice, currency) {
-    let html = `
-        <h4 class="sub-table-title mt-4">
-            <i class="fas fa-tags"></i> كوبونات الخصم المتاحة
-        </h4>
-        <div class="table-responsive">
-            <table class="sub-table coupons-table">
-                <thead>
-                    <tr>
-                        <th>كود الكوبون</th>
-                        <th>نوع الخصم</th>
-                        <th>القيمة</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-    
-    coupons.forEach(coupon => {
-        html += `
-            <tr>
-                <td class="coupon-code">${coupon.code}</td>
-                <td>${coupon.type === 'percentage' ? 'نسبة مئوية' : 'مبلغ ثابت'}</td>
-                <td>${coupon.type === 'percentage' ? coupon.value + '%' : formatPrice(coupon.value, currency)}</td>
-            </tr>
-        `;
-    });
-    
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
-    
-    return html;
-}
 
-function buildGrantsInfo() {
-    return `
-        <div class="grants-info mt-4">
-            <h4 class="sub-table-title">
-                <i class="fas fa-hands-helping"></i> برنامج المنح الدراسية
-            </h4>
-            <div class="alert alert-info">
-                <p><strong>برنامج المنح متاح لهذه الدورة</strong></p>
-                <p>يتم تصميم خطط دفع مخصصة لكل حالة بناءً على:</p>
-                <ul>
-                    <li>تحليل الاستمارة والظروف الخاصة</li>
-                    <li>التفاوض المباشر مع المتقدم</li>
-                    <li>إمكانية دمج عروض مختلفة</li>
-                </ul>
-            </div>
-        </div>
-    `;
-}
 
 // دالة التقريب التسويقي
 function marketingRound(price) {
