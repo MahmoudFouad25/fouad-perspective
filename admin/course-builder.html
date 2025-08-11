@@ -1800,7 +1800,7 @@ const additionalCSS = `
         <div class="row">
             <div class="col-md-3 mb-3">
                 <label class="form-label">نوع التسعير <span class="required">*</span></label>
-                <select class="form-select" id="priceType" onchange="updatePricingFields()">
+                <select class="form-select" id="priceType" onchange="updatePricingFields(); autoSave();">
                     <option value="free">مجانية</option>
                     <option value="paid-enrolled">مدفوعة - مسجلة</option>
                     <option value="paid-direct">مدفوعة - مباشر</option>
@@ -1809,7 +1809,7 @@ const additionalCSS = `
             
             <div class="col-md-3 mb-3">
                 <label class="form-label">العملة</label>
-                <select class="form-select" id="currency" onchange="updateCurrencyLabel()">
+                <select class="form-select" id="currency" onchange="updateCurrencyLabel(); autoSave();">
                     <option value="EGP">جنيه مصري (EGP)</option>
                     <option value="SAR">ريال سعودي (SAR)</option>
                     <option value="USD">دولار أمريكي (USD)</option>
@@ -1857,7 +1857,7 @@ const additionalCSS = `
         </h2>
         
         <div class="form-check mb-3">
-            <input type="checkbox" class="form-check-input" id="enableCashDiscount" onchange="toggleCashDiscount()">
+            <input type="checkbox" class="form-check-input" id="enableCashDiscount" onchange="toggleCashDiscount(); autoSave();">
             <label class="form-check-label" for="enableCashDiscount">
                 تفعيل خصم للدفع الكامل (كاش)
             </label>
@@ -1869,7 +1869,7 @@ const additionalCSS = `
                     <label class="form-label">نسبة الخصم</label>
                     <div class="input-group">
                         <input type="number" class="form-control" id="cashDiscountPercent" 
-                               value="5" min="0" max="50" onchange="updatePricePreview()">
+       value="10" min="0" max="50" onchange="updatePricePreview(); autoSave();">
                         <span class="input-group-text">%</span>
                     </div>
                 </div>
@@ -4236,15 +4236,22 @@ function autoSave() {
     clearTimeout(autoSaveTimeout);
     
     autoSaveTimeout = setTimeout(() => {
+        // جمع البيانات أولاً - مهم جداً
+        collectFormData();
+        
         saveCourseData().then(() => {
             showAutoSaveIndicator();
             console.log('تم الحفظ التلقائي بنجاح');
         }).catch(error => {
             console.error('فشل الحفظ التلقائي:', error);
         });
-    }, 2000);
+    }, 1500); // قللنا الوقت لـ 1.5 ثانية
 }
-
+// دالة لتحديث كل شيء فوراً
+function updateAndSave() {
+    updatePricePreview();
+    autoSave();
+}
         function showAutoSaveIndicator() {
             const indicator = document.getElementById('autoSaveIndicator');
             indicator.classList.add('show');
@@ -4337,10 +4344,10 @@ function collectFormData() {
     courseData.salePrice = document.getElementById('salePrice')?.value ? parseFloat(document.getElementById('salePrice').value) : null;
     
     // خصم الدفع الكامل
-    courseData.cashDiscount = {
-        enabled: document.getElementById('enableCashDiscount')?.checked || false,
-        percentage: parseFloat(document.getElementById('cashDiscountPercent')?.value) || 10
-    };
+courseData.cashDiscount = {
+    enabled: document.getElementById('enableCashDiscount')?.checked || false,
+    percentage: parseFloat(document.getElementById('cashDiscountPercent')?.value) || 10
+};
     
     // خطط المنح (محفوظة مسبقاً في المصفوفة)
 if (!courseData.grantPlans) courseData.grantPlans = [];
@@ -4369,26 +4376,25 @@ if (!courseData.grantPlans) courseData.grantPlans = [];
     });
 
     
-    // خصومات المجموعات
-    courseData.groupDiscounts = [];
-    document.querySelectorAll('#groupDiscountsList .card').forEach((card, index) => {
-        const nameInput = card.querySelector('input[placeholder="اسم عرض المجموعة"]');
-        const minSizeInput = card.querySelector('input[type="number"][min="2"]');
-        const percentageInput = card.querySelector('.input-group input[type="number"]');
+// خصومات المجموعات
+courseData.groupDiscounts = [];
+document.querySelectorAll('#groupDiscountsList .card').forEach((card, index) => {
+    const nameInput = card.querySelector('input[placeholder="اسم عرض المجموعة"]');
+    const minSizeInput = card.querySelector('input[type="number"][min="2"]');
+    const percentageInput = card.querySelector('.input-group input[type="number"]');
+    
+    if (nameInput && percentageInput) {
+        const groupDiscount = {
+            id: 'group_' + Date.now() + '_' + index,
+            name: nameInput.value || '',
+            minSize: parseInt(minSizeInput?.value) || 3,
+            percentage: parseInt(percentageInput.value) || 0
+        };
         
-        if (percentageInput) {
-            const groupDiscount = {
-                id: 'group_' + Date.now() + '_' + index,
-                name: nameInput?.value || '',
-                minSize: parseInt(minSizeInput?.value) || 3,
-                percentage: parseInt(percentageInput.value) || 0
-            };
-            
-            if (groupDiscount.percentage > 0) {
-                courseData.groupDiscounts.push(groupDiscount);
-            }
-        }
-    });
+        // احفظ حتى لو القيم فاضية
+        courseData.groupDiscounts.push(groupDiscount);
+    }
+});
     
     // خطط الدفع والكوبونات (محفوظة مسبقاً في المصفوفات)
     if (!courseData.paymentPlans) courseData.paymentPlans = [];
@@ -4637,13 +4643,19 @@ function updateUIWithCourseData() {
         setValueSafe('salePrice', courseData.salePrice);
         
         // خصم الدفع الكامل
-        if (courseData.cashDiscount) {
-            setCheckedSafe('enableCashDiscount', courseData.cashDiscount.enabled);
-            setValueSafe('cashDiscountPercent', courseData.cashDiscount.percentage || 10);
-            if (typeof toggleCashDiscount === 'function') {
-                toggleCashDiscount();
-            }
-        }
+if (courseData.cashDiscount) {
+    setCheckedSafe('enableCashDiscount', courseData.cashDiscount.enabled);
+    setValueSafe('cashDiscountPercent', courseData.cashDiscount.percentage || 10);
+    if (typeof toggleCashDiscount === 'function') {
+        toggleCashDiscount();
+    }
+}
+        // تحديث معاينة الأسعار
+setTimeout(() => {
+    if (typeof updatePricePreview === 'function') {
+        updatePricePreview();
+    }
+}, 500);
         
 // العروض الزمنية
 if (courseData.discounts && courseData.discounts.length > 0) {
@@ -6325,8 +6337,8 @@ function addDiscountTier() {
     courseData.discounts.push(discount);
     
     renderDiscounts();
-    updatePricePreview();
-    autoSave(); // أضفنا السطر ده
+    updatePricePreview(); // مهم جداً
+    autoSave();
 }
 
 function removeDiscount(index) {
@@ -6349,8 +6361,8 @@ function addGroupDiscount() {
     courseData.groupDiscounts.push(groupDiscount);
     
     renderGroupDiscounts();
-    updatePricePreview();
-    autoSave(); // أضفنا السطر ده
+    updatePricePreview(); // مهم جداً
+    autoSave();
 }
 
 function removeGroupDiscount(index) {
