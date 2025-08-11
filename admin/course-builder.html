@@ -2842,6 +2842,8 @@ let courseData = {
 
         let currentStep = 1;
         let autoSaveTimeout = null;
+        let isSaving = false;
+        let isAddingItem = false;
         let isLoading = false;
 
         // ========================================
@@ -4232,6 +4234,12 @@ function autoSave() {
         return;
     }
     
+    // منع الحفظ المتكرر
+    if (isSaving) {
+        console.log('حفظ قيد التنفيذ بالفعل');
+        return;
+    }
+    
     // إلغاء أي حفظ سابق معلق
     clearTimeout(autoSaveTimeout);
     
@@ -4244,7 +4252,6 @@ function autoSave() {
         });
     }, 2000);
 }
-
         function showAutoSaveIndicator() {
             const indicator = document.getElementById('autoSaveIndicator');
             indicator.classList.add('show');
@@ -4264,51 +4271,107 @@ async function saveCourseData() {
         return Promise.resolve();
     }
     
+    // منع الحفظ المتكرر
+    if (isSaving) {
+        console.log('حفظ قيد التنفيذ بالفعل');
+        return Promise.resolve();
+    }
+    
     if (!firebase.firestore) {
         console.error('Firestore not initialized');
         return Promise.reject('Firestore not initialized');
     }
     
+    isSaving = true;
+    
     try {
         // جمع كل البيانات من الفورم
         collectFormData();
         
+        // تنظيف البيانات قبل الحفظ
+        const dataToSave = cleanDataBeforeSave(courseData);
+        
         // تحديث slug فقط (مش ID)
-        let finalSlug = courseData.slug;
+        let finalSlug = dataToSave.slug;
         const slugInput = document.getElementById('courseSlug');
         
         if (slugInput && slugInput.value.trim()) {
             finalSlug = slugInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
         }
         
-        if (!finalSlug && courseData.title && courseData.title !== 'دورة جديدة') {
-            finalSlug = generateSlug(courseData.title);
+        if (!finalSlug && dataToSave.title && dataToSave.title !== 'دورة جديدة') {
+            finalSlug = generateSlug(dataToSave.title);
         }
         
         // تجهيز البيانات للحفظ
-        const dataToSave = {
-            ...courseData,
+        const finalData = {
+            ...dataToSave,
             slug: finalSlug,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
         
         // حذف القيم الغير معرفة
-        Object.keys(dataToSave).forEach(key => {
-            if (dataToSave[key] === undefined) {
-                delete dataToSave[key];
+        Object.keys(finalData).forEach(key => {
+            if (finalData[key] === undefined) {
+                delete finalData[key];
             }
         });
         
         // تحديث دورة موجودة فقط
-        await window.firebaseDB.courses.updateCourse(courseData.id, dataToSave);
+        await window.firebaseDB.courses.updateCourse(courseData.id, finalData);
         console.log('تم تحديث الدورة:', courseData.id);
         
         return Promise.resolve();
     } catch (error) {
         console.error('Error saving course:', error);
         return Promise.reject(error);
+    } finally {
+        isSaving = false;
     }
 }
+
+        // دالة تنظيف البيانات قبل الحفظ
+function cleanDataBeforeSave(data) {
+    const cleaned = { ...data };
+    
+    // تنظيف الخصومات الفارغة
+    if (cleaned.discounts && Array.isArray(cleaned.discounts)) {
+        cleaned.discounts = cleaned.discounts.filter(d => 
+            d && (d.name || d.percentage > 0)
+        );
+    }
+    
+    // تنظيف خصومات المجموعات الفارغة
+    if (cleaned.groupDiscounts && Array.isArray(cleaned.groupDiscounts)) {
+        cleaned.groupDiscounts = cleaned.groupDiscounts.filter(g => 
+            g && g.percentage > 0
+        );
+    }
+    
+    // تنظيف خطط الدفع الفارغة
+    if (cleaned.paymentPlans && Array.isArray(cleaned.paymentPlans)) {
+        cleaned.paymentPlans = cleaned.paymentPlans.filter(p => 
+            p && p.name && p.installments > 0
+        );
+    }
+    
+    // تنظيف الكوبونات الفارغة
+    if (cleaned.coupons && Array.isArray(cleaned.coupons)) {
+        cleaned.coupons = cleaned.coupons.filter(c => 
+            c && c.code && c.value > 0
+        );
+    }
+    
+    // تنظيف خطط المنح الفارغة
+    if (cleaned.grantPlans && Array.isArray(cleaned.grantPlans)) {
+        cleaned.grantPlans = cleaned.grantPlans.filter(p => 
+            p && p.name
+        );
+    }
+    
+    return cleaned;
+}
+        
 function collectFormData() {
     // تأكد من تحميل الصفحة أولاً
     if (!document.getElementById('courseTitle')) {
@@ -6274,48 +6337,84 @@ function toggleCashDiscount() {
 
 function renderDiscounts() {
     const container = document.getElementById('discountsList');
+    if (!container) return;
+    
+    // إفراغ المحتوى أولاً لمنع التكرار
+    container.innerHTML = '';
+    
     if (!courseData.discounts || courseData.discounts.length === 0) {
         container.innerHTML = '<p class="text-muted">لا توجد عروض خصم حالياً</p>';
         return;
     }
     
-    container.innerHTML = courseData.discounts.map((discount, index) => `
-        <div class="card mb-2">
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-md-3">
-                        <input type="text" class="form-control" placeholder="اسم العرض"
-                               value="${discount.name}" onchange="courseData.discounts[${index}].name = this.value; updatePricePreview()">
-                    </div>
-                    <div class="col-md-2">
-                        <div class="input-group">
-                            <input type="number" class="form-control" value="${discount.percentage}"
-                                   min="0" max="100" onchange="courseData.discounts[${index}].percentage = parseInt(this.value) || 0; updatePricePreview()">
-                            <span class="input-group-text">%</span>
+    // عرض الخصومات الموجودة فقط - بدون إضافة عناصر فارغة
+    courseData.discounts.forEach((discount, index) => {
+        // تخطي العناصر الفارغة تماماً
+        if (!discount || (!discount.name && !discount.percentage && !discount.startDate && !discount.endDate)) {
+            return;
+        }
+        
+        const discountHTML = `
+            <div class="card mb-2" data-discount-index="${index}">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-3">
+                            <input type="text" class="form-control" placeholder="اسم العرض"
+                                   value="${discount.name || ''}" 
+                                   onchange="updateDiscountField(${index}, 'name', this.value)">
                         </div>
-                    </div>
-                    <div class="col-md-3">
-                        <input type="date" class="form-control" value="${discount.startDate}"
-                               onchange="courseData.discounts[${index}].startDate = this.value; updatePricePreview()">
-                        <small class="text-muted">من تاريخ</small>
-                    </div>
-                    <div class="col-md-3">
-                        <input type="date" class="form-control" value="${discount.endDate}"
-                               onchange="courseData.discounts[${index}].endDate = this.value; updatePricePreview()">
-                        <small class="text-muted">إلى تاريخ</small>
-                    </div>
-                    <div class="col-md-1">
-                        <button class="btn btn-danger btn-sm" onclick="removeDiscount(${index})">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        <div class="col-md-2">
+                            <div class="input-group">
+                                <input type="number" class="form-control" 
+                                       value="${discount.percentage || 0}"
+                                       min="0" max="100" 
+                                       onchange="updateDiscountField(${index}, 'percentage', parseInt(this.value) || 0)">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <input type="date" class="form-control" 
+                                   value="${discount.startDate || ''}"
+                                   onchange="updateDiscountField(${index}, 'startDate', this.value)">
+                            <small class="text-muted">من تاريخ</small>
+                        </div>
+                        <div class="col-md-3">
+                            <input type="date" class="form-control" 
+                                   value="${discount.endDate || ''}"
+                                   onchange="updateDiscountField(${index}, 'endDate', this.value)">
+                            <small class="text-muted">إلى تاريخ</small>
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-danger btn-sm" onclick="removeDiscount(${index})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    `).join('');
+        `;
+        
+        container.insertAdjacentHTML('beforeend', discountHTML);
+    });
 }
 
+        // دالة تحديث حقل خصم محدد
+function updateDiscountField(index, field, value) {
+    if (!courseData.discounts[index]) {
+        courseData.discounts[index] = {};
+    }
+    
+    courseData.discounts[index][field] = value;
+    updatePricePreview();
+    autoSave();
+}
+        
+
 function addDiscountTier() {
+    // منع الإضافة المتكررة
+    if (isAddingItem) return;
+    isAddingItem = true;
+    
     const discount = {
         id: 'discount_' + Date.now(),
         name: '',
@@ -6329,8 +6428,13 @@ function addDiscountTier() {
     
     renderDiscounts();
     updatePricePreview();
+    
+    // السماح بالإضافة مرة أخرى بعد قليل
+    setTimeout(() => {
+        isAddingItem = false;
+    }, 300);
 }
-
+        
 function removeDiscount(index) {
     courseData.discounts.splice(index, 1);
     renderDiscounts();
@@ -6339,6 +6443,10 @@ function removeDiscount(index) {
 
 // خصومات المجموعات
 function addGroupDiscount() {
+    // منع الإضافة المتكررة
+    if (isAddingItem) return;
+    isAddingItem = true;
+    
     const groupDiscount = {
         id: 'group_' + Date.now(),
         name: '',
@@ -6351,6 +6459,11 @@ function addGroupDiscount() {
     
     renderGroupDiscounts();
     updatePricePreview();
+    
+    // السماح بالإضافة مرة أخرى بعد قليل
+    setTimeout(() => {
+        isAddingItem = false;
+    }, 300);
 }
 
         function removeGroupDiscount(index) {
@@ -6361,42 +6474,75 @@ function addGroupDiscount() {
 
 function renderGroupDiscounts() {
     const container = document.getElementById('groupDiscountsList');
+    if (!container) return;
+    
+    // إفراغ المحتوى أولاً لمنع التكرار
+    container.innerHTML = '';
+    
     if (!courseData.groupDiscounts || courseData.groupDiscounts.length === 0) {
         container.innerHTML = '<p class="text-muted">لا توجد عروض مجموعات حالياً</p>';
         return;
     }
     
-    container.innerHTML = courseData.groupDiscounts.map((group, index) => `
-        <div class="card mb-2">
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-md-4">
-                        <input type="text" class="form-control" placeholder="اسم عرض المجموعة"
-                               value="${group.name}" onchange="courseData.groupDiscounts[${index}].name = this.value; updatePricePreview()">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label">الحد الأدنى للمجموعة</label>
-                        <input type="number" class="form-control" value="${group.minSize}"
-                               min="2" onchange="courseData.groupDiscounts[${index}].minSize = parseInt(this.value) || 3; updatePricePreview()">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label">نسبة الخصم</label>
-                        <div class="input-group">
-                            <input type="number" class="form-control" value="${group.percentage}"
-                                   min="0" max="100" onchange="courseData.groupDiscounts[${index}].percentage = parseInt(this.value) || 0; updatePricePreview()">
-                            <span class="input-group-text">%</span>
+    // عرض خصومات المجموعات الموجودة فقط - بدون إضافة عناصر فارغة
+    courseData.groupDiscounts.forEach((group, index) => {
+        // تخطي العناصر الفارغة تماماً
+        if (!group || (!group.name && !group.minSize && !group.percentage)) {
+            return;
+        }
+        
+        const groupHTML = `
+            <div class="card mb-2">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control" placeholder="اسم عرض المجموعة"
+                                   value="${group.name || ''}" 
+                                   onchange="updateGroupField(${index}, 'name', this.value)">
                         </div>
-                    </div>
-                    <div class="col-md-2 text-end">
-                        <button class="btn btn-danger btn-sm" onclick="removeGroupDiscount(${index})">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        <div class="col-md-3">
+                            <label class="form-label">الحد الأدنى للمجموعة</label>
+                            <input type="number" class="form-control" 
+                                   value="${group.minSize || 3}"
+                                   min="2" 
+                                   onchange="updateGroupField(${index}, 'minSize', parseInt(this.value) || 3)">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">نسبة الخصم</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" 
+                                       value="${group.percentage || 0}"
+                                       min="0" max="100" 
+                                       onchange="updateGroupField(${index}, 'percentage', parseInt(this.value) || 0)">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-2 text-end">
+                            <button class="btn btn-danger btn-sm" onclick="removeGroupDiscount(${index})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    `).join('');
+        `;
+        
+        container.insertAdjacentHTML('beforeend', groupHTML);
+    });
 }
+
+        // دالة تحديث حقل خصم مجموعة محدد
+function updateGroupField(index, field, value) {
+    if (!courseData.groupDiscounts[index]) {
+        courseData.groupDiscounts[index] = {};
+    }
+    
+    courseData.groupDiscounts[index][field] = value;
+    updatePricePreview();
+    autoSave();
+}
+
+        
 
 // برنامج المنح
 function toggleGrants() {
