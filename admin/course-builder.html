@@ -5462,9 +5462,10 @@ function updatePricePreview() {
 if (document.getElementById('enableGrants')?.checked) {
     html += buildGrantsTable();
     // إضافة خطط المنح المخصصة
-    if (courseData.grantPlans && courseData.grantPlans.length > 0) {
-        html += buildGrantPlansTable();
-    }
+    // في نهاية دالة updatePricePreview قبل html += `</div>`;
+if (document.getElementById('enableGrants')?.checked && courseData.grantPlans && courseData.grantPlans.length > 0) {
+    html += buildGrantPlansTable();
+}
 }
 
     
@@ -5878,20 +5879,25 @@ function buildCouponsTable(coupons, basePrice, currency) {
 function collectGrantPlans() {
     const plans = [];
     
-    // التحقق من تفعيل المنح
     if (!document.getElementById('enableGrants')?.checked) {
         return plans;
     }
     
-    // جمع الخطط المخصصة من courseData.grantPlans
     if (courseData.grantPlans && courseData.grantPlans.length > 0) {
         courseData.grantPlans.forEach(plan => {
+            const installments = parseInt(plan.installments) || 1;
+            const percentage = parseInt(plan.percentage) || 0;
+            const fixedAmount = parseInt(plan.fixedAmount) || 0;
+            
             plans.push({
-                name: plan.name,
+                name: plan.name || 'منحة غير مسماة',
+                conditions: plan.conditions || '',
                 type: plan.discountType === 'percentage' ? 
-                    `خصم ${plan.percentage}%` : 
-                    `خصم ${plan.fixedAmount} ${courseData.currency}`,
-                details: `${plan.installments} ${plan.installments === 1 ? 'دفعة' : 'دفعات'}${plan.firstPayment > 0 ? ` - دفعة أولى ${plan.firstPayment}%` : ''}`
+                    `خصم ${percentage}%` : 
+                    `خصم ${fixedAmount} ${courseData.currency}`,
+                details: `${installments} ${installments === 1 ? 'دفعة' : 'دفعات'}${plan.firstPayment > 0 ? ` - دفعة أولى ${plan.firstPayment}%` : ''}`,
+                limit: plan.limit,
+                used: plan.timesUsed || 0
             });
         });
     }
@@ -6732,32 +6738,46 @@ function renderGrantPlans() {
     }
     
     container.innerHTML = courseData.grantPlans.map((plan, index) => {
-        // حساب التوزيع المالي
+        // حل مشكلة undefined values
+        const installments = parseInt(plan.installments) || 1;
+        const percentage = parseInt(plan.percentage) || 0;
+        const fixedAmount = parseInt(plan.fixedAmount) || 0;
+        const firstPayment = parseInt(plan.firstPayment) || 0;
+        const firstPaymentAmount = parseInt(plan.firstPaymentAmount) || 0;
+        
+        // حساب السعر النهائي
         const basePrice = parseFloat(document.getElementById('price')?.value) || 0;
         let finalPrice = basePrice;
         
-        // حساب السعر بعد الخصم
         if (plan.discountType === 'percentage') {
-            finalPrice = basePrice * (1 - (plan.percentage || 0) / 100);
+            finalPrice = basePrice * (1 - percentage / 100);
         } else {
-            finalPrice = basePrice - (plan.fixedAmount || 0);
+            finalPrice = basePrice - fixedAmount;
         }
         
-        // حساب توزيع الدفعات
-        const installments = plan.installments || 1;
-        const firstPaymentPercent = plan.firstPayment || 0;
-        const firstPaymentAmount = finalPrice * (firstPaymentPercent / 100);
-        const remainingAmount = finalPrice - firstPaymentAmount;
-        const monthlyAmount = remainingAmount / Math.max(1, installments - 1);
-        
-        // تفاصيل مالية
+        // حساب التوزيع المالي
         let paymentDetails = '';
         if (installments === 1) {
             paymentDetails = `دفعة واحدة: ${formatPrice(finalPrice, courseData.currency)}`;
-        } else if (firstPaymentPercent > 0) {
-            paymentDetails = `دفعة أولى: ${formatPrice(firstPaymentAmount, courseData.currency)} + ${installments - 1} أقساط × ${formatPrice(monthlyAmount, courseData.currency)}`;
         } else {
-            paymentDetails = `${installments} أقساط × ${formatPrice(finalPrice / installments, courseData.currency)}`;
+            let firstAmount = 0;
+            let remainingAmount = finalPrice;
+            
+            if (plan.firstPaymentType === 'fixed' && firstPaymentAmount > 0) {
+                firstAmount = firstPaymentAmount;
+                remainingAmount = finalPrice - firstAmount;
+            } else if (firstPayment > 0) {
+                firstAmount = finalPrice * (firstPayment / 100);
+                remainingAmount = finalPrice - firstAmount;
+            }
+            
+            if (firstAmount > 0) {
+                const monthlyAmount = remainingAmount / (installments - 1);
+                paymentDetails = `${formatPrice(firstAmount, courseData.currency)} + ${installments - 1} × ${formatPrice(monthlyAmount, courseData.currency)}`;
+            } else {
+                const monthlyAmount = finalPrice / installments;
+                paymentDetails = `${installments} أقساط × ${formatPrice(monthlyAmount, courseData.currency)}`;
+            }
         }
         
         return `
@@ -6765,12 +6785,14 @@ function renderGrantPlans() {
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start">
                         <div class="flex-grow-1">
-                            <h5 style="color: var(--text-primary);">${plan.name}</h5>
+                            <h5 style="color: var(--text-primary);">${plan.name || 'منحة غير مسماة'}</h5>
+                            ${plan.conditions ? `<p class="mb-2" style="color: var(--text-muted); font-size: 0.9em; font-style: italic;">📝 ${plan.conditions}</p>` : ''}
+                            
                             <div class="row">
                                 <div class="col-md-6">
                                     <p class="mb-1" style="color: var(--text-secondary);">
                                         <strong>نوع الخصم:</strong> 
-                                        ${plan.discountType === 'percentage' ? `${plan.percentage || 0}%` : `${plan.fixedAmount || 0} ${courseData.currency}`}
+                                        ${plan.discountType === 'percentage' ? `${percentage}%` : `${fixedAmount} ${courseData.currency}`}
                                     </p>
                                     <p class="mb-1" style="color: var(--text-secondary);">
                                         <strong>السعر النهائي:</strong> ${formatPrice(finalPrice, courseData.currency)}
@@ -6784,8 +6806,8 @@ function renderGrantPlans() {
                                 </div>
                             </div>
                             <div class="mt-2">
-                                <span class="badge bg-info">استُخدمت ${plan.timesUsed || 0} مرة</span>
-                                ${plan.limit ? `<span class="badge bg-warning ms-2">متبقي ${plan.limit - (plan.timesUsed || 0)} من ${plan.limit}</span>` : ''}
+                                <span class="badge" style="background-color: #3b82f6; color: white;">استُخدمت ${plan.timesUsed || 0} مرة</span>
+                                ${plan.limit ? `<span class="badge ms-2" style="background-color: #f59e0b; color: #111827;">متبقي ${plan.limit - (plan.timesUsed || 0)} من ${plan.limit}</span>` : ''}
                             </div>
                         </div>
                         <div class="btn-group-vertical ms-3">
@@ -6802,12 +6824,14 @@ function renderGrantPlans() {
         `;
     }).join('');
 }
-        function buildGrantPlansTable() {
+function buildGrantPlansTable() {
     const grantPlans = collectGrantPlans();
     
     if (grantPlans.length === 0) {
         return '';
     }
+    
+    const basePrice = parseFloat(document.getElementById('price')?.value) || 0;
     
     let html = `
         <h4 class="sub-table-title mt-4">
@@ -6818,19 +6842,44 @@ function renderGrantPlans() {
                 <thead>
                     <tr style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
                         <th>اسم خطة المنحة</th>
+                        <th>الظروف المناسبة</th>
                         <th>نوع الخصم</th>
+                        <th>السعر النهائي</th>
                         <th>تفاصيل الدفع</th>
+                        <th>العدد المتاح</th>
                     </tr>
                 </thead>
                 <tbody>
     `;
     
-    grantPlans.forEach(plan => {
+    courseData.grantPlans?.forEach(plan => {
+        const installments = parseInt(plan.installments) || 1;
+        const percentage = parseInt(plan.percentage) || 0;
+        const fixedAmount = parseInt(plan.fixedAmount) || 0;
+        
+        let finalPrice = basePrice;
+        if (plan.discountType === 'percentage') {
+            finalPrice = basePrice * (1 - percentage / 100);
+        } else {
+            finalPrice = basePrice - fixedAmount;
+        }
+        
+        let paymentDetails = '';
+        if (installments === 1) {
+            paymentDetails = `دفعة واحدة`;
+        } else {
+            const monthlyAmount = finalPrice / installments;
+            paymentDetails = `${installments} أقساط × ${formatPrice(monthlyAmount, courseData.currency)}`;
+        }
+        
         html += `
             <tr style="background: rgba(16, 185, 129, 0.05);">
                 <td style="color: var(--text-primary); font-weight: 600;">${plan.name}</td>
-                <td style="color: #10b981; font-weight: 500;">${plan.type}</td>
-                <td style="color: var(--text-secondary);">${plan.details}</td>
+                <td style="color: var(--text-secondary); font-size: 0.9em;">${plan.conditions || 'غير محدد'}</td>
+                <td style="color: #10b981; font-weight: 500;">${plan.discountType === 'percentage' ? `${percentage}%` : `${fixedAmount} ${courseData.currency}`}</td>
+                <td style="color: var(--text-primary); font-weight: 600;">${formatPrice(finalPrice, courseData.currency)}</td>
+                <td style="color: var(--text-secondary);">${paymentDetails}</td>
+                <td style="color: var(--text-secondary);">${plan.limit ? `${plan.limit - (plan.timesUsed || 0)} / ${plan.limit}` : 'غير محدود'}</td>
             </tr>
         `;
     });
