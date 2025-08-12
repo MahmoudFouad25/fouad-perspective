@@ -3703,6 +3703,436 @@ function showMessage(message, type = 'info') {
     });
 }
 
+        // ============ قسم الاستثمار الجديد ============
+
+// عرض قسم الاستثمار بناءً على بيانات الدورة
+function displayInvestmentSection() {
+    const course = window.currentCourseData;
+    if (!course) return;
+
+    // إظهار القسم المناسب حسب نوع التسعير
+    if (course.priceType === 'free') {
+        displayFreeCourse();
+    } else if (course.priceType === 'paid-recorded' || course.priceType === 'paid-direct') {
+        displayPaidCourse(course);
+    }
+
+    // إظهار المنح إذا كانت مفعلة
+    if (course.grants?.enabled && course.grants?.seats > 0) {
+        document.getElementById('grants-info').style.display = 'block';
+        document.getElementById('grant-btn').style.display = 'inline-flex';
+    }
+}
+
+// عرض الدورة المجانية
+function displayFreeCourse() {
+    document.getElementById('free-course-display').style.display = 'block';
+    document.getElementById('paid-course-display').style.display = 'none';
+    document.getElementById('main-action-text').textContent = 'سجل مجاناً';
+    document.getElementById('main-action-btn').querySelector('i').className = 'fas fa-user-plus';
+}
+
+// عرض الدورة المدفوعة
+function displayPaidCourse(course) {
+    document.getElementById('free-course-display').style.display = 'none';
+    document.getElementById('paid-course-display').style.display = 'block';
+    
+    // حساب أفضل سعر متاح
+    const pricing = calculateBestPrice(course);
+    
+    // عرض الأسعار
+    document.getElementById('original-price').textContent = formatNumber(course.price);
+    document.getElementById('best-price').textContent = formatNumber(pricing.finalPrice);
+    
+    // عرض التوفير إن وجد
+    if (pricing.savings > 0) {
+        document.getElementById('savings-display').style.display = 'inline-flex';
+        document.getElementById('savings-amount').textContent = formatNumber(pricing.savings);
+        document.getElementById('savings-percentage').textContent = Math.round(pricing.savingsPercentage);
+    }
+    
+    // عرض العروض المتاحة
+    displayActiveOffers(course);
+    
+    // عرض خطط الدفع
+    displayPaymentPlans(course, pricing.finalPrice);
+}
+
+// حساب أفضل سعر متاح
+function calculateBestPrice(course) {
+    let finalPrice = course.salePrice || course.price;
+    let appliedDiscounts = [];
+    
+    // التحقق من الخصومات المبكرة
+    if (course.discounts && course.discounts.length > 0) {
+        const today = new Date();
+        const activeDiscount = course.discounts.find(discount => {
+            const startDate = new Date(discount.startDate);
+            const endDate = new Date(discount.endDate);
+            return today >= startDate && today <= endDate;
+        });
+        
+        if (activeDiscount) {
+            finalPrice = course.price * (1 - activeDiscount.percentage / 100);
+            appliedDiscounts.push({
+                type: 'early',
+                name: activeDiscount.name,
+                percentage: activeDiscount.percentage
+            });
+        }
+    }
+    
+    const savings = course.price - finalPrice;
+    const savingsPercentage = (savings / course.price) * 100;
+    
+    return {
+        originalPrice: course.price,
+        finalPrice: Math.round(finalPrice),
+        savings: Math.round(savings),
+        savingsPercentage: savingsPercentage,
+        appliedDiscounts: appliedDiscounts
+    };
+}
+
+// عرض العروض المتاحة
+function displayActiveOffers(course) {
+    const offersContainer = document.getElementById('offers-container');
+    offersContainer.innerHTML = '';
+    let hasOffers = false;
+    
+    // الخصومات المبكرة
+    if (course.discounts && course.discounts.length > 0) {
+        const today = new Date();
+        course.discounts.forEach(discount => {
+            const startDate = new Date(discount.startDate);
+            const endDate = new Date(discount.endDate);
+            
+            if (today >= startDate && today <= endDate) {
+                hasOffers = true;
+                const daysLeft = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+                
+                offersContainer.innerHTML += `
+                    <div class="offer-card active">
+                        <div class="offer-header">
+                            <div class="offer-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="offer-badge">${discount.percentage}%</div>
+                        </div>
+                        <h4 class="offer-title">${discount.name}</h4>
+                        <p class="offer-description">خصم ${discount.percentage}% على السعر الأصلي</p>
+                        <div class="countdown">
+                            <i class="fas fa-hourglass-half"></i>
+                            متبقي ${daysLeft} ${daysLeft === 1 ? 'يوم' : 'أيام'}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+    }
+    
+    // خصومات المجموعات
+    if (course.groupDiscounts && course.groupDiscounts.length > 0) {
+        hasOffers = true;
+        course.groupDiscounts.forEach(group => {
+            offersContainer.innerHTML += `
+                <div class="offer-card">
+                    <div class="offer-header">
+                        <div class="offer-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="offer-badge">${group.percentage}%</div>
+                    </div>
+                    <h4 class="offer-title">${group.name}</h4>
+                    <p class="offer-description">للمجموعات من ${group.minSize} أشخاص فأكثر</p>
+                </div>
+            `;
+        });
+    }
+    
+    // الخصم النقدي
+    if (course.cashDiscount?.enabled) {
+        hasOffers = true;
+        offersContainer.innerHTML += `
+            <div class="offer-card">
+                <div class="offer-header">
+                    <div class="offer-icon">
+                        <i class="fas fa-money-bill-wave"></i>
+                    </div>
+                    <div class="offer-badge">${course.cashDiscount.percentage}%</div>
+                </div>
+                <h4 class="offer-title">خصم الدفع النقدي</h4>
+                <p class="offer-description">عند الدفع الكامل مقدماً</p>
+            </div>
+        `;
+    }
+    
+    // إظهار القسم إذا كانت هناك عروض
+    if (hasOffers) {
+        document.getElementById('active-offers').style.display = 'block';
+    }
+}
+
+// عرض خطط الدفع
+function displayPaymentPlans(course, basePrice) {
+    const plansContainer = document.getElementById('plans-container');
+    plansContainer.innerHTML = '';
+    let hasPlans = false;
+    
+    // الدفع النقدي
+    if (course.cashDiscount?.enabled) {
+        hasPlans = true;
+        const cashPrice = basePrice * (1 - course.cashDiscount.percentage / 100);
+        const cashSavings = basePrice - cashPrice;
+        
+        plansContainer.innerHTML += `
+            <div class="plan-card" onclick="selectPaymentPlan('cash', ${cashPrice})">
+                <div class="plan-icon">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <h4 class="plan-name">دفعة واحدة</h4>
+                <p class="plan-details">ادفع المبلغ كاملاً واحصل على خصم إضافي</p>
+                <div class="plan-price">${formatNumber(cashPrice)} ج.م</div>
+                <div class="plan-savings">وفر ${formatNumber(cashSavings)} ج.م</div>
+            </div>
+        `;
+    } else {
+        // الدفع النقدي بدون خصم
+        hasPlans = true;
+        plansContainer.innerHTML += `
+            <div class="plan-card" onclick="selectPaymentPlan('cash', ${basePrice})">
+                <div class="plan-icon">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <h4 class="plan-name">دفعة واحدة</h4>
+                <p class="plan-details">ادفع المبلغ كاملاً</p>
+                <div class="plan-price">${formatNumber(basePrice)} ج.م</div>
+            </div>
+        `;
+    }
+    
+    // خطط التقسيط
+    if (course.paymentPlans && course.paymentPlans.length > 0) {
+        hasPlans = true;
+        course.paymentPlans.forEach(plan => {
+            const monthlyAmount = Math.ceil(basePrice / plan.installments);
+            
+            plansContainer.innerHTML += `
+                <div class="plan-card" onclick="selectPaymentPlan('installment', ${basePrice}, ${plan.installments})">
+                    <div class="plan-icon">
+                        <i class="fas fa-calendar-alt"></i>
+                    </div>
+                    <h4 class="plan-name">${plan.name}</h4>
+                    <p class="plan-details">${plan.installments} أقساط شهرية</p>
+                    <div class="plan-price">${formatNumber(monthlyAmount)} ج.م/شهر</div>
+                </div>
+            `;
+        });
+    }
+    
+    // إظهار القسم إذا كانت هناك خطط
+    if (hasPlans) {
+        document.getElementById('payment-plans').style.display = 'block';
+    }
+}
+
+// اختيار خطة الدفع
+function selectPaymentPlan(type, amount, installments = 1) {
+    // إزالة التحديد السابق
+    document.querySelectorAll('.plan-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    
+    // تحديد الخطة المختارة
+    event.currentTarget.classList.add('selected');
+    
+    // حفظ الخطة المختارة
+    window.selectedPaymentPlan = {
+        type: type,
+        amount: amount,
+        installments: installments,
+        monthlyAmount: Math.ceil(amount / installments)
+    };
+}
+
+// الإجراء الرئيسي (حجز أو تسجيل)
+function handleMainAction() {
+    const course = window.currentCourseData;
+    
+    if (course.priceType === 'free') {
+        // للدورات المجانية - تسجيل مباشر
+        registerFreeCourse();
+    } else {
+        // للدورات المدفوعة - فتح نموذج الحجز
+        openBookingModal();
+    }
+}
+
+// تسجيل في دورة مجانية
+function registerFreeCourse() {
+    Swal.fire({
+        title: 'التسجيل في الدورة المجانية',
+        html: `
+            <div style="text-align: right;">
+                <div class="swal-input-group">
+                    <label>الاسم الكامل</label>
+                    <input id="free-name" class="swal2-input" placeholder="أدخل اسمك الكامل" required>
+                </div>
+                <div class="swal-input-group">
+                    <label>رقم الواتساب</label>
+                    <input id="free-phone" class="swal2-input" placeholder="01XXXXXXXXX" dir="ltr" required>
+                </div>
+                <div class="swal-input-group">
+                    <label>البريد الإلكتروني (اختياري)</label>
+                    <input id="free-email" class="swal2-input" type="email" placeholder="email@example.com" dir="ltr">
+                </div>
+            </div>
+        `,
+        confirmButtonText: 'تأكيد التسجيل',
+        showCancelButton: true,
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#28a745',
+        preConfirm: () => {
+            const name = document.getElementById('free-name').value;
+            const phone = document.getElementById('free-phone').value;
+            const email = document.getElementById('free-email').value;
+            
+            if (!name || !phone) {
+                Swal.showValidationMessage('يرجى ملء جميع الحقول المطلوبة');
+                return false;
+            }
+            
+            return { name, phone, email };
+        }
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // حفظ التسجيل
+            submitFreeRegistration(result.value);
+        }
+    });
+}
+
+// فتح نموذج الحجز للدورات المدفوعة
+function openBookingModal() {
+    // سيتم تنفيذها في الخطوة التالية
+    Swal.fire({
+        icon: 'info',
+        title: 'قريباً',
+        text: 'نموذج الحجز قيد التطوير وسيكون متاحاً قريباً',
+        confirmButtonColor: '#FFD700'
+    });
+}
+
+// نافذة التبرع
+function openDonationModal() {
+    document.getElementById('donationModal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeDonationModal() {
+    document.getElementById('donationModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+    // إعادة تعيين النموذج
+    document.getElementById('customDonationAmount').value = '';
+    document.getElementById('donorName').value = '';
+    document.getElementById('donorPhone').value = '';
+    document.getElementById('donationMessage').value = '';
+    document.querySelectorAll('.amount-buttons button').forEach(btn => btn.classList.remove('selected'));
+}
+
+// اختيار مبلغ التبرع
+let selectedDonationAmount = 0;
+
+function selectDonationAmount(amount) {
+    selectedDonationAmount = amount;
+    document.getElementById('customDonationAmount').value = '';
+    
+    // تحديث الأزرار
+    document.querySelectorAll('.amount-buttons button').forEach(btn => btn.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+}
+
+// إرسال التبرع
+async function submitDonation() {
+    // الحصول على المبلغ
+    const customAmount = document.getElementById('customDonationAmount').value;
+    const amount = customAmount || selectedDonationAmount;
+    
+    if (!amount || amount < 10) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'مبلغ التبرع',
+            text: 'يرجى اختيار أو إدخال مبلغ التبرع (الحد الأدنى 10 ج.م)',
+            confirmButtonColor: '#FFD700'
+        });
+        return;
+    }
+    
+    const donorPhone = document.getElementById('donorPhone').value;
+    if (!donorPhone) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'بيانات ناقصة',
+            text: 'يرجى إدخال رقم الواتساب للتواصل',
+            confirmButtonColor: '#FFD700'
+        });
+        return;
+    }
+    
+    // جمع البيانات
+    const donationData = {
+        amount: parseInt(amount),
+        donorName: document.getElementById('donorName').value || 'متبرع كريم',
+        donorPhone: donorPhone,
+        message: document.getElementById('donationMessage').value,
+        courseId: getCourseId(),
+        courseTitle: window.currentCourseData?.title || 'دورة غير محددة',
+        timestamp: new Date().toISOString(),
+        type: 'support'
+    };
+    
+    try {
+        // حفظ في Firebase
+        await db.collection('donations').add(donationData);
+        
+        // رسالة نجاح
+        await Swal.fire({
+            icon: 'success',
+            title: 'شكراً لك!',
+            html: `
+                <p>تم استلام طلب التبرع بمبلغ <strong>${amount} ج.م</strong></p>
+                <p>سيتم التواصل معك عبر الواتساب لإتمام التبرع</p>
+                <p>جزاك الله خيراً على دعمك للمتعلمين</p>
+            `,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#28a745'
+        });
+        
+        closeDonationModal();
+    } catch (error) {
+        console.error('Error submitting donation:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ في إرسال طلب التبرع. يرجى المحاولة مرة أخرى',
+            confirmButtonColor: '#dc3545'
+        });
+    }
+}
+
+// دالة مساعدة لتنسيق الأرقام
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+// استدعاء عرض قسم الاستثمار عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    // انتظار تحميل بيانات الدورة ثم عرض القسم
+    setTimeout(() => {
+        displayInvestmentSection();
+    }, 1000);
+});
+
     </script>
 </body>
 </html>
