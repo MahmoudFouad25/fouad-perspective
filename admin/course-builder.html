@@ -1934,10 +1934,11 @@ const additionalCSS = `
                     <option value="fixed">مبلغ ثابت</option>
                 </select>
             </div>
-            <div class="col-md-3 mb-3">
-                <input type="number" class="form-control" id="couponValue" 
-                       placeholder="القيمة" min="0">
-            </div>
+           <div class="col-md-2 mb-3">
+    <input type="number" class="form-control" id="couponLimit" 
+           placeholder="العدد المتاح" min="0">
+    <small class="text-muted">اترك فارغ = غير محدود</small>
+</div>
             <div class="col-md-2 mb-3">
                 <button class="btn btn-primary w-100" onclick="addCoupon()">
                     <i class="fas fa-plus"></i> إضافة
@@ -4949,6 +4950,7 @@ function addCoupon() {
     const code = document.getElementById('couponCode').value.trim().toUpperCase();
     const type = document.getElementById('couponType').value;
     const value = parseFloat(document.getElementById('couponValue').value) || 0;
+    const limit = parseInt(document.getElementById('couponLimit').value) || 0;
     
     if (!code || value === 0) {
         Swal.fire({
@@ -4959,7 +4961,13 @@ function addCoupon() {
         return;
     }
     
-    const coupon = { code, type, value };
+    const coupon = { 
+        code, 
+        type, 
+        value, 
+        limit: limit || null,
+        used: 0 // عدد المرات المستخدمة
+    };
     
     if (!courseData.coupons) courseData.coupons = [];
     courseData.coupons.push(coupon);
@@ -4967,12 +4975,12 @@ function addCoupon() {
     // Clear inputs
     document.getElementById('couponCode').value = '';
     document.getElementById('couponValue').value = '';
+    document.getElementById('couponLimit').value = '';
     
     renderCoupons();
     updatePricePreview();
     autoSave();
 }
-
 
 
 function renderModules() {
@@ -5471,6 +5479,11 @@ function updatePricePreview() {
     
     html += `</div>`;
     container.innerHTML = html;
+    // إضافة جدول المنح
+if (document.getElementById('enableGrants')?.checked) {
+    html += buildGrantsTable();
+}
+    
 }
 
 function buildFullPricingTable(basePrice, salePrice, currency, discounts, groupDiscounts, paymentPlans, cashDiscountEnabled, cashDiscountPercent) {
@@ -5512,7 +5525,7 @@ function buildFullPricingTable(basePrice, salePrice, currency, discounts, groupD
     else if (!cashDiscountEnabled && paymentPlans.length === 0 && groupDiscounts.length > 0) {
         html += `<th>السعر الأساسي</th>`;
         groupDiscounts.forEach(group => {
-            html += `<th>مجموعة ${group.minSize}+ (خصم ${group.percentage}%)</th>`;
+            html += `<th>${group.name || `مجموعة ${group.minSize}+`} (خصم ${group.percentage}%)</th>`;
         });
     }
     // باقي الحالات
@@ -5524,14 +5537,14 @@ function buildFullPricingTable(basePrice, salePrice, currency, discounts, groupD
         }
         
         if (groupDiscounts.length > 0) {
-            groupDiscounts.forEach(group => {
-                if (groupColumns === 1) {
-                    html += `<th>مجموعة ${group.minSize}+ (خصم ${group.percentage}%)</th>`;
-                } else {
-                    html += `<th colspan="${groupColumns}">مجموعة ${group.minSize}+ (خصم ${group.percentage}%)</th>`;
-                }
-            });
+    groupDiscounts.forEach(group => {
+        if (groupColumns === 1) {
+            html += `<th>${group.name || `مجموعة ${group.minSize}+`} (خصم ${group.percentage}%)</th>`;
+        } else {
+            html += `<th colspan="${groupColumns}">${group.name || `مجموعة ${group.minSize}+`} (خصم ${group.percentage}%)</th>`;
         }
+    });
+}
     }
     
     html += `
@@ -5848,14 +5861,19 @@ function buildCouponsTable(coupons, basePrice, currency) {
         }
         
         html += `
-            <tr>
-                <td class="coupon-code">${coupon.code}</td>
-                <td>${coupon.type === 'percentage' ? 'نسبة مئوية' : 'مبلغ ثابت'}</td>
-                <td>${coupon.type === 'percentage' ? coupon.value + '%' : formatPrice(coupon.value, currency)}</td>
-                <td class="price-value">${formatPrice(finalPrice, currency)}</td>
-                <td>${coupon.limit || 'غير محدود'}</td>
-            </tr>
-        `;
+    <tr>
+        <td class="coupon-code">${coupon.code}</td>
+        <td>${coupon.type === 'percentage' ? 'نسبة مئوية' : 'مبلغ ثابت'}</td>
+        <td>${coupon.type === 'percentage' ? coupon.value + '%' : formatPrice(coupon.value, currency)}</td>
+        <td class="price-value">${formatPrice(finalPrice, currency)}</td>
+        <td>
+            ${coupon.limit ? 
+                `${coupon.limit - (coupon.used || 0)} من أصل ${coupon.limit}` : 
+                'غير محدود'
+            }
+        </td>
+    </tr>
+`;
     });
     
     html += `
@@ -5867,56 +5885,7 @@ function buildCouponsTable(coupons, basePrice, currency) {
     return html;
 }
 
-function buildGrantsTable() {
-    const grantPlans = collectGrantPlans();
-    
-    if (grantPlans.length === 0) {
-        return `
-            <div class="grants-info mt-4">
-                <h4 class="sub-table-title">
-                    <i class="fas fa-hands-helping"></i> برنامج المنح الدراسية
-                </h4>
-                <div class="alert alert-info">
-                    <p>برنامج المنح متاح - يتم تصميم خطط مخصصة حسب كل حالة</p>
-                </div>
-            </div>
-        `;
-    }
-    
-    let html = `
-        <h4 class="sub-table-title mt-4">
-            <i class="fas fa-hands-helping"></i> خطط المنح المتاحة
-        </h4>
-        <div class="table-responsive">
-            <table class="sub-table grants-table">
-                <thead>
-                    <tr>
-                        <th>اسم المنحة</th>
-                        <th>نوع الدعم</th>
-                        <th>التفاصيل</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-    
-    grantPlans.forEach(plan => {
-        html += `
-            <tr>
-                <td>${plan.name}</td>
-                <td>${plan.type}</td>
-                <td>${plan.details}</td>
-            </tr>
-        `;
-    });
-    
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
-    
-    return html;
-}
+
 
 function collectGrantPlans() {
     const plans = [];
