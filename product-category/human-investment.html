@@ -4033,34 +4033,75 @@ function updateCardPreview(card) {
 }
 
 function selectJourney(journey) {
-   selectedJourney = journey;
-   
-   // إخفاء كل التفاصيل
-   document.querySelectorAll('.journey-details').forEach(detail => {
-       detail.style.display = 'none';
-   });
-   
-   // إظهار حاوي التفاصيل
-   document.querySelector('.journey-details-container').style.display = 'block';
-   
-   // إظهار التفاصيل المناسبة
-   const detailsElement = document.querySelector(`.${journey}-details`);
-   if (detailsElement) {
-       detailsElement.style.display = 'block';
-       
-       // تهيئة العناصر الخاصة بكل رحلة
-       if (journey === 'individual') {
-           initializeIndividualJourney();
-       } else if (journey === 'group') {
-           initializeGroupJourney();
-       } else if (journey === 'support') {
-           initializeSupportJourney();
-       }
-   }
-   
-   // تمرير سلس للأسفل
-   smoothScrollTo('.journey-details-container');
+    try {
+        selectedJourney = journey;
+        
+        // إخفاء كل التفاصيل مع التحقق من وجودها
+        const allDetails = document.querySelectorAll('.journey-details');
+        if (allDetails.length > 0) {
+            allDetails.forEach(detail => {
+                if (detail) {
+                    detail.style.display = 'none';
+                }
+            });
+        }
+        
+        // إظهار حاوي التفاصيل مع التحقق من وجوده
+        const detailsContainer = document.querySelector('.journey-details-container');
+        if (detailsContainer) {
+            detailsContainer.style.display = 'block';
+        } else {
+            console.warn('لم يتم العثور على حاوي التفاصيل');
+            return;
+        }
+        
+        // إظهار التفاصيل المناسبة مع التحقق
+        const detailsElement = document.querySelector(`.${journey}-details`);
+        if (detailsElement) {
+            detailsElement.style.display = 'block';
+            
+            // تهيئة العناصر الخاصة بكل رحلة
+            try {
+                if (journey === 'individual') {
+                    if (typeof initializeIndividualJourney === 'function') {
+                        initializeIndividualJourney();
+                    }
+                } else if (journey === 'group') {
+                    if (typeof initializeGroupJourney === 'function') {
+                        initializeGroupJourney();
+                    }
+                } else if (journey === 'support') {
+                    if (typeof initializeSupportJourney === 'function') {
+                        initializeSupportJourney();
+                    }
+                }
+            } catch (initError) {
+                console.error('خطأ في تهيئة الرحلة:', initError);
+            }
+        } else {
+            console.warn(`لم يتم العثور على تفاصيل الرحلة: ${journey}`);
+            // إنشاء رسالة خطأ للمستخدم
+            showErrorMessage('عذراً، لم يتم العثور على تفاصيل هذه الرحلة');
+            return;
+        }
+        
+        // تمرير سلس للأسفل مع التحقق من وجود الدالة
+        if (typeof smoothScrollTo === 'function') {
+            smoothScrollTo('.journey-details-container');
+        } else {
+            // تمرير بديل
+            const container = document.querySelector('.journey-details-container');
+            if (container) {
+                container.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+        
+    } catch (error) {
+        console.error('خطأ في اختيار الرحلة:', error);
+        showErrorMessage('حدث خطأ أثناء تحميل تفاصيل الرحلة');
+    }
 }
+
 
 // ========================================
 // الرحلة الفردية
@@ -4491,46 +4532,163 @@ function initializeSmartCalculator() {
 }
 
 function applyCouponCode() {
-   const couponInput = document.querySelector('.coupon-input');
-   const couponCode = couponInput.value.trim().toUpperCase();
-   
-   if (!couponCode) return;
-   
-   // البحث عن الكوبون
-   const coupon = currentCourseData.coupons?.find(c => c.code === couponCode);
-   
-   const feedbackElement = document.querySelector('.coupon-feedback');
-   
-   if (!coupon) {
-       feedbackElement.textContent = 'الكوبون غير صحيح';
-       feedbackElement.className = 'coupon-feedback error';
-       feedbackElement.style.display = 'block';
-       return;
-   }
-   
-   // التحقق من صلاحية الكوبون
-   if (coupon.limit && coupon.used >= coupon.limit) {
-       feedbackElement.textContent = 'الكوبون مستنفذ';
-       feedbackElement.className = 'coupon-feedback error';
-       feedbackElement.style.display = 'block';
-       return;
-   }
-   
-   // تطبيق الكوبون
-   appliedCoupon = coupon;
-   feedbackElement.textContent = `تم تطبيق الكوبون! خصم ${
-       coupon.type === 'percentage' ? coupon.value + '%' : formatPrice(coupon.value)
-   }`;
-   feedbackElement.className = 'coupon-feedback success';
-   feedbackElement.style.display = 'block';
-   
-   // تعطيل الإدخال
-   couponInput.disabled = true;
-   document.querySelector('.apply-coupon-btn').disabled = true;
-   
-   // تحديث الحسابات
-   updateCalculatorResult();
+    try {
+        const couponInput = document.querySelector('.coupon-input');
+        
+        // التحقق من وجود حقل الإدخال
+        if (!couponInput) {
+            console.warn('لم يتم العثور على حقل إدخال الكوبون');
+            return;
+        }
+        
+        const couponCode = couponInput.value.trim().toUpperCase();
+        
+        if (!couponCode) {
+            showCouponFeedback('يرجى إدخال رمز الكوبون', 'error');
+            return;
+        }
+        
+        // التحقق من وجود بيانات الكورس
+        if (!currentCourseData || !currentCourseData.coupons) {
+            showCouponFeedback('لا توجد كوبونات متاحة حالياً', 'error');
+            return;
+        }
+        
+        // البحث عن الكوبون
+        const coupon = currentCourseData.coupons.find(c => c.code === couponCode);
+        
+        if (!coupon) {
+            showCouponFeedback('الكوبون غير صحيح', 'error');
+            return;
+        }
+        
+        // التحقق من صلاحية الكوبون
+        if (coupon.limit && coupon.used >= coupon.limit) {
+            showCouponFeedback('الكوبون مستنفذ', 'error');
+            return;
+        }
+        
+        // التحقق من تاريخ انتهاء الصلاحية إن وجد
+        if (coupon.expiry && new Date() > new Date(coupon.expiry)) {
+            showCouponFeedback('انتهت صلاحية الكوبون', 'error');
+            return;
+        }
+        
+        // تطبيق الكوبون
+        appliedCoupon = coupon;
+        const discountText = coupon.type === 'percentage' 
+            ? `${coupon.value}%` 
+            : (typeof formatPrice === 'function' ? formatPrice(coupon.value) : coupon.value + ' جنيه');
+            
+        showCouponFeedback(`تم تطبيق الكوبون! خصم ${discountText}`, 'success');
+        
+        // تعطيل الإدخال والزر
+        couponInput.disabled = true;
+        const applyButton = document.querySelector('.apply-coupon-btn');
+        if (applyButton) {
+            applyButton.disabled = true;
+            applyButton.textContent = 'تم التطبيق';
+        }
+        
+        // تحديث الحسابات
+        if (typeof updateCalculatorResult === 'function') {
+            updateCalculatorResult();
+        } else {
+            console.warn('دالة تحديث النتائج غير متوفرة');
+        }
+        
+    } catch (error) {
+        console.error('خطأ في تطبيق الكوبون:', error);
+        showCouponFeedback('حدث خطأ أثناء تطبيق الكوبون', 'error');
+    }
 }
+
+// دالة مساعدة لإظهار رسائل الكوبون
+function showCouponFeedback(message, type) {
+    const feedbackElement = document.querySelector('.coupon-feedback');
+    
+    if (feedbackElement) {
+        feedbackElement.textContent = message;
+        feedbackElement.className = `coupon-feedback ${type}`;
+        feedbackElement.style.display = 'block';
+        
+        // إخفاء الرسالة تلقائياً بعد 5 ثوان للرسائل الناجحة
+        if (type === 'success') {
+            setTimeout(() => {
+                if (feedbackElement.style.display !== 'none') {
+                    fadeOut(feedbackElement);
+                }
+            }, 5000);
+        }
+    } else {
+        // إظهار رسالة بديلة إذا لم يوجد العنصر
+        console.log(`كوبون: ${message}`);
+        alert(message); // كحل مؤقت
+    }
+}
+
+// دالة مساعدة لإظهار رسائل الخطأ العامة
+function showErrorMessage(message) {
+    // يمكن تحسين هذه الدالة لاحقاً لإظهار رسائل أكثر جمالاً
+    const existingError = document.querySelector('.error-toast');
+    if (existingError) {
+        existingError.remove();
+    }
+    
+    const errorToast = document.createElement('div');
+    errorToast.className = 'error-toast show';
+    errorToast.textContent = message;
+    document.body.appendChild(errorToast);
+    
+    setTimeout(() => {
+        errorToast.classList.remove('show');
+        setTimeout(() => errorToast.remove(), 300);
+    }, 3000);
+}
+
+// دالة مساعدة للاختفاء التدريجي
+function fadeOut(element) {
+    if (!element) return;
+    
+    element.style.transition = 'opacity 0.5s';
+    element.style.opacity = '0';
+    
+    setTimeout(() => {
+        element.style.display = 'none';
+        element.style.opacity = '1';
+        element.style.transition = '';
+    }, 500);
+}
+
+// دالة للتحقق من جاهزية DOM
+function whenReady(callback) {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', callback);
+    } else {
+        callback();
+    }
+}
+
+// استخدام الدالة عند تحميل الصفحة
+whenReady(function() {
+    console.log('DOM جاهز، يمكن تشغيل الكود بأمان');
+    
+    // تهيئة المتغيرات الأساسية إذا لم تكن موجودة
+    if (typeof selectedJourney === 'undefined') {
+        window.selectedJourney = null;
+    }
+    if (typeof appliedCoupon === 'undefined') {
+        window.appliedCoupon = null;
+    }
+    if (typeof currentCourseData === 'undefined') {
+        window.currentCourseData = {
+            coupons: [
+                { code: 'SAVE20', type: 'percentage', value: 20, limit: 100, used: 0 },
+                { code: 'DISCOUNT50', type: 'fixed', value: 50, limit: 50, used: 0 }
+            ]
+        };
+    }
+});
 
 function selectCalculatorPaymentType(type) {
    // تحديث الأزرار
