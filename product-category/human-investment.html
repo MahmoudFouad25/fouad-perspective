@@ -1877,45 +1877,301 @@
         }
         
         // جلب بيانات الدورة
-        async function loadCourseData() {
-            try {
-                courseId = getCourseId();
-                console.log('جاري تحميل بيانات الدورة:', courseId);
-                
-                // جلب البيانات من Firebase
-                const docRef = db.collection('courses').doc(courseId);
-                const doc = await docRef.get();
-                
-                if (doc.exists) {
-                    courseData = doc.data();
-                    console.log('تم تحميل البيانات:', courseData);
-                    updateUI();
-                } else {
-                    console.log('الدورة غير موجودة');
-                    // نستخدم بيانات تجريبية
-                    courseData = {
-                        title: 'دورة تجريبية',
-                        price: 1500,
-                        salePrice: 1200,
-                        currency: 'EGP',
-                        grants: { seats: 5 },
-                        groupDiscounts: [{ percentage: 30 }]
-                    };
-                    updateUI();
-                }
-            } catch (error) {
-                console.error('خطأ في تحميل البيانات:', error);
-                // بيانات افتراضية
-                courseData = {
-                    title: 'دورة تجريبية',
-                    price: 1500,
-                    currency: 'EGP',
-                    grants: { seats: 5 },
-                    groupDiscounts: [{ percentage: 30 }]
-                };
-                updateUI();
-            }
+        // جلب بيانات الدورة من Firebase
+async function loadCourseData() {
+    try {
+        courseId = getCourseId();
+        console.log('جاري تحميل بيانات الدورة:', courseId);
+        
+        // جلب البيانات من Firebase
+        const docRef = db.collection('courses').doc(courseId);
+        const doc = await docRef.get();
+        
+        if (doc.exists) {
+            courseData = doc.data();
+            console.log('البيانات المحملة:', courseData);
+            
+            // التأكد من وجود البيانات الأساسية
+            courseData.price = courseData.price || 1500;
+            courseData.currency = courseData.currency || 'EGP';
+            courseData.priceType = courseData.priceType || 'paid';
+            
+            // تحديث كل شيء
+            updateAllPricing();
+        } else {
+            console.log('الدورة غير موجودة، استخدام بيانات افتراضية');
+            setDefaultData();
         }
+    } catch (error) {
+        console.error('خطأ في تحميل البيانات:', error);
+        setDefaultData();
+    }
+}
+
+// البيانات الافتراضية
+function setDefaultData() {
+    courseData = {
+        title: 'دورة تجريبية',
+        price: 1500,
+        salePrice: 1200,
+        currency: 'EGP',
+        priceType: 'paid',
+        cashDiscount: {
+            enabled: true,
+            percentage: 10
+        },
+        discounts: [
+            {
+                name: 'خصم الحجز المبكر',
+                percentage: 20,
+                startDate: '2024-12-01',
+                endDate: '2024-12-31'
+            }
+        ],
+        groupDiscounts: [
+            {
+                name: 'مجموعة صغيرة',
+                minSize: 3,
+                percentage: 15
+            },
+            {
+                name: 'مجموعة كبيرة',
+                minSize: 5,
+                percentage: 30
+            }
+        ],
+        paymentPlans: [
+            {
+                name: '3 أقساط',
+                installments: 3,
+                firstPaymentPercent: 40,
+                firstPaymentType: 'percentage'
+            },
+            {
+                name: '6 أقساط',
+                installments: 6,
+                firstPaymentPercent: 30,
+                firstPaymentType: 'percentage'
+            }
+        ],
+        grants: {
+            enabled: true,
+            seats: 5
+        }
+    };
+    
+    updateAllPricing();
+}
+
+// تحديث كل البيانات في الصفحة
+function updateAllPricing() {
+    // 1. تحديث البطاقات
+    updateCards();
+    
+    // 2. تحديث العروض الزمنية
+    updateTimeOffers();
+    
+    // 3. تحديث الحاسبة
+    updateCalculator();
+    
+    // 4. بناء الجدول الديناميكي
+    buildDynamicTable();
+    
+    // 5. تحديث المنح
+    updateGrants();
+}
+
+        // تحديث البطاقات الرئيسية
+function updateCards() {
+    // السعر الفردي
+    const individualPrice = courseData.salePrice || courseData.price;
+    document.getElementById('individualPrice').textContent = 
+        individualPrice.toLocaleString('ar-EG');
+    
+    // خصم المجموعة الأكبر
+    const maxGroupDiscount = courseData.groupDiscounts?.reduce((max, g) => 
+        Math.max(max, g.percentage), 0) || 30;
+    document.getElementById('groupDiscount').textContent = maxGroupDiscount;
+    
+    // المنح المتاحة
+    const grantsAvailable = courseData.grants?.seats || 5;
+    document.getElementById('grantsAvailable').textContent = grantsAvailable;
+}
+
+// تحديث العروض الزمنية
+function updateTimeOffers() {
+    const container = document.querySelector('.offers-slider');
+    if (!container || !courseData.discounts) return;
+    
+    container.innerHTML = '';
+    
+    courseData.discounts.forEach((discount, index) => {
+        const isActive = checkIfActive(discount);
+        const cardClass = index === 0 ? 'urgent' : isActive ? 'active' : 'upcoming';
+        
+        container.innerHTML += `
+            <div class="offer-card ${cardClass}">
+                <div class="offer-badge">${isActive ? 'نشط الآن' : 'قادم'}</div>
+                <h4>${discount.name}</h4>
+                <div class="offer-discount">${discount.percentage}%</div>
+                ${discount.endDate ? `
+                    <div class="offer-timer" data-end="${discount.endDate}">
+                        <span class="days">--</span> يوم
+                        <span class="hours">--</span>:
+                        <span class="minutes">--</span>:
+                        <span class="seconds">--</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    // إعادة تشغيل العدادات
+    updateCountdowns();
+}
+
+// التحقق من العرض النشط
+function checkIfActive(discount) {
+    if (!discount.startDate || !discount.endDate) return false;
+    const now = new Date();
+    const start = new Date(discount.startDate);
+    const end = new Date(discount.endDate);
+    return now >= start && now <= end;
+}
+
+// تحديث الحاسبة
+function updateCalculator() {
+    if (!calculator) return;
+    
+    // تحديث السعر الأساسي
+    calculator.basePrice = courseData.price;
+    
+    // تحديث العرض الحالي
+    const activeDiscount = courseData.discounts?.find(d => checkIfActive(d));
+    calculator.currentOffer = activeDiscount ? activeDiscount.percentage / 100 : 0;
+    
+    // تحديث خطط الدفع
+    calculator.paymentPlans = courseData.paymentPlans || [];
+    
+    // تحديث خصم النقدي
+    calculator.cashDiscountPercent = courseData.cashDiscount?.percentage || 10;
+    
+    // إعادة الحساب
+    calculator.calculate();
+}
+
+// بناء الجدول الديناميكي
+function buildDynamicTable() {
+    const tableBody = document.querySelector('.pricing-table tbody');
+    if (!tableBody) return;
+    
+    tableBody.innerHTML = '';
+    
+    // السعر الأساسي مع العروض
+    const basePrice = courseData.price;
+    const salePrice = courseData.salePrice || basePrice;
+    const activeDiscount = courseData.discounts?.find(d => checkIfActive(d));
+    const currentPrice = activeDiscount ? 
+        basePrice * (1 - activeDiscount.percentage/100) : salePrice;
+    
+    // صف الأفراد
+    const individualRow = createTableRow(
+        'رحلة فردية',
+        'fa-user',
+        basePrice,
+        currentPrice,
+        'individual'
+    );
+    tableBody.innerHTML += individualRow;
+    
+    // صفوف المجموعات
+    courseData.groupDiscounts?.forEach(group => {
+        const groupPrice = currentPrice * (1 - group.percentage/100);
+        const groupRow = createTableRow(
+            `${group.name} (${group.minSize}+ أشخاص)`,
+            'fa-users',
+            basePrice,
+            groupPrice,
+            'group'
+        );
+        tableBody.innerHTML += groupRow;
+    });
+    
+    // صف المنح
+    if (courseData.grants?.enabled) {
+        const grantRow = createTableRow(
+            'منحة جزئية 50%',
+            'fa-hands-helping',
+            basePrice,
+            basePrice * 0.5,
+            'support'
+        );
+        tableBody.innerHTML += grantRow;
+    }
+}
+
+// إنشاء صف في الجدول
+function createTableRow(name, icon, originalPrice, currentPrice, type) {
+    const cashPrice = currentPrice * 0.9; // خصم نقدي 10%
+    
+    // حساب الأقساط
+    let installment3 = '', installment6 = '';
+    
+    if (courseData.paymentPlans) {
+        const plan3 = courseData.paymentPlans.find(p => p.installments === 3);
+        const plan6 = courseData.paymentPlans.find(p => p.installments === 6);
+        
+        if (plan3) {
+            const firstPayment3 = Math.round(currentPrice * (plan3.firstPaymentPercent/100) / 10) * 10;
+            const monthly3 = Math.round((currentPrice - firstPayment3) / 2 / 10) * 10;
+            installment3 = `
+                <small>${firstPayment3} ج.م مقدم</small><br>
+                <strong>${monthly3} ج.م × 2</strong>
+            `;
+        }
+        
+        if (plan6) {
+            const firstPayment6 = Math.round(currentPrice * (plan6.firstPaymentPercent/100) / 10) * 10;
+            const monthly6 = Math.round((currentPrice - firstPayment6) / 5 / 10) * 10;
+            installment6 = `
+                <small>${firstPayment6} ج.م مقدم</small><br>
+                <strong>${monthly6} ج.م × 5</strong>
+            `;
+        }
+    }
+    
+    return `
+        <tr class="${type}-row">
+            <td>
+                <i class="fas ${icon}"></i>
+                ${name}
+            </td>
+            <td class="old-price">${Math.round(originalPrice)} ج.م</td>
+            <td class="offer-price">${Math.round(currentPrice)} ج.م</td>
+            <td class="cash-price">${Math.round(cashPrice)} ج.م</td>
+            <td>${installment3}</td>
+            <td>${installment6}</td>
+        </tr>
+    `;
+}
+
+// تحديث المنح
+function updateGrants() {
+    if (!courseData.grants) return;
+    
+    // تحديث عدد المنح
+    const grantsElement = document.getElementById('grantsAvailable');
+    if (grantsElement) {
+        grantsElement.textContent = courseData.grants.seats || 0;
+    }
+    
+    // تحديث قسم المنح
+    const supportContent = document.getElementById('supportContent');
+    if (supportContent && courseData.grantPlans) {
+        // هنا ممكن نحدث خطط المنح الديناميكية
+        console.log('خطط المنح:', courseData.grantPlans);
+    }
+}
         
         // تحديث الواجهة
         function updateUI() {
@@ -2207,10 +2463,12 @@ function animateNumbers() {
 }
 animateNumbers();
 
-        // الحاسبة الذكية
+       // الحاسبة الذكية المحدثة
 const calculator = {
     basePrice: 1500,
-    currentOffer: 0.2, // 20% خصم العرض الحالي
+    currentOffer: 0,
+    cashDiscountPercent: 10,
+    paymentPlans: [],
     
     init() {
         // مستمعي الأحداث
@@ -2245,154 +2503,181 @@ const calculator = {
         this.calculate();
     },
     
-   calculate() {
-    const journey = document.getElementById('calcJourney').value;
-    const payment = document.querySelector('input[name="calcPayment"]:checked').value;
-    
-    let price = this.basePrice;
-    let discounts = [];
-    
-    // خصم العرض الحالي
-    const offerDiscount = price * this.currentOffer;
-    price -= offerDiscount;
-    if (offerDiscount > 0) {
-        discounts.push({ type: 'offer', amount: offerDiscount });
-    }
-    
-    // خصم المجموعة
-    if (journey === 'group') {
-        const groupSize = parseInt(document.getElementById('calcGroupSlider').value);
-        const groupDiscount = Math.min(groupSize * 10, 30) / 100;
-        const groupDiscountAmount = this.basePrice * groupDiscount;
-        price = this.basePrice * (1 - this.currentOffer) * (1 - groupDiscount);
-        discounts.push({ type: 'group', amount: groupDiscountAmount });
-    }
-    
-    // خصم الدفع النقدي
-    if (payment === 'cash') {
-        const cashDiscount = price * 0.1;
-        price -= cashDiscount;
-        discounts.push({ type: 'cash', amount: cashDiscount });
-    }
-    
-    // خصم المنحة
-    if (journey === 'support') {
-        const grantDiscount = this.basePrice * 0.5;
-        price = this.basePrice * 0.5;
-        discounts = [{ type: 'grant', amount: grantDiscount }];
-    }
-    
-    // تحديث العرض مع الأقساط الجديدة
-    this.updateDisplay(price, discounts, payment);
-},
-
-updateDisplay(finalPrice, discounts, payment) {
-    // السعر الأساسي
-    document.getElementById('calcBase').textContent = `${this.basePrice} ج.م`;
-    
-    // إخفاء كل الخصومات أولاً
-    document.querySelectorAll('.discount-row').forEach(row => {
-        row.style.display = 'none';
-    });
-    
-    // عرض الخصومات النشطة
-    discounts.forEach(discount => {
-        if (discount.type === 'offer') {
-            document.querySelector('.discount-row:nth-child(2)').style.display = 'flex';
-            document.getElementById('calcOfferDiscount').textContent = `-${Math.round(discount.amount)} ج.م`;
-        }
-        if (discount.type === 'group') {
-            document.querySelector('.discount-row:nth-child(3)').style.display = 'flex';
-            document.getElementById('calcGroupDiscount').textContent = `-${Math.round(discount.amount)} ج.م`;
-        }
-        if (discount.type === 'cash') {
-            document.querySelector('.discount-row:nth-child(4)').style.display = 'flex';
-            document.getElementById('calcCashDiscount').textContent = `-${Math.round(discount.amount)} ج.م`;
-        }
-    });
-    
-    // الإجمالي
-    document.getElementById('calcTotal').textContent = `${Math.round(finalPrice)} ج.م`;
-    
-    // حساب الأقساط مع الدفعة الأولى
-    if (payment !== 'cash') {
-        const months = parseInt(payment);
-        let installmentText = '';
+    calculate() {
+        const journey = document.getElementById('calcJourney').value;
+        const payment = document.querySelector('input[name="calcPayment"]:checked').value;
         
-        if (months === 3) {
-            // دفعة أولى 40% ثم 30% ثم 30%
-            const firstPayment = Math.round(finalPrice * 0.4 / 10) * 10; // تقريب لأقرب 10
-            const remaining = finalPrice - firstPayment;
-            const monthlyPayment = Math.round(remaining / 2 / 10) * 10; // تقريب لأقرب 10
-            
-            installmentText = `دفعة أولى: ${firstPayment} ج.م + قسطين: ${monthlyPayment} ج.م/شهر`;
-        } 
-        else if (months === 6) {
-            // دفعة أولى 30% ثم 5 أقساط متساوية
-            const firstPayment = Math.round(finalPrice * 0.3 / 10) * 10;
-            const remaining = finalPrice - firstPayment;
-            const monthlyPayment = Math.round(remaining / 5 / 10) * 10;
-            
-            installmentText = `دفعة أولى: ${firstPayment} ج.م + 5 أقساط: ${monthlyPayment} ج.م/شهر`;
-        }
-        else if (months === 12) {
-            // دفعة أولى 20% ثم 11 قسط
-            const firstPayment = Math.round(finalPrice * 0.2 / 10) * 10;
-            const remaining = finalPrice - firstPayment;
-            const monthlyPayment = Math.round(remaining / 11 / 10) * 10;
-            
-            installmentText = `دفعة أولى: ${firstPayment} ج.م + 11 قسط: ${monthlyPayment} ج.م/شهر`;
+        let price = this.basePrice;
+        let discounts = [];
+        
+        // خصم العرض الحالي من Firebase
+        if (this.currentOffer > 0) {
+            const offerDiscount = price * this.currentOffer;
+            price -= offerDiscount;
+            discounts.push({ type: 'offer', amount: offerDiscount });
         }
         
-        document.querySelector('.installment-row').style.display = 'flex';
-        document.getElementById('calcMonthly').textContent = installmentText;
-    } else {
-        document.querySelector('.installment-row').style.display = 'none';
-    }
+        // خصم المجموعة من Firebase
+        if (journey === 'group' && courseData.groupDiscounts) {
+            const groupSize = parseInt(document.getElementById('calcGroupSlider').value);
+            
+            // البحث عن أفضل خصم للعدد
+            let bestDiscount = 0;
+            courseData.groupDiscounts.forEach(group => {
+                if (groupSize >= group.minSize && group.percentage > bestDiscount) {
+                    bestDiscount = group.percentage;
+                }
+            });
+            
+            if (bestDiscount > 0) {
+                const groupDiscountAmount = this.basePrice * (bestDiscount / 100);
+                price = price * (1 - bestDiscount / 100);
+                discounts.push({ type: 'group', amount: groupDiscountAmount });
+            }
+        }
+        
+        // خصم الدفع النقدي
+        if (payment === 'cash' && courseData.cashDiscount?.enabled) {
+            const cashDiscount = price * (this.cashDiscountPercent / 100);
+            price -= cashDiscount;
+            discounts.push({ type: 'cash', amount: cashDiscount });
+        }
+        
+        // خصم المنحة
+        if (journey === 'support') {
+            const grantDiscount = this.basePrice * 0.5;
+            price = this.basePrice * 0.5;
+            discounts = [{ type: 'grant', amount: grantDiscount }];
+        }
+        
+        // تحديث العرض
+        this.updateDisplay(price, discounts, payment);
+    },
     
-    // التوفير
-    const totalSavings = this.basePrice - finalPrice;
-    if (totalSavings > 0) {
-        document.getElementById('calcSavings').style.display = 'block';
-        document.getElementById('savingsAmount').textContent = Math.round(totalSavings);
-    } else {
-        document.getElementById('calcSavings').style.display = 'none';
-    }
-},
+    updateDisplay(finalPrice, discounts, payment) {
+        // السعر الأساسي
+        document.getElementById('calcBase').textContent = `${this.basePrice} ج.م`;
+        
+        // إخفاء كل الخصومات
+        document.querySelectorAll('.discount-row').forEach(row => {
+            row.style.display = 'none';
+        });
+        
+        // عرض الخصومات النشطة
+        discounts.forEach(discount => {
+            if (discount.type === 'offer') {
+                document.querySelector('.discount-row:nth-child(2)').style.display = 'flex';
+                document.getElementById('calcOfferDiscount').textContent = `-${Math.round(discount.amount)} ج.م`;
+            }
+            if (discount.type === 'group') {
+                document.querySelector('.discount-row:nth-child(3)').style.display = 'flex';
+                document.getElementById('calcGroupDiscount').textContent = `-${Math.round(discount.amount)} ج.م`;
+            }
+            if (discount.type === 'cash') {
+                document.querySelector('.discount-row:nth-child(4)').style.display = 'flex';
+                document.getElementById('calcCashDiscount').textContent = `-${Math.round(discount.amount)} ج.م`;
+            }
+        });
+        
+        // الإجمالي
+        document.getElementById('calcTotal').textContent = `${Math.round(finalPrice)} ج.م`;
+        
+        // حساب الأقساط من Firebase
+        if (payment !== 'cash' && this.paymentPlans.length > 0) {
+            const months = parseInt(payment);
+            const plan = this.paymentPlans.find(p => p.installments === months);
+            
+            if (plan) {
+                const firstPercent = plan.firstPaymentPercent || 30;
+                const firstPayment = Math.round(finalPrice * (firstPercent / 100) / 10) * 10;
+                const remaining = finalPrice - firstPayment;
+                const monthlyPayment = Math.round(remaining / (months - 1) / 10) * 10;
+                
+                const installmentText = `دفعة أولى: ${firstPayment} ج.م + ${months - 1} أقساط: ${monthlyPayment} ج.م/شهر`;
+                
+                document.querySelector('.installment-row').style.display = 'flex';
+                document.getElementById('calcMonthly').textContent = installmentText;
+            }
+        } else if (payment === 'cash') {
+            document.querySelector('.installment-row').style.display = 'none';
+        }
+        
+        // التوفير
+        const totalSavings = this.basePrice - finalPrice;
+        if (totalSavings > 0) {
+            document.getElementById('calcSavings').style.display = 'block';
+            document.getElementById('savingsAmount').textContent = Math.round(totalSavings);
+        } else {
+            document.getElementById('calcSavings').style.display = 'none';
+        }
+    },
     
     applyCoupon() {
         const code = document.getElementById('calcCoupon').value.toUpperCase();
         
-        // كوبونات تجريبية
-        const coupons = {
-            'SAVE10': 0.1,
-            'WELCOME': 0.15,
-            'FRIEND20': 0.2
-        };
-        
-        if (coupons[code]) {
-            Swal.fire({
-                title: 'تم التطبيق!',
-                text: `كود ${code} يمنحك خصم ${coupons[code] * 100}%`,
-                icon: 'success',
-                timer: 2000,
-                showConfirmButton: false,
-                background: '#152238',
-                color: '#fff'
-            });
+        // البحث في الكوبونات من Firebase
+        if (courseData.coupons) {
+            const coupon = courseData.coupons.find(c => c.code === code);
             
-            // تطبيق الخصم
-            this.calculate();
-        } else {
-            Swal.fire({
-                title: 'كود غير صحيح',
-                text: 'جرب: SAVE10 أو WELCOME',
-                icon: 'error',
-                timer: 2000,
-                showConfirmButton: false,
-                background: '#152238',
-                color: '#fff'
-            });
+            if (coupon) {
+                // التحقق من الصلاحية
+                const now = new Date();
+                const validFrom = coupon.validFrom ? new Date(coupon.validFrom) : null;
+                const validTo = coupon.validTo ? new Date(coupon.validTo) : null;
+                
+                if ((!validFrom || now >= validFrom) && (!validTo || now <= validTo)) {
+                    Swal.fire({
+                        title: 'تم التطبيق!',
+                        text: `كود ${code} يمنحك خصم ${coupon.value}${coupon.type === 'percentage' ? '%' : ' ج.م'}`,
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false,
+                        background: '#152238',
+                        color: '#fff'
+                    });
+                    
+                    // تطبيق الخصم
+                    this.calculate();
+                } else {
+                    Swal.fire({
+                        title: 'الكوبون منتهي',
+                        text: 'هذا الكود غير صالح حالياً',
+                        icon: 'error',
+                        timer: 2000,
+                        showConfirmButton: false,
+                        background: '#152238',
+                        color: '#fff'
+                    });
+                }
+            } else {
+                // كوبونات تجريبية
+                const testCoupons = {
+                    'SAVE10': 10,
+                    'WELCOME': 15
+                };
+                
+                if (testCoupons[code]) {
+                    Swal.fire({
+                        title: 'تم التطبيق!',
+                        text: `كود ${code} يمنحك خصم ${testCoupons[code]}%`,
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false,
+                        background: '#152238',
+                        color: '#fff'
+                    });
+                } else {
+                    Swal.fire({
+                        title: 'كود غير صحيح',
+                        text: 'جرب: SAVE10 أو WELCOME',
+                        icon: 'error',
+                        timer: 2000,
+                        showConfirmButton: false,
+                        background: '#152238',
+                        color: '#fff'
+                    });
+                }
+            }
         }
     }
 };
