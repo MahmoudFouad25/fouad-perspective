@@ -256,7 +256,7 @@
     </section>
     
     <script>
-// Firebase Config
+// Firebase Config - نفس اللي في كل الصفحات
 const firebaseConfig = {
     apiKey: "AIzaSyDp-mU3-hhqLZCvINL6lm9rqCyc4iA8BDhY",
     authDomain: "fouadbenali-87749.firebaseapp.com",
@@ -266,82 +266,67 @@ const firebaseConfig = {
     appId: "1:787383989189:web:fa2d225cac1b044e8bb49e"
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// Course Data
 let courseData = {};
 
-// Load Course Data
+// نفس الطريقة بالضبط زي course-discover
 async function loadCourseData() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const courseId = urlParams.get('id');
+    
+    if (!courseId) {
+        console.error('No course ID provided');
+        useDefaultData();
+        return;
+    }
+    
     try {
-        // جيب الـ slug من الـ URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const slug = urlParams.get('slug') || 'default-course';
+        // جيب الدورة بالـ ID مباشرة - زي ما بنعمل في كل الصفحات
+        const doc = await db.collection('courses').doc(courseId).get();
         
-        // دور على الدورة بالـ slug
-        const querySnapshot = await db.collection('courses')
-            .where('slug', '==', slug)
-            .limit(1)
-            .get();
-        
-        if (!querySnapshot.empty) {
-            // الدورة موجودة
-            courseData = querySnapshot.docs[0].data();
+        if (doc.exists) {
+            courseData = doc.data();
+            console.log('Course loaded:', courseData);
             displayData();
         } else {
-            // لو مفيش دورة بالـ slug ده، جيب أي دورة كمثال
-            const anyDoc = await db.collection('courses').limit(1).get();
-            if (!anyDoc.empty) {
-                courseData = anyDoc.docs[0].data();
-                displayData();
-            }
+            console.error('Course not found');
+            useDefaultData();
         }
     } catch (error) {
-        console.error('Error:', error);
-        // استخدم بيانات افتراضية
+        console.error('Error loading course:', error);
         useDefaultData();
     }
 }
 
-// عرض البيانات
 function displayData() {
-    // السعر الفردي - من basicPricing
-    const individualPrice = courseData.basicPricing?.salePrice || 
-                           courseData.basicPricing?.price || 
-                           1500;
-    document.getElementById('individualPrice').textContent = individualPrice;
+    // البيانات زي ما حللناها في course-builder
     
-    // أقصى خصم للمجموعات
-    let maxGroupDiscount = 0;
-    if (courseData.groupDiscounts && courseData.groupDiscounts.length > 0) {
-        maxGroupDiscount = Math.max(...courseData.groupDiscounts.map(g => g.percentage || 0));
-    }
-    document.getElementById('groupDiscount').textContent = maxGroupDiscount || 35;
+    // السعر من basicPricing
+    const price = courseData.basicPricing?.price || courseData.price || 1500;
+    const salePrice = courseData.basicPricing?.salePrice || courseData.salePrice || price;
+    document.getElementById('individualPrice').textContent = salePrice;
     
-    // المنح المتاحة
-    const grantsAvailable = courseData.grants?.seats || 5;
-    document.getElementById('grantsAvailable').textContent = grantsAvailable;
+    // خصومات المجموعات
+    const maxGroupDiscount = courseData.groupDiscounts?.length > 0 ? 
+        Math.max(...courseData.groupDiscounts.map(g => g.percentage || 0)) : 35;
+    document.getElementById('groupDiscount').textContent = maxGroupDiscount;
     
-    // بناء الجدول
+    // المنح
+    const grantsSeats = courseData.grants?.seats || 5;
+    document.getElementById('grantsAvailable').textContent = grantsSeats;
+    
     buildPricingTable();
 }
 
-// بناء جدول الأسعار
 function buildPricingTable() {
     const tbody = document.getElementById('pricingTableBody');
     tbody.innerHTML = '';
     
-    // البيانات من الدورة
+    // نفس البنية اللي في course-builder
     const price = courseData.basicPricing?.price || 1500;
     const salePrice = courseData.basicPricing?.salePrice || 1200;
-    const cashDiscount = courseData.cashDiscount?.percentage || 10;
-    const groupDiscounts = courseData.groupDiscounts || [
-        { minSize: 3, percentage: 15 },
-        { minSize: 5, percentage: 25 },
-        { minSize: 7, percentage: 35 }
-    ];
     
     // السعر الأساسي
     tbody.innerHTML += `
@@ -353,7 +338,7 @@ function buildPricingTable() {
         </tr>
     `;
     
-    // السعر بعد التخفيض
+    // السعر الحالي
     if (salePrice < price) {
         const discount = Math.round((1 - salePrice / price) * 100);
         tbody.innerHTML += `
@@ -368,34 +353,53 @@ function buildPricingTable() {
     
     // الدفع النقدي
     if (courseData.cashDiscount?.enabled) {
-        const cashPrice = Math.round(salePrice * (1 - cashDiscount / 100));
+        const cashPrice = Math.round(salePrice * (1 - courseData.cashDiscount.percentage / 100));
         tbody.innerHTML += `
             <tr class="table-warning">
                 <td>دفع نقدي كامل</td>
                 <td>${salePrice} ج.م</td>
-                <td>${cashDiscount}% إضافي</td>
+                <td>${courseData.cashDiscount.percentage}% إضافي</td>
                 <td><strong>${cashPrice} ج.م</strong></td>
             </tr>
         `;
     }
     
     // خصومات المجموعات
-    groupDiscounts.forEach(group => {
-        const groupPrice = Math.round(salePrice * (1 - group.percentage / 100));
-        tbody.innerHTML += `
-            <tr>
-                <td>مجموعة ${group.minSize}+ أشخاص</td>
-                <td>${salePrice} ج.م للشخص</td>
-                <td>${group.percentage}%</td>
-                <td><strong>${groupPrice} ج.م</strong> للشخص</td>
-            </tr>
-        `;
-    });
+    if (courseData.groupDiscounts?.length > 0) {
+        courseData.groupDiscounts.forEach(group => {
+            const groupPrice = Math.round(salePrice * (1 - group.percentage / 100));
+            tbody.innerHTML += `
+                <tr>
+                    <td>مجموعة ${group.minSize}+ أشخاص</td>
+                    <td>${salePrice} ج.م</td>
+                    <td>${group.percentage}%</td>
+                    <td><strong>${groupPrice} ج.م</strong> للشخص</td>
+                </tr>
+            `;
+        });
+    }
+    
+    // خطط الأقساط
+    if (courseData.paymentPlans?.length > 0) {
+        courseData.paymentPlans.forEach(plan => {
+            if (plan.enabled) {
+                const monthlyAmount = Math.round(salePrice / plan.installments);
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${plan.name}</td>
+                        <td>${salePrice} ج.م</td>
+                        <td>${plan.installments} شهر</td>
+                        <td><strong>${monthlyAmount} ج.م</strong> شهرياً</td>
+                    </tr>
+                `;
+            }
+        });
+    }
 }
 
-// بيانات افتراضية (لو Firebase مش شغال)
 function useDefaultData() {
     courseData = {
+        title: "دورة تجريبية",
         basicPricing: {
             price: 1500,
             salePrice: 1200
@@ -416,7 +420,6 @@ function useDefaultData() {
     displayData();
 }
 
-// Start
 document.addEventListener('DOMContentLoaded', loadCourseData);
     </script>
 </body>
