@@ -256,7 +256,7 @@
     </section>
     
     <script>
-// Firebase Config - نفس اللي في كل الصفحات
+// Firebase Config
 const firebaseConfig = {
     apiKey: "AIzaSyDp-mU3-hhqLZCvINL6lm9rqCyc4iA8BDhY",
     authDomain: "fouadbenali-87749.firebaseapp.com",
@@ -271,50 +271,34 @@ const db = firebase.firestore();
 
 let courseData = {};
 
-// نفس الطريقة بالضبط زي course-discover
 async function loadCourseData() {
     const urlParams = new URLSearchParams(window.location.search);
-    const courseId = urlParams.get('id');
-    
-    if (!courseId) {
-        console.error('No course ID provided');
-        useDefaultData();
-        return;
-    }
+    const courseId = urlParams.get('id') || 'malaz-alhayara-course';
     
     try {
-        // جيب الدورة بالـ ID مباشرة - زي ما بنعمل في كل الصفحات
         const doc = await db.collection('courses').doc(courseId).get();
         
         if (doc.exists) {
             courseData = doc.data();
             console.log('Course loaded:', courseData);
             displayData();
-        } else {
-            console.error('Course not found');
-            useDefaultData();
         }
     } catch (error) {
-        console.error('Error loading course:', error);
-        useDefaultData();
+        console.error('Error:', error);
     }
 }
 
 function displayData() {
-    // البيانات زي ما حللناها في course-builder
-    
-    // السعر من basicPricing
-    const price = courseData.basicPricing?.price || courseData.price || 1500;
-    const salePrice = courseData.basicPricing?.salePrice || courseData.salePrice || price;
+    // السعر الحقيقي - 7000 مش 1200
+    const salePrice = courseData.salePrice || 7000;
     document.getElementById('individualPrice').textContent = salePrice;
     
-    // خصومات المجموعات
-    const maxGroupDiscount = courseData.groupDiscounts?.length > 0 ? 
-        Math.max(...courseData.groupDiscounts.map(g => g.percentage || 0)) : 35;
-    document.getElementById('groupDiscount').textContent = maxGroupDiscount;
+    // خصم المجموعة - 30% للصحاب (3 أشخاص)
+    const groupDiscount = courseData.groupDiscounts?.[0]?.percentage || 30;
+    document.getElementById('groupDiscount').textContent = groupDiscount;
     
-    // المنح
-    const grantsSeats = courseData.grants?.seats || 5;
+    // المنح - 3 منح متاحة من 8
+    const grantsSeats = courseData.grants?.seats || 3;
     document.getElementById('grantsAvailable').textContent = grantsSeats;
     
     buildPricingTable();
@@ -324,11 +308,10 @@ function buildPricingTable() {
     const tbody = document.getElementById('pricingTableBody');
     tbody.innerHTML = '';
     
-    // نفس البنية اللي في course-builder
-    const price = courseData.basicPricing?.price || 1500;
-    const salePrice = courseData.basicPricing?.salePrice || 1200;
+    const price = courseData.price || 10000;
+    const salePrice = courseData.salePrice || 7000;
     
-    // السعر الأساسي
+    // السعر الأساسي - 10000
     tbody.innerHTML += `
         <tr>
             <td>السعر الأساسي</td>
@@ -338,20 +321,18 @@ function buildPricingTable() {
         </tr>
     `;
     
-    // السعر الحالي
-    if (salePrice < price) {
-        const discount = Math.round((1 - salePrice / price) * 100);
-        tbody.innerHTML += `
-            <tr class="table-success">
-                <td>السعر الحالي</td>
-                <td><del>${price}</del></td>
-                <td>${discount}%</td>
-                <td><strong>${salePrice} ج.م</strong></td>
-            </tr>
-        `;
-    }
+    // السعر الحالي - 7000 (خصم 30%)
+    const basicDiscount = Math.round((1 - salePrice / price) * 100);
+    tbody.innerHTML += `
+        <tr class="table-success">
+            <td>السعر الحالي</td>
+            <td><del>${price}</del></td>
+            <td>${basicDiscount}%</td>
+            <td><strong>${salePrice} ج.م</strong></td>
+        </tr>
+    `;
     
-    // الدفع النقدي
+    // الدفع النقدي - خصم 42% إضافي!
     if (courseData.cashDiscount?.enabled) {
         const cashPrice = Math.round(salePrice * (1 - courseData.cashDiscount.percentage / 100));
         tbody.innerHTML += `
@@ -364,60 +345,52 @@ function buildPricingTable() {
         `;
     }
     
-    // خصومات المجموعات
+    // خصم المجموعة - الصحاب 3+ أشخاص
     if (courseData.groupDiscounts?.length > 0) {
-        courseData.groupDiscounts.forEach(group => {
-            const groupPrice = Math.round(salePrice * (1 - group.percentage / 100));
-            tbody.innerHTML += `
-                <tr>
-                    <td>مجموعة ${group.minSize}+ أشخاص</td>
-                    <td>${salePrice} ج.م</td>
-                    <td>${group.percentage}%</td>
-                    <td><strong>${groupPrice} ج.م</strong> للشخص</td>
-                </tr>
-            `;
-        });
+        const group = courseData.groupDiscounts[0];
+        const groupPrice = Math.round(salePrice * (1 - group.percentage / 100));
+        tbody.innerHTML += `
+            <tr>
+                <td>${group.name} (${group.minSize}+ أشخاص)</td>
+                <td>${salePrice} ج.م</td>
+                <td>${group.percentage}%</td>
+                <td><strong>${groupPrice} ج.م</strong> للشخص</td>
+            </tr>
+        `;
     }
     
-    // خطط الأقساط
+    // خطة الأقساط - 3 شهور
     if (courseData.paymentPlans?.length > 0) {
-        courseData.paymentPlans.forEach(plan => {
-            if (plan.enabled) {
-                const monthlyAmount = Math.round(salePrice / plan.installments);
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${plan.name}</td>
-                        <td>${salePrice} ج.م</td>
-                        <td>${plan.installments} شهر</td>
-                        <td><strong>${monthlyAmount} ج.م</strong> شهرياً</td>
-                    </tr>
-                `;
-            }
-        });
+        const plan = courseData.paymentPlans[0];
+        const monthlyAmount = Math.round(salePrice / plan.installments);
+        tbody.innerHTML += `
+            <tr>
+                <td>${plan.name}</td>
+                <td>${salePrice} ج.م</td>
+                <td>تقسيط</td>
+                <td><strong>${monthlyAmount} ج.م</strong> شهرياً</td>
+            </tr>
+        `;
     }
-}
-
-function useDefaultData() {
-    courseData = {
-        title: "دورة تجريبية",
-        basicPricing: {
-            price: 1500,
-            salePrice: 1200
-        },
-        cashDiscount: {
-            enabled: true,
-            percentage: 10
-        },
-        groupDiscounts: [
-            { minSize: 3, percentage: 15 },
-            { minSize: 5, percentage: 25 },
-            { minSize: 7, percentage: 35 }
-        ],
-        grants: {
-            seats: 5
+    
+    // العروض الزمنية النشطة
+    const now = new Date();
+    courseData.discounts?.forEach(discount => {
+        const startDate = new Date(discount.startDate);
+        const endDate = new Date(discount.endDate);
+        
+        if (now >= startDate && now <= endDate) {
+            const offerPrice = Math.round(salePrice * (1 - discount.percentage / 100));
+            tbody.innerHTML += `
+                <tr style="background: rgba(255,215,0,0.1);">
+                    <td>🔥 ${discount.name} (ينتهي ${discount.endDate})</td>
+                    <td>${salePrice} ج.م</td>
+                    <td>${discount.percentage}%</td>
+                    <td><strong>${offerPrice} ج.م</strong></td>
+                </tr>
+            `;
         }
-    };
-    displayData();
+    });
 }
 
 document.addEventListener('DOMContentLoaded', loadCourseData);
