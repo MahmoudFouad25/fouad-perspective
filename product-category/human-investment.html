@@ -2313,49 +2313,128 @@ document.addEventListener('DOMContentLoaded', function() {
 });
         // جلب بيانات الدورة
         // جلب بيانات الدورة من Firebase
-// جلب بيانات الدورة من Firebase مع معالجة كل السيناريوهات
-// جلب بيانات الدورة من Firebase مع معالجة الأخطاء
+// جلب بيانات الدورة من Firebase
 async function loadCourseData() {
     const urlParams = new URLSearchParams(window.location.search);
     const courseId = urlParams.get('course');
     
     if (!courseId) {
-        console.error('معرف الدورة مفقود');
+        console.log('معرف الدورة مفقود - استخدام البيانات الافتراضية');
         showDefaultContent();
         return;
     }
     
     try {
-        // التحقق من وجود db
+        // انتظار Firebase
         if (typeof db === 'undefined') {
-            console.error('Firebase غير محمل بعد');
-            setTimeout(() => loadCourseData(), 1000);
+            console.log('انتظار تحميل Firebase...');
+            setTimeout(() => loadCourseData(), 500);
             return;
         }
         
+        console.log('جاري جلب بيانات الدورة:', courseId);
         const courseRef = db.collection('courses').doc(courseId);
         const doc = await courseRef.get();
         
         if (!doc.exists) {
-            console.error('الدورة غير موجودة');
+            console.log('الدورة غير موجودة - استخدام البيانات الافتراضية');
             showDefaultContent();
             return;
         }
         
         const courseData = doc.data();
+        console.log('البيانات المستلمة:', courseData);
+        
+        // تصحيح الأسعار إذا كانت خاطئة
+        if (courseData.price < 100) {
+            courseData.price = courseData.price * 1000;
+        }
+        if (courseData.salePrice && courseData.salePrice < 100) {
+            courseData.salePrice = courseData.salePrice * 1000;
+        }
+        
         window.currentCourseData = courseData;
         
-        // تحديد السيناريو النشط
-        const scenario = detectActiveScenario(courseData);
-        console.log('السيناريو النشط:', scenario);
-        
-        // تحديث الواجهة
-        updateUIBasedOnScenario(courseData, scenario);
+        // تحديث كل شيء
+        updatePageWithData(courseData);
         
     } catch (error) {
         console.error('خطأ في جلب البيانات:', error);
         showDefaultContent();
     }
+}
+
+// دالة تحديث الصفحة بالبيانات
+function updatePageWithData(courseData) {
+    console.log('تحديث الصفحة بالبيانات:', courseData);
+    
+    // تحديث العنوان
+    const titleElement = document.querySelector('.hero-title');
+    if (titleElement && courseData.title) {
+        titleElement.textContent = courseData.title;
+    }
+    
+    // تحديد السيناريو
+    const scenario = detectActiveScenario(courseData);
+    console.log('السيناريو النشط:', scenario);
+    
+    // تحديث العروض النشطة
+    updateActiveOffers(courseData, scenario);
+    
+    // تحديث الحاسبة
+    if (typeof updateCalculatorOptions === 'function') {
+        updateCalculatorOptions(courseData, scenario);
+    }
+    
+    // تحديث الجدول
+    if (typeof buildDynamicPricingTable === 'function') {
+        buildDynamicPricingTable(courseData, scenario);
+    }
+    
+    // تحديث الأسعار
+    if (typeof updateAllPrices === 'function') {
+        updateAllPrices(courseData, scenario);
+    }
+}
+
+// البيانات الافتراضية
+function showDefaultContent() {
+    const defaultData = {
+        title: 'استثمر في رحلتك نحو نور الحياة الطيبة',
+        price: 10000,  // السعر الصحيح
+        salePrice: 8000,
+        currency: 'EGP',
+        priceType: 'paid',
+        cashDiscount: {
+            enabled: true,
+            percentage: 15
+        },
+        paymentPlans: [
+            {
+                name: '3 شهور',
+                installments: 3,
+                firstPaymentPercent: 40,
+                frequency: 'monthly'
+            },
+            {
+                name: '6 شهور', 
+                installments: 6,
+                firstPaymentPercent: 30,
+                frequency: 'monthly'
+            }
+        ],
+        groupDiscounts: [
+            {
+                name: 'الصحاب',
+                minSize: 3,
+                percentage: 30
+            }
+        ],
+        discounts: []  // لا توجد عروض زمنية افتراضية
+    };
+    
+    window.currentCourseData = defaultData;
+    updatePageWithData(defaultData);
 }
 
 // دالة الاحتياط عند عدم وجود بيانات
@@ -3412,40 +3491,58 @@ function updateActiveOffers(data, scenario) {
     }
     
     // دالة محسنة لحساب السعر الحالي
-    function getCurrentPrice() {
-        let price = data.price || 1000;
-        let hasActiveTimeDiscount = false;
-        
-        // 1. التحقق من العروض الزمنية النشطة أولاً
-        if (data.discounts && data.discounts.length > 0) {
-            const now = new Date();
-            const activeDiscount = data.discounts.find(d => {
-                if (!d.startDate || !d.endDate) return false;
+   // دالة محسنة لحساب السعر الحالي
+function getCurrentPrice() {
+    let price = data.price || 10000;  // السعر الافتراضي الصحيح
+    let hasActiveTimeDiscount = false;
+    
+    // تصحيح السعر إذا كان أقل من 100
+    if (price < 100) {
+        price = price * 1000;
+    }
+    
+    // 1. التحقق من العروض الزمنية النشطة
+    if (data.discounts && data.discounts.length > 0) {
+        const now = new Date();
+        const activeDiscount = data.discounts.find(d => {
+            if (!d.startDate || !d.endDate) return false;
+            try {
                 const start = new Date(d.startDate);
                 const end = new Date(d.endDate);
                 return now >= start && now <= end && d.percentage > 0;
-            });
-            
-            if (activeDiscount) {
-                hasActiveTimeDiscount = true;
-                price = price * (1 - activeDiscount.percentage / 100);
+            } catch (e) {
+                return false;
+            }
+        });
+        
+        if (activeDiscount) {
+            hasActiveTimeDiscount = true;
+            price = price * (1 - activeDiscount.percentage / 100);
+        }
+    }
+    
+    // 2. التحقق من سعر التخفيض
+    if (!hasActiveTimeDiscount && data.salePrice && data.salePrice < data.price) {
+        // تصحيح سعر التخفيض
+        let salePrice = data.salePrice;
+        if (salePrice < 100) {
+            salePrice = salePrice * 1000;
+        }
+        
+        // استخدام سعر التخفيض فقط في السيناريو الأول
+        if (!data.discounts || data.discounts.length === 0) {
+            if (!data.paymentPlans || data.paymentPlans.length === 0) {
+                price = salePrice;
             }
         }
-        
-        // 2. إذا لم يكن هناك عرض زمني نشط، تحقق من سعر التخفيض
-        if (!hasActiveTimeDiscount && data.salePrice && data.salePrice < data.price && 
-            (!data.discounts || data.discounts.length === 0) && 
-            (!data.paymentPlans || data.paymentPlans.length === 0)) {
-            // السيناريو الأول: سعر + تخفيض فقط
-            price = data.salePrice;
-        }
-        
-        return {
-            current: roundPrice(price),
-            hasTimeDiscount: hasActiveTimeDiscount,
-            original: data.price
-        };
     }
+    
+    return {
+        current: Math.round(price / 10) * 10,  // تقريب لأقرب 10
+        hasTimeDiscount: hasActiveTimeDiscount,
+        original: data.price
+    };
+}
     
     const priceInfo = getCurrentPrice();
     const currentPrice = priceInfo.current;
@@ -3745,6 +3842,85 @@ function startCountdowns() {
         setInterval(updateTimer, 1000);
     });
 }
+        // دالة مساعدة للتحقق من الأخطاء
+function checkAndFixErrors() {
+    // إصلاح startCountdowns إذا لم تكن موجودة
+    if (typeof startCountdowns === 'undefined') {
+        window.startCountdowns = function() {
+            const timers = document.querySelectorAll('.offer-timer[data-end]');
+            if (!timers || timers.length === 0) return;
+            
+            timers.forEach(timer => {
+                const endDate = timer.dataset.end;
+                if (!endDate) return;
+                
+                const updateTimer = () => {
+                    try {
+                        const now = new Date().getTime();
+                        const end = new Date(endDate).getTime();
+                        const distance = end - now;
+                        
+                        if (distance < 0) {
+                            timer.innerHTML = '<span style="color: #E11D48">انتهى العرض</span>';
+                            return;
+                        }
+                        
+                        const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                        const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                        
+                        const daysEl = timer.querySelector('.days');
+                        const hoursEl = timer.querySelector('.hours');
+                        const minutesEl = timer.querySelector('.minutes');
+                        
+                        if (daysEl) daysEl.textContent = days;
+                        if (hoursEl) hoursEl.textContent = String(hours).padStart(2, '0');
+                        if (minutesEl) minutesEl.textContent = String(minutes).padStart(2, '0');
+                    } catch (e) {
+                        console.log('خطأ في العداد:', e);
+                    }
+                };
+                
+                updateTimer();
+                setInterval(updateTimer, 1000);
+            });
+        };
+    }
+    
+    // إصلاح updateCalculatedPrice
+    if (typeof updateCalculatedPrice === 'undefined') {
+        window.updateCalculatedPrice = function() {
+            console.log('تحديث السعر المحسوب');
+        };
+    }
+    
+    // إصلاح showDefaultContent
+    if (typeof showDefaultContent === 'undefined') {
+        window.showDefaultContent = function() {
+            console.log('عرض المحتوى الافتراضي');
+        };
+    }
+}
+
+// إصلاح buildDynamicPricingTable
+window.buildDynamicPricingTable = function(data, scenario) {
+    console.log('بناء الجدول الديناميكي');
+    // سيتم إضافة الكود لاحقاً
+};
+
+// تشغيل الإصلاحات
+checkAndFixErrors();
+
+// بدء التطبيق عند تحميل الصفحة
+window.addEventListener('load', function() {
+    console.log('=== بدء تحميل الصفحة ===');
+    checkAndFixErrors();
+    
+    // تأخير بسيط للتأكد من كل شيء
+    setTimeout(() => {
+        loadCourseData();
+    }, 1000);
+});
     </script>
 </body>
 </html>
