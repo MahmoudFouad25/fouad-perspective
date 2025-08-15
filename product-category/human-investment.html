@@ -1878,34 +1878,103 @@
         
         // جلب بيانات الدورة
         // جلب بيانات الدورة من Firebase
+// جلب بيانات الدورة من Firebase مع معالجة كل السيناريوهات
 async function loadCourseData() {
-    try {
-        courseId = getCourseId();
-        console.log('جاري تحميل بيانات الدورة:', courseId);
-        
-        // جلب البيانات من Firebase
-        const docRef = db.collection('courses').doc(courseId);
-        const doc = await docRef.get();
-        
-        if (doc.exists) {
-            courseData = doc.data();
-            console.log('البيانات المحملة:', courseData);
-            
-            // التأكد من وجود البيانات الأساسية
-            courseData.price = courseData.price || 1500;
-            courseData.currency = courseData.currency || 'EGP';
-            courseData.priceType = courseData.priceType || 'paid';
-            
-            // تحديث كل شيء
-            updateAllPricing();
-        } else {
-            console.log('الدورة غير موجودة، استخدام بيانات افتراضية');
-            setDefaultData();
-        }
-    } catch (error) {
-        console.error('خطأ في تحميل البيانات:', error);
-        setDefaultData();
+    const urlParams = new URLSearchParams(window.location.search);
+    const courseId = urlParams.get('course');
+    
+    if (!courseId) {
+        console.error('معرف الدورة مفقود');
+        showDefaultContent();
+        return;
     }
+    
+    try {
+        const courseRef = db.collection('courses').doc(courseId);
+        const doc = await courseRef.get();
+        
+        if (!doc.exists) {
+            console.error('الدورة غير موجودة');
+            showDefaultContent();
+            return;
+        }
+        
+        const courseData = doc.data();
+        window.currentCourseData = courseData; // حفظ البيانات globally
+        
+        // تحديد السيناريو النشط
+        const scenario = detectActiveScenario(courseData);
+        console.log('السيناريو النشط:', scenario);
+        
+        // تحديث الواجهة حسب السيناريو
+        updateUIBasedOnScenario(courseData, scenario);
+        
+    } catch (error) {
+        console.error('خطأ في جلب البيانات:', error);
+        showDefaultContent();
+    }
+}
+
+// دالة جديدة: كشف السيناريو النشط
+function detectActiveScenario(data) {
+    const hasDiscounts = data.discounts && data.discounts.length > 0;
+    const hasPaymentPlans = data.paymentPlans && data.paymentPlans.length > 0;
+    const hasCashDiscount = data.cashDiscount && data.cashDiscount.enabled;
+    const hasGroups = data.groupDiscounts && data.groupDiscounts.length > 0;
+    const hasSalePrice = data.salePrice && data.salePrice < data.price;
+    
+    // السيناريو 1: سعر + تخفيض فقط
+    if (hasSalePrice && !hasDiscounts && !hasPaymentPlans && !hasCashDiscount) {
+        return 'PRICE_SALE_ONLY';
+    }
+    
+    // السيناريو 2: سعر + أقساط فقط
+    if (hasPaymentPlans && !hasDiscounts && !hasCashDiscount && !hasSalePrice) {
+        return 'PRICE_INSTALLMENTS';
+    }
+    
+    // السيناريو 3: سعر + أقساط + خصم نقدي
+    if (hasPaymentPlans && hasCashDiscount && !hasDiscounts) {
+        return 'PRICE_INSTALLMENTS_CASH';
+    }
+    
+    // السيناريو 4: سعر + خصم نقدي فقط
+    if (hasCashDiscount && !hasPaymentPlans && !hasDiscounts && !hasSalePrice) {
+        return 'PRICE_CASH_ONLY';
+    }
+    
+    // السيناريو 5: عروض زمنية
+    if (hasDiscounts && !hasPaymentPlans && !hasCashDiscount) {
+        return 'TIME_DISCOUNTS';
+    }
+    
+    // السيناريو 6: عروض زمنية + أقساط
+    if (hasDiscounts && hasPaymentPlans && !hasCashDiscount) {
+        return 'TIME_DISCOUNTS_INSTALLMENTS';
+    }
+    
+    // السيناريو 7: الكومبو الكامل
+    if (hasDiscounts && hasPaymentPlans && hasCashDiscount) {
+        return 'FULL_COMBO';
+    }
+    
+    // افتراضي: سعر بسيط
+    return 'SIMPLE_PRICE';
+}
+
+// دالة جديدة: تحديث الواجهة حسب السيناريو
+function updateUIBasedOnScenario(data, scenario) {
+    // 1. تحديث العروض النشطة
+    updateActiveOffers(data, scenario);
+    
+    // 2. تحديث الحاسبة
+    updateCalculatorOptions(data, scenario);
+    
+    // 3. بناء الجدول
+    buildDynamicPricingTable(data, scenario);
+    
+    // 4. تحديث الأسعار في كل مكان
+    updateAllPrices(data, scenario);
 }
 
 // البيانات الافتراضية
@@ -2791,6 +2860,118 @@ loadCourseData = async function() {
     await originalLoadCourseData();
     await updatePricingFromFirebase();
 };
+        // تحديث العروض النشطة بناءً على السيناريو
+function updateActiveOffers(data, scenario) {
+    const offersContainer = document.querySelector('.offers-slider');
+    if (!offersContainer) return;
+    
+    offersContainer.innerHTML = ''; // مسح المحتوى القديم
+    
+    switch(scenario) {
+        case 'PRICE_SALE_ONLY':
+            // عرض واحد: التخفيض
+            const discount = ((data.price - data.salePrice) / data.price * 100).toFixed(0);
+            offersContainer.innerHTML = `
+                <div class="offer-card active">
+                    <div class="offer-badge">متاح الآن</div>
+                    <h4>عرض خاص</h4>
+                    <div class="offer-discount">${discount}% خصم</div>
+                    <div class="offer-prices">
+                        <span class="original">${data.price} ج.م</span>
+                        <span class="current">${data.salePrice} ج.م</span>
+                    </div>
+                </div>
+            `;
+            break;
+            
+        case 'TIME_DISCOUNTS':
+        case 'TIME_DISCOUNTS_INSTALLMENTS':
+        case 'FULL_COMBO':
+            // عروض زمنية متعددة
+            const now = new Date();
+            data.discounts.forEach((offer, index) => {
+                const start = new Date(offer.startDate);
+                const end = new Date(offer.endDate);
+                const isActive = now >= start && now <= end;
+                const status = isActive ? 'active' : (now < start ? 'upcoming' : 'ended');
+                
+                offersContainer.innerHTML += `
+                    <div class="offer-card ${status}">
+                        <div class="offer-badge">${
+                            isActive ? 'نشط الآن' : 
+                            (now < start ? 'قريباً' : 'انتهى')
+                        }</div>
+                        <h4>${offer.name}</h4>
+                        <div class="offer-discount">${offer.percentage || 0}% خصم</div>
+                        ${offer.startDate ? `
+                            <div class="offer-dates">
+                                من ${formatDate(offer.startDate)} 
+                                إلى ${formatDate(offer.endDate)}
+                            </div>
+                        ` : ''}
+                        ${isActive ? `
+                            <div class="offer-timer" data-end="${offer.endDate}">
+                                <span class="days">--</span> يوم
+                                <span class="hours">--</span>:
+                                <span class="minutes">--</span>:
+                                <span class="seconds">--</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            
+            // تشغيل العدادات
+            if (scenario.includes('TIME_DISCOUNTS')) {
+                startCountdowns();
+            }
+            break;
+            
+        case 'PRICE_INSTALLMENTS':
+        case 'PRICE_INSTALLMENTS_CASH':
+            // عرض الأقساط
+            offersContainer.innerHTML = `
+                <div class="offer-card active">
+                    <div class="offer-badge">متاح</div>
+                    <h4>تقسيط ميسر</h4>
+                    <div class="offer-details">
+                        ${data.paymentPlans.map(plan => `
+                            <div class="plan-option">
+                                ${plan.name}: 
+                                ${plan.installments} ${plan.installments > 2 ? 'أقساط' : 'قسطين'}
+                            </div>
+                        `).join('')}
+                    </div>
+                    ${scenario === 'PRICE_INSTALLMENTS_CASH' ? `
+                        <div class="cash-bonus">
+                            أو دفع نقدي بخصم ${data.cashDiscount.percentage}%
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            break;
+            
+        default:
+            // عرض افتراضي
+            offersContainer.innerHTML = `
+                <div class="offer-card active">
+                    <div class="offer-badge">متاح</div>
+                    <h4>السعر الأساسي</h4>
+                    <div class="offer-price">${data.price} ج.م</div>
+                </div>
+            `;
+    }
+}
+
+// دالة مساعدة: تنسيق التاريخ
+function formatDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ar-EG', {
+        day: 'numeric',
+        month: 'long'
+    });
+}
     </script>
 </body>
 </html>
