@@ -2297,7 +2297,20 @@
             const urlParams = new URLSearchParams(window.location.search);
             return urlParams.get('course') || 'default-course';
         }
-        
+        // انتظار تحميل الصفحة بالكامل
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('الصفحة جاهزة');
+    
+    // تأخير بسيط للتأكد من تحميل Firebase
+    setTimeout(() => {
+        if (typeof db !== 'undefined') {
+            loadCourseData();
+        } else {
+            console.error('Firebase لم يتم تحميله');
+            showDefaultContent();
+        }
+    }, 1000);
+});
         // جلب بيانات الدورة
         // جلب بيانات الدورة من Firebase
 // جلب بيانات الدورة من Firebase مع معالجة كل السيناريوهات
@@ -3385,6 +3398,7 @@ loadCourseData = async function() {
         // تحديث العروض النشطة بناءً على السيناريو
 // تحديث العروض النشطة - نسخة محسنة بتصميم جذاب
 // تحديث العروض النشطة - نسخة مصححة مع ترتيب أفضل
+// تحديث العروض النشطة - النسخة الصحيحة
 function updateActiveOffers(data, scenario) {
     const offersContainer = document.querySelector('.offers-slider');
     if (!offersContainer) return;
@@ -3397,33 +3411,47 @@ function updateActiveOffers(data, scenario) {
         return Math.round(price / 10) * 10;
     }
     
-    // دالة مساعدة لحساب السعر الحالي
+    // دالة محسنة لحساب السعر الحالي
     function getCurrentPrice() {
-        let price = data.price;
+        let price = data.price || 1000;
+        let hasActiveTimeDiscount = false;
         
-        // التحقق من العروض الزمنية النشطة
+        // 1. التحقق من العروض الزمنية النشطة أولاً
         if (data.discounts && data.discounts.length > 0) {
             const now = new Date();
             const activeDiscount = data.discounts.find(d => {
                 if (!d.startDate || !d.endDate) return false;
                 const start = new Date(d.startDate);
                 const end = new Date(d.endDate);
-                return now >= start && now <= end;
+                return now >= start && now <= end && d.percentage > 0;
             });
             
-            if (activeDiscount && activeDiscount.percentage > 0) {
+            if (activeDiscount) {
+                hasActiveTimeDiscount = true;
                 price = price * (1 - activeDiscount.percentage / 100);
             }
-        } else if (data.salePrice && data.salePrice < data.price) {
+        }
+        
+        // 2. إذا لم يكن هناك عرض زمني نشط، تحقق من سعر التخفيض
+        if (!hasActiveTimeDiscount && data.salePrice && data.salePrice < data.price && 
+            (!data.discounts || data.discounts.length === 0) && 
+            (!data.paymentPlans || data.paymentPlans.length === 0)) {
+            // السيناريو الأول: سعر + تخفيض فقط
             price = data.salePrice;
         }
         
-        return roundPrice(price);
+        return {
+            current: roundPrice(price),
+            hasTimeDiscount: hasActiveTimeDiscount,
+            original: data.price
+        };
     }
     
-    const currentPrice = getCurrentPrice();
+    const priceInfo = getCurrentPrice();
+    const currentPrice = priceInfo.current;
+    const showOriginal = currentPrice < data.price;
     
-    // 1️⃣ بطاقة السعر الأساسي (دائماً أولاً)
+    // 1️⃣ بطاقة السعر الأساسي
     cardsHTML += `
         <div class="offer-card price-card">
             <div class="offer-header">
@@ -3432,7 +3460,7 @@ function updateActiveOffers(data, scenario) {
             </div>
             <h4>السعر الحالي</h4>
             <div class="price-display">
-                ${currentPrice < data.price ? `
+                ${showOriginal ? `
                     <div class="price-original">${data.price.toLocaleString('ar-EG')} ج.م</div>
                     <div class="price-current">
                         <span class="price-number">${currentPrice.toLocaleString('ar-EG')}</span>
@@ -3451,7 +3479,7 @@ function updateActiveOffers(data, scenario) {
         </div>
     `;
     
-    // 2️⃣ بطاقة الأقساط (ثانياً إذا كانت موجودة)
+    // 2️⃣ بطاقة الأقساط
     if (data.paymentPlans && data.paymentPlans.length > 0) {
         cardsHTML += `
             <div class="offer-card installments-card">
@@ -3462,15 +3490,17 @@ function updateActiveOffers(data, scenario) {
                 <h4>خطط السداد بدون فوائد</h4>
                 <div class="plans-grid">
                     ${data.paymentPlans.map(plan => {
+                        const installments = plan.installments || 3;
+                        const firstPercent = plan.firstPaymentPercent || 0;
                         let firstPayment = 0;
                         let monthlyAmount = 0;
                         
-                        if (plan.firstPaymentPercent && plan.firstPaymentPercent > 0) {
-                            firstPayment = roundPrice(currentPrice * plan.firstPaymentPercent / 100);
+                        if (firstPercent > 0) {
+                            firstPayment = roundPrice(currentPrice * firstPercent / 100);
                             const remaining = currentPrice - firstPayment;
-                            monthlyAmount = roundPrice(remaining / (plan.installments - 1));
+                            monthlyAmount = roundPrice(remaining / (installments - 1));
                         } else {
-                            monthlyAmount = roundPrice(currentPrice / plan.installments);
+                            monthlyAmount = roundPrice(currentPrice / installments);
                         }
                         
                         return `
@@ -3481,10 +3511,10 @@ function updateActiveOffers(data, scenario) {
                                         <span class="first-payment">${firstPayment.toLocaleString('ar-EG')} ج.م مقدم</span>
                                         <span class="then">ثم</span>
                                         <span class="monthly">${monthlyAmount.toLocaleString('ar-EG')} ج.م</span>
-                                        <span class="period">× ${plan.installments - 1} ${plan.frequency === 'monthly' ? 'شهر' : 'أسبوع'}</span>
+                                        <span class="period">× ${installments - 1} شهر</span>
                                     ` : `
                                         <span class="monthly">${monthlyAmount.toLocaleString('ar-EG')} ج.م</span>
-                                        <span class="period">× ${plan.installments} ${plan.frequency === 'monthly' ? 'شهر' : 'أسبوع'}</span>
+                                        <span class="period">× ${installments} شهر</span>
                                     `}
                                 </div>
                             </div>
@@ -3499,8 +3529,8 @@ function updateActiveOffers(data, scenario) {
         `;
     }
     
-    // 3️⃣ بطاقة الدفع النقدي (ثالثاً إذا كان مفعلاً)
-    if (data.cashDiscount && data.cashDiscount.enabled) {
+    // 3️⃣ بطاقة الدفع النقدي
+    if (data.cashDiscount && data.cashDiscount.enabled === true) {
         const cashPrice = roundPrice(currentPrice * (1 - data.cashDiscount.percentage / 100));
         cardsHTML += `
             <div class="offer-card cash-card">
@@ -3530,7 +3560,7 @@ function updateActiveOffers(data, scenario) {
         `;
     }
     
-    // 4️⃣ بطاقة المجموعات (رابعاً إذا كانت موجودة)
+    // 4️⃣ بطاقة المجموعات
     if (data.groupDiscounts && data.groupDiscounts.length > 0) {
         cardsHTML += `
             <div class="offer-card groups-card">
@@ -3557,10 +3587,12 @@ function updateActiveOffers(data, scenario) {
                     }).join('')}
                 </div>
                 <div class="group-features">
-                    <div class="feature">
-                        <i class="fas fa-check"></i>
-                        متاح التقسيط بنفس الشروط
-                    </div>
+                    ${data.paymentPlans && data.paymentPlans.length > 0 ? `
+                        <div class="feature">
+                            <i class="fas fa-check"></i>
+                            متاح التقسيط بنفس الشروط
+                        </div>
+                    ` : ''}
                     ${data.cashDiscount && data.cashDiscount.enabled ? `
                         <div class="feature">
                             <i class="fas fa-check"></i>
@@ -3572,11 +3604,12 @@ function updateActiveOffers(data, scenario) {
         `;
     }
     
-    // 5️⃣ بطاقة العروض الزمنية (أخيراً إذا كانت موجودة)
+    // 5️⃣ بطاقة العروض الزمنية
     if (data.discounts && data.discounts.length > 0) {
         const now = new Date();
         
         data.discounts.forEach(offer => {
+            // تخطي العروض بدون تواريخ
             if (!offer.startDate || !offer.endDate) return;
             
             const start = new Date(offer.startDate);
@@ -3596,7 +3629,7 @@ function updateActiveOffers(data, scenario) {
                         </div>
                         <i class="fas fa-clock offer-icon"></i>
                     </div>
-                    <h4>${offer.name}</h4>
+                    <h4>${offer.name || 'عرض زمني'}</h4>
                     ${offer.percentage > 0 ? `
                         <div class="time-offer-details">
                             <div class="discount-circle">
@@ -3633,18 +3666,6 @@ function updateActiveOffers(data, scenario) {
                                 </span>
                             </div>
                         ` : ''}
-                        ${data.paymentPlans && data.paymentPlans.length > 0 ? `
-                            <div class="offer-extra-info">
-                                <i class="fas fa-check-circle"></i>
-                                متاح التقسيط بدون فوائد
-                            </div>
-                        ` : ''}
-                        ${data.cashDiscount && data.cashDiscount.enabled ? `
-                            <div class="offer-extra-info">
-                                <i class="fas fa-check-circle"></i>
-                                خصم إضافي ${data.cashDiscount.percentage}% للدفع النقدي
-                            </div>
-                        ` : ''}
                     ` : `
                         <div class="regular-price-period">
                             <span>السعر العادي</span>
@@ -3654,6 +3675,18 @@ function updateActiveOffers(data, scenario) {
                             </div>
                         </div>
                     `}
+                    ${data.paymentPlans && data.paymentPlans.length > 0 ? `
+                        <div class="offer-extra-info">
+                            <i class="fas fa-check-circle"></i>
+                            متاح التقسيط بدون فوائد
+                        </div>
+                    ` : ''}
+                    ${data.cashDiscount && data.cashDiscount.enabled ? `
+                        <div class="offer-extra-info">
+                            <i class="fas fa-check-circle"></i>
+                            خصم إضافي ${data.cashDiscount.percentage}% للدفع النقدي
+                        </div>
+                    ` : ''}
                 </div>
             `;
         });
