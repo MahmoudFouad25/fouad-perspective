@@ -737,9 +737,10 @@
 
 <script>
 // ==========================================
-// البيانات الأساسية
+// البيانات المستلمة والإعدادات
 // ==========================================
 const bookingData = {
+    // البيانات الأساسية من الصفحة السابقة
     type: '',
     courseId: '',
     courseName: '',
@@ -748,14 +749,25 @@ const bookingData = {
     finalPrice: 0,
     paymentPlan: '',
     paymentMethod: '',
+    
+    // بيانات خاصة بكل نوع
+    groupSize: 0,
+    groupDiscount: 0,
+    giftType: '',
+    giftAmount: 0,
+    grantType: '',
+    
+    // التنقل
     currentStep: 1,
     totalSteps: 4,
     steps: [],
+    
+    // البيانات المدخلة
     formData: {}
 };
 
 // ==========================================
-// الدوال المساعدة الأساسية
+// الدوال المساعدة الأساسية - يجب أن تكون في الأول
 // ==========================================
 function calculateTimeLeft(endDate) {
     if (!endDate) return null;
@@ -769,12 +781,45 @@ function calculateTimeLeft(endDate) {
         
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         
         if (days > 0) return `${days} يوم و ${hours} ساعة`;
-        if (hours > 0) return `${hours} ساعة`;
-        return 'أقل من ساعة';
+        if (hours > 0) return `${hours} ساعة و ${minutes} دقيقة`;
+        return `${minutes} دقيقة`;
     } catch (error) {
+        console.warn('⚠️ خطأ في حساب الوقت:', error);
         return null;
+    }
+}
+
+function saveTemporaryData() {
+    if (!window.bookingData) {
+        console.warn('⚠️ لا توجد بيانات حجز للحفظ');
+        return;
+    }
+    
+    const form = document.getElementById('bookingForm');
+    if (!form) return;
+    
+    try {
+        const formData = new FormData(form);
+        const currentStepData = {};
+        
+        for (let [key, value] of formData.entries()) {
+            currentStepData[key] = value;
+        }
+        
+        // دمج البيانات الجديدة مع الموجودة
+        window.bookingData.formData = {
+            ...window.bookingData.formData,
+            ...currentStepData
+        };
+        
+        // حفظ في Local Storage كنسخة احتياطية
+        localStorage.setItem('bookingBackup', JSON.stringify(window.bookingData));
+        console.log('✅ تم حفظ البيانات مؤقتاً');
+    } catch (error) {
+        console.warn('⚠️ تعذر الحفظ المؤقت:', error);
     }
 }
 
@@ -783,9 +828,16 @@ function updateNavigationButtons() {
     const btnNext = document.getElementById('btnNext');
     const btnSubmit = document.getElementById('btnSubmit');
     
-    if (!btnPrev || !btnNext || !btnSubmit) return;
+    if (!btnPrev || !btnNext || !btnSubmit) {
+        console.warn('⚠️ بعض أزرار التنقل غير موجودة');
+        return;
+    }
     
-    btnPrev.style.display = bookingData.currentStep === 1 ? 'none' : 'block';
+    if (bookingData.currentStep === 1) {
+        btnPrev.style.display = 'none';
+    } else {
+        btnPrev.style.display = 'block';
+    }
     
     if (bookingData.currentStep === bookingData.totalSteps) {
         btnNext.style.display = 'none';
@@ -797,13 +849,145 @@ function updateNavigationButtons() {
 }
 
 // ==========================================
-// تحديث ملخص الحجز
+// استقبال البيانات من URL - محسن
+// ==========================================
+function initializeBooking() {
+    console.log('🚀 بدء تهيئة صفحة الحجز...');
+    
+    const params = new URLSearchParams(window.location.search);
+    const dataParam = params.get('data');
+    
+    if (!dataParam) {
+        console.error('❌ لا توجد بيانات في URL');
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ في البيانات',
+            text: 'لم يتم العثور على بيانات الحجز',
+            confirmButtonColor: '#FFD700'
+        }).then(() => {
+            window.location.href = 'human-investment.html';
+        });
+        return;
+    }
+    
+    try {
+        console.log('📥 البيانات الخام المستلمة:', dataParam);
+        
+        // فك تشفير البيانات المستلمة
+        const decodedData = decodeURIComponent(dataParam);
+        console.log('📤 البيانات بعد فك التشفير:', decodedData);
+        
+        const receivedData = JSON.parse(decodedData);
+        console.log('✅ البيانات المحللة:', receivedData);
+        
+        // التحقق من أن البيانات الأساسية موجودة
+        if (!receivedData.type || !receivedData.courseName || receivedData.finalPrice === undefined) {
+            throw new Error('البيانات الأساسية مفقودة');
+        }
+        
+        // ✅ الحل الجذري: نسخ البيانات بالضبط كما هي
+        Object.assign(bookingData, receivedData);
+        console.log('✅ البيانات بعد النسخ في bookingData:', bookingData);
+        
+        // تحديد الخطوات حسب النوع
+        setupSteps();
+        
+        // تحديث الواجهة تدريجياً
+        console.log('🔄 تحديث واجهة المستخدم...');
+        
+        // 1. تحديث الملخص أولاً
+        updateDetailedSummary();
+        
+        // 2. عرض الخطوة الحالية
+        renderCurrentStep();
+        
+        // 3. تحديث شريط التقدم
+        updateProgressBar();
+        
+        // 4. تحديث الأزرار
+        updateNavigationButtons();
+        
+        console.log('✅ تم تهيئة صفحة الحجز بنجاح');
+        
+    } catch (error) {
+        console.error('❌ خطأ في معالجة البيانات:', error);
+        console.error('❌ تفاصيل الخطأ:', error.message);
+        console.error('❌ البيانات المُرسلة:', dataParam);
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ في معالجة البيانات',
+            text: `حدث خطأ: ${error.message}`,
+            confirmButtonColor: '#FFD700'
+        }).then(() => {
+            window.location.href = 'human-investment.html';
+        });
+    }
+}
+
+// ==========================================
+// إعداد الخطوات حسب نوع الحجز
+// ==========================================
+function setupSteps() {
+    switch(bookingData.type) {
+        case 'individual':
+            bookingData.steps = [
+                { id: 'personal', title: 'البيانات الشخصية', icon: 'fa-user' },
+                { id: 'details', title: 'تفاصيل إضافية', icon: 'fa-info-circle' },
+                { id: 'payment', title: 'طريقة الدفع', icon: 'fa-credit-card' },
+                { id: 'review', title: 'المراجعة والتأكيد', icon: 'fa-check-circle' }
+            ];
+            break;
+            
+        case 'group':
+            bookingData.steps = [
+                { id: 'personal', title: 'منسق المجموعة', icon: 'fa-user' },
+                { id: 'group', title: 'بيانات المجموعة', icon: 'fa-users' },
+                { id: 'payment', title: 'طريقة الدفع', icon: 'fa-credit-card' },
+                { id: 'review', title: 'المراجعة والتأكيد', icon: 'fa-check-circle' }
+            ];
+            break;
+            
+        case 'gift':
+            bookingData.steps = [
+                { id: 'personal', title: 'بيانات المُهدي', icon: 'fa-user' },
+                { id: 'recipient', title: 'بيانات المستفيد', icon: 'fa-gift' },
+                { id: 'message', title: 'رسالة الإهداء', icon: 'fa-envelope' },
+                { id: 'payment', title: 'طريقة الدفع', icon: 'fa-credit-card' },
+                { id: 'review', title: 'المراجعة والتأكيد', icon: 'fa-check-circle' }
+            ];
+            bookingData.totalSteps = 5;
+            break;
+            
+        case 'grant':
+            bookingData.steps = [
+                { id: 'personal', title: 'البيانات الشخصية', icon: 'fa-user' },
+                { id: 'story', title: 'قصتك والدافع', icon: 'fa-heart' },
+                { id: 'financial', title: 'الوضع المالي', icon: 'fa-chart-line' },
+                { id: 'plan', title: 'الخطة المقترحة', icon: 'fa-handshake' },
+                { id: 'commitment', title: 'التعهدات', icon: 'fa-file-contract' },
+                { id: 'review', title: 'المراجعة والإرسال', icon: 'fa-check-circle' }
+            ];
+            bookingData.totalSteps = 6;
+            break;
+    }
+    
+    bookingData.totalSteps = bookingData.steps.length;
+}
+
+// ==========================================
+// تحديث ملخص الحجز المفصل - محسن
 // ==========================================
 function updateDetailedSummary() {
-    console.log('🔄 تحديث الملخص:', bookingData);
+    console.log('🔄 تحديث الملخص بالبيانات:', bookingData);
     
-    if (!bookingData || !bookingData.type) return;
+    // التحقق من وجود البيانات
+    if (!bookingData || !bookingData.type) {
+        console.warn('⚠️ لا توجد بيانات حجز للعرض');
+        return;
+    }
     
+    // تحديث الأيقونة والعنوان
     const icons = {
         'individual': 'fa-user',
         'group': 'fa-users', 
@@ -818,7 +1002,7 @@ function updateDetailedSummary() {
         'grant': 'طلب منحة دراسية'
     };
     
-    // تحديث العناصر
+    // تحديث العناصر بأمان
     const summaryIcon = document.getElementById('summaryIcon');
     if (summaryIcon) {
         summaryIcon.innerHTML = `<i class="fas ${icons[bookingData.type] || 'fa-shopping-bag'}"></i>`;
@@ -834,8 +1018,9 @@ function updateDetailedSummary() {
         courseName.textContent = bookingData.courseName || 'الدورة';
     }
     
-    // تحديث الأسعار
+    // تحديث التفاصيل الكاملة
     updatePricingDisplay();
+    updateAdditionalInfo();
 }
 
 function updatePricingDisplay() {
@@ -844,6 +1029,7 @@ function updatePricingDisplay() {
     
     let priceHTML = '<div class="detail-group-title">تفصيل الاستثمار</div>';
     
+    // السعر الأساسي
     priceHTML += `
         <div class="price-item">
             <span>السعر الأساسي:</span>
@@ -851,16 +1037,42 @@ function updatePricingDisplay() {
         </div>
     `;
     
+    // الخصومات (إذا كانت موجودة)
     if (bookingData.discounts && bookingData.discounts.length > 0) {
-        const totalDiscount = bookingData.discounts.reduce((sum, d) => sum + (d.amount || 0), 0);
+        priceHTML += '<div style="border-top: 1px solid rgba(255,215,0,0.2); margin: 10px 0; padding-top: 10px;">';
+        
+        bookingData.discounts.forEach(discount => {
+            priceHTML += `
+                <div class="price-item discount">
+                    <span>${discount.type}: ${discount.name}</span>
+                    <span>-${(discount.amount || 0).toLocaleString('ar-EG')} ج.م</span>
+                </div>
+            `;
+        });
+        
+        priceHTML += '</div>';
+    }
+    
+    // خطة الأقساط (إذا كانت موجودة)
+    if (bookingData.installmentDetails) {
         priceHTML += `
-            <div class="price-item discount">
-                <span>إجمالي الخصومات:</span>
-                <span>-${totalDiscount.toLocaleString('ar-EG')} ج.م</span>
+            <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; margin: 15px 0;">
+                <div class="detail-group-title" style="color: var(--info); margin-bottom: 10px;">
+                    خطة السداد: ${bookingData.installmentDetails.planName || 'خطة أقساط'}
+                </div>
+                <div class="price-item">
+                    <span>الدفعة الأولى:</span>
+                    <span>${(bookingData.installmentDetails.firstPayment || 0).toLocaleString('ar-EG')} ج.م</span>
+                </div>
+                <div class="price-item">
+                    <span>الأقساط الشهرية:</span>
+                    <span>${(bookingData.installmentDetails.monthlyAmount || 0).toLocaleString('ar-EG')} ج.م × ${bookingData.installmentDetails.totalMonths || 0}</span>
+                </div>
             </div>
         `;
     }
     
+    // الإجمالي النهائي
     priceHTML += `
         <div class="price-item total">
             <span>المبلغ المطلوب:</span>
@@ -871,55 +1083,75 @@ function updatePricingDisplay() {
     priceBreakdown.innerHTML = priceHTML;
 }
 
-// ==========================================
-// إعداد الخطوات
-// ==========================================
-function setupSteps() {
-    switch(bookingData.type) {
-        case 'individual':
-            bookingData.steps = [
-                { id: 'personal', title: 'البيانات الشخصية' },
-                { id: 'details', title: 'تفاصيل إضافية' },
-                { id: 'payment', title: 'طريقة الدفع' },
-                { id: 'review', title: 'المراجعة والتأكيد' }
-            ];
-            break;
-        case 'group':
-            bookingData.steps = [
-                { id: 'personal', title: 'منسق المجموعة' },
-                { id: 'group', title: 'بيانات المجموعة' },
-                { id: 'payment', title: 'طريقة الدفع' },
-                { id: 'review', title: 'المراجعة والتأكيد' }
-            ];
-            break;
-        case 'gift':
-            bookingData.steps = [
-                { id: 'personal', title: 'بيانات المُهدي' },
-                { id: 'recipient', title: 'بيانات المستفيد' },
-                { id: 'payment', title: 'طريقة الدفع' },
-                { id: 'review', title: 'المراجعة والتأكيد' }
-            ];
-            break;
-        case 'grant':
-            bookingData.steps = [
-                { id: 'personal', title: 'البيانات الشخصية' },
-                { id: 'story', title: 'قصتك والدافع' },
-                { id: 'financial', title: 'الوضع المالي' },
-                { id: 'review', title: 'المراجعة والإرسال' }
-            ];
-            break;
-        default:
-            bookingData.steps = [
-                { id: 'personal', title: 'البيانات الشخصية' },
-                { id: 'review', title: 'المراجعة والتأكيد' }
-            ];
+function updateAdditionalInfo() {
+    const additionalInfo = document.getElementById('additionalInfo');
+    const additionalInfoContent = document.getElementById('additionalInfoContent');
+    
+    if (!additionalInfo || !additionalInfoContent) return;
+    
+    let importantHTML = '';
+    
+    // العرض الزمني النشط
+    if (bookingData.activeOffer) {
+        const timeLeft = calculateTimeLeft(bookingData.activeOffer.endDate);
+        importantHTML += `
+            <div style="background: rgba(236, 72, 153, 0.1); padding: 15px; border-radius: 12px; margin-bottom: 15px;">
+                <div class="detail-row">
+                    <span>🎯 العرض النشط:</span>
+                    <span style="color: var(--gold-primary);">${bookingData.activeOffer.name}</span>
+                </div>
+                <div class="detail-row">
+                    <span>الخصم:</span>
+                    <span style="color: var(--success);">-${(bookingData.activeOffer.amount || 0).toLocaleString('ar-EG')} ج.م</span>
+                </div>
+                ${timeLeft ? `
+                <div class="detail-row">
+                    <span>متبقي:</span>
+                    <span style="color: var(--danger);">${timeLeft}</span>
+                </div>
+                ` : ''}
+            </div>
+        `;
     }
     
-    bookingData.totalSteps = bookingData.steps.length;
+    // بيانات المجموعة
+    if (bookingData.groupData) {
+        importantHTML += `
+            <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 12px; margin-bottom: 15px;">
+                <div class="detail-row">
+                    <span>👥 نوع المجموعة:</span>
+                    <span>${bookingData.groupData.name}</span>
+                </div>
+                <div class="detail-row">
+                    <span>الحد الأدنى:</span>
+                    <span>${bookingData.groupData.minSize} أشخاص</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    // الكوبون
+    if (bookingData.coupon) {
+        importantHTML += `
+            <div style="background: rgba(147, 51, 234, 0.1); padding: 15px; border-radius: 12px;">
+                <div class="detail-row">
+                    <span>🎫 كود الخصم:</span>
+                    <span style="color: var(--gold-primary); font-weight: bold;">${bookingData.coupon.code}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    if (importantHTML) {
+        additionalInfo.style.display = 'block';
+        additionalInfoContent.innerHTML = importantHTML;
+    } else {
+        additionalInfo.style.display = 'none';
+    }
 }
 
 // ==========================================
-// شريط التقدم
+// تحديث شريط التقدم
 // ==========================================
 function updateProgressBar() {
     const container = document.getElementById('progressSteps');
@@ -942,6 +1174,7 @@ function updateProgressBar() {
                     ${isCompleted ? '<i class="fas fa-check"></i>' : stepNumber}
                 </div>
                 <div class="step-title">${step.title}</div>
+                ${stepNumber < bookingData.steps.length ? '<div class="progress-line"></div>' : ''}
             </div>
         `;
     });
@@ -950,7 +1183,7 @@ function updateProgressBar() {
 }
 
 // ==========================================
-// عرض محتوى الخطوة
+// عرض المحتوى الديناميكي للخطوة الحالية
 // ==========================================
 function renderCurrentStep() {
     const container = document.getElementById('formContent');
@@ -959,61 +1192,376 @@ function renderCurrentStep() {
     const currentStepData = bookingData.steps[bookingData.currentStep - 1];
     if (!currentStepData) return;
     
-    let content = '<div class="section-header"><h3>خطوة تجريبية</h3><p>هذا محتوى تجريبي للاختبار</p></div>';
+    let content = '';
     
+    // توليد المحتوى حسب نوع الخطوة ونوع الحجز
     switch(currentStepData.id) {
         case 'personal':
-            content = `
-                <div class="section-header">
-                    <h3><i class="fas fa-user"></i> البيانات الشخصية</h3>
-                    <p>معلوماتك الأساسية للتواصل</p>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">الاسم الكامل <span class="required">*</span></label>
-                    <input type="text" class="form-control" id="fullName" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">رقم الواتساب <span class="required">*</span></label>
-                    <input type="tel" class="form-control" id="whatsapp" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">البريد الإلكتروني <span class="required">*</span></label>
-                    <input type="email" class="form-control" id="email" required>
-                </div>
-            `;
+            content = renderPersonalInfo();
+            break;
+        case 'details':
+            content = renderAdditionalDetails();
+            break;
+        case 'group':
+            content = renderGroupInfo();
+            break;
+        case 'recipient':
+            content = renderRecipientInfo();
+            break;
+        case 'message':
+            content = renderGiftMessage();
+            break;
+        case 'story':
+            content = renderGrantStory();
+            break;
+        case 'financial':
+            content = renderFinancialInfo();
+            break;
+        case 'plan':
+            content = renderGrantPlan();
+            break;
+        case 'commitment':
+            content = renderCommitment();
+            break;
+        case 'payment':
+            content = renderPaymentMethod();
             break;
         case 'review':
-            content = `
-                <div class="section-header">
-                    <h3><i class="fas fa-check-circle"></i> مراجعة وتأكيد</h3>
-                    <p>تأكد من البيانات قبل الإرسال</p>
-                </div>
-                <div class="review-container">
-                    <div class="form-group">
-                        <div class="form-check">
-                            <input type="checkbox" id="agreeTerms" required>
-                            <label for="agreeTerms">
-                                <strong>أوافق على الشروط والأحكام</strong>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            `;
+            content = renderReview();
             break;
         default:
             content = `
                 <div class="section-header">
                     <h3>${currentStepData.title}</h3>
-                    <p>محتوى هذه الخطوة سيتم إضافته لاحقاً</p>
-                </div>
-                <div class="info-alert">
-                    <i class="fas fa-info-circle"></i>
-                    <div>هذه خطوة تجريبية لاختبار التنقل</div>
+                    <p>محتوى هذه الخطوة قيد التطوير</p>
                 </div>
             `;
     }
     
-    container.innerHTML = `<div class="form-section active">${content}</div>`;
+    container.innerHTML = `
+        <div class="form-section active">
+            ${content}
+        </div>
+    `;
+    
+    // ربط الأحداث الخاصة بالخطوة
+    bindStepEvents();
+}
+
+// ==========================================
+// محتوى الخطوات المختلفة
+// ==========================================
+function renderPersonalInfo() {
+    const title = bookingData.type === 'gift' ? 'بيانات المُهدي' : 
+                  bookingData.type === 'group' ? 'بيانات منسق المجموعة' : 
+                  'بياناتك الشخصية';
+    
+    return `
+        <div class="section-header">
+            <h3><i class="fas fa-user"></i> ${title}</h3>
+            <p>معلوماتك الأساسية للتواصل</p>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label class="form-label">
+                        <span class="required">*</span> الاسم الكامل
+                    </label>
+                    <input type="text" class="form-control" id="fullName" required 
+                           value="${bookingData.formData.fullName || ''}">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label class="form-label">
+                        <span class="required">*</span> رقم الواتساب
+                    </label>
+                    <input type="tel" class="form-control" id="whatsapp" required
+                           placeholder="01xxxxxxxxx"
+                           value="${bookingData.formData.whatsapp || ''}">
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label class="form-label">
+                        <span class="required">*</span> البريد الإلكتروني
+                    </label>
+                    <input type="email" class="form-control" id="email" required
+                           value="${bookingData.formData.email || ''}">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label class="form-label">
+                        <span class="required">*</span> المحافظة/المدينة
+                    </label>
+                    <select class="form-select" id="city" required>
+                        <option value="">اختر المحافظة</option>
+                        <option value="cairo">القاهرة</option>
+                        <option value="giza">الجيزة</option>
+                        <option value="alex">الإسكندرية</option>
+                        <option value="other">أخرى</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        ${bookingData.type !== 'gift' ? `
+        <div class="form-group">
+            <label class="form-label">الوظيفة/الدراسة الحالية</label>
+            <input type="text" class="form-control" id="occupation"
+                   value="${bookingData.formData.occupation || ''}">
+        </div>
+        ` : ''}
+        
+        <div class="form-group">
+            <label class="form-label">كيف عرفت عن منظور الفؤاد؟</label>
+            <select class="form-select" id="source">
+                <option value="">اختر</option>
+                <option value="facebook">فيسبوك</option>
+                <option value="instagram">انستجرام</option>
+                <option value="youtube">يوتيوب</option>
+                <option value="friend">صديق</option>
+                <option value="other">أخرى</option>
+            </select>
+        </div>
+    `;
+}
+
+function renderAdditionalDetails() {
+    return `
+        <div class="section-header">
+            <h3><i class="fas fa-info-circle"></i> معلومات إضافية</h3>
+            <p>ساعدنا لنقدم لك تجربة أفضل</p>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">
+                <span class="required">*</span> ما توقعاتك من الدورة؟
+            </label>
+            <textarea class="form-control" id="expectations" rows="4" required
+                      placeholder="اكتب توقعاتك وما تريد تحقيقه من هذه الرحلة...">${bookingData.formData.expectations || ''}</textarea>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">هل لديك خبرة سابقة في الموضوع؟</label>
+            <select class="form-select" id="experience">
+                <option value="">اختر</option>
+                <option value="none">لا يوجد</option>
+                <option value="basic">مبتدئ</option>
+                <option value="intermediate">متوسط</option>
+                <option value="advanced">متقدم</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">كيف تخطط لتطبيق ما ستتعلمه؟</label>
+            <textarea class="form-control" id="applicationPlan" rows="3"
+                      placeholder="شارك معنا خططك...">${bookingData.formData.applicationPlan || ''}</textarea>
+        </div>
+        
+        <div class="info-alert">
+            <i class="fas fa-info-circle"></i>
+            <div>
+                <strong>ملاحظة:</strong> هذه المعلومات تساعدنا في تخصيص المحتوى ليناسب احتياجاتك بشكل أفضل
+            </div>
+        </div>
+    `;
+}
+
+function renderPaymentMethod() {
+    // للمنح لا نعرض طرق الدفع
+    if (bookingData.type === 'grant') {
+        return `
+            <div class="section-header">
+                <h3><i class="fas fa-envelope-open"></i> إرسال الطلب</h3>
+                <p>طلبك جاهز للإرسال</p>
+            </div>
+            
+            <div class="info-alert">
+                <i class="fas fa-clock"></i>
+                <div>
+                    <strong>ماذا يحدث بعد الإرسال؟</strong>
+                    <ul class="mt-2 mb-0">
+                        <li>سنراجع طلبك خلال 24-48 ساعة</li>
+                        <li>قد نتواصل معك لمعلومات إضافية</li>
+                        <li>ستصلك النتيجة على الواتساب</li>
+                        <li>في حالة الموافقة، سنناقش معك تفاصيل الخطة</li>
+                    </ul>
+                </div>
+            </div>
+        `;
+    }
+    
+    return `
+        <div class="section-header">
+            <h3><i class="fas fa-credit-card"></i> طريقة الدفع</h3>
+            <p>اختر الطريقة المناسبة لك</p>
+        </div>
+        
+        <div class="payment-methods">
+            <div class="payment-method selected" data-payment="vodafone">
+                <i class="fas fa-mobile-alt"></i>
+                <h6>فودافون كاش</h6>
+                <small>01224938330</small>
+            </div>
+            <div class="payment-method" data-payment="instapay">
+                <i class="fas fa-bolt"></i>
+                <h6>انستاباي</h6>
+                <small>تحويل فوري</small>
+            </div>
+            <div class="payment-method" data-payment="bank">
+                <i class="fas fa-university"></i>
+                <h6>تحويل بنكي</h6>
+                <small>CIB - QNB</small>
+            </div>
+            <div class="payment-method" data-payment="card">
+                <i class="fas fa-credit-card"></i>
+                <h6>بطاقة بنكية</h6>
+                <small>Visa/MasterCard</small>
+            </div>
+        </div>
+        
+        <div class="info-alert">
+            <i class="fas fa-shield-alt"></i>
+            <div>
+                <strong>دفع آمن:</strong> جميع معاملاتك المالية محمية ومشفرة. 
+                ستظهر لك تفاصيل الدفع بعد تأكيد الحجز.
+            </div>
+        </div>
+    `;
+}
+
+function renderReview() {
+    const data = collectFormData();
+    
+    return `
+        <div class="section-header">
+            <h3><i class="fas fa-check-circle"></i> مراجعة وتأكيد</h3>
+            <p>تأكد من البيانات قبل الإرسال</p>
+        </div>
+        
+        <div class="review-container">
+            <!-- البيانات الشخصية -->
+            <div class="review-section">
+                <h5 class="review-title">البيانات الشخصية</h5>
+                <div class="review-item">
+                    <span>الاسم:</span>
+                    <span>${data.fullName || '--'}</span>
+                </div>
+                <div class="review-item">
+                    <span>الواتساب:</span>
+                    <span>${data.whatsapp || '--'}</span>
+                </div>
+                <div class="review-item">
+                    <span>البريد الإلكتروني:</span>
+                    <span>${data.email || '--'}</span>
+                </div>
+            </div>
+            
+            <!-- تفاصيل الحجز -->
+            <div class="review-section">
+                <h5 class="review-title">تفاصيل الحجز</h5>
+                <div class="review-item">
+                    <span>الدورة:</span>
+                    <span>${bookingData.courseName}</span>
+                </div>
+                <div class="review-item">
+                    <span>نوع الحجز:</span>
+                    <span>${getBookingTypeLabel()}</span>
+                </div>
+                <div class="review-item">
+                    <span>المبلغ:</span>
+                    <span class="text-warning">${bookingData.finalPrice.toLocaleString('ar-EG')} ج.م</span>
+                </div>
+            </div>
+            
+            <!-- الموافقات -->
+            <div class="form-group mt-4">
+                <div class="form-check">
+                    <input type="checkbox" id="agreeTerms" required>
+                    <label for="agreeTerms">
+                        <strong>أوافق على الشروط والأحكام وأقر بصحة جميع البيانات المدخلة</strong>
+                    </label>
+                </div>
+                ${bookingData.type !== 'grant' ? `
+                <div class="form-check">
+                    <input type="checkbox" id="agreePayment" required>
+                    <label for="agreePayment">
+                        أتعهد بإتمام الدفع خلال 48 ساعة من تأكيد الحجز
+                    </label>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
+// ==========================================
+// دوال مساعدة للعرض
+// ==========================================
+function getBookingTypeLabel() {
+    const labels = {
+        'individual': 'رحلة فردية',
+        'group': 'رحلة جماعية',
+        'gift': 'إهداء رحلة',
+        'grant': 'طلب منحة دراسية'
+    };
+    return labels[bookingData.type] || 'حجز';
+}
+
+// ==========================================
+// ربط الأحداث الخاصة بكل خطوة
+// ==========================================
+function bindStepEvents() {
+    // أحداث اختيار طرق الدفع
+    document.querySelectorAll('.payment-method').forEach(method => {
+        method.addEventListener('click', function() {
+            document.querySelectorAll('.payment-method').forEach(m => m.classList.remove('selected'));
+            this.classList.add('selected');
+        });
+    });
+    
+    // أحداث اختيار الخيارات
+    document.querySelectorAll('.option-card').forEach(card => {
+        card.addEventListener('click', function() {
+            const siblings = this.parentElement.querySelectorAll('.option-card');
+            siblings.forEach(s => s.classList.remove('selected'));
+            this.classList.add('selected');
+        });
+    });
+}
+
+// ==========================================
+// التنقل بين الخطوات
+// ==========================================
+function navigateStep(direction) {
+    // حفظ البيانات الحالية
+    saveTemporaryData();
+    
+    // التحقق من الصحة عند الانتقال للأمام
+    if (direction === 'next' && !validateCurrentStep()) {
+        return;
+    }
+    
+    // تحديث رقم الخطوة
+    if (direction === 'next') {
+        bookingData.currentStep++;
+    } else {
+        bookingData.currentStep--;
+    }
+    
+    // عرض الخطوة الجديدة
+    renderCurrentStep();
+    updateProgressBar();
+    updateNavigationButtons();
+    
+    // التمرير لأعلى
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ==========================================
@@ -1024,6 +1572,8 @@ function validateCurrentStep() {
     for (let field of requiredFields) {
         if (!field.value.trim() && !field.checked) {
             field.focus();
+            field.classList.add('is-invalid');
+            
             Swal.fire({
                 icon: 'warning',
                 title: 'حقل مطلوب',
@@ -1033,36 +1583,60 @@ function validateCurrentStep() {
             return false;
         }
     }
+    
+    // تحقق خاص من رقم الواتساب
+    const whatsapp = document.getElementById('whatsapp');
+    if (whatsapp && whatsapp.value) {
+        const phoneRegex = /^01[0125][0-9]{8}$/;
+        if (!phoneRegex.test(whatsapp.value)) {
+            whatsapp.focus();
+            Swal.fire({
+                icon: 'warning',
+                title: 'رقم غير صحيح',
+                text: 'الرجاء إدخال رقم واتساب صحيح',
+                confirmButtonColor: '#FFD700'
+            });
+            return false;
+        }
+    }
+    
     return true;
 }
 
 // ==========================================
-// التنقل بين الخطوات
+// جمع كل البيانات
 // ==========================================
-function navigateStep(direction) {
-    if (direction === 'next' && !validateCurrentStep()) {
-        return;
+function collectFormData() {
+    const form = document.getElementById('bookingForm');
+    if (!form) return bookingData.formData || {};
+    
+    const formData = new FormData(form);
+    const currentStepData = {};
+    
+    for (let [key, value] of formData.entries()) {
+        currentStepData[key] = value;
     }
     
-    if (direction === 'next') {
-        bookingData.currentStep++;
-    } else {
-        bookingData.currentStep--;
-    }
-    
-    renderCurrentStep();
-    updateProgressBar();
-    updateNavigationButtons();
-    
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return {
+        ...bookingData.formData,
+        ...currentStepData,
+        // البيانات الأساسية
+        bookingType: bookingData.type,
+        courseId: bookingData.courseId,
+        courseName: bookingData.courseName,
+        basePrice: bookingData.basePrice,
+        finalPrice: bookingData.finalPrice,
+        discounts: bookingData.discounts
+    };
 }
 
 // ==========================================
-// إرسال النموذج
+// إرسال الحجز
 // ==========================================
 async function submitBooking(e) {
     e.preventDefault();
     
+    // التحقق من الموافقات
     const agreeTerms = document.getElementById('agreeTerms');
     if (agreeTerms && !agreeTerms.checked) {
         Swal.fire({
@@ -1074,93 +1648,107 @@ async function submitBooking(e) {
         return;
     }
     
-    Swal.fire({
-        icon: 'success',
-        title: 'تم بنجاح!',
-        text: 'تم إرسال طلبك بنجاح',
-        confirmButtonColor: '#22C55E'
-    });
-}
-
-// ==========================================
-// تهيئة البيانات من URL
-// ==========================================
-function initializeBooking() {
-    console.log('🚀 بدء تهيئة الصفحة...');
-    
-    const params = new URLSearchParams(window.location.search);
-    const dataParam = params.get('data');
-    
-    if (!dataParam) {
-        console.warn('⚠️ لا توجد بيانات في URL');
-        // بيانات تجريبية للاختبار
-        bookingData.type = 'individual';
-        bookingData.courseName = 'ملاذ الحياري';
-        bookingData.basePrice = 1500;
-        bookingData.finalPrice = 1200;
-        bookingData.discounts = [
-            { type: 'عرض زمني', name: 'خصم مبكر', amount: 300 }
-        ];
-    } else {
-        try {
-            const decodedData = decodeURIComponent(dataParam);
-            const receivedData = JSON.parse(decodedData);
-            Object.assign(bookingData, receivedData);
-            console.log('✅ تم استلام البيانات:', bookingData);
-        } catch (error) {
-            console.error('❌ خطأ في تحليل البيانات:', error);
-            return;
-        }
+    // عرض التحميل
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    if (loadingOverlay) {
+        loadingOverlay.classList.add('active');
     }
     
-    // إعداد الخطوات وتحديث الواجهة
-    setupSteps();
-    updateDetailedSummary();
-    renderCurrentStep();
-    updateProgressBar();
-    updateNavigationButtons();
+    // جمع البيانات
+    const formData = collectFormData();
     
-    console.log('✅ تم تهيئة الصفحة بنجاح');
+    try {
+        // محاكاة الإرسال (استبدل برابط Google Script الحقيقي)
+        console.log('📤 إرسال البيانات:', formData);
+        
+        // await sendToGoogleSheets(formData);
+        
+        // إخفاء التحميل
+        if (loadingOverlay) {
+            loadingOverlay.classList.remove('active');
+        }
+        
+        // رسالة النجاح
+        Swal.fire({
+            icon: 'success',
+            title: 'تم بنجاح!',
+            html: `<p>رقم الحجز: <strong>BK${Date.now()}</strong></p><p>تم إرسال طلبك بنجاح</p>`,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#22C55E'
+        });
+        
+    } catch (error) {
+        if (loadingOverlay) {
+            loadingOverlay.classList.remove('active');
+        }
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ أثناء إرسال الحجز. الرجاء المحاولة مرة أخرى',
+            confirmButtonColor: '#E11D48'
+        });
+    }
 }
 
 // ==========================================
-// ربط الأحداث
+// ربط الأحداث الرئيسية
 // ==========================================
-function bindEvents() {
+function bindMainEvents() {
     const btnNext = document.getElementById('btnNext');
     const btnPrev = document.getElementById('btnPrev');
     const bookingForm = document.getElementById('bookingForm');
     
     if (btnNext) {
-        btnNext.addEventListener('click', () => navigateStep('next'));
+        btnNext.addEventListener('click', () => {
+            console.log('👆 تم الضغط على التالي');
+            navigateStep('next');
+        });
     }
     
     if (btnPrev) {
-        btnPrev.addEventListener('click', () => navigateStep('prev'));
+        btnPrev.addEventListener('click', () => {
+            console.log('👆 تم الضغط على السابق');
+            navigateStep('prev');
+        });
     }
     
     if (bookingForm) {
         bookingForm.addEventListener('submit', submitBooking);
     }
+    
+    // حفظ تلقائي عند التغيير
+    document.addEventListener('input', function(e) {
+        if (e.target.form && e.target.form.id === 'bookingForm') {
+            clearTimeout(window.autoSaveTimer);
+            window.autoSaveTimer = setTimeout(saveTemporaryData, 3000);
+        }
+    });
 }
 
 // ==========================================
-// التهيئة عند تحميل الصفحة
+// التهيئة الآمنة عند تحميل الصفحة
 // ==========================================
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('📄 تم تحميل الصفحة');
+    console.log('📄 تم تحميل الصفحة، بدء التهيئة...');
     
     try {
+        // 1. تهيئة البيانات من URL
         initializeBooking();
-        bindEvents();
-        console.log('✅ تم تهيئة كل شيء بنجاح');
+        
+        // 2. ربط الأحداث
+        bindMainEvents();
+        
+        console.log('✅ تم تهيئة صفحة الحجز بنجاح');
+        
     } catch (error) {
-        console.error('❌ خطأ في التهيئة:', error);
+        console.error('❌ خطأ في تهيئة الصفحة:', error);
+        
         Swal.fire({
             icon: 'error',
             title: 'خطأ في التحميل',
             text: 'حدث خطأ أثناء تحميل الصفحة',
-            confirmButtonColor: '#E11D48'
+            confirmButtonColor: '#FFD700'
         });
     }
 });
