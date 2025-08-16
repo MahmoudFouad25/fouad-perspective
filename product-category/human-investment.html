@@ -4314,24 +4314,39 @@ const smartCalculator = {
     const total = document.getElementById('calcTotal').textContent;
     const journey = this.selectedJourney;
     
-    // تجهيز البيانات للإرسال
+    // جمع كل البيانات المحسوبة
     const bookingParams = new URLSearchParams({
         type: journey,
-        course: this.courseData.courseId || 'default',
-        name: this.courseData.title || 'ملاذ الحيارى',
-        price: total.replace(/[^\d]/g, ''),
-        plan: this.getSelectedPaymentPlan()
+        courseId: this.courseData.courseId || 'default',
+        courseName: this.courseData.title || 'ملاذ الحيارى',
+        basePrice: this.courseData.price || 10000,
+        finalPrice: total.replace(/[^\d]/g, ''),
+        paymentPlan: this.getSelectedPaymentPlan(),
+        paymentMethod: this.getSelectedPaymentMethod()
     });
     
-    // إضافة بيانات خاصة حسب النوع
-    if (journey === 'group') {
-        bookingParams.append('groupSize', this.selectedGroup ? 
-            this.courseData.groupDiscounts[this.selectedGroup].minSize : 3);
-    } else if (journey === 'gift') {
-        bookingParams.append('giftType', this.selectedGift);
+    // إضافة الخصومات
+    const discounts = this.getAppliedDiscounts();
+    if (discounts.length > 0) {
+        bookingParams.append('discounts', encodeURIComponent(JSON.stringify(discounts)));
     }
     
-    // الانتقال لصفحة الحجز
+    // بيانات خاصة بكل نوع
+    if (journey === 'group') {
+        const group = this.courseData.groupDiscounts[this.selectedGroup];
+        bookingParams.append('groupSize', group ? group.minSize : 3);
+        bookingParams.append('groupDiscount', group ? group.percentage : 0);
+    } else if (journey === 'gift') {
+        bookingParams.append('giftType', this.selectedGift);
+        if (this.selectedGift === 'voucher') {
+            const voucherAmount = document.getElementById('voucherAmount')?.value || 0;
+            bookingParams.append('giftAmount', voucherAmount);
+        } else {
+            bookingParams.append('giftAmount', total.replace(/[^\d]/g, ''));
+        }
+    }
+    
+    // الانتقال لصفحة الحجز مع كل البيانات
     window.location.href = `booking-page.html?${bookingParams.toString()}`;
 },
 
@@ -4340,14 +4355,79 @@ getSelectedPaymentPlan() {
     if (!paymentCard) return '';
     
     const payment = paymentCard.dataset.payment;
-    if (payment === 'cash') return 'نقدي';
+    if (payment === 'cash') return 'دفعة واحدة (نقدي)';
     if (payment.startsWith('plan_')) {
         const planIndex = parseInt(payment.split('_')[1]);
         const plan = this.courseData.paymentPlans[planIndex];
-        return plan ? plan.name : '';
+        if (plan) {
+            // حساب تفاصيل الخطة
+            const total = parseInt(document.getElementById('calcTotal').textContent.replace(/[^\d]/g, ''));
+            const firstPayment = Math.round(total * plan.firstPaymentPercent / 100 / 10) * 10;
+            const remaining = total - firstPayment;
+            const monthly = Math.round(remaining / (plan.installments - 1) / 10) * 10;
+            return `${firstPayment} ج.م + ${plan.installments - 1} × ${monthly} ج.م`;
+        }
     }
     return '';
 },
+
+getSelectedPaymentMethod() {
+    const paymentCard = document.querySelector('.payment-card.active');
+    return paymentCard ? paymentCard.dataset.payment : 'cash';
+},
+
+getAppliedDiscounts() {
+    const discounts = [];
+    
+    // العرض الزمني
+    const activeOffer = this.getActiveTimeOffer();
+    if (activeOffer) {
+        discounts.push({
+            type: 'time',
+            name: activeOffer.name,
+            percentage: activeOffer.percentage,
+            amount: Math.round(this.courseData.price * activeOffer.percentage / 100)
+        });
+    }
+    
+    // خصم المجموعة
+    if (this.selectedJourney === 'group' && this.selectedGroup !== null) {
+        const group = this.courseData.groupDiscounts[this.selectedGroup];
+        if (group) {
+            discounts.push({
+                type: 'group',
+                name: group.name,
+                percentage: group.percentage,
+                amount: Math.round(this.courseData.price * group.percentage / 100)
+            });
+        }
+    }
+    
+    // خصم الدفع النقدي
+    const paymentCard = document.querySelector('.payment-card.active');
+    if (paymentCard?.dataset.payment === 'cash' && this.courseData.cashDiscount?.enabled) {
+        discounts.push({
+            type: 'cash',
+            name: 'دفع نقدي',
+            percentage: this.courseData.cashDiscount.percentage,
+            amount: Math.round(this.courseData.price * this.courseData.cashDiscount.percentage / 100)
+        });
+    }
+    
+    // كود الخصم
+    if (this.appliedCoupon) {
+        discounts.push({
+            type: 'coupon',
+            name: this.appliedCoupon.code,
+            value: this.appliedCoupon.value,
+            amount: this.appliedCoupon.type === 'percentage' ? 
+                Math.round(this.courseData.price * this.appliedCoupon.value / 100) :
+                this.appliedCoupon.value
+        });
+    }
+    
+    return discounts;
+}
     
     handleIndividualBooking(total) {
         Swal.fire({
