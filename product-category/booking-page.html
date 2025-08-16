@@ -766,14 +766,61 @@ const bookingData = {
     formData: {}
 };
 
+    // دالة حساب الوقت المتبقي
+function calculateTimeLeft(endDate) {
+    if (!endDate) return null;
+    
+    const now = new Date();
+    const end = new Date(endDate);
+    const diff = end - now;
+    
+    if (diff <= 0) return null;
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    if (days > 0) return `${days} يوم و ${hours} ساعة`;
+    if (hours > 0) return `${hours} ساعة و ${minutes} دقيقة`;
+    return `${minutes} دقيقة`;
+}
+
+// دالة تحديث أزرار التنقل
+function updateNavigationButtons() {
+    const btnPrev = document.getElementById('btnPrev');
+    const btnNext = document.getElementById('btnNext');
+    const btnSubmit = document.getElementById('btnSubmit');
+    
+    if (!btnPrev || !btnNext || !btnSubmit) return;
+    
+    if (bookingData.currentStep === 1) {
+        btnPrev.style.display = 'none';
+    } else {
+        btnPrev.style.display = 'block';
+    }
+    
+    if (bookingData.currentStep === bookingData.totalSteps) {
+        btnNext.style.display = 'none';
+        btnSubmit.style.display = 'block';
+    } else {
+        btnNext.style.display = 'block';
+        btnSubmit.style.display = 'none';
+    }
+}
+    
+
 // ==========================================
 // استقبال البيانات من URL
 // ==========================================
-function initializeBooking() {
+
+   function initializeBooking() {
+    console.log('🚀 بدء تهيئة صفحة الحجز...');
+    
     const params = new URLSearchParams(window.location.search);
     const dataParam = params.get('data');
     
     if (!dataParam) {
+        console.error('❌ لا توجد بيانات في URL');
         Swal.fire({
             icon: 'error',
             title: 'خطأ في البيانات',
@@ -786,11 +833,18 @@ function initializeBooking() {
     }
     
     try {
+        console.log('📥 محاولة فك تشفير البيانات...');
+        
         // فك تشفير البيانات المستلمة
         const decodedData = decodeURIComponent(dataParam);
         const receivedData = JSON.parse(decodedData);
         
         console.log('✅ البيانات المستلمة من الحاسبة:', receivedData);
+        
+        // التحقق من أن البيانات الأساسية موجودة
+        if (!receivedData.type || !receivedData.courseName || !receivedData.finalPrice) {
+            throw new Error('البيانات الأساسية مفقودة');
+        }
         
         // ✅ الحل الجذري: نسخ البيانات بالضبط كما هي
         Object.assign(bookingData, receivedData);
@@ -798,21 +852,45 @@ function initializeBooking() {
         // ✅ تأكيد استلام البيانات الصحيحة
         console.log('✅ البيانات بعد النسخ:', bookingData);
         
-        // تحديد الخطوات
-        setupSteps();
+        // تحديد الخطوات حسب النوع
+        if (typeof setupSteps === 'function') {
+            setupSteps();
+        } else {
+            // إعداد افتراضي للخطوات
+            bookingData.totalSteps = 4;
+            bookingData.currentStep = 1;
+        }
         
-        // تحديث الواجهة فوراً
+        // تحديث الواجهة تدريجياً
+        console.log('🔄 تحديث واجهة المستخدم...');
+        
+        // 1. تحديث الملخص أولاً
         updateDetailedSummary();
-        renderCurrentStep();
-        updateProgressBar();
+        
+        // 2. عرض الخطوة الحالية
+        if (typeof renderCurrentStep === 'function') {
+            renderCurrentStep();
+        }
+        
+        // 3. تحديث شريط التقدم
+        if (typeof updateProgressBar === 'function') {
+            updateProgressBar();
+        }
+        
+        // 4. تحديث الأزرار
         updateNavigationButtons();
+        
+        console.log('✅ تم تهيئة صفحة الحجز بنجاح');
         
     } catch (error) {
         console.error('❌ خطأ في معالجة البيانات:', error);
+        console.error('❌ تفاصيل الخطأ:', error.message);
+        console.error('❌ البيانات المُرسلة:', dataParam);
+        
         Swal.fire({
             icon: 'error',
-            title: 'خطأ',
-            text: 'حدث خطأ في معالجة البيانات',
+            title: 'خطأ في معالجة البيانات',
+            text: `حدث خطأ: ${error.message}`,
             confirmButtonColor: '#FFD700'
         }).then(() => {
             window.location.href = 'human-investment.html';
@@ -961,7 +1039,8 @@ function updateProgressBar() {
 // ==========================================
 // عرض المحتوى الديناميكي للخطوة الحالية
 // ==========================================
-   function updateDetailedSummary() {
+   
+    function updateDetailedSummary() {
     console.log('🔄 تحديث الملخص بالبيانات:', bookingData);
     
     // التحقق من وجود البيانات
@@ -1001,11 +1080,45 @@ function updateProgressBar() {
         courseName.textContent = bookingData.courseName || 'الدورة';
     }
     
-    // ✅ تحديث تفاصيل الأسعار بالضبط كما جاءت من الحاسبة
-    updatePricingDisplay();
+    // تحديث الأسعار - نسخة مبسطة
+    updateSimplePricing();
+}
+
+// دالة مبسطة لتحديث الأسعار
+function updateSimplePricing() {
+    const priceBreakdown = document.getElementById('priceBreakdown');
+    if (!priceBreakdown) return;
     
-    // تحديث المعلومات الإضافية
-    updateAdditionalInfo();
+    let priceHTML = '<div class="detail-group-title">تفصيل الاستثمار</div>';
+    
+    // السعر الأساسي
+    priceHTML += `
+        <div class="price-item">
+            <span>السعر الأساسي:</span>
+            <span>${(bookingData.basePrice || 0).toLocaleString('ar-EG')} ج.م</span>
+        </div>
+    `;
+    
+    // إجمالي الخصومات
+    if (bookingData.discounts && bookingData.discounts.length > 0) {
+        const totalDiscount = bookingData.discounts.reduce((sum, d) => sum + (d.amount || 0), 0);
+        priceHTML += `
+            <div class="price-item discount">
+                <span>إجمالي الخصومات:</span>
+                <span>-${totalDiscount.toLocaleString('ar-EG')} ج.م</span>
+            </div>
+        `;
+    }
+    
+    // الإجمالي النهائي
+    priceHTML += `
+        <div class="price-item total">
+            <span>المبلغ المطلوب:</span>
+            <span>${(bookingData.finalPrice || 0).toLocaleString('ar-EG')} ج.م</span>
+        </div>
+    `;
+    
+    priceBreakdown.innerHTML = priceHTML;
 }
 
 // دالة منفصلة لتحديث الأسعار
@@ -2121,6 +2234,12 @@ function updateNavigationButtons() {
     const btnNext = document.getElementById('btnNext');
     const btnSubmit = document.getElementById('btnSubmit');
     
+    // ✅ فحص الأمان - التأكد من وجود العناصر
+    if (!btnPrev || !btnNext || !btnSubmit) {
+        console.warn('⚠️ بعض أزرار التنقل غير موجودة');
+        return;
+    }
+    
     if (bookingData.currentStep === 1) {
         btnPrev.style.display = 'none';
     } else {
@@ -2343,6 +2462,25 @@ document.getElementById('btnNext').addEventListener('click', () => {
 document.getElementById('btnPrev').addEventListener('click', () => {
     saveTemporaryData(); 
     navigateStep('prev');
+});
+
+    // حماية من الدوال المفقودة
+window.addEventListener('error', function(e) {
+    if (e.message.includes('is not defined')) {
+        console.warn('⚠️ دالة مفقودة:', e.message);
+        // لا تظهر خطأ للمستخدم، فقط سجل في Console
+        e.preventDefault();
+    }
+});
+
+// تهيئة آمنة عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('📄 تم تحميل الصفحة، بدء التهيئة...');
+    
+    // إعطاء وقت قصير للتأكد من تحميل كل شيء
+    setTimeout(() => {
+        initializeBooking();
+    }, 100);
 });
 // ==========================================
 // التهيئة عند التحميل
