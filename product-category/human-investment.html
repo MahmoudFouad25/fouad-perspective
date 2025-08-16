@@ -4313,84 +4313,63 @@ const smartCalculator = {
     handleMainAction() {
     const journey = this.selectedJourney;
     
-    // جمع كل التفاصيل بدقة
+    // جمع البيانات الصحيحة والكاملة
     const fullBookingData = {
-        // البيانات الأساسية
         type: journey,
         courseId: this.courseData.courseId || 'default',
         courseName: this.courseData.title || 'ملاذ الحيارى',
-        
-        // الأسعار التفصيلية
         basePrice: this.courseData.price || 10000,
-        salePrice: this.courseData.salePrice || null,
-        
-        // العروض الزمنية النشطة
-        activeOffer: null,
-        
-        // الخصومات التفصيلية
         discounts: [],
-        
-        // السعر النهائي
-        finalPrice: 0,
-        
-        // خطة الدفع
-        paymentMethod: null,
-        paymentPlan: null,
-        installmentDetails: null,
-        
-        // الكوبون
-        coupon: null,
-        
-        // بيانات خاصة بكل نوع
-        groupData: null,
-        giftData: null
+        finalPrice: 0
     };
     
-    // 1. العرض الزمني النشط
+    // حساب السعر الحالي بناءً على العروض النشطة
+    let currentPrice = this.courseData.price;
+    
+    // 1. العرض الزمني النشط أو السعر المخفض
     const activeOffer = this.getActiveTimeOffer();
     if (activeOffer) {
-        fullBookingData.activeOffer = {
-            name: activeOffer.name,
-            percentage: activeOffer.percentage,
-            startDate: activeOffer.startDate,
-            endDate: activeOffer.endDate,
-            amount: Math.round(this.courseData.price * activeOffer.percentage / 100)
-        };
+        const discountAmount = Math.round(this.courseData.price * activeOffer.percentage / 100);
+        currentPrice -= discountAmount;
         fullBookingData.discounts.push({
             type: 'عرض زمني',
             name: activeOffer.name,
             percentage: activeOffer.percentage,
-            amount: fullBookingData.activeOffer.amount
+            amount: discountAmount
         });
+        fullBookingData.activeOffer = activeOffer;
     } else if (this.courseData.salePrice && this.courseData.salePrice < this.courseData.price) {
-        // سعر التخفيض
+        const discountAmount = this.courseData.price - this.courseData.salePrice;
+        currentPrice = this.courseData.salePrice;
         fullBookingData.discounts.push({
             type: 'تخفيض',
             name: 'سعر مخفض',
-            amount: this.courseData.price - this.courseData.salePrice
+            amount: discountAmount
         });
     }
     
-    // 2. بيانات المجموعة
+    // 2. خصم المجموعة
     if (journey === 'group' && this.selectedGroup !== null) {
         const group = this.courseData.groupDiscounts[this.selectedGroup];
         if (group) {
+            const groupDiscountAmount = Math.round(currentPrice * group.percentage / 100);
+            currentPrice -= groupDiscountAmount;
             fullBookingData.groupData = {
                 name: group.name,
                 minSize: group.minSize,
                 percentage: group.percentage,
-                amount: Math.round((this.courseData.salePrice || this.courseData.price) * group.percentage / 100)
+                amount: groupDiscountAmount
             };
             fullBookingData.discounts.push({
                 type: 'خصم مجموعة',
                 name: group.name,
                 percentage: group.percentage,
-                amount: fullBookingData.groupData.amount
+                amount: groupDiscountAmount
             });
         }
     }
     
-    // 3. بيانات الإهداء
+    // 3. الإهداء - معالجة خاصة
     if (journey === 'gift') {
         fullBookingData.giftData = {
             type: this.selectedGift,
@@ -4399,76 +4378,71 @@ const smartCalculator = {
         };
         
         if (this.selectedGift === 'voucher') {
-            const voucherAmount = document.getElementById('voucherAmount')?.value || 0;
-            fullBookingData.giftData.voucherAmount = parseInt(voucherAmount);
-            fullBookingData.finalPrice = parseInt(voucherAmount);
+            // للقسيمة: القيمة المدخلة هي المبلغ النهائي
+            const voucherAmount = parseInt(document.getElementById('voucherAmount')?.value || 1000);
+            fullBookingData.giftData.voucherAmount = voucherAmount;
+            fullBookingData.finalPrice = voucherAmount;
+            fullBookingData.isVoucher = true;
+            // لا نحسب خصومات للقسيمة
+            fullBookingData.discounts = [];
         }
     }
     
-    // 4. طريقة الدفع والخصومات
+    // 4. طريقة الدفع والأقساط
     const paymentCard = document.querySelector('.payment-card.active');
-    if (paymentCard) {
+    if (paymentCard && !fullBookingData.isVoucher) {
         const paymentMethod = paymentCard.dataset.payment;
         fullBookingData.paymentMethod = paymentMethod;
         
-        // خصم الدفع النقدي
         if (paymentMethod === 'cash' && this.courseData.cashDiscount?.enabled) {
-            let priceAfterDiscounts = this.courseData.price;
-            fullBookingData.discounts.forEach(d => priceAfterDiscounts -= d.amount);
-            
-            const cashDiscountAmount = Math.round(priceAfterDiscounts * this.courseData.cashDiscount.percentage / 100);
+            // خصم الدفع النقدي
+            const cashDiscountAmount = Math.round(currentPrice * this.courseData.cashDiscount.percentage / 100);
+            currentPrice -= cashDiscountAmount;
             fullBookingData.discounts.push({
                 type: 'خصم نقدي',
                 name: `دفع كامل ${this.courseData.cashDiscount.percentage}%`,
                 percentage: this.courseData.cashDiscount.percentage,
                 amount: cashDiscountAmount
             });
-        }
-        
-        // خطط الأقساط
-        if (paymentMethod.startsWith('plan_')) {
+        } else if (paymentMethod.startsWith('plan_')) {
+            // خطة الأقساط
             const planIndex = parseInt(paymentMethod.split('_')[1]);
             const plan = this.courseData.paymentPlans[planIndex];
             if (plan) {
-                let finalPrice = this.courseData.price;
-                fullBookingData.discounts.forEach(d => finalPrice -= d.amount);
-                
-                const firstPayment = Math.round(finalPrice * plan.firstPaymentPercent / 100 / 10) * 10;
-                const remaining = finalPrice - firstPayment;
+                const firstPayment = Math.round(currentPrice * plan.firstPaymentPercent / 100 / 10) * 10;
+                const remaining = currentPrice - firstPayment;
                 const monthlyAmount = Math.round(remaining / (plan.installments - 1) / 10) * 10;
                 
-                fullBookingData.paymentPlan = plan.name;
                 fullBookingData.installmentDetails = {
                     planName: plan.name,
                     installments: plan.installments,
                     firstPayment: firstPayment,
+                    firstPaymentPercent: plan.firstPaymentPercent,
                     monthlyAmount: monthlyAmount,
                     totalMonths: plan.installments - 1,
-                    firstPaymentPercent: plan.firstPaymentPercent
+                    totalAmount: firstPayment + (monthlyAmount * (plan.installments - 1))
                 };
+                fullBookingData.paymentPlan = plan.name;
             }
         }
     }
     
     // 5. الكوبون
-    if (this.appliedCoupon) {
-        let priceAfterDiscounts = this.courseData.price;
-        fullBookingData.discounts.forEach(d => priceAfterDiscounts -= d.amount);
-        
+    if (this.appliedCoupon && !fullBookingData.isVoucher) {
         let couponAmount = 0;
         if (this.appliedCoupon.type === 'percentage') {
-            couponAmount = Math.round(priceAfterDiscounts * this.appliedCoupon.value / 100);
+            couponAmount = Math.round(currentPrice * this.appliedCoupon.value / 100);
         } else {
-            couponAmount = Math.min(this.appliedCoupon.value, priceAfterDiscounts);
+            couponAmount = Math.min(this.appliedCoupon.value, currentPrice);
         }
         
+        currentPrice -= couponAmount;
         fullBookingData.coupon = {
             code: this.appliedCoupon.code,
             type: this.appliedCoupon.type,
             value: this.appliedCoupon.value,
             amount: couponAmount
         };
-        
         fullBookingData.discounts.push({
             type: 'كود خصم',
             name: this.appliedCoupon.code,
@@ -4476,18 +4450,16 @@ const smartCalculator = {
         });
     }
     
-    // 6. حساب السعر النهائي
-    if (journey !== 'gift' || this.selectedGift !== 'voucher') {
-        fullBookingData.finalPrice = this.courseData.price;
-        fullBookingData.discounts.forEach(d => {
-            fullBookingData.finalPrice -= d.amount;
-        });
+    // السعر النهائي
+    if (!fullBookingData.isVoucher) {
+        fullBookingData.finalPrice = Math.max(currentPrice, 0);
     }
     
-    // 7. التحويل لـ URL parameters
-    const params = new URLSearchParams();
+    // التحقق من صحة البيانات قبل الإرسال
+    console.log('Booking Data to Send:', fullBookingData);
     
-    // تحويل كل البيانات لـ JSON وترميزها
+    // التحويل لـ URL
+    const params = new URLSearchParams();
     params.append('data', encodeURIComponent(JSON.stringify(fullBookingData)));
     
     // الانتقال للصفحة
@@ -4496,21 +4468,20 @@ const smartCalculator = {
 
 // دالة زر "أحتاج دعم أكبر"
 handleGrantRequest() {
-    // جمع البيانات الحالية
-    const currentData = {
+    const grantData = {
         type: 'grant',
         courseId: this.courseData.courseId || 'default',
         courseName: this.courseData.title || 'ملاذ الحيارى',
         basePrice: this.courseData.price || 10000,
-        currentCalculatedPrice: parseInt(document.getElementById('calcTotal').textContent.replace(/[^\d]/g, '')),
-        requestReason: 'يحتاج دعم إضافي',
-        previousJourney: this.selectedJourney
+        // لا ننقل أي عروض أو خصومات للمنح
+        discounts: [],
+        finalPrice: 0, // سيحدد لاحقاً
+        isGrantRequest: true
     };
     
     const params = new URLSearchParams();
-    params.append('data', encodeURIComponent(JSON.stringify(currentData)));
+    params.append('data', encodeURIComponent(JSON.stringify(grantData)));
     
-    // الانتقال لصفحة الحجز بنوع منحة
     window.location.href = `booking-page.html?${params.toString()}`;
 },
     
