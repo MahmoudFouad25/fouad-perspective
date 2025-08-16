@@ -4311,122 +4311,207 @@ const smartCalculator = {
     },
     
     handleMainAction() {
-    const total = document.getElementById('calcTotal').textContent;
     const journey = this.selectedJourney;
     
-    // جمع كل البيانات المحسوبة
-    const bookingParams = new URLSearchParams({
+    // جمع كل التفاصيل بدقة
+    const fullBookingData = {
+        // البيانات الأساسية
         type: journey,
         courseId: this.courseData.courseId || 'default',
         courseName: this.courseData.title || 'ملاذ الحيارى',
+        
+        // الأسعار التفصيلية
         basePrice: this.courseData.price || 10000,
-        finalPrice: total.replace(/[^\d]/g, ''),
-        paymentPlan: this.getSelectedPaymentPlan(),
-        paymentMethod: this.getSelectedPaymentMethod()
-    });
+        salePrice: this.courseData.salePrice || null,
+        
+        // العروض الزمنية النشطة
+        activeOffer: null,
+        
+        // الخصومات التفصيلية
+        discounts: [],
+        
+        // السعر النهائي
+        finalPrice: 0,
+        
+        // خطة الدفع
+        paymentMethod: null,
+        paymentPlan: null,
+        installmentDetails: null,
+        
+        // الكوبون
+        coupon: null,
+        
+        // بيانات خاصة بكل نوع
+        groupData: null,
+        giftData: null
+    };
     
-    // إضافة الخصومات
-    const discounts = this.getAppliedDiscounts();
-    if (discounts.length > 0) {
-        bookingParams.append('discounts', encodeURIComponent(JSON.stringify(discounts)));
-    }
-    
-    // بيانات خاصة بكل نوع
-    if (journey === 'group') {
-        const group = this.courseData.groupDiscounts[this.selectedGroup];
-        bookingParams.append('groupSize', group ? group.minSize : 3);
-        bookingParams.append('groupDiscount', group ? group.percentage : 0);
-    } else if (journey === 'gift') {
-        bookingParams.append('giftType', this.selectedGift);
-        if (this.selectedGift === 'voucher') {
-            const voucherAmount = document.getElementById('voucherAmount')?.value || 0;
-            bookingParams.append('giftAmount', voucherAmount);
-        } else {
-            bookingParams.append('giftAmount', total.replace(/[^\d]/g, ''));
-        }
-    }
-    
-    // الانتقال لصفحة الحجز مع كل البيانات
-    window.location.href = `booking-page.html?${bookingParams.toString()}`;
-},
-
-getSelectedPaymentPlan() {
-    const paymentCard = document.querySelector('.payment-card.active');
-    if (!paymentCard) return '';
-    
-    const payment = paymentCard.dataset.payment;
-    if (payment === 'cash') return 'دفعة واحدة (نقدي)';
-    if (payment.startsWith('plan_')) {
-        const planIndex = parseInt(payment.split('_')[1]);
-        const plan = this.courseData.paymentPlans[planIndex];
-        if (plan) {
-            // حساب تفاصيل الخطة
-            const total = parseInt(document.getElementById('calcTotal').textContent.replace(/[^\d]/g, ''));
-            const firstPayment = Math.round(total * plan.firstPaymentPercent / 100 / 10) * 10;
-            const remaining = total - firstPayment;
-            const monthly = Math.round(remaining / (plan.installments - 1) / 10) * 10;
-            return `${firstPayment} ج.م + ${plan.installments - 1} × ${monthly} ج.م`;
-        }
-    }
-    return '';
-},
-
-getSelectedPaymentMethod() {
-    const paymentCard = document.querySelector('.payment-card.active');
-    return paymentCard ? paymentCard.dataset.payment : 'cash';
-},
-
-getAppliedDiscounts() {
-    const discounts = [];
-    
-    // العرض الزمني
+    // 1. العرض الزمني النشط
     const activeOffer = this.getActiveTimeOffer();
     if (activeOffer) {
-        discounts.push({
-            type: 'time',
+        fullBookingData.activeOffer = {
             name: activeOffer.name,
             percentage: activeOffer.percentage,
+            startDate: activeOffer.startDate,
+            endDate: activeOffer.endDate,
             amount: Math.round(this.courseData.price * activeOffer.percentage / 100)
+        };
+        fullBookingData.discounts.push({
+            type: 'عرض زمني',
+            name: activeOffer.name,
+            percentage: activeOffer.percentage,
+            amount: fullBookingData.activeOffer.amount
+        });
+    } else if (this.courseData.salePrice && this.courseData.salePrice < this.courseData.price) {
+        // سعر التخفيض
+        fullBookingData.discounts.push({
+            type: 'تخفيض',
+            name: 'سعر مخفض',
+            amount: this.courseData.price - this.courseData.salePrice
         });
     }
     
-    // خصم المجموعة
-    if (this.selectedJourney === 'group' && this.selectedGroup !== null) {
+    // 2. بيانات المجموعة
+    if (journey === 'group' && this.selectedGroup !== null) {
         const group = this.courseData.groupDiscounts[this.selectedGroup];
         if (group) {
-            discounts.push({
-                type: 'group',
+            fullBookingData.groupData = {
+                name: group.name,
+                minSize: group.minSize,
+                percentage: group.percentage,
+                amount: Math.round((this.courseData.salePrice || this.courseData.price) * group.percentage / 100)
+            };
+            fullBookingData.discounts.push({
+                type: 'خصم مجموعة',
                 name: group.name,
                 percentage: group.percentage,
-                amount: Math.round(this.courseData.price * group.percentage / 100)
+                amount: fullBookingData.groupData.amount
             });
         }
     }
     
-    // خصم الدفع النقدي
+    // 3. بيانات الإهداء
+    if (journey === 'gift') {
+        fullBookingData.giftData = {
+            type: this.selectedGift,
+            typeName: this.selectedGift === 'specific' ? 'لشخص محدد' :
+                      this.selectedGift === 'anonymous' ? 'هدية مجهولة' : 'قسيمة دعم'
+        };
+        
+        if (this.selectedGift === 'voucher') {
+            const voucherAmount = document.getElementById('voucherAmount')?.value || 0;
+            fullBookingData.giftData.voucherAmount = parseInt(voucherAmount);
+            fullBookingData.finalPrice = parseInt(voucherAmount);
+        }
+    }
+    
+    // 4. طريقة الدفع والخصومات
     const paymentCard = document.querySelector('.payment-card.active');
-    if (paymentCard?.dataset.payment === 'cash' && this.courseData.cashDiscount?.enabled) {
-        discounts.push({
-            type: 'cash',
-            name: 'دفع نقدي',
-            percentage: this.courseData.cashDiscount.percentage,
-            amount: Math.round(this.courseData.price * this.courseData.cashDiscount.percentage / 100)
-        });
+    if (paymentCard) {
+        const paymentMethod = paymentCard.dataset.payment;
+        fullBookingData.paymentMethod = paymentMethod;
+        
+        // خصم الدفع النقدي
+        if (paymentMethod === 'cash' && this.courseData.cashDiscount?.enabled) {
+            let priceAfterDiscounts = this.courseData.price;
+            fullBookingData.discounts.forEach(d => priceAfterDiscounts -= d.amount);
+            
+            const cashDiscountAmount = Math.round(priceAfterDiscounts * this.courseData.cashDiscount.percentage / 100);
+            fullBookingData.discounts.push({
+                type: 'خصم نقدي',
+                name: `دفع كامل ${this.courseData.cashDiscount.percentage}%`,
+                percentage: this.courseData.cashDiscount.percentage,
+                amount: cashDiscountAmount
+            });
+        }
+        
+        // خطط الأقساط
+        if (paymentMethod.startsWith('plan_')) {
+            const planIndex = parseInt(paymentMethod.split('_')[1]);
+            const plan = this.courseData.paymentPlans[planIndex];
+            if (plan) {
+                let finalPrice = this.courseData.price;
+                fullBookingData.discounts.forEach(d => finalPrice -= d.amount);
+                
+                const firstPayment = Math.round(finalPrice * plan.firstPaymentPercent / 100 / 10) * 10;
+                const remaining = finalPrice - firstPayment;
+                const monthlyAmount = Math.round(remaining / (plan.installments - 1) / 10) * 10;
+                
+                fullBookingData.paymentPlan = plan.name;
+                fullBookingData.installmentDetails = {
+                    planName: plan.name,
+                    installments: plan.installments,
+                    firstPayment: firstPayment,
+                    monthlyAmount: monthlyAmount,
+                    totalMonths: plan.installments - 1,
+                    firstPaymentPercent: plan.firstPaymentPercent
+                };
+            }
+        }
     }
     
-    // كود الخصم
+    // 5. الكوبون
     if (this.appliedCoupon) {
-        discounts.push({
-            type: 'coupon',
-            name: this.appliedCoupon.code,
+        let priceAfterDiscounts = this.courseData.price;
+        fullBookingData.discounts.forEach(d => priceAfterDiscounts -= d.amount);
+        
+        let couponAmount = 0;
+        if (this.appliedCoupon.type === 'percentage') {
+            couponAmount = Math.round(priceAfterDiscounts * this.appliedCoupon.value / 100);
+        } else {
+            couponAmount = Math.min(this.appliedCoupon.value, priceAfterDiscounts);
+        }
+        
+        fullBookingData.coupon = {
+            code: this.appliedCoupon.code,
+            type: this.appliedCoupon.type,
             value: this.appliedCoupon.value,
-            amount: this.appliedCoupon.type === 'percentage' ? 
-                Math.round(this.courseData.price * this.appliedCoupon.value / 100) :
-                this.appliedCoupon.value
+            amount: couponAmount
+        };
+        
+        fullBookingData.discounts.push({
+            type: 'كود خصم',
+            name: this.appliedCoupon.code,
+            amount: couponAmount
         });
     }
     
-    return discounts;
+    // 6. حساب السعر النهائي
+    if (journey !== 'gift' || this.selectedGift !== 'voucher') {
+        fullBookingData.finalPrice = this.courseData.price;
+        fullBookingData.discounts.forEach(d => {
+            fullBookingData.finalPrice -= d.amount;
+        });
+    }
+    
+    // 7. التحويل لـ URL parameters
+    const params = new URLSearchParams();
+    
+    // تحويل كل البيانات لـ JSON وترميزها
+    params.append('data', encodeURIComponent(JSON.stringify(fullBookingData)));
+    
+    // الانتقال للصفحة
+    window.location.href = `booking-page.html?${params.toString()}`;
+},
+
+// دالة زر "أحتاج دعم أكبر"
+handleGrantRequest() {
+    // جمع البيانات الحالية
+    const currentData = {
+        type: 'grant',
+        courseId: this.courseData.courseId || 'default',
+        courseName: this.courseData.title || 'ملاذ الحيارى',
+        basePrice: this.courseData.price || 10000,
+        currentCalculatedPrice: parseInt(document.getElementById('calcTotal').textContent.replace(/[^\d]/g, '')),
+        requestReason: 'يحتاج دعم إضافي',
+        previousJourney: this.selectedJourney
+    };
+    
+    const params = new URLSearchParams();
+    params.append('data', encodeURIComponent(JSON.stringify(currentData)));
+    
+    // الانتقال لصفحة الحجز بنوع منحة
+    window.location.href = `booking-page.html?${params.toString()}`;
 },
     
     handleIndividualBooking(total) {
@@ -4687,37 +4772,7 @@ getAppliedDiscounts() {
     });
 },
     
-    handleGrantRequest() {
-        Swal.fire({
-            title: 'طلب دعم إضافي',
-            html: `
-                <div style="text-align: right;">
-                    <p>نحن نقدر ظروفك ونسعى لمساعدتك</p>
-                    <p>نقدم عدة أنواع من الدعم:</p>
-                    <ul style="text-align: right;">
-                        <li>منح جزئية (50% - 75%)</li>
-                        <li>خطط تقسيط مرنة (حتى 24 شهر)</li>
-                        <li>منح كاملة (100%) حسب الحالة</li>
-                        <li>العمل مقابل التعلم</li>
-                    </ul>
-                    <p>سيتم دراسة طلبك بسرية تامة</p>
-                </div>
-            `,
-            icon: 'info',
-            showCancelButton: true,
-            confirmButtonText: 'املأ نموذج الدعم',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#22C55E',
-            background: '#152238',
-            color: '#fff'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                // توجيه لنموذج طلب الدعم
-                console.log('توجيه لنموذج طلب الدعم...');
-                // window.location.href = '/grant-application';
-            }
-        });
-    }
+    
 };
 
 // تهيئة الحاسبة عند التحميل
