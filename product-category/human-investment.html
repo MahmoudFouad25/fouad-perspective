@@ -2672,18 +2672,16 @@
                             </div>
                         </div>
                         
-                        <!-- أزرار الإجراءات -->
-                        <div class="action-buttons">
-                            <button class="btn-primary-action" id="calcBookBtn">
-                                <i class="fas fa-shopping-cart"></i>
-                                احجز بهذا السعر
-                            </button>
-                            
-                            <button class="btn-secondary-action" id="calcGrantBtn" style="display:none;">
-                                <i class="fas fa-hands-helping"></i>
-                                أحتاج دعم أكبر
-                            </button>
-                        </div>
+                     <!-- أزرار الإجراءات -->
+<div class="action-buttons">
+    <button class="btn-primary-action" id="calcBookBtn">
+        🛒 احجز بهذا السعر
+    </button>
+    
+    <button class="btn-secondary-action grant-btn" id="calcGrantBtn" onclick="calculator.handleGrantRequest()">
+        🤲 أحتاج دعم أكبر
+    </button>
+</div>
                         
                         <!-- رسالة الدعم -->
 <div class="support-message" id="calcSupportMessage" style="display:none;">
@@ -4369,29 +4367,18 @@ removeCoupon() {
     handleMainAction() {
     const journey = this.selectedJourney;
     
-    // نقل الأرقام المحسوبة بالضبط من الواجهة
-    const calcTotal = document.getElementById('calcTotal');
-    const calcBase = document.getElementById('calcBase');
-    const calcDiscounts = document.getElementById('calcDiscounts');
-    const calcOffer = document.getElementById('calcOffer');
+    // جمع الأرقام الفعلية المعروضة على الشاشة
+    const displayedTotal = document.getElementById('calcTotal').textContent;
+    const finalPrice = parseInt(displayedTotal.replace(/[^\d]/g, '')) || 0;
     
     const fullBookingData = {
         type: journey,
-        courseId: this.courseData.courseId || 'default',
+        courseId: this.courseData.courseId || 'default', 
         courseName: this.courseData.title || 'ملاذ الحيارى',
-        
-        // الأرقام المحسوبة بالضبط كما هي
-        basePrice: parseInt(calcBase?.textContent.replace(/[^\d]/g, '')) || this.courseData.price,
-        finalPrice: parseInt(calcTotal.textContent.replace(/[^\d]/g, '')) || 0,
-        totalDiscounts: parseInt(calcDiscounts?.textContent.replace(/[^\d]/g, '')) || 0,
-        
-        // تفاصيل الخصومات
+        basePrice: this.courseData.price || 10000,
+        finalPrice: finalPrice, // السعر النهائي المعروض
         discounts: [],
-        
-        // العروض الزمنية
         activeOffer: null,
-        
-        // البيانات الخاصة
         paymentMethod: null,
         installmentDetails: null,
         groupData: null,
@@ -4399,7 +4386,7 @@ removeCoupon() {
         coupon: null
     };
     
-    // 1. العرض الزمني النشط مع تاريخ الانتهاء
+    // 1. العرض الزمني النشط
     const activeOffer = this.getActiveTimeOffer();
     if (activeOffer) {
         const endDate = new Date(activeOffer.endDate);
@@ -4417,29 +4404,28 @@ removeCoupon() {
         
         fullBookingData.discounts.push({
             type: 'عرض زمني',
-            name: `${activeOffer.name} (باقي ${daysLeft} يوم)`,
+            name: activeOffer.name,
             percentage: activeOffer.percentage,
             amount: fullBookingData.activeOffer.amount
         });
     } else if (this.courseData.salePrice && this.courseData.salePrice < this.courseData.price) {
-        const discountAmount = this.courseData.price - this.courseData.salePrice;
         fullBookingData.discounts.push({
             type: 'تخفيض',
             name: 'سعر مخفض',
-            amount: discountAmount
+            amount: this.courseData.price - this.courseData.salePrice
         });
     }
     
-    // 2. بيانات المجموعة
+    // 2. المجموعة
     if (journey === 'group' && this.selectedGroup !== null) {
         const group = this.courseData.groupDiscounts[this.selectedGroup];
         if (group) {
-            // نأخذ القيمة المحسوبة من الواجهة
-            const groupDiscountElement = document.querySelector('.discount-item.group-discount .discount-value');
-            const groupDiscountAmount = groupDiscountElement ? 
-                parseInt(groupDiscountElement.textContent.replace(/[^\d]/g, '')) : 
-                Math.round((this.courseData.salePrice || this.courseData.price) * group.percentage / 100);
+            const priceAfterTimeOffer = activeOffer ? 
+                this.courseData.price - Math.round(this.courseData.price * activeOffer.percentage / 100) :
+                (this.courseData.salePrice || this.courseData.price);
                 
+            const groupDiscountAmount = Math.round(priceAfterTimeOffer * group.percentage / 100);
+            
             fullBookingData.groupData = {
                 name: group.name,
                 minSize: group.minSize,
@@ -4470,6 +4456,7 @@ removeCoupon() {
             fullBookingData.finalPrice = voucherAmount;
             fullBookingData.isVoucher = true;
             fullBookingData.discounts = [];
+            fullBookingData.basePrice = voucherAmount; // للقسيمة، السعر الأساسي = القيمة المدخلة
         }
     }
     
@@ -4480,55 +4467,62 @@ removeCoupon() {
         fullBookingData.paymentMethod = paymentMethod;
         
         if (paymentMethod === 'cash' && this.courseData.cashDiscount?.enabled) {
-            // نأخذ قيمة الخصم النقدي من الواجهة
-            const cashDiscountElement = document.querySelector('.discount-item.cash-discount .discount-value');
-            const cashDiscountAmount = cashDiscountElement ? 
-                parseInt(cashDiscountElement.textContent.replace(/[^\d]/g, '')) : 0;
-                
-            if (cashDiscountAmount > 0) {
-                fullBookingData.discounts.push({
-                    type: 'خصم نقدي',
-                    name: `دفع كامل ${this.courseData.cashDiscount.percentage}%`,
-                    percentage: this.courseData.cashDiscount.percentage,
-                    amount: cashDiscountAmount
-                });
-            }
+            // حساب خصم النقدي على السعر بعد كل الخصومات
+            let priceBeforeCash = this.courseData.price;
+            fullBookingData.discounts.forEach(d => priceBeforeCash -= d.amount);
+            
+            const cashDiscountAmount = Math.round(priceBeforeCash * this.courseData.cashDiscount.percentage / 100);
+            
+            fullBookingData.discounts.push({
+                type: 'خصم نقدي',
+                name: `دفع كامل ${this.courseData.cashDiscount.percentage}%`,
+                percentage: this.courseData.cashDiscount.percentage,
+                amount: cashDiscountAmount
+            });
         } else if (paymentMethod.startsWith('plan_')) {
             const planIndex = parseInt(paymentMethod.split('_')[1]);
             const plan = this.courseData.paymentPlans[planIndex];
             if (plan) {
-                // نأخذ الأرقام المحسوبة من الواجهة
-                const installmentInfo = document.querySelector('.installment-info');
-                if (installmentInfo) {
-                    const firstPaymentText = installmentInfo.querySelector('.first-payment')?.textContent || '';
-                    const monthlyText = installmentInfo.querySelector('.monthly-payment')?.textContent || '';
-                    
-                    const firstPayment = parseInt(firstPaymentText.replace(/[^\d]/g, '')) || 0;
-                    const monthlyAmount = parseInt(monthlyText.replace(/[^\d]/g, '')) || 0;
-                    
-                    fullBookingData.installmentDetails = {
-                        planName: plan.name,
-                        installments: plan.installments,
-                        firstPayment: firstPayment,
-                        firstPaymentPercent: plan.firstPaymentPercent,
-                        monthlyAmount: monthlyAmount,
-                        totalMonths: plan.installments - 1,
-                        totalAmount: firstPayment + (monthlyAmount * (plan.installments - 1))
-                    };
-                    fullBookingData.paymentPlan = plan.name;
-                    fullBookingData.finalPrice = fullBookingData.installmentDetails.totalAmount;
-                }
+                const firstPayment = Math.round(finalPrice * plan.firstPaymentPercent / 100 / 10) * 10;
+                const remaining = finalPrice - firstPayment;
+                const monthlyAmount = Math.round(remaining / (plan.installments - 1) / 10) * 10;
+                
+                fullBookingData.installmentDetails = {
+                    planName: plan.name,
+                    installments: plan.installments,
+                    firstPayment: firstPayment,
+                    firstPaymentPercent: plan.firstPaymentPercent,
+                    monthlyAmount: monthlyAmount,
+                    totalMonths: plan.installments - 1,
+                    totalAmount: firstPayment + (monthlyAmount * (plan.installments - 1))
+                };
+                fullBookingData.paymentPlan = plan.name;
             }
         }
     }
     
     // 5. الكوبون
     if (this.appliedCoupon && !fullBookingData.isVoucher) {
-        // نأخذ قيمة الكوبون من الواجهة
-        const couponDiscountElement = document.querySelector('.discount-item.coupon-discount .discount-value');
-        const couponAmount = couponDiscountElement ? 
-            parseInt(couponDiscountElement.textContent.replace(/[^\d]/g, '')) : 0;
-            
+        let priceBeforeCoupon = this.courseData.price;
+        
+        // خصم العروض الزمنية والمجموعات أولاً
+        if (activeOffer) {
+            priceBeforeCoupon -= Math.round(this.courseData.price * activeOffer.percentage / 100);
+        } else if (this.courseData.salePrice) {
+            priceBeforeCoupon = this.courseData.salePrice;
+        }
+        
+        if (journey === 'group' && fullBookingData.groupData) {
+            priceBeforeCoupon -= fullBookingData.groupData.amount;
+        }
+        
+        let couponAmount = 0;
+        if (this.appliedCoupon.type === 'percentage') {
+            couponAmount = Math.round(priceBeforeCoupon * this.appliedCoupon.value / 100);
+        } else {
+            couponAmount = Math.min(this.appliedCoupon.value, priceBeforeCoupon);
+        }
+        
         fullBookingData.coupon = {
             code: this.appliedCoupon.code,
             type: this.appliedCoupon.type,
@@ -4543,63 +4537,31 @@ removeCoupon() {
         });
     }
     
-    // التحقق من البيانات
-    console.log('Final Booking Data:', fullBookingData);
+    console.log('Booking Data to Send:', fullBookingData);
     
-    // الإرسال
     const params = new URLSearchParams();
     params.append('data', encodeURIComponent(JSON.stringify(fullBookingData)));
     
     window.location.href = `booking-page.html?${params.toString()}`;
 },
+
+// دالة زر "أحتاج دعم أكبر" - بدون this.appliedCoupon
+handleGrantRequest() {
+    const grantData = {
+        type: 'grant',
+        courseId: this.courseData.courseId || 'default',
+        courseName: this.courseData.title || 'ملاذ الحيارى',
+        basePrice: this.courseData.price || 10000,
+        discounts: [],
+        finalPrice: 0,
+        isGrantRequest: true
+    };
     
-    handleGroupBooking(total) {
-        const group = this.courseData.groupDiscounts[this.selectedGroup];
-        
-        Swal.fire({
-            title: 'تأكيد حجز المجموعة',
-            html: `
-                <div style="text-align: right;">
-                    <p><strong>نوع الرحلة:</strong> ${group.name}</p>
-                    <p><strong>عدد الأفراد:</strong> ${group.minSize}+ أشخاص</p>
-                    <p><strong>السعر للفرد:</strong> ${total}</p>
-                    <hr>
-                    <p>ستحصل على رابط خاص لمشاركته مع المجموعة</p>
-                </div>
-            `,
-            icon: 'info',
-            showCancelButton: true,
-            confirmButtonText: 'متابعة',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#9333EA',
-            background: '#152238',
-            color: '#fff'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                // توليد رابط المجموعة
-                const groupLink = `${window.location.origin}/group-booking?id=${Date.now()}`;
-                
-                Swal.fire({
-                    title: 'رابط المجموعة جاهز!',
-                    html: `
-                        <div style="text-align: right;">
-                            <p>شارك هذا الرابط مع أفراد مجموعتك:</p>
-                            <div style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 5px; margin: 10px 0;">
-                                <code style="color: #FFD700;">${groupLink}</code>
-                            </div>
-                            <button onclick="navigator.clipboard.writeText('${groupLink}')" 
-                                    style="background: #9333EA; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
-                                نسخ الرابط
-                            </button>
-                        </div>
-                    `,
-                    icon: 'success',
-                    background: '#152238',
-                    color: '#fff'
-                });
-            }
-        });
-    },
+    const params = new URLSearchParams();
+    params.append('data', encodeURIComponent(JSON.stringify(grantData)));
+    
+    window.location.href = `booking-page.html?${params.toString()}`;
+},
     
     handleGiftAction(total) {
         const giftType = this.selectedGift;
