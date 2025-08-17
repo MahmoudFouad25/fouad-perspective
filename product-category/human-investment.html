@@ -2677,6 +2677,11 @@
     <button class="btn-primary-action" id="calcBookBtn">
         🛒 احجز بهذا السعر
     </button>
+    // في نهاية HTML الخاص بالحاسبة، أضف:
+<button onclick="smartCalculator.validateDataBeforeSending() && console.log(smartCalculator.getDisplayedValues())" 
+        style="background: #666; color: white; padding: 10px; margin-top: 10px; border-radius: 5px;">
+    تحقق من البيانات (للاختبار)
+</button>
     
     <button class="btn-secondary-action grant-btn" id="calcGrantBtn" onclick="smartCalculator.handleGrantRequest()">
         🤲 أحتاج دعم أكبر
@@ -3774,16 +3779,55 @@ animateNumbers();
 // الحاسبة الذكية المتطورة V2
 // الحاسبة الذكية المتطورة V3 - النسخة المصححة
 const smartCalculator = {
+    restoreFromStorage() {
+    const saved = localStorage.getItem('calculatorState');
+    if (saved) {
+        try {
+            const state = JSON.parse(saved);
+            // استعادة الحالة
+            this.selectedJourney = state.journey || 'individual';
+            this.selectedGroup = state.group || null;
+            this.selectedGift = state.gift || 'specific';
+            this.appliedCoupon = state.coupon || null;
+            
+            console.log('تم استعادة الحالة المحفوظة');
+            return true;
+        } catch (e) {
+            console.error('خطأ في استعادة البيانات');
+        }
+    }
+    return false;
+},
+
+saveToStorage() {
+    const state = {
+        journey: this.selectedJourney,
+        group: this.selectedGroup,
+        gift: this.selectedGift,
+        coupon: this.appliedCoupon,
+        lastCalculation: this.lastCalculationState
+    };
+    localStorage.setItem('calculatorState', JSON.stringify(state));
+},
     courseData: null,
     selectedJourney: 'individual',
     selectedGroup: null,
     selectedGift: 'specific',
     appliedCoupon: null,
     
-    init() {
+   init() {
     console.log('تهيئة الحاسبة الذكية V3');
+    
+    // محاولة استعادة الحالة المحفوظة
+    this.restoreFromStorage();
+    
     this.bindEvents();
     this.updateFromFirebase();
+    
+    // حفظ الحالة عند كل تغيير
+    setInterval(() => {
+        this.saveToStorage();
+    }, 1000);
     
     // التأكد من ظهور زر الدعم للرحلة الفردية
     setTimeout(() => {
@@ -4170,6 +4214,14 @@ const smartCalculator = {
     }
     
     this.updateDisplay(basePrice, currentPrice, discounts, paymentMethod);
+       // في نهاية دالة calculate، بعد this.updateDisplay
+this.lastCalculationState = {
+    basePrice: basePrice,
+    finalPrice: finalPrice,
+    discounts: discounts,
+    paymentMethod: paymentMethod,
+    timestamp: new Date().toISOString()
+};
 },
     
     updateDisplay(basePrice, finalPrice, discounts, paymentMethod) {
@@ -4340,14 +4392,82 @@ removeCoupon() {
 
     // أضف هذه الدالة الجديدة
 getDisplayedValues() {
+    // جمع كل البيانات المعروضة حالياً
+    const basePrice = parseInt(document.getElementById('calcBase').textContent.replace(/[^\d]/g, '')) || 0;
+    const finalPrice = parseInt(document.getElementById('calcTotal').textContent.replace(/[^\d]/g, '')) || 0;
+    
+    // جمع معلومات العرض النشط
+    const activeOffer = this.getActiveTimeOffer();
+    let activeOfferData = null;
+    if (activeOffer) {
+        activeOfferData = {
+            name: activeOffer.name,
+            percentage: activeOffer.percentage,
+            startDate: activeOffer.startDate,
+            endDate: activeOffer.endDate,
+            discountAmount: Math.round(basePrice * (activeOffer.percentage / 100))
+        };
+    }
+    
+    // جمع كل الخصومات المطبقة
+    const discounts = [];
+    
+    // خصم العرض الزمني
+    if (document.getElementById('calcTimeDiscountRow').style.display !== 'none') {
+        const amount = parseInt(document.getElementById('calcTimeDiscount').textContent.replace(/[^\d]/g, '')) || 0;
+        const label = document.getElementById('calcTimeDiscountLabel').textContent;
+        discounts.push({
+            type: 'time',
+            name: label.replace(':', ''),
+            percentage: activeOffer ? activeOffer.percentage : 0,
+            amount: amount
+        });
+    }
+    
+    // خصم المجموعة
+    if (document.getElementById('calcGroupDiscountRow').style.display !== 'none') {
+        const amount = parseInt(document.getElementById('calcGroupDiscount').textContent.replace(/[^\d]/g, '')) || 0;
+        const group = this.courseData.groupDiscounts[this.selectedGroup];
+        discounts.push({
+            type: 'group',
+            name: group ? group.name : 'خصم المجموعة',
+            percentage: group ? group.percentage : 0,
+            amount: amount
+        });
+    }
+    
+    // خصم النقدي
+    if (document.getElementById('calcCashDiscountRow').style.display !== 'none') {
+        const amount = parseInt(document.getElementById('calcCashDiscount').textContent.replace(/[^\d]/g, '')) || 0;
+        discounts.push({
+            type: 'cash',
+            name: 'دفع كامل',
+            percentage: this.courseData.cashDiscount?.percentage || 0,
+            amount: amount
+        });
+    }
+    
+    // كود الخصم
+    if (document.getElementById('calcCouponDiscountRow').style.display !== 'none') {
+        const amount = parseInt(document.getElementById('calcCouponDiscount').textContent.replace(/[^\d]/g, '')) || 0;
+        discounts.push({
+            type: 'coupon',
+            name: this.appliedCoupon?.code || 'كوبون',
+            percentage: this.appliedCoupon?.type === 'percentage' ? this.appliedCoupon.value : 0,
+            amount: amount,
+            couponData: this.appliedCoupon
+        });
+    }
+    
     return {
-        basePrice: parseInt(document.getElementById('calcBase').textContent.replace(/[^\d]/g, '')) || 0,
-        finalPrice: parseInt(document.getElementById('calcTotal').textContent.replace(/[^\d]/g, '')) || 0,
-        discounts: this.getDisplayedDiscounts(),
+        basePrice: basePrice,
+        finalPrice: finalPrice,
+        discounts: discounts,
+        activeOffer: activeOfferData,
         paymentMethod: document.querySelector('.payment-card.active')?.dataset.payment || 'full',
         installmentDetails: this.getDisplayedInstallments(),
         coupon: this.appliedCoupon,
-        activeOffer: this.getActiveTimeOffer()
+        totalSavings: basePrice - finalPrice
     };
 },
 
@@ -4413,34 +4533,93 @@ getDisplayedInstallments() {
     
 handleMainAction() {
     const journey = this.selectedJourney;
-    
-    // ✅ الحل الجذري: نأخذ القيم المعروضة بالضبط
     const displayedData = this.getDisplayedValues();
     
+    // جمع البيانات الكاملة للحجز
     const fullBookingData = {
+        // معلومات أساسية
         type: journey,
-        courseId: this.courseData.courseId || 'default',
-        courseName: this.courseData.title || 'ملاذ الحياري',
+        courseId: this.courseData?.courseId || 'default',
+        courseName: this.courseData?.title || 'الدورة',
         
-        // ✅ نقل البيانات المعروضة بالضبط (بدون إعادة حساب)
-        basePrice: displayedData.basePrice,
-        finalPrice: displayedData.finalPrice,
+        // معلومات التسعير الكاملة
+        pricing: {
+            basePrice: displayedData.basePrice,
+            finalPrice: displayedData.finalPrice,
+            totalSavings: displayedData.totalSavings,
+            currency: 'EGP'
+        },
+        
+        // تفاصيل الخصومات
         discounts: displayedData.discounts,
-        paymentMethod: displayedData.paymentMethod,
-        installmentDetails: displayedData.installmentDetails,
-        coupon: displayedData.coupon,
+        
+        // العرض النشط
         activeOffer: displayedData.activeOffer,
         
-        // البيانات الإضافية
-        groupData: journey === 'group' ? this.getGroupData() : null,
-        giftData: journey === 'gift' ? this.getGiftData() : null
+        // طريقة الدفع
+        payment: {
+            method: displayedData.paymentMethod,
+            installmentDetails: displayedData.installmentDetails
+        },
+        
+        // كوبون الخصم
+        coupon: displayedData.coupon,
+        
+        // بيانات إضافية حسب نوع الرحلة
+        additionalData: {}
     };
     
-    // ✅ نقل مباشر بدون معالجة إضافية
+    // إضافة البيانات الخاصة بكل نوع رحلة
+    if (journey === 'group') {
+        const group = this.courseData.groupDiscounts[this.selectedGroup];
+        fullBookingData.additionalData.group = {
+            name: group?.name,
+            minSize: group?.minSize,
+            percentage: group?.percentage,
+            selectedIndex: this.selectedGroup
+        };
+    } else if (journey === 'gift') {
+        fullBookingData.additionalData.gift = {
+            type: this.selectedGift,
+            recipientName: document.getElementById('giftRecipientName')?.value || '',
+            gifterName: document.getElementById('gifterName')?.value || '',
+            revealName: document.getElementById('revealGifterName')?.checked || false,
+            message: document.getElementById('giftMessage')?.value || '',
+            voucherAmount: this.selectedGift === 'voucher' ? 
+                (parseInt(document.getElementById('voucherAmount')?.value) || 0) : 0
+        };
+    }
+    
+    // حفظ البيانات في localStorage للأمان
+    localStorage.setItem('bookingData', JSON.stringify(fullBookingData));
+    
+    // إرسال البيانات عبر URL
     const params = new URLSearchParams();
     params.append('data', encodeURIComponent(JSON.stringify(fullBookingData)));
     
+    // الانتقال لصفحة الحجز
     window.location.href = `booking-page.html?${params.toString()}`;
+},
+
+    validateDataBeforeSending() {
+    const data = this.getDisplayedValues();
+    
+    // التحقق من وجود السعر النهائي
+    if (!data.finalPrice || data.finalPrice <= 0) {
+        console.error('السعر النهائي غير صحيح');
+        return false;
+    }
+    
+    // التحقق من طريقة الدفع
+    if (!data.paymentMethod) {
+        console.error('لم يتم اختيار طريقة الدفع');
+        return false;
+    }
+    
+    // طباعة البيانات للتأكد
+    console.log('البيانات المرسلة:', data);
+    
+    return true;
 },
     
     getGroupData() {
