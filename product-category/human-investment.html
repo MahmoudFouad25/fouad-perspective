@@ -2930,22 +2930,47 @@
             appId: "1:564654107574:web:baebb660288b22f16213e6"
         };
         // معالج الأخطاء العام
+// معالج أخطاء شامل
 window.addEventListener('error', function(event) {
-    console.warn('خطأ تم التعامل معه:', event.error);
-    
-    // تجاهل أخطاء العناصر غير الموجودة
-    if (event.error && event.error.message && 
-        event.error.message.includes('Cannot read properties of null')) {
+    // تجاهل أخطاء favicon
+    if (event.message && event.message.includes('favicon')) {
         event.preventDefault();
         return false;
     }
+    console.warn('خطأ تم معالجته:', event.error);
 });
 
-// معالج للوعود غير المعالجة
-window.addEventListener('unhandledrejection', function(event) {
-    console.warn('وعد غير معالج:', event.reason);
-    event.preventDefault();
-});
+// التحقق من Firebase قبل الاستخدام
+function initializeFirebaseSafely() {
+    try {
+        // تأكد من وجود Firebase
+        if (typeof firebase === 'undefined') {
+            console.log('Firebase غير محمل - استخدام البيانات الافتراضية');
+            showFallbackContent();
+            return false;
+        }
+        
+        // تهيئة Firebase مع معالجة الأخطاء
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        
+        window.db = firebase.firestore();
+        
+        // تعيين مهلة للاتصال
+        db.enablePersistence({ synchronizeTabs: true })
+            .catch(err => {
+                console.log('تم تشغيل الوضع الافتراضي');
+                showFallbackContent();
+            });
+            
+        return true;
+    } catch (error) {
+        console.log('خطأ في Firebase - استخدام البيانات الافتراضية');
+        showFallbackContent();
+        return false;
+    }
+}
         
         // تهيئة Firebase
         firebase.initializeApp(firebaseConfig);
@@ -3282,17 +3307,22 @@ function detectActiveScenario(data) {
 
 // دالة جديدة: تحديث الواجهة حسب السيناريو
 function updateUIBasedOnScenario(data, scenario) {
-    // 1. تحديث العروض النشطة
-    updateActiveOffers(data, scenario);
+    // التحقق من وجود الدوال قبل استدعائها
+    if (typeof updateActiveOffers === 'function') {
+        updateActiveOffers(data, scenario);
+    }
     
-    // 2. تحديث الحاسبة
-    updateCalculatorOptions(data, scenario);
+    if (typeof smartCalculator !== 'undefined' && smartCalculator.updateFromFirebase) {
+        smartCalculator.updateFromFirebase();
+    }
     
-    // 3. بناء الجدول
-    buildDynamicPricingTable(data, scenario);
+    if (typeof buildDynamicPricingTable === 'function') {
+        buildDynamicPricingTable(data, scenario);
+    }
     
-    // 4. تحديث الأسعار في كل مكان
-    updateAllPrices(data, scenario);
+    if (typeof updateAllPrices === 'function') {
+        updateAllPrices(data, scenario);
+    }
 }
 
 // البيانات الافتراضية
@@ -4606,12 +4636,65 @@ getDisplayedInstallments() {
 
     
     
-handleMainAction() {
-    // احصل على البيانات المعروضة حالياً
-    const displayedData = this.getDisplayedValues();
+// دالة محسنة لحفظ البيانات
+saveCalculationState() {
+    const state = {
+        journey: this.selectedJourney,
+        group: this.selectedGroup,
+        gift: this.selectedGift,
+        paymentMethod: this.getSelectedPaymentMethod(),
+        coupon: this.appliedCoupon,
+        
+        // البيانات المعروضة
+        displayedValues: this.getDisplayedValues(),
+        
+        // البيانات الأصلية
+        courseData: {
+            title: this.courseData?.title || 'الدورة',
+            price: this.courseData?.price || 10000,
+            salePrice: this.courseData?.salePrice,
+            cashDiscount: this.courseData?.cashDiscount,
+            paymentPlans: this.courseData?.paymentPlans,
+            groupDiscounts: this.courseData?.groupDiscounts
+        },
+        
+        // الطابع الزمني
+        timestamp: new Date().toISOString()
+    };
     
-    // تأكد من وجود بيانات صحيحة
-    if (!displayedData.finalPrice || displayedData.finalPrice <= 0) {
+    // حفظ في عدة أماكن
+    const stateString = JSON.stringify(state);
+    localStorage.setItem('calculatorState', stateString);
+    sessionStorage.setItem('calculatorState', stateString);
+    
+    return state;
+},
+
+// دالة محسنة للحصول على طريقة الدفع
+getSelectedPaymentMethod() {
+    const activeCard = document.querySelector('.payment-card.active');
+    if (!activeCard) return 'full';
+    
+    const method = activeCard.dataset.payment;
+    const methodName = activeCard.querySelector('h6')?.textContent || '';
+    
+    return {
+        code: method,
+        name: methodName,
+        isInstallment: method.startsWith('plan_')
+    };
+},
+
+// دالة الإجراء الرئيسي المحسنة
+handleMainAction() {
+    console.log('بدء عملية الحجز...');
+    
+    // احفظ الحالة الحالية
+    const currentState = this.saveCalculationState();
+    
+    // تحقق من صحة البيانات
+    if (!currentState.displayedValues.finalPrice || 
+        currentState.displayedValues.finalPrice <= 0) {
         Swal.fire({
             icon: 'warning',
             title: 'تنبيه',
@@ -4620,44 +4703,39 @@ handleMainAction() {
         return;
     }
     
-    // جمع كل البيانات المطلوبة
-    const bookingData = {
-        // معلومات أساسية
-        timestamp: new Date().toISOString(),
-        courseId: this.courseData?.courseId || 'default',
-        courseName: this.courseData?.title || 'الدورة',
-        
-        // نوع الرحلة
-        journeyType: this.selectedJourney,
-        
-        // الأسعار والخصومات
-        basePrice: displayedData.basePrice,
-        finalPrice: displayedData.finalPrice,
-        totalSavings: displayedData.totalSavings,
-        
-        // تفاصيل الخصومات
-        discounts: displayedData.discounts,
-        
-        // طريقة الدفع
-        paymentMethod: displayedData.paymentMethod,
-        installmentDetails: displayedData.installmentDetails,
-        
-        // كود الخصم
-        coupon: this.appliedCoupon,
-        
-        // معلومات إضافية حسب النوع
-        additionalInfo: this.getAdditionalInfo()
+    // جهز البيانات للإرسال
+    const bookingPackage = {
+        version: '2.0',
+        source: 'calculator',
+        data: currentState,
+        checksum: this.generateChecksum(currentState)
     };
     
-    // احفظ في localStorage و sessionStorage معاً
-    localStorage.setItem('bookingData', JSON.stringify(bookingData));
-    sessionStorage.setItem('bookingData', JSON.stringify(bookingData));
+    // حفظ البيانات
+    const packageString = JSON.stringify(bookingPackage);
+    localStorage.setItem('bookingPackage', packageString);
+    sessionStorage.setItem('bookingPackage', packageString);
     
-    // انتقل للصفحة مع البيانات في URL أيضاً
+    // إنشاء URL آمن
+    const safeData = btoa(unescape(encodeURIComponent(packageString)));
     const params = new URLSearchParams();
-    params.append('data', btoa(encodeURIComponent(JSON.stringify(bookingData))));
+    params.append('pkg', safeData);
     
+    // الانتقال للصفحة
+    console.log('الانتقال لصفحة الحجز...');
     window.location.href = `booking-page.html?${params.toString()}`;
+},
+
+// دالة لإنشاء checksum للتحقق من سلامة البيانات
+generateChecksum(data) {
+    const str = JSON.stringify(data);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
 },
     
 getAdditionalInfo() {
