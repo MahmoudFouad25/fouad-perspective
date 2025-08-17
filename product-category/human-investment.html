@@ -5307,6 +5307,200 @@ window.addEventListener('load', function() {
         loadCourseData();
     }, 1000);
 });
+        // نظام حفظ البيانات الجديد
+window.BookingDataCollector = {
+    // جمع كل البيانات المرئية من الصفحة
+    collectAllVisibleData() {
+        const data = {
+            timestamp: new Date().toISOString(),
+            
+            // 1. البيانات الأساسية
+            journey: document.querySelector('.journey-option.active')?.dataset.journey || 'individual',
+            courseName: window.currentCourseData?.title || 'الدورة',
+            courseId: window.currentCourseData?.courseId || 'default',
+            
+            // 2. الأسعار المعروضة (نأخذها من DOM مباشرة)
+            prices: {
+                base: this.extractPrice('calcBase'),
+                final: this.extractPrice('calcTotal'),
+                displayed: document.getElementById('calcTotal')?.textContent || '0 ج.م'
+            },
+            
+            // 3. الخصومات المرئية
+            discounts: this.extractVisibleDiscounts(),
+            
+            // 4. طريقة الدفع
+            payment: this.extractPaymentInfo(),
+            
+            // 5. البيانات الخاصة
+            specificData: this.extractSpecificData(),
+            
+            // 6. العروض النشطة
+            activeOffers: this.extractActiveOffers(),
+            
+            // 7. الكوبون
+            coupon: this.extractCouponInfo()
+        };
+        
+        return data;
+    },
+    
+    extractPrice(elementId) {
+        const element = document.getElementById(elementId);
+        if (!element) return 0;
+        const text = element.textContent;
+        return parseInt(text.replace(/[^\d]/g, '')) || 0;
+    },
+    
+    extractVisibleDiscounts() {
+        const discounts = [];
+        
+        // خصم زمني
+        if (this.isElementVisible('calcTimeDiscountRow')) {
+            discounts.push({
+                type: 'time',
+                name: document.getElementById('calcTimeDiscountLabel')?.textContent.replace(':', '') || 'عرض زمني',
+                amount: this.extractPrice('calcTimeDiscount'),
+                percentage: smartCalculator.getActiveTimeOffer()?.percentage || 0
+            });
+        }
+        
+        // خصم مجموعة
+        if (this.isElementVisible('calcGroupDiscountRow')) {
+            const groupCard = document.querySelector('.group-card.active');
+            discounts.push({
+                type: 'group',
+                name: groupCard?.querySelector('h5')?.textContent || 'خصم مجموعة',
+                amount: this.extractPrice('calcGroupDiscount'),
+                percentage: parseInt(groupCard?.querySelector('.discount')?.textContent) || 0
+            });
+        }
+        
+        // خصم نقدي
+        if (this.isElementVisible('calcCashDiscountRow')) {
+            discounts.push({
+                type: 'cash',
+                name: 'دفع نقدي كامل',
+                amount: this.extractPrice('calcCashDiscount'),
+                percentage: window.currentCourseData?.cashDiscount?.percentage || 0
+            });
+        }
+        
+        // كوبون
+        if (this.isElementVisible('calcCouponDiscountRow')) {
+            discounts.push({
+                type: 'coupon',
+                name: smartCalculator.appliedCoupon?.code || 'كود خصم',
+                amount: this.extractPrice('calcCouponDiscount'),
+                percentage: smartCalculator.appliedCoupon?.value || 0
+            });
+        }
+        
+        return discounts;
+    },
+    
+    extractPaymentInfo() {
+        const activeCard = document.querySelector('.payment-card.active');
+        const method = activeCard?.dataset.payment || 'full';
+        
+        let info = {
+            method: method,
+            name: activeCard?.querySelector('h6')?.textContent || 'دفع كامل'
+        };
+        
+        // تفاصيل الأقساط
+        if (method.startsWith('plan_') && this.isElementVisible('calcInstallmentDetails')) {
+            info.installments = {
+                text: document.getElementById('calcInstallmentPlan')?.innerHTML || '',
+                isActive: true
+            };
+        }
+        
+        return info;
+    },
+    
+    extractSpecificData() {
+        const journey = document.querySelector('.journey-option.active')?.dataset.journey;
+        
+        if (journey === 'group') {
+            const groupCard = document.querySelector('.group-card.active');
+            return {
+                type: 'group',
+                name: groupCard?.querySelector('h5')?.textContent || '',
+                minSize: parseInt(groupCard?.querySelector('.size')?.textContent) || 3,
+                percentage: parseInt(groupCard?.querySelector('.discount')?.textContent) || 0
+            };
+        }
+        
+        if (journey === 'gift') {
+            const giftCard = document.querySelector('.gift-option-card.active');
+            const giftType = giftCard?.dataset.gift || 'specific';
+            
+            if (giftType === 'voucher') {
+                return {
+                    type: 'gift',
+                    giftType: 'voucher',
+                    amount: parseInt(document.getElementById('voucherAmount')?.value) || 0
+                };
+            }
+            
+            return {
+                type: 'gift',
+                giftType: giftType,
+                recipientName: document.getElementById('giftRecipientName')?.value || '',
+                gifterName: document.getElementById('gifterName')?.value || '',
+                message: document.getElementById('giftMessage')?.value || ''
+            };
+        }
+        
+        return null;
+    },
+    
+    extractActiveOffers() {
+        const activeOffer = smartCalculator.getActiveTimeOffer();
+        if (activeOffer && this.isElementVisible('calcActiveOffer')) {
+            return {
+                name: activeOffer.name,
+                percentage: activeOffer.percentage,
+                endDate: activeOffer.endDate
+            };
+        }
+        return null;
+    },
+    
+    extractCouponInfo() {
+        if (smartCalculator.appliedCoupon) {
+            return {
+                code: smartCalculator.appliedCoupon.code,
+                type: smartCalculator.appliedCoupon.type,
+                value: smartCalculator.appliedCoupon.value
+            };
+        }
+        return null;
+    },
+    
+    isElementVisible(elementId) {
+        const element = document.getElementById(elementId);
+        return element && element.style.display !== 'none';
+    }
+};
+
+// استبدل دالة handleMainAction في smartCalculator
+smartCalculator.handleMainAction = function() {
+    // جمع كل البيانات المرئية
+    const collectedData = window.BookingDataCollector.collectAllVisibleData();
+    
+    console.log('📦 البيانات المجمعة:', collectedData);
+    
+    // حفظ في localStorage كنسخة احتياطية
+    localStorage.setItem('bookingData', JSON.stringify(collectedData));
+    
+    // إرسال عبر URL
+    const params = new URLSearchParams();
+    params.append('data', encodeURIComponent(JSON.stringify(collectedData)));
+    
+    window.location.href = `booking-page.html?${params.toString()}`;
+};
     </script>
 </body>
 </html>
