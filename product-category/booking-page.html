@@ -921,7 +921,8 @@ function processReceivedData(data) {
         if (localData) {
             try {
                 const parsedData = JSON.parse(localData);
-                Object.assign(bookingData, parsedData);
+                bookingData = parsedData;
+                bookingData.originalData = parsedData;
                 
                 setupSteps();
                 updateDetailedSummary();
@@ -956,45 +957,35 @@ function processReceivedData(data) {
         
         // تحويل لـ JSON
         const receivedData = JSON.parse(decodedData);
-        // حفظ كل البيانات
-bookingData = receivedData;
-bookingData.originalData = receivedData;
         
         console.log('✅ البيانات المستلمة:', receivedData);
         
-        // معالجة ونسخ البيانات
-const processedData = processReceivedData(receivedData);
-Object.assign(bookingData, processedData);
-// حفظ البيانات الأصلية كاملة
-bookingData.originalData = receivedData;
-        // إضافة: تأكد من وجود الأسعار
-if (!bookingData.basePrice && receivedData.pricing) {
-    bookingData.basePrice = receivedData.pricing.basePriceNumber;
-    bookingData.finalPrice = receivedData.pricing.finalPriceNumber;
-}
-
-// إضافة: تأكد من وجود الخصومات
-if (!bookingData.discounts && receivedData.discounts) {
-    bookingData.discounts = receivedData.discounts;
-}
-
+        // معالجة البيانات
+        const processedData = processReceivedData(receivedData);
+        
+        // دمج البيانات المعالجة مع bookingData
+        Object.assign(bookingData, processedData);
+        
+        // حفظ البيانات الأصلية
+        bookingData.originalData = receivedData;
+        
+        // التأكد من وجود الأسعار (من البيانات الأصلية)
+        if (!bookingData.basePrice && receivedData.pricing) {
+            bookingData.basePrice = receivedData.pricing.basePriceNumber || 0;
+            bookingData.finalPrice = receivedData.pricing.finalPriceNumber || 0;
+        }
+        
+        // التأكد من وجود الخصومات
+        if (!bookingData.discounts && receivedData.discounts) {
+            bookingData.discounts = receivedData.discounts;
+        }
+        
         // البيانات الافتراضية
         if (!bookingData.type) bookingData.type = 'individual';
         if (!bookingData.totalSteps) bookingData.totalSteps = 4;
         if (!bookingData.currentStep) bookingData.currentStep = 1;
         if (!bookingData.formData) bookingData.formData = {};
         if (!bookingData.steps) bookingData.steps = [];
-        
-        // معالجة نوع الرحلة
-        if (receivedData.journey && receivedData.journey.type) {
-            bookingData.type = receivedData.journey.type;
-        }
-        
-        // معالجة الأسعار
-        if (receivedData.pricing) {
-            bookingData.finalPrice = receivedData.pricing.finalPriceNumber || 0;
-            bookingData.basePrice = receivedData.pricing.basePriceNumber || 0;
-        }
         
         // تحديث الصفحة
         setupSteps();
@@ -1003,14 +994,18 @@ if (!bookingData.discounts && receivedData.discounts) {
         updateProgressBar();
         updateNavigationButtons();
         
+        // تحديثات إضافية بعد التحميل
         setTimeout(() => {
             updatePricingDisplay();
             updateAdditionalInfo();
-        }, 100);
+            if (typeof forceUpdateDisplay === 'function') {
+                forceUpdateDisplay();
+            }
+        }, 200);
         
         console.log('✅ تم تهيئة الصفحة بنجاح');
-        setTimeout(forceUpdateDisplay, 500);
-
+        console.log('📊 البيانات النهائية:', bookingData);
+        
     } catch (error) {
         console.error('❌ خطأ:', error);
         
@@ -1019,7 +1014,8 @@ if (!bookingData.discounts && receivedData.discounts) {
         if (localData) {
             try {
                 const parsedData = JSON.parse(localData);
-                Object.assign(bookingData, parsedData);
+                bookingData = parsedData;
+                bookingData.originalData = parsedData;
                 
                 setupSteps();
                 updateDetailedSummary();
@@ -1114,56 +1110,31 @@ function updateDetailedSummary() {
             return 0;
         };
         
-        // استخراج الأسعار مع التحويل للأرقام
+        // استخراج الأسعار
         if (data.pricing) {
-            bookingData.basePrice = extractNum(data.pricing.basePriceNumber || data.pricing.basePrice) || bookingData.basePrice || 0;
-            bookingData.finalPrice = extractNum(data.pricing.finalPriceNumber || data.pricing.finalPrice) || bookingData.finalPrice || 0;
+            bookingData.basePrice = data.pricing.basePriceNumber || extractNum(data.pricing.basePrice) || 0;
+            bookingData.finalPrice = data.pricing.finalPriceNumber || extractNum(data.pricing.finalPrice) || 0;
+            bookingData.basePriceText = data.pricing.basePrice;
+            bookingData.finalPriceText = data.pricing.finalPrice;
         }
         
         // استخراج معلومات الرحلة
         if (data.journey) {
-            bookingData.type = data.journey.type || bookingData.type || 'individual';
-            bookingData.courseName = data.journey.courseName || bookingData.courseName || 'رحلة التعلم';
+            bookingData.type = data.journey.type || 'individual';
+            bookingData.courseName = data.journey.courseName || 'رحلة التعلم';
         }
         
-        // استخراج الخصومات مع التحويل للأرقام
+        // استخراج الخصومات
         if (data.discounts && data.discounts.length > 0) {
-            bookingData.discounts = data.discounts.map(d => ({
-                ...d,
-                amount: extractNum(d.amount)
-            }));
+            bookingData.discounts = data.discounts;
         }
         
-        // استخراج العرض النشط
-        if (data.activeOffer) {
-            bookingData.activeOffer = data.activeOffer;
-        }
-        
-        // استخراج معلومات الدفع
-        if (data.payment) {
-            bookingData.payment = data.payment;
-        }
-        
-        // استخراج الكوبون
-        if (data.coupon) {
-            bookingData.coupon = data.coupon;
-        }
-        
-        // إجمالي التوفير
-        if (data.totalSavings) {
-            bookingData.totalSavings = extractNum(data.totalSavings);
-        }
-    }
-    
-    // معالجة البيانات المباشرة (إذا كانت موجودة)
-    if (bookingData.pricing) {
-        bookingData.basePrice = bookingData.pricing.basePriceNumber || bookingData.pricing.basePrice || bookingData.basePrice || 0;
-        bookingData.finalPrice = bookingData.pricing.finalPriceNumber || bookingData.pricing.finalPrice || bookingData.finalPrice || 0;
-    }
-    
-    if (bookingData.journey) {
-        bookingData.type = bookingData.journey.type || bookingData.type;
-        bookingData.courseName = bookingData.journey.courseName || bookingData.courseName;
+        // البيانات الإضافية
+        if (data.activeOffer) bookingData.activeOffer = data.activeOffer;
+        if (data.payment) bookingData.payment = data.payment;
+        if (data.coupon) bookingData.coupon = data.coupon;
+        if (data.totalSavings !== undefined) bookingData.totalSavings = extractNum(data.totalSavings);
+        if (data.totalSavingsText) bookingData.totalSavingsText = data.totalSavingsText;
     }
     
     // التحقق من وجود البيانات
@@ -1172,40 +1143,54 @@ function updateDetailedSummary() {
         return;
     }
     
-    // تحديث عنصر اسم الدورة
+    // تحديث اسم الدورة
     const courseNameElement = document.getElementById('courseName');
     if (courseNameElement) {
         courseNameElement.textContent = bookingData.courseName || 'رحلة التعلم';
     }
     
-    // تحديث عنصر السعر الأساسي
+    // تحديث السعر الأساسي
     const basePriceElement = document.getElementById('basePrice');
-    if (basePriceElement && bookingData.basePrice) {
-        basePriceElement.textContent = `${bookingData.basePrice.toLocaleString('ar-EG')} ج.م`;
+    if (basePriceElement) {
+        if (bookingData.basePrice) {
+            basePriceElement.textContent = `${bookingData.basePrice.toLocaleString('ar-EG')} ج.م`;
+        } else if (bookingData.basePriceText) {
+            basePriceElement.textContent = bookingData.basePriceText;
+        }
     }
     
-    // تحديث عنصر السعر النهائي
+    // تحديث السعر النهائي
     const finalPriceElement = document.getElementById('finalPrice');
-    if (finalPriceElement && bookingData.finalPrice) {
-        finalPriceElement.textContent = `${bookingData.finalPrice.toLocaleString('ar-EG')} ج.م`;
+    if (finalPriceElement) {
+        if (bookingData.finalPrice) {
+            finalPriceElement.textContent = `${bookingData.finalPrice.toLocaleString('ar-EG')} ج.م`;
+        } else if (bookingData.finalPriceText) {
+            finalPriceElement.textContent = bookingData.finalPriceText;
+        }
     }
     
-    // عرض الخصومات الإجمالية
+    // عرض الخصومات
     const discountRow = document.getElementById('discountRow');
     const totalDiscountElement = document.getElementById('totalDiscount');
     
-    if (discountRow && totalDiscountElement && bookingData.discounts && bookingData.discounts.length > 0) {
+    if (bookingData.discounts && bookingData.discounts.length > 0) {
         let totalDiscountAmount = 0;
         
         bookingData.discounts.forEach(discount => {
             const amount = discount.amount || 0;
             totalDiscountAmount += amount;
-            console.log('عرض خصم:', discount.label || discount.type, '- المبلغ:', amount);
+            console.log('خصم:', discount.label || discount.type, '=', amount, 'ج.م');
         });
         
-        if (totalDiscountAmount > 0) {
+        if (discountRow && totalDiscountElement && totalDiscountAmount > 0) {
             discountRow.style.display = 'flex';
             totalDiscountElement.textContent = `-${totalDiscountAmount.toLocaleString('ar-EG')} ج.م`;
+        }
+    } else if (bookingData.totalSavings > 0) {
+        // لو مفيش تفاصيل خصومات، استخدم الإجمالي
+        if (discountRow && totalDiscountElement) {
+            discountRow.style.display = 'flex';
+            totalDiscountElement.textContent = bookingData.totalSavingsText || `-${bookingData.totalSavings.toLocaleString('ar-EG')} ج.م`;
         }
     }
     
@@ -1222,32 +1207,30 @@ function updateDetailedSummary() {
     }
     
     // تحديث الأيقونة
-    const icons = {
-        'individual': 'fa-user',
-        'group': 'fa-users', 
-        'gift': 'fa-gift',
-        'grant': 'fa-hands-helping'
-    };
-    
     const summaryIcon = document.getElementById('summaryIcon');
     if (summaryIcon) {
+        const icons = {
+            'individual': 'fa-user',
+            'group': 'fa-users',
+            'gift': 'fa-gift',
+            'grant': 'fa-hands-helping'
+        };
         summaryIcon.innerHTML = `<i class="fas ${icons[bookingData.type] || 'fa-shopping-bag'}"></i>`;
     }
     
     // تحديث العنوان الفرعي
-    const titles = {
-        'individual': 'رحلة فردية',
-        'group': 'رحلة جماعية',
-        'gift': 'إهداء رحلة',
-        'grant': 'طلب منحة دراسية'
-    };
-    
     const summarySubtitle = document.getElementById('summarySubtitle');
     if (summarySubtitle) {
+        const titles = {
+            'individual': 'رحلة فردية',
+            'group': 'رحلة جماعية',
+            'gift': 'إهداء رحلة',
+            'grant': 'طلب منحة دراسية'
+        };
         summarySubtitle.textContent = titles[bookingData.type] || 'حجز';
     }
     
-    // عرض معلومات المجموعة إن وجدت
+    // معلومات المجموعة
     const groupSizeRow = document.getElementById('groupSizeRow');
     const groupSizeDisplay = document.getElementById('groupSizeDisplay');
     
@@ -1258,7 +1241,7 @@ function updateDetailedSummary() {
         }
     }
     
-    // عرض معلومات الإهداء إن وجدت
+    // معلومات الإهداء
     const giftTypeRow = document.getElementById('giftTypeRow');
     const giftTypeDisplay = document.getElementById('giftTypeDisplay');
     
@@ -1269,7 +1252,7 @@ function updateDetailedSummary() {
         }
     }
     
-    // عرض خطة السداد إن وجدت
+    // خطة السداد
     const paymentPlanRow = document.getElementById('paymentPlanRow');
     const paymentPlanDisplay = document.getElementById('paymentPlan');
     
