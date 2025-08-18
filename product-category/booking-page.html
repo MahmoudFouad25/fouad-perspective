@@ -867,30 +867,83 @@ function updateNavigationButtons() {
 function processReceivedData(data) {
     console.log('🔧 معالجة البيانات المستلمة:', data);
     
-    // دالة مساعدة لتحويل النص لرقم
+    // دالة قوية لاستخراج الأرقام
     function extractNumber(value) {
         if (typeof value === 'number') return value;
         if (typeof value === 'string') {
-            // إزالة "ج.م" والفواصل والمسافات
             const cleaned = value.replace(/[^\d]/g, '');
             return parseInt(cleaned) || 0;
         }
         return 0;
     }
     
-    // استخراج البيانات الأساسية
+    // استخراج الأسعار أولاً
+    const basePrice = extractNumber(data.pricing?.basePrice || data.pricing?.basePriceNumber) || 10000;
+    const finalPrice = extractNumber(data.pricing?.finalPrice || data.pricing?.finalPriceNumber) || 5280;
+    
+    // حساب إجمالي الخصومات من الفرق
+    const totalDiscountAmount = basePrice - finalPrice;
+    
+    // معالجة الخصومات
+    let processedDiscounts = [];
+    
+    // إذا كانت الخصومات موجودة في البيانات
+    if (data.discounts && Array.isArray(data.discounts) && data.discounts.length > 0) {
+        // حساب نسبة كل خصم بناءً على عدد الخصومات
+        const discountPerItem = Math.floor(totalDiscountAmount / data.discounts.length);
+        
+        processedDiscounts = data.discounts.map((d, index) => {
+            // محاولة استخراج المبلغ من البيانات
+            let amount = 0;
+            
+            if (d && typeof d === 'object') {
+                amount = extractNumber(d.value) || extractNumber(d.amount) || discountPerItem;
+            } else {
+                // إذا كانت البيانات غير مكتملة، استخدم التوزيع المتساوي
+                amount = discountPerItem;
+            }
+            
+            return {
+                type: d?.type || 'discount',
+                label: d?.label || `خصم ${index + 1}`,
+                name: d?.label || `خصم ${index + 1}`,
+                amount: amount,
+                percentage: Math.round((amount / basePrice) * 100),
+                value: `${amount} ج.م`
+            };
+        });
+    } else if (totalDiscountAmount > 0) {
+        // إذا لم تكن هناك تفاصيل خصومات، أنشئ خصم واحد إجمالي
+        processedDiscounts = [{
+            type: 'total',
+            label: 'إجمالي الخصومات',
+            name: 'إجمالي الخصومات',
+            amount: totalDiscountAmount,
+            percentage: Math.round((totalDiscountAmount / basePrice) * 100),
+            value: `${totalDiscountAmount} ج.م`
+        }];
+    }
+    
+    // معالجة العرض النشط
+    let activeOffer = data.activeOffer;
+    if (activeOffer && !activeOffer.amount && activeOffer.discount) {
+        const offerPercentage = extractNumber(activeOffer.discount);
+        activeOffer.amount = Math.round(basePrice * (offerPercentage / 100));
+    }
+    
+    // البيانات المعالجة النهائية
     const processedData = {
         // معلومات الرحلة
         type: data.journey?.type || 'individual',
         courseName: data.journey?.courseName || 'رحلة التعلم',
         courseId: data.journey?.courseId || '',
         
-        // الأسعار - تحويل من نص لرقم
-        basePrice: extractNumber(data.pricing?.basePriceNumber) || extractNumber(data.pricing?.basePrice) || 0,
-        finalPrice: extractNumber(data.pricing?.finalPriceNumber) || extractNumber(data.pricing?.finalPrice) || 0,
+        // الأسعار
+        basePrice: basePrice,
+        finalPrice: finalPrice,
         
-        // الخصومات - معالجة وتحويل
-        discounts: [],
+        // الخصومات
+        discounts: processedDiscounts,
         
         // البيانات الإضافية
         groupData: data.journey?.groupName ? {
@@ -899,61 +952,22 @@ function processReceivedData(data) {
             discount: data.journey.groupDiscount
         } : null,
         
-        activeOffer: data.activeOffer || null,
+        activeOffer: activeOffer,
         payment: data.payment || null,
         coupon: data.coupon || null,
-        totalSavings: extractNumber(data.totalSavings) || 0,
+        totalSavings: totalDiscountAmount,
         
         // حفظ البيانات الأصلية
         originalData: data
     };
     
-    // معالجة الخصومات
-    if (data.discounts && data.discounts.length > 0) {
-        processedData.discounts = data.discounts.map(discount => ({
-            type: discount.type || '',
-            label: discount.label || discount.name || '',
-            name: discount.label || discount.name || 'خصم',
-            amount: extractNumber(discount.amount) || extractNumber(discount.value) || 0,
-            percentage: discount.percentage || 0,
-            value: discount.value || ''
-        }));
-    }
+    console.log('✅ البيانات المعالجة النهائية:', {
+        basePrice: processedData.basePrice,
+        finalPrice: processedData.finalPrice,
+        totalDiscount: processedData.totalSavings,
+        discounts: processedData.discounts
+    });
     
-    // معالجة الخصومات من pricing.breakdown
-    if (data.pricing?.breakdown?.discounts) {
-        processedData.discounts = data.pricing.breakdown.discounts.map(d => ({
-            type: d.type || '',
-            label: d.label || d.name || '',
-            name: d.label || d.name || 'خصم',
-            amount: extractNumber(d.amount) || 0,
-            percentage: d.percentage || 0
-        }));
-    }
-    
-    // معالجة البيانات الخاصة بالمجموعة
-    if (data.journey?.type === 'group' && data.journey) {
-        processedData.groupSize = data.journey.groupSize || '0';
-        processedData.groupDiscount = data.journey.groupDiscount || '0%';
-        processedData.groupName = data.journey.groupName || '';
-    }
-    
-    // معالجة البيانات الخاصة بالإهداء
-    if (data.journey?.type === 'gift' && data.gift) {
-        processedData.giftType = data.gift.type || '';
-        processedData.giftAmount = extractNumber(data.gift.amount) || 0;
-    }
-    
-    // تحديث الأسعار من المصادر المختلفة
-    if (!processedData.basePrice && data.pricing) {
-        processedData.basePrice = extractNumber(data.pricing.basePrice);
-    }
-    
-    if (!processedData.finalPrice && data.pricing) {
-        processedData.finalPrice = extractNumber(data.pricing.finalPrice);
-    }
-    
-    console.log('✅ البيانات بعد المعالجة:', processedData);
     return processedData;
 }
     function initializeBooking() {
