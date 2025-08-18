@@ -3794,50 +3794,80 @@ window.showAllData = function() {
 };
 
 // دالة النقل للصفحة التالية
-window.proceedToBooking = function() {
-    console.log('🚀 نقل البيانات للصفحة التالية...');
+// دالة النقل للصفحة التالية - نسخة Firebase محسنة
+window.proceedToBooking = async function() {
+    console.log('🚀 بدء حفظ البيانات في Firebase...');
     
-    // احصل على البيانات المجمعة
+    // جمع البيانات المجمعة
     const data = window.fullBookingData || collectCompleteData();
     
-    // تأكد من وجود البيانات
-    if (!data || !data.pricing.finalPriceNumber) {
-        alert('⚠️ خطأ في البيانات - حاول مرة أخرى');
+    if (!data) {
+        alert('⚠️ لا توجد بيانات للنقل');
         return;
     }
     
-    // حفظ البيانات بطرق متعددة
-    const dataString = JSON.stringify(data);
+    // منع الضغط المتكرر
+    const proceedBtn = event?.target;
+    if (proceedBtn) {
+        proceedBtn.disabled = true;
+        proceedBtn.textContent = 'جاري الحفظ...';
+    }
     
-    // 1. في localStorage
-    localStorage.setItem('fullBookingData', dataString);
-    console.log('💾 تم حفظ في localStorage');
-    
-    // 2. في sessionStorage
-    sessionStorage.setItem('fullBookingData', dataString);
-    console.log('💾 تم حفظ في sessionStorage');
-    
-    // 3. كـ كائن في window
-    window.bookingDataToTransfer = data;
-    
-    // أغلق الصندوق
-    document.getElementById('dataDisplayBox').style.display = 'none';
-    
-    // عرض رسالة نجاح
-    Swal.fire({
-        icon: 'success',
-        title: 'تم حفظ البيانات!',
-        text: 'جاري الانتقال لصفحة إتمام الحجز...',
-        timer: 2000,
-        showConfirmButton: false
-    });
-    
-    // الانتقال بعد ثانيتين
-    setTimeout(() => {
-        // إنشاء URL مع البيانات المضغوطة
-        const compressed = btoa(encodeURIComponent(dataString));
-        window.location.href = `booking-page.html?data=${compressed}`;
-    }, 2000);
+    try {
+        // تأكد من وجود Firebase
+        if (typeof db === 'undefined') {
+            throw new Error('Firebase غير متصل');
+        }
+        
+        // إضافة معلومات إضافية
+        data.bookingId = 'BK_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        data.timestamp = new Date().toISOString();
+        data.status = 'pending';
+        data.userAgent = navigator.userAgent;
+        
+        console.log('📦 البيانات المرسلة:', data);
+        
+        // حفظ في Firebase
+        const docRef = await db.collection('tempBookings').add(data);
+        console.log('✅ تم الحفظ بنجاح، المعرف:', docRef.id);
+        
+        // حفظ احتياطي في localStorage
+        localStorage.setItem('lastBookingId', docRef.id);
+        localStorage.setItem('lastBookingData', JSON.stringify(data));
+        
+        // إغلاق الصندوق
+        if (document.getElementById('dataDisplayBox')) {
+            document.getElementById('dataDisplayBox').style.display = 'none';
+        }
+        
+        // رسالة نجاح سريعة
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم حفظ البيانات!',
+                text: 'جاري الانتقال...',
+                timer: 1500,
+                showConfirmButton: false
+            });
+        }
+        
+        // الانتقال للصفحة التالية
+        setTimeout(() => {
+            window.location.href = `booking-page.html?bookingId=${docRef.id}`;
+        }, 1500);
+        
+    } catch (error) {
+        console.error('❌ خطأ في الحفظ:', error);
+        
+        // إعادة تفعيل الزر
+        if (proceedBtn) {
+            proceedBtn.disabled = false;
+            proceedBtn.textContent = '✅ نقل البيانات والمتابعة';
+        }
+        
+        // رسالة خطأ
+        alert('حدث خطأ في حفظ البيانات:\n' + error.message + '\n\nتأكد من اتصال الإنترنت وحاول مرة أخرى');
+    }
 };
 
 
@@ -6164,7 +6194,39 @@ window.buildDynamicPricingTable = function(data, scenario) {
 };
 
         // ============ الحل الكامل المُنظم ============
+// دالة اختبار Firebase
+async function testFirebaseConnection() {
+    console.log('🔍 اختبار اتصال Firebase...');
+    try {
+        if (typeof db === 'undefined') {
+            console.error('❌ Firebase غير محمل');
+            return false;
+        }
+        
+        // محاولة كتابة اختبارية
+        const testDoc = await db.collection('tempBookings').add({
+            test: true,
+            timestamp: new Date().toISOString()
+        });
+        
+        console.log('✅ Firebase يعمل بشكل صحيح، معرف الاختبار:', testDoc.id);
+        
+        // حذف الاختبار
+        await db.collection('tempBookings').doc(testDoc.id).delete();
+        
+        return true;
+    } catch (error) {
+        console.error('❌ خطأ في Firebase:', error);
+        return false;
+    }
+}
 
+// تشغيل الاختبار عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        testFirebaseConnection();
+    }, 2000);
+});
 // 1. إنشاء الصندوق
 function createDataDisplay() {
     // تحقق من عدم وجود الصندوق
@@ -6202,11 +6264,11 @@ function createDataDisplay() {
             <!-- البيانات ستظهر هنا -->
         </div>
         <div style="margin-top: 20px; display: flex; gap: 10px;">
-            <button onclick="window.proceedToBooking()" 
-                    style="background: #22C55E; color: white; border: none; padding: 12px 30px; 
-                           border-radius: 25px; cursor: pointer; flex: 1; font-weight: bold;">
-                ✅ نقل البيانات والمتابعة
-            </button>
+           <button onclick="window.proceedToBooking(event)" 
+        style="background: #22C55E; color: white; border: none; padding: 12px 30px; 
+               border-radius: 25px; cursor: pointer; flex: 1; font-weight: bold;">
+    ✅ نقل البيانات والمتابعة
+</button>
             <button onclick="document.getElementById('dataDisplayBox').style.display='none'" 
                     style="background: #E11D48; color: white; border: none; padding: 12px 30px; 
                            border-radius: 25px; cursor: pointer; flex: 1;">
@@ -6374,7 +6436,36 @@ window.addEventListener('load', function() {
         loadCourseData();
     }, 1000);
 });
+
+        <!-- زر اختبار Firebase -->
+<button onclick="testFirebaseNow()" 
+        style="position: fixed; bottom: 150px; left: 20px; 
+               background: #9333EA; color: white; 
+               padding: 10px 20px; border-radius: 25px; 
+               border: none; cursor: pointer; z-index: 9999;">
+    🧪 اختبار Firebase
+</button>
+
+<script>
+async function testFirebaseNow() {
+    console.log('🧪 بدء الاختبار...');
+    
+    try {
+        const testData = {
+            test: true,
+            time: new Date().toISOString(),
+            message: 'اختبار من الزر'
+        };
         
+        const docRef = await db.collection('tempBookings').add(testData);
+        alert('✅ نجح الاختبار!\nالمعرف: ' + docRef.id);
+        console.log('✅ نجح:', docRef.id);
+        
+    } catch (error) {
+        alert('❌ فشل الاختبار!\n' + error.message);
+        console.error('❌ خطأ:', error);
+    }
+}
     </script>
 </body>
 </html>
