@@ -1234,12 +1234,28 @@ window.regenerateSlug = function() {
 // معالجة إنشاء الحساب
 async function processAccountCreation(studentId, student, formData) {
     try {
+        // عرض رسالة الانتظار
         Swal.fire({
             title: 'جاري إنشاء الحساب...',
-            html: 'الرجاء الانتظار...',
+            html: `
+                <div style="text-align: center;">
+                    <div class="loading-spinner" style="border: 4px solid #E5E7EB; border-top: 4px solid #3B82F6; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto;"></div>
+                    <p>الرجاء الانتظار...</p>
+                    <p style="color: #6B7280; font-size: 0.9rem;">لا تغلق هذه النافذة</p>
+                </div>
+            `,
             allowOutsideClick: false,
+            showConfirmButton: false,
             didOpen: () => {
-                Swal.showLoading();
+                // إضافة animation للـ spinner
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                `;
+                document.head.appendChild(style);
             }
         });
         
@@ -1259,20 +1275,23 @@ async function processAccountCreation(studentId, student, formData) {
             throw new Error('هذا البريد مستخدم بالفعل');
         }
         
-        // 3. حفظ بيانات الأدمن الحالي قبل إنشاء المستخدم الجديد
-        const currentAdmin = firebase.auth().currentUser;
-        const adminEmail = currentAdmin ? currentAdmin.email : null;
+        // 3. حفظ بيانات الأدمن الحالي
+        const currentUser = firebase.auth().currentUser;
+        console.log('الأدمن الحالي:', currentUser?.email);
         
-        // 4. إنشاء الحساب في Firebase Auth
+        // 4. متغير لتتبع إنشاء المستخدم
         let authId = null;
         let userCreated = false;
         
+        // 5. محاولة إنشاء المستخدم في Firebase Auth
         try {
-            // إنشاء المستخدم
+            // محاولة إنشاء المستخدم
             const userCredential = await firebase.auth()
                 .createUserWithEmailAndPassword(formData.email, formData.password);
+            
             authId = userCredential.user.uid;
             userCreated = true;
+            console.log('تم إنشاء المستخدم بنجاح:', authId);
             
             // تحديث اسم المستخدم
             await userCredential.user.updateProfile({
@@ -1280,14 +1299,21 @@ async function processAccountCreation(studentId, student, formData) {
             });
             
         } catch (authError) {
+            console.error('خطأ في Auth:', authError);
+            
             if (authError.code === 'auth/email-already-in-use') {
                 console.log('البريد مستخدم في Auth - نتابع بدون authId');
+                // نستمر حتى لو كان البريد موجود
+            } else if (authError.code === 'auth/weak-password') {
+                throw new Error('كلمة المرور ضعيفة جداً');
+            } else if (authError.code === 'auth/invalid-email') {
+                throw new Error('البريد الإلكتروني غير صحيح');
             } else {
                 throw authError;
             }
         }
         
-        // 5. تحضير بيانات المستخدم
+        // 6. تحضير بيانات المستخدم
         const userData = {
             // المعرف والبيانات الأساسية
             id: formData.slug,
@@ -1314,20 +1340,21 @@ async function processAccountCreation(studentId, student, formData) {
             }],
             
             // معلومات النظام
-            authId: authId,
+            authId: authId, // قد يكون null إذا فشل إنشاء Auth
             accountStatus: formData.activateAccount ? 'active' : 'pending',
             accountCreated: true,
-            accountCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            accountCreatedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
             createdFrom: 'individual-students',
             originalBookingId: student.originalBookingId || student.id
         };
         
-        // 6. حفظ في Firestore
+        // 7. حفظ في Firestore
         await db.collection('users').doc(formData.slug).set(userData);
+        console.log('تم حفظ البيانات في Firestore');
         
-        // 7. تحديث حالة الطالب في individualStudents
+        // 8. تحديث حالة الطالب في individualStudents
         await db.collection('individualStudents').doc(studentId).update({
             accountCreated: true,
             accountCreatedAt: new Date().toISOString(),
@@ -1335,36 +1362,37 @@ async function processAccountCreation(studentId, student, formData) {
             userId: formData.slug,
             userEmail: formData.email
         });
+        console.log('تم تحديث حالة الطالب');
         
-        // 8. إعادة تسجيل دخول الأدمن إذا تم إنشاء مستخدم جديد
+        // 9. إعادة تسجيل دخول الأدمن إذا تم إنشاء مستخدم جديد
         if (userCreated) {
-            // تسجيل خروج المستخدم الجديد
-            await firebase.auth().signOut();
+            console.log('إعادة تسجيل دخول الأدمن...');
             
-            // إعادة تسجيل دخول الأدمن
+            // انتظار قليل للتأكد من اكتمال العمليات
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             try {
-                // جرب أولاً ببيانات الأدمن المحفوظة
-                await firebase.auth().signInWithEmailAndPassword(
+                // تسجيل خروج أي مستخدم حالي
+                await firebase.auth().signOut();
+                console.log('تم تسجيل الخروج');
+                
+                // انتظار قليل
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // إعادة تسجيل دخول الأدمن
+                const adminCredential = await firebase.auth().signInWithEmailAndPassword(
                     'admin@fouad-academy.com',
                     'RahmaMahmoud@2020$'
                 );
                 console.log('تم إعادة تسجيل دخول الأدمن بنجاح');
-            } catch (adminError) {
-                console.error('خطأ في إعادة تسجيل دخول الأدمن:', adminError);
-                // إذا فشل، نعرض رسالة للمستخدم
-                setTimeout(() => {
-                    Swal.fire({
-                        icon: 'info',
-                        title: 'تنبيه',
-                        text: 'سيتم إعادة تسجيل الدخول...',
-                        timer: 2000,
-                        showConfirmButton: false
-                    });
-                }, 1000);
+                
+            } catch (reAuthError) {
+                console.error('خطأ في إعادة تسجيل دخول الأدمن:', reAuthError);
+                // لا نوقف العملية - فقط نسجل الخطأ
             }
         }
         
-        // 9. إرسال البيانات عبر WhatsApp
+        // 10. إرسال البيانات عبر WhatsApp
         if (formData.sendCredentials && student.customer?.whatsapp) {
             const message = `
 مرحباً ${student.customer.name} 👋
@@ -1386,51 +1414,71 @@ https://mahmoudfouad25.github.io/fouad-perspective/profile/${formData.slug}
             
             const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
             
+            // فتح WhatsApp في نافذة جديدة بعد إغلاق رسالة النجاح
             setTimeout(() => {
                 window.open(whatsappUrl, '_blank');
-            }, 1500);
+            }, 2000);
         }
         
-        // 10. عرض رسالة النجاح
-        Swal.fire({
+        // 11. عرض رسالة النجاح
+        await Swal.fire({
             icon: 'success',
             title: 'تم إنشاء الحساب بنجاح!',
             html: `
                 <div style="text-align: right;">
-                    <p><strong>المعرف:</strong> ${formData.slug}</p>
-                    <p><strong>البريد:</strong> ${formData.email}</p>
-                    <p><strong>كلمة المرور:</strong> ${formData.password}</p>
-                    ${formData.sendCredentials ? '<p style="color: #10B981;">✓ تم فتح نافذة WhatsApp للإرسال</p>' : ''}
-                    <hr>
-                    <p style="color: #3B82F6; font-size: 0.9rem;">
-                        <i class="fas fa-info-circle"></i>
-                        تم حفظ البيانات وإعادة تسجيل دخول الأدمن
-                    </p>
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <h4 style="color: #065F46; margin-bottom: 10px;">
+                            <i class="fas fa-check-circle"></i> بيانات الحساب
+                        </h4>
+                        <p><strong>المعرف:</strong> <span style="direction: ltr; display: inline-block; background: #E5E7EB; padding: 5px 10px; border-radius: 5px; font-family: monospace;">${formData.slug}</span></p>
+                        <p><strong>البريد:</strong> <span style="direction: ltr; display: inline-block;">${formData.email}</span></p>
+                        <p><strong>كلمة المرور:</strong> <span style="direction: ltr; display: inline-block; background: #FEF3C7; padding: 5px 10px; border-radius: 5px; font-family: monospace;">${formData.password}</span></p>
+                    </div>
+                    
+                    ${formData.sendCredentials ? `
+                        <div style="background: #EFF6FF; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                            <i class="fab fa-whatsapp" style="color: #25D366;"></i>
+                            تم فتح نافذة WhatsApp للإرسال
+                        </div>
+                    ` : ''}
+                    
+                    ${authId ? `
+                        <div style="background: #F3F4F6; padding: 10px; border-radius: 5px;">
+                            <small style="color: #6B7280;">
+                                <i class="fas fa-info-circle"></i>
+                                تم إنشاء الحساب في Firebase Auth
+                            </small>
+                        </div>
+                    ` : ''}
                 </div>
             `,
             confirmButtonText: 'حسناً',
             confirmButtonColor: '#10B981'
         });
         
-        // 11. إعادة تحميل البيانات
-        setTimeout(() => {
-            loadStudents();
-        }, 500);
+        // 12. إعادة تحميل البيانات
+        console.log('إعادة تحميل البيانات...');
+        await loadStudents();
         
     } catch (error) {
         console.error('خطأ في إنشاء الحساب:', error);
         
-        // محاولة إعادة تسجيل دخول الأدمن في حالة الخطأ
+        // محاولة إعادة تسجيل دخول الأدمن في حالة أي خطأ
         try {
-            await firebase.auth().signOut();
-            await firebase.auth().signInWithEmailAndPassword(
-                'admin@fouad-academy.com',
-                'RahmaMahmoud@2020$'
-            );
+            const currentUser = firebase.auth().currentUser;
+            if (!currentUser || currentUser.email !== 'admin@fouad-academy.com') {
+                await firebase.auth().signOut();
+                await firebase.auth().signInWithEmailAndPassword(
+                    'admin@fouad-academy.com',
+                    'RahmaMahmoud@2020$'
+                );
+                console.log('تم استعادة جلسة الأدمن');
+            }
         } catch (reAuthError) {
-            console.error('خطأ في إعادة المصادقة:', reAuthError);
+            console.error('خطأ في استعادة جلسة الأدمن:', reAuthError);
         }
         
+        // عرض رسالة الخطأ
         Swal.fire({
             icon: 'error',
             title: 'خطأ!',
@@ -1705,7 +1753,42 @@ checkAdminAuth();
     // تحديث كل 30 ثانية
     setInterval(loadStudents, 30000);
 });
-        
+
+        // دالة للتحقق من حالة الأدمن وإصلاحها
+async function ensureAdminAuth() {
+    const maxRetries = 3;
+    let retries = 0;
+    
+    while (retries < maxRetries) {
+        try {
+            const currentUser = firebase.auth().currentUser;
+            
+            if (!currentUser || currentUser.email !== 'admin@fouad-academy.com') {
+                console.log('محاولة استعادة جلسة الأدمن...');
+                await firebase.auth().signOut();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                await firebase.auth().signInWithEmailAndPassword(
+                    'admin@fouad-academy.com',
+                    'RahmaMahmoud@2020$'
+                );
+                console.log('تم استعادة جلسة الأدمن بنجاح');
+                return true;
+            }
+            return true;
+        } catch (error) {
+            console.error(`محاولة ${retries + 1} فشلت:`, error);
+            retries++;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+    return false;
+}
+
+// استدعاء الدالة عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', async () => {
+    await ensureAdminAuth();
+});
         
         // إضافة الدوال للـ window للاستخدام في onclick
 window.generateStrongPassword = generateStrongPassword;
