@@ -991,14 +991,17 @@
                     
                     <div class="action-buttons">
                         ${!hasAccount ? `
-                            <button class="btn btn-primary" onclick="createAccount('${student.id}')">
-                                <i class="fas fa-user-plus"></i> إنشاء حساب
-                            </button>
-                        ` : accountStatus !== 'active' ? `
-                            <button class="btn btn-success" onclick="activateAccount('${student.id}')">
-                                <i class="fas fa-check"></i> تفعيل الحساب
-                            </button>
-                        ` : ''}
+    <button class="btn btn-primary" onclick="createAccount('${student.id}')">
+        <i class="fas fa-user-plus"></i> إنشاء حساب
+    </button>
+` : `
+    <button class="btn btn-success" onclick="sendCredentials('${student.id}')">
+        <i class="fab fa-whatsapp"></i> إرسال البيانات
+    </button>
+    <button class="btn btn-info" onclick="resendWelcome('${student.id}')">
+        <i class="fas fa-envelope"></i> رسالة ترحيب
+    </button>
+`}
                         
                         ${!student.courseAssigned ? `
                             <button class="btn btn-warning" onclick="assignCourse('${student.id}')">
@@ -1119,8 +1122,7 @@ async function createAccount(studentId) {
                         <strong>إرسال بيانات الدخول عبر الواتساب</strong>
                     </label>
                     <label style="display: block; cursor: pointer;">
-                        <input type="checkbox" id="activateAccount" checked style="margin-left: 5px;">
-                        <strong>تفعيل الحساب مباشرة</strong>
+                        
                     </label>
                 </div>
             </div>
@@ -1136,7 +1138,7 @@ async function createAccount(studentId) {
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
             const sendCredentials = document.getElementById('sendCredentials').checked;
-            const activateAccount = document.getElementById('activateAccount').checked;
+            const activateAccount = true; // دايماً مفعّل
             
             // التحقق من البيانات
             if (!slug || !email || !password) {
@@ -1575,7 +1577,7 @@ https://fouad-perspective.web.app/profile/${formData.slug}
                 select.innerHTML += `<option value="${course}">${course}</option>`;
             });
         }
-        
+                
         // تحميل البيانات عند فتح الصفحة
         document.addEventListener('DOMContentLoaded', () => {
     // تعيين قيمة افتراضية للفلتر
@@ -1590,6 +1592,160 @@ https://fouad-perspective.web.app/profile/${formData.slug}
     setInterval(loadStudents, 30000);
 });
 
+        // إرسال بيانات الدخول
+async function sendCredentials(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student) return;
+    
+    const customer = student.customer || {};
+    
+    // جلب بيانات المستخدم من users collection
+    let userData = null;
+    if (student.userId) {
+        const userDoc = await db.collection('users').doc(student.userId).get();
+        if (userDoc.exists) {
+            userData = userDoc.data();
+        }
+    }
+    
+    if (!userData) {
+        Swal.fire('تنبيه', 'لم يتم العثور على بيانات المستخدم', 'warning');
+        return;
+    }
+    
+    // فك تشفير كلمة المرور
+    const password = userData.tempPassword ? atob(userData.tempPassword) : '[كلمة المرور غير متاحة]';
+    
+    const { value: messageType } = await Swal.fire({
+        title: 'اختر نوع الرسالة',
+        input: 'radio',
+        inputOptions: {
+            credentials: 'بيانات الدخول فقط',
+            welcome: 'رسالة ترحيب مع البيانات',
+            reminder: 'تذكير بالبيانات'
+        },
+        inputValue: 'credentials',
+        showCancelButton: true,
+        confirmButtonText: 'إرسال',
+        confirmButtonColor: '#25D366',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!messageType) return;
+    
+    let message = '';
+    
+    switch(messageType) {
+        case 'credentials':
+            message = `
+بيانات دخولك لمنظور الفؤاد:
+
+📧 البريد: ${userData.email}
+🔑 كلمة المرور: ${password}
+🆔 المعرف: ${userData.id}
+
+🔗 رابط الدخول:
+https://fouad-perspective.web.app/login
+            `.trim();
+            break;
+            
+        case 'welcome':
+            message = `
+مرحباً ${customer.name} 👋
+
+نرحب بك في منظور الفؤاد! 🎉
+
+تم تفعيل حسابك بنجاح ويمكنك الآن الدخول للمنصة.
+
+📧 البريد: ${userData.email}
+🔑 كلمة المرور: ${password}
+🆔 معرف الحساب: ${userData.id}
+
+📚 الدورة المسجلة: ${student.courseName || 'غير محدد'}
+
+🔗 رابط الدخول:
+https://fouad-perspective.web.app/login
+
+📱 ملفك الشخصي:
+https://fouad-perspective.web.app/profile/${userData.id}
+
+نتمنى لك رحلة تعليمية ممتعة ومفيدة 🚀
+            `.trim();
+            break;
+            
+        case 'reminder':
+            message = `
+تذكير بحسابك في منظور الفؤاد
+
+${customer.name} عزيزي/عزيزتي
+
+نذكرك ببيانات دخولك:
+
+📧 البريد: ${userData.email}
+🔑 كلمة المرور: ${password}
+
+🔗 للدخول:
+https://fouad-perspective.web.app/login
+
+في حال واجهتك أي مشكلة، تواصل معنا.
+
+مع تحياتنا،
+فريق منظور الفؤاد
+            `.trim();
+            break;
+    }
+    
+    if (customer.whatsapp) {
+        const whatsappUrl = `https://wa.me/${customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+        window.open(whatsappUrl, '_blank');
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم فتح WhatsApp',
+            text: 'تم فتح نافذة WhatsApp لإرسال الرسالة',
+            confirmButtonColor: '#25D366'
+        });
+    } else {
+        Swal.fire('تنبيه', 'لا يوجد رقم واتساب لهذا الطالب', 'warning');
+    }
+}
+
+// إرسال رسالة ترحيب
+async function resendWelcome(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student) return;
+    
+    const customer = student.customer || {};
+    
+    if (!customer.whatsapp) {
+        Swal.fire('تنبيه', 'لا يوجد رقم واتساب لهذا الطالب', 'warning');
+        return;
+    }
+    
+    const message = `
+مرحباً ${customer.name} 👋
+
+نسعد بانضمامك لمنظور الفؤاد! 
+
+حسابك جاهز الآن ويمكنك البدء في رحلتك التعليمية.
+
+📚 أنت مسجل في: ${student.courseName || 'دورة تدريبية'}
+
+للحصول على بيانات الدخول، يرجى التواصل معنا.
+
+نتمنى لك تجربة تعليمية رائعة! 🌟
+
+مع تحياتنا،
+فريق منظور الفؤاد
+    `.trim();
+    
+    const whatsappUrl = `https://wa.me/${customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+}
+
+// إضافة الدوال للـ window
+window.sendCredentials = sendCredentials;
+window.resendWelcome = resendWelcome;
         // إضافة الدوال للـ window للاستخدام في onclick
 window.generateStrongPassword = generateStrongPassword;
 window.generateUniqueSlug = generateUniqueSlug;
