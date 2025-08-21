@@ -1259,30 +1259,35 @@ async function processAccountCreation(studentId, student, formData) {
             throw new Error('هذا البريد مستخدم بالفعل');
         }
         
-        // 3. إنشاء الحساب في Firebase Auth
+        // 3. حفظ بيانات الأدمن الحالي قبل إنشاء المستخدم الجديد
+        const currentAdmin = firebase.auth().currentUser;
+        const adminEmail = currentAdmin ? currentAdmin.email : null;
+        
+        // 4. إنشاء الحساب في Firebase Auth
         let authId = null;
+        let userCreated = false;
+        
         try {
+            // إنشاء المستخدم
             const userCredential = await firebase.auth()
                 .createUserWithEmailAndPassword(formData.email, formData.password);
             authId = userCredential.user.uid;
+            userCreated = true;
             
             // تحديث اسم المستخدم
             await userCredential.user.updateProfile({
                 displayName: student.customer?.name || 'User'
             });
             
-            // تسجيل خروج المستخدم الجديد فوراً
-            await firebase.auth().signOut();
-            
-            // إعادة تسجيل دخول الأدمن (يجب تعديل البيانات حسب أدمن النظام)
-            // await firebase.auth().signInWithEmailAndPassword('admin@example.com', 'adminPassword');
-            
         } catch (authError) {
-            console.log('خطأ في Auth:', authError);
-            // نتابع حتى لو فشل Auth
+            if (authError.code === 'auth/email-already-in-use') {
+                console.log('البريد مستخدم في Auth - نتابع بدون authId');
+            } else {
+                throw authError;
+            }
         }
         
-        // 4. تحضير بيانات المستخدم
+        // 5. تحضير بيانات المستخدم
         const userData = {
             // المعرف والبيانات الأساسية
             id: formData.slug,
@@ -1319,10 +1324,10 @@ async function processAccountCreation(studentId, student, formData) {
             originalBookingId: student.originalBookingId || student.id
         };
         
-        // 5. حفظ في Firestore
+        // 6. حفظ في Firestore
         await db.collection('users').doc(formData.slug).set(userData);
         
-        // 6. تحديث حالة الطالب في individualStudents
+        // 7. تحديث حالة الطالب في individualStudents
         await db.collection('individualStudents').doc(studentId).update({
             accountCreated: true,
             accountCreatedAt: new Date().toISOString(),
@@ -1331,7 +1336,35 @@ async function processAccountCreation(studentId, student, formData) {
             userEmail: formData.email
         });
         
-        // 7. إرسال البيانات عبر WhatsApp
+        // 8. إعادة تسجيل دخول الأدمن إذا تم إنشاء مستخدم جديد
+        if (userCreated) {
+            // تسجيل خروج المستخدم الجديد
+            await firebase.auth().signOut();
+            
+            // إعادة تسجيل دخول الأدمن
+            try {
+                // جرب أولاً ببيانات الأدمن المحفوظة
+                await firebase.auth().signInWithEmailAndPassword(
+                    'admin@fouad-academy.com',
+                    'RahmaMahmoud@2020$'
+                );
+                console.log('تم إعادة تسجيل دخول الأدمن بنجاح');
+            } catch (adminError) {
+                console.error('خطأ في إعادة تسجيل دخول الأدمن:', adminError);
+                // إذا فشل، نعرض رسالة للمستخدم
+                setTimeout(() => {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'تنبيه',
+                        text: 'سيتم إعادة تسجيل الدخول...',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                }, 1000);
+            }
+        }
+        
+        // 9. إرسال البيانات عبر WhatsApp
         if (formData.sendCredentials && student.customer?.whatsapp) {
             const message = `
 مرحباً ${student.customer.name} 👋
@@ -1343,10 +1376,10 @@ async function processAccountCreation(studentId, student, formData) {
 🔗 معرف الحساب: ${formData.slug}
 
 رابط الدخول:
-https://fouad-perspective.web.app/login
+https://mahmoudfouad25.github.io/fouad-perspective/login
 
 رابط ملفك الشخصي:
-https://fouad-perspective.web.app/profile/${formData.slug}
+https://mahmoudfouad25.github.io/fouad-perspective/profile/${formData.slug}
 
 نتمنى لك رحلة تعليمية ممتعة 🚀
             `.trim();
@@ -1358,7 +1391,7 @@ https://fouad-perspective.web.app/profile/${formData.slug}
             }, 1500);
         }
         
-        // 8. عرض رسالة النجاح
+        // 10. عرض رسالة النجاح
         Swal.fire({
             icon: 'success',
             title: 'تم إنشاء الحساب بنجاح!',
@@ -1368,17 +1401,36 @@ https://fouad-perspective.web.app/profile/${formData.slug}
                     <p><strong>البريد:</strong> ${formData.email}</p>
                     <p><strong>كلمة المرور:</strong> ${formData.password}</p>
                     ${formData.sendCredentials ? '<p style="color: #10B981;">✓ تم فتح نافذة WhatsApp للإرسال</p>' : ''}
+                    <hr>
+                    <p style="color: #3B82F6; font-size: 0.9rem;">
+                        <i class="fas fa-info-circle"></i>
+                        تم حفظ البيانات وإعادة تسجيل دخول الأدمن
+                    </p>
                 </div>
             `,
             confirmButtonText: 'حسناً',
             confirmButtonColor: '#10B981'
         });
         
-        // 9. إعادة تحميل البيانات
-        loadStudents();
+        // 11. إعادة تحميل البيانات
+        setTimeout(() => {
+            loadStudents();
+        }, 500);
         
     } catch (error) {
         console.error('خطأ في إنشاء الحساب:', error);
+        
+        // محاولة إعادة تسجيل دخول الأدمن في حالة الخطأ
+        try {
+            await firebase.auth().signOut();
+            await firebase.auth().signInWithEmailAndPassword(
+                'admin@fouad-academy.com',
+                'RahmaMahmoud@2020$'
+            );
+        } catch (reAuthError) {
+            console.error('خطأ في إعادة المصادقة:', reAuthError);
+        }
+        
         Swal.fire({
             icon: 'error',
             title: 'خطأ!',
@@ -1387,6 +1439,25 @@ https://fouad-perspective.web.app/profile/${formData.slug}
         });
     }
 }
+        // التحقق من حالة تسجيل دخول الأدمن
+function checkAdminAuth() {
+    firebase.auth().onAuthStateChanged((user) => {
+        if (!user || user.email !== 'admin@fouad-academy.com') {
+            console.log('الأدمن غير مسجل دخول - إعادة المحاولة...');
+            firebase.auth().signInWithEmailAndPassword(
+                'admin@fouad-academy.com',
+                'RahmaMahmoud@2020$'
+            ).then(() => {
+                console.log('تم إعادة تسجيل دخول الأدمن');
+            }).catch((error) => {
+                console.error('خطأ في تسجيل دخول الأدمن:', error);
+            });
+        }
+    });
+}
+
+// استدعاء التحقق عند تحميل الصفحة
+checkAdminAuth();
         
         
         // تفعيل الحساب
