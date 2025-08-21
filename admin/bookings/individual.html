@@ -1821,7 +1821,364 @@ async function resendWelcome(studentId) {
     });
 }
 
+// ==================== جلب الدورات المتاحة ====================
+async function loadAvailableCourses() {
+    try {
+        const coursesSnapshot = await db.collection('courses').get();
+        availableCourses = [];
+        
+        coursesSnapshot.forEach(doc => {
+            const data = doc.data();
+            availableCourses.push({
+                id: doc.id,
+                type: 'course',
+                title: data.title || 'دورة غير محددة',
+                price: parseFloat(data.price) || 0,
+                instructor: data.instructor || '',
+                description: data.description || '',
+                thumbnail: data.thumbnail || '',
+                category: data.category || '',
+                level: data.level || 'beginner',
+                duration: data.duration || '',
+                studentsCount: data.studentsCount || 0
+            });
+        });
+        
+        const pathsSnapshot = await db.collection('paths').get();
+        availablePaths = [];
+        
+        pathsSnapshot.forEach(doc => {
+            const data = doc.data();
+            availablePaths.push({
+                id: doc.id,
+                type: 'path',
+                title: data.title || 'مسار غير محدد',
+                price: parseFloat(data.price) || 0,
+                instructor: data.instructor || '',
+                description: data.description || '',
+                thumbnail: data.thumbnail || '',
+                coursesCount: data.coursesCount || 0,
+                level: data.level || 'beginner'
+            });
+        });
+        
+        console.log('تم تحميل', availableCourses.length, 'دورة و', availablePaths.length, 'مسار');
+        
+    } catch (error) {
+        console.error('خطأ في جلب الدورات:', error);
+        availableCourses = [
+            {
+                id: 'malaz-alhayara-course',
+                type: 'course',
+                title: 'ملاذ الحيارى',
+                price: 7500,
+                instructor: 'د. محمود فؤاد',
+                level: 'intermediate'
+            },
+            {
+                id: 'enneagram-course',
+                type: 'course',
+                title: 'دورة الإنياجرام',
+                price: 5000,
+                instructor: 'د. محمود فؤاد',
+                level: 'beginner'
+            }
+        ];
+        
+        availablePaths = [
+            {
+                id: 'professional-path',
+                type: 'path',
+                title: 'المسار الاحترافي',
+                price: 15000,
+                coursesCount: 5,
+                level: 'advanced'
+            }
+        ];
+    }
+}
 
+// ==================== دالة تخصيص الدورة الصحيحة ====================
+async function assignCourseToStudent(studentId) {
+    try {
+        if (availableCourses.length === 0 && availablePaths.length === 0) {
+            await loadAvailableCourses();
+        }
+        
+        const student = allStudents.find(s => s.id === studentId);
+        if (!student) {
+            Swal.fire('خطأ', 'لم يتم العثور على الطالب', 'error');
+            return;
+        }
+        
+        const allItems = [...availableCourses, ...availablePaths];
+        
+        const coursesOptionsHTML = allItems.map(item => 
+            '<div class="course-option" style="' +
+            'border: 2px solid #E5E7EB;' +
+            'border-radius: 8px;' +
+            'padding: 12px;' +
+            'margin-bottom: 10px;' +
+            'cursor: pointer;' +
+            'transition: all 0.3s;' +
+            '" onclick="selectCourse(this, \'' + item.id + '\', \'' + item.type + '\', ' + item.price + ')">' +
+            '<div style="display: flex; justify-content: space-between; align-items: center;">' +
+            '<div>' +
+            '<strong>' + item.title + '</strong>' +
+            '<span style="' +
+            'background: ' + (item.type === 'course' ? '#3B82F6' : '#8B5CF6') + ';' +
+            'color: white;' +
+            'padding: 2px 8px;' +
+            'border-radius: 4px;' +
+            'font-size: 0.75rem;' +
+            'margin-right: 8px;' +
+            '">' + (item.type === 'course' ? 'دورة' : 'مسار') + '</span>' +
+            '</div>' +
+            '<div style="text-align: left;">' +
+            '<div style="color: #10B981; font-weight: bold;">' + item.price + ' جنيه</div>' +
+            (item.instructor ? '<small style="color: #6B7280;">' + item.instructor + '</small>' : '') +
+            '</div>' +
+            '</div>' +
+            (item.type === 'path' ? '<small style="color: #6B7280;">يحتوي على ' + item.coursesCount + ' دورات</small>' : '') +
+            '</div>'
+        ).join('');
+        
+        const result = await Swal.fire({
+            title: 'تخصيص دورة للطالب',
+            html: '<div style="text-align: right; direction: rtl;">' +
+                '<div style="background: #F0F9FF; padding: 15px; border-radius: 8px; margin-bottom: 20px;">' +
+                '<h4 style="margin: 0 0 10px 0; color: #0369A1;">' +
+                '<i class="fas fa-user"></i> ' + (student.customer?.name || 'الطالب') +
+                '</h4>' +
+                '<p style="margin: 0; color: #64748B;">' +
+                '<i class="fas fa-book"></i> الدورة الأصلية: ' + (student.courseName || 'غير محددة') +
+                '</p>' +
+                '</div>' +
+                '<div style="margin-bottom: 20px;">' +
+                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
+                '<i class="fas fa-graduation-cap"></i> اختر الدورة أو المسار' +
+                '</label>' +
+                '<div style="max-height: 200px; overflow-y: auto; border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px;">' +
+                coursesOptionsHTML +
+                '</div>' +
+                '<input type="hidden" id="selectedCourseId" value="">' +
+                '<input type="hidden" id="selectedCourseType" value="">' +
+                '<input type="hidden" id="selectedCoursePrice" value="">' +
+                '</div>' +
+                '<div id="selectedCourseInfo" style="display: none; background: #F0FDF4; padding: 12px; border-radius: 8px; margin-bottom: 20px;">' +
+                '<strong>الدورة المختارة: </strong>' +
+                '<span id="selectedCourseName"></span>' +
+                '</div>' +
+                '<div style="margin-bottom: 20px;">' +
+                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
+                '<i class="fas fa-calendar-alt"></i> فترة الوصول' +
+                '</label>' +
+                '<div style="display: flex; gap: 10px; align-items: center;">' +
+                '<input type="date" id="startDate" class="swal2-input" value="' + new Date().toISOString().split('T')[0] + '" style="flex: 1;">' +
+                '<span>إلى</span>' +
+                '<input type="date" id="endDate" class="swal2-input" style="flex: 1;">' +
+                '</div>' +
+                '</div>' +
+                '<div style="margin-bottom: 20px;">' +
+                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
+                '<i class="fas fa-key"></i> نوع الوصول' +
+                '</label>' +
+                '<select id="accessType" class="swal2-input" style="width: 100%;">' +
+                '<option value="full">وصول كامل</option>' +
+                '<option value="limited">وصول محدود</option>' +
+                '<option value="preview">معاينة فقط</option>' +
+                '</select>' +
+                '</div>' +
+                '<div style="margin-bottom: 20px;">' +
+                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
+                '<i class="fas fa-percentage"></i> الخصم %' +
+                '</label>' +
+                '<input type="number" id="discount" class="swal2-input" value="0" min="0" max="100" style="width: 100%;" onchange="updateFinalPrice()">' +
+                '</div>' +
+                '<div style="background: white; padding: 15px; border-radius: 8px; text-align: center;">' +
+                '<div>السعر الأصلي: <span id="originalPrice">0</span> جنيه</div>' +
+                '<div style="font-size: 1.5rem; color: #10B981; font-weight: bold; margin-top: 10px;">' +
+                'السعر النهائي: <span id="finalPrice">0</span> جنيه' +
+                '</div>' +
+                '</div>' +
+                '<div style="margin-top: 20px;">' +
+                '<label>' +
+                '<input type="checkbox" id="isFree" onchange="toggleFree()">' +
+                '<strong>مجاني بالكامل</strong>' +
+                '</label>' +
+                '</div>' +
+                '</div>' +
+                '<script>' +
+                'function selectCourse(element, courseId, courseType, price) {' +
+                'document.querySelectorAll(".course-option").forEach(el => {' +
+                'el.style.border = "2px solid #E5E7EB";' +
+                'el.style.background = "white";' +
+                '});' +
+                'element.style.border = "2px solid #10B981";' +
+                'element.style.background = "#F0FDF4";' +
+                'document.getElementById("selectedCourseId").value = courseId;' +
+                'document.getElementById("selectedCourseType").value = courseType;' +
+                'document.getElementById("selectedCoursePrice").value = price;' +
+                'document.getElementById("selectedCourseInfo").style.display = "block";' +
+                'document.getElementById("selectedCourseName").textContent = element.querySelector("strong").textContent;' +
+                'document.getElementById("originalPrice").textContent = price;' +
+                'updateFinalPrice();' +
+                '}' +
+                'function updateFinalPrice() {' +
+                'const price = parseFloat(document.getElementById("selectedCoursePrice").value) || 0;' +
+                'const discount = parseFloat(document.getElementById("discount").value) || 0;' +
+                'const isFree = document.getElementById("isFree").checked;' +
+                'if (isFree) {' +
+                'document.getElementById("finalPrice").textContent = "0";' +
+                '} else {' +
+                'const finalPrice = price - (price * discount / 100);' +
+                'document.getElementById("finalPrice").textContent = finalPrice.toFixed(2);' +
+                '}' +
+                '}' +
+                'function toggleFree() {' +
+                'const isFree = document.getElementById("isFree").checked;' +
+                'document.getElementById("discount").disabled = isFree;' +
+                'if (isFree) {' +
+                'document.getElementById("discount").value = 100;' +
+                '}' +
+                'updateFinalPrice();' +
+                '}' +
+                '</' + 'script>',
+            showCancelButton: true,
+            confirmButtonText: 'تخصيص الدورة',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981',
+            width: '800px',
+            preConfirm: () => {
+                const selectedCourseId = document.getElementById('selectedCourseId').value;
+                const selectedCourseType = document.getElementById('selectedCourseType').value;
+                const selectedCoursePrice = parseFloat(document.getElementById('selectedCoursePrice').value) || 0;
+                const startDate = document.getElementById('startDate').value;
+                const endDate = document.getElementById('endDate').value;
+                const accessType = document.getElementById('accessType').value;
+                const discount = parseFloat(document.getElementById('discount').value) || 0;
+                const isFree = document.getElementById('isFree').checked;
+                
+                if (!selectedCourseId) {
+                    Swal.showValidationMessage('يجب اختيار دورة أو مسار');
+                    return false;
+                }
+                
+                if (!startDate) {
+                    Swal.showValidationMessage('يجب تحديد تاريخ البداية');
+                    return false;
+                }
+                
+                const selectedCourse = allItems.find(item => item.id === selectedCourseId);
+                
+                return {
+                    courseId: selectedCourseId,
+                    courseType: selectedCourseType,
+                    courseTitle: selectedCourse?.title || 'غير محدد',
+                    coursePrice: selectedCoursePrice,
+                    startDate,
+                    endDate,
+                    accessType,
+                    discount,
+                    isFree,
+                    finalPrice: isFree ? 0 : (selectedCoursePrice - (selectedCoursePrice * discount / 100))
+                };
+            }
+        });
+        
+        if (!result.isConfirmed || !result.value) return;
+        
+        const formData = result.value;
+        
+        Swal.fire({
+            title: 'جاري تخصيص الدورة...',
+            html: 'الرجاء الانتظار',
+            allowOutsideClick: false,
+            showConfirmButton: false,
+            willOpen: () => { Swal.showLoading(); }
+        });
+        
+        let userData = null;
+        if (student.userId) {
+            const userDoc = await db.collection('users').doc(student.userId).get();
+            if (userDoc.exists) {
+                userData = userDoc.data();
+            }
+        }
+        
+        if (!userData) {
+            throw new Error('لم يتم العثور على بيانات المستخدم');
+        }
+        
+        const enrollmentData = {
+            id: formData.courseId,
+            type: formData.courseType,
+            title: formData.courseTitle,
+            price: formData.coursePrice,
+            startDate: formData.startDate,
+            endDate: formData.endDate || null,
+            accessType: formData.accessType,
+            isFree: formData.isFree,
+            currency: 'EGP',
+            enrolledAt: new Date().toISOString(),
+            notes: ''
+        };
+        
+        const enrollments = userData.enrollments || [];
+        const existingIndex = enrollments.findIndex(e => e.id === formData.courseId);
+        
+        if (existingIndex !== -1) {
+            enrollments[existingIndex] = enrollmentData;
+        } else {
+            enrollments.push(enrollmentData);
+        }
+        
+        await db.collection('users').doc(student.userId).update({
+            enrollments: enrollments,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastUpdatedBy: 'individual-students-page'
+        });
+        
+        await db.collection('individualStudents').doc(studentId).set({
+            courseAssigned: true,
+            courseAssignedAt: new Date().toISOString(),
+            assignedCourseId: formData.courseId,
+            assignedCourseTitle: formData.courseTitle
+        }, { merge: true });
+        
+        const studentIndex = allStudents.findIndex(s => s.id === studentId);
+        if (studentIndex !== -1) {
+            allStudents[studentIndex].courseAssigned = true;
+            allStudents[studentIndex].assignedCourseId = formData.courseId;
+            allStudents[studentIndex].assignedCourseTitle = formData.courseTitle;
+        }
+        
+        await Swal.fire({
+            icon: 'success',
+            title: 'تم تخصيص الدورة بنجاح! 🎉',
+            html: '<div style="text-align: right;">' +
+                '<p><strong>الطالب:</strong> ' + (student.customer?.name || 'غير محدد') + '</p>' +
+                '<p><strong>الدورة:</strong> ' + formData.courseTitle + '</p>' +
+                '<p><strong>السعر النهائي:</strong> ' + formData.finalPrice + ' جنيه</p>' +
+                '<p><strong>نوع الوصول:</strong> ' + (formData.accessType === 'full' ? 'كامل' : formData.accessType === 'limited' ? 'محدود' : 'معاينة') + '</p>' +
+                '</div>',
+            confirmButtonColor: '#10B981'
+        });
+        
+        filterByTab(currentFilter);
+        
+    } catch (error) {
+        console.error('خطأ في تخصيص الدورة:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ!',
+            text: error.message || 'حدث خطأ في تخصيص الدورة',
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+window.assignCourseToStudent = assignCourseToStudent;
 
 // إضافة الدوال للـ window
 window.sendCredentials = sendCredentials;
