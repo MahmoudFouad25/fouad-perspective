@@ -753,12 +753,16 @@ let availablePaths = [];
         }
 
         // دالة للتحقق من وجود حساب المستخدم
+// دالة للتحقق من وجود حساب المستخدم
 async function checkUserAccount(student) {
     try {
+        console.log('التحقق من حساب:', student.customer?.name);
+        
         // لو في userId محفوظ
         if (student.userId) {
             const userDoc = await db.collection('users').doc(student.userId).get();
             if (userDoc.exists) {
+                console.log('✓ وجد حساب بالـ userId:', student.userId);
                 return true;
             }
         }
@@ -770,6 +774,7 @@ async function checkUserAccount(student) {
                 .limit(1)
                 .get();
             if (!emailQuery.empty) {
+                console.log('✓ وجد حساب بالـ email:', student.userEmail);
                 return true;
             }
         }
@@ -786,8 +791,8 @@ async function checkUserAccount(student) {
                 const userData = bookingQuery.docs[0].data();
                 student.userId = userData.id;
                 student.userEmail = userData.email;
-                student.accountCreated = true;
-                student.accountStatus = 'active';
+                
+                console.log('✓ وجد حساب بالـ originalBookingId:', bookingId);
                 
                 // حدث في Firebase
                 await db.collection('individualStudents').doc(student.id).set({
@@ -801,6 +806,7 @@ async function checkUserAccount(student) {
             }
         }
         
+        console.log('✗ لا يوجد حساب لـ:', student.customer?.name);
         return false;
     } catch (error) {
         console.error('خطأ في التحقق من الحساب:', error);
@@ -808,7 +814,8 @@ async function checkUserAccount(student) {
     }
 }
         // تحميل البيانات
-        async function loadStudents() {
+        // تحميل البيانات
+async function loadStudents() {
     try {
         console.log('جاري تحميل البيانات...');
         
@@ -817,31 +824,44 @@ async function checkUserAccount(student) {
         allStudents = [];
         
         if (!snapshot.empty) {
+            // جمع كل البيانات أولاً
+            const tempStudents = [];
+            
             snapshot.forEach(doc => {
                 const data = doc.data();
-                // التحقق من وجود حساب
-                checkUserAccount({
-                    ...data,
-                    id: doc.id
-                }).then(hasAccount => {
-                    if (hasAccount && !data.accountCreated) {
-                        // حدث البيانات المحلية
-                        const index = allStudents.findIndex(s => s.id === doc.id);
-                        if (index !== -1) {
-                            allStudents[index].accountCreated = true;
-                            allStudents[index].accountStatus = 'active';
-                        }
-                    }
-                });
                 // فقط نضيف الطلاب مع بيانات كاملة
                 if (data && data.customer && data.customer.name && data.customer.name !== 'غير محدد') {
-                    allStudents.push({
+                    tempStudents.push({
                         id: doc.id,
                         ...data,
                         transferredAt: data.transferredAt || new Date().toISOString()
                     });
                 }
             });
+            
+            // الآن نتحقق من كل طالب بشكل متزامن
+            for (const student of tempStudents) {
+                // التحقق من وجود حساب
+                const hasAccount = await checkUserAccount(student);
+                
+                if (hasAccount && !student.accountCreated) {
+                    // حدث البيانات
+                    student.accountCreated = true;
+                    student.accountStatus = 'active';
+                    
+                    // حدث في Firebase أيضاً
+                    try {
+                        await db.collection('individualStudents').doc(student.id).set({
+                            accountCreated: true,
+                            accountStatus: 'active'
+                        }, { merge: true });
+                    } catch (updateError) {
+                        console.error('خطأ في تحديث individualStudents:', updateError);
+                    }
+                }
+                
+                allStudents.push(student);
+            }
         }
         
         console.log('تم تحميل:', allStudents.length, 'طالب');
@@ -1053,6 +1073,18 @@ function createStudentCard(student) {
         // عرض الطلاب
         function displayStudents() {
             const grid = document.getElementById('studentsGrid');
+            // إظهار حالة التحميل أثناء المعالجة
+            if (!grid) return;
+            
+            if (window.isLoadingStudents) {
+                grid.innerHTML = `
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                        <p style="margin-top: 20px; color: white;">جاري معالجة البيانات...</p>
+                    </div>
+                `;
+                return;
+            }
             
             if (filteredStudents.length === 0) {
                 grid.innerHTML = `
@@ -1718,17 +1750,23 @@ window.sendMessage = sendMessage;
         }
                 
         // تحميل البيانات عند فتح الصفحة
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
     // تعيين قيمة افتراضية للفلتر
     currentFilter = 'all';
     filteredStudents = [];
     allStudents = [];
     
-    // تحميل البيانات
-    loadStudents();
+    // إظهار حالة التحميل
+    window.isLoadingStudents = true;
     
-    // تحديث كل 30 ثانية
-  //  setInterval(loadStudents, 30000);
+    // تحميل البيانات
+    await loadStudents();
+    
+    // إزالة حالة التحميل
+    window.isLoadingStudents = false;
+    
+    // تحميل الدورات المتاحة
+    await loadAvailableCourses();
 });
 
         // إرسال بيانات الدخول
