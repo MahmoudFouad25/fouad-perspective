@@ -1089,6 +1089,7 @@ function generateUniqueSlug(name) {
 
 // إنشاء حساب محسّن
 // ==================== إنشاء حساب محسّن ونظيف ====================
+// ==================== إنشاء حساب محسّن مع التحقق من التكرار ====================
 async function createAccount(studentId) {
     // منع الضغطات المتكررة
     if (window.isCreatingAccount) {
@@ -1103,7 +1104,7 @@ async function createAccount(studentId) {
             throw new Error('لم يتم العثور على الطالب');
         }
         
-        // التحقق من عدم وجود حساب مسبق
+        // التحقق من عدم وجود حساب مسبق في individualStudents
         if (student.accountCreated) {
             window.isCreatingAccount = false;
             
@@ -1123,38 +1124,247 @@ async function createAccount(studentId) {
             return;
         }
         
+        // ⭐ التحقق من وجود حساب سابق بنفس originalBookingId في users
+        const originalId = student.originalBookingId || student.id;
+        
+        // البحث عن مستخدم بنفس originalBookingId
+        const existingUserQuery = await db.collection('users')
+            .where('originalBookingId', '==', originalId)
+            .limit(1)
+            .get();
+        
+        if (!existingUserQuery.empty) {
+            // حساب موجود بالفعل - نحدث individualStudents فقط
+            const existingUser = existingUserQuery.docs[0];
+            const userData = existingUser.data();
+            
+            // تحديث individualStudents بمعلومات الحساب الموجود
+            await db.collection('individualStudents').doc(studentId).update({
+                accountCreated: true,
+                accountCreatedAt: userData.accountCreatedAt || new Date().toISOString(),
+                accountStatus: 'active',
+                userId: existingUser.id,
+                userEmail: userData.email
+            });
+            
+            window.isCreatingAccount = false;
+            
+            // فك تشفير كلمة المرور إن وجدت
+            const password = userData.tempPassword ? atob(userData.tempPassword) : '[كلمة المرور غير متاحة]';
+            
+            await Swal.fire({
+                icon: 'info',
+                title: 'الحساب موجود بالفعل!',
+                html: `
+                    <div style="text-align: right; background: #F0F9FF; padding: 20px; border-radius: 10px;">
+                        <h3 style="color: #0369A1; margin-bottom: 15px;">بيانات الحساب الموجود:</h3>
+                        <div style="background: white; padding: 15px; border-radius: 8px;">
+                            <p><strong>🆔 المعرف:</strong> ${existingUser.id}</p>
+                            <p><strong>📧 البريد:</strong> ${userData.email}</p>
+                            <p><strong>🔑 كلمة المرور:</strong> ${password}</p>
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <button onclick="sendCredentials('${studentId}')" class="swal2-confirm swal2-styled" style="background: #25D366;">
+                                <i class="fab fa-whatsapp"></i> إرسال البيانات عبر WhatsApp
+                            </button>
+                        </div>
+                    </div>
+                `,
+                confirmButtonText: 'حسناً',
+                confirmButtonColor: '#0369A1'
+            });
+            
+            // تحديث البيانات المحلية
+            const studentIndex = allStudents.findIndex(s => s.id === studentId);
+            if (studentIndex !== -1) {
+                allStudents[studentIndex].accountCreated = true;
+                allStudents[studentIndex].accountStatus = 'active';
+                allStudents[studentIndex].userId = existingUser.id;
+                allStudents[studentIndex].userEmail = userData.email;
+            }
+            
+            // إعادة تحميل الصفحة
+            await loadStudents();
+            return;
+        }
+        
+        // ⭐ التحقق من وجود حساب بنفس الإيميل
         const customer = student.customer || {};
+        if (customer.email) {
+            const emailQuery = await db.collection('users')
+                .where('email', '==', customer.email)
+                .limit(1)
+                .get();
+                
+            if (!emailQuery.empty) {
+                window.isCreatingAccount = false;
+                
+                const existingUser = emailQuery.docs[0];
+                const userData = existingUser.data();
+                
+                const result = await Swal.fire({
+                    icon: 'question',
+                    title: 'حساب موجود بنفس البريد!',
+                    html: `
+                        <p>يوجد حساب بالفعل بالبريد: <strong>${customer.email}</strong></p>
+                        <p>المعرف: <strong>${existingUser.id}</strong></p>
+                        <p>هل تريد ربط هذا الطالب بالحساب الموجود؟</p>
+                    `,
+                    showCancelButton: true,
+                    confirmButtonText: 'نعم، اربط الحساب',
+                    cancelButtonText: 'لا، ألغي',
+                    confirmButtonColor: '#3B82F6'
+                });
+                
+                if (result.isConfirmed) {
+                    // ربط الطالب بالحساب الموجود
+                    await db.collection('individualStudents').doc(studentId).update({
+                        accountCreated: true,
+                        accountCreatedAt: userData.accountCreatedAt || new Date().toISOString(),
+                        accountStatus: 'active',
+                        userId: existingUser.id,
+                        userEmail: userData.email
+                    });
+                    
+                    // إضافة الدورة للمستخدم الموجود
+                    const updatedCourses = userData.courses || [];
+                    updatedCourses.push({
+                        id: student.courseId || Date.now().toString(),
+                        title: student.courseName || 'دورة غير محددة',
+                        type: 'individual',
+                        enrolledAt: new Date().toISOString(),
+                        price: student.pricing?.finalPrice || 0,
+                        status: 'active',
+                        originalBookingId: originalId
+                    });
+                    
+                    await db.collection('users').doc(existingUser.id).update({
+                        courses: updatedCourses,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    Swal.fire('تم!', 'تم ربط الطالب بالحساب الموجود بنجاح', 'success');
+                    await loadStudents();
+                }
+                return;
+            }
+        }
         
-        // توليد كلمة مرور قوية
-        const password = generateStrongPassword();
-        const slug = generateUniqueSlug(customer.name);
-        
-        // عرض شاشة تحميل
-        Swal.fire({
-            title: 'جاري إنشاء الحساب...',
+        // باقي كود إنشاء الحساب الجديد (الكود الأصلي)
+        const { value: formData } = await Swal.fire({
+            title: 'إنشاء حساب جديد',
             html: `
-                <div style="text-align: center;">
-                    <div class="loading-spinner"></div>
-                    <p style="margin-top: 20px;">يرجى الانتظار...</p>
+                <div style="text-align: right;">
+                    <!-- معرف المستخدم -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">
+                            <i class="fas fa-fingerprint"></i> معرف المستخدم (Slug)
+                        </label>
+                        <div style="display: flex; gap: 10px;">
+                            <input id="userSlug" class="swal2-input" style="flex: 1; font-family: monospace;" 
+                                   value="${generateUniqueSlug(customer.name)}" 
+                                   placeholder="user-slug-1234">
+                            <button type="button" onclick="document.getElementById('userSlug').value = generateUniqueSlug('${customer.name || 'user'}')" 
+                                    style="padding: 10px 15px; background: #6B7280; color: white; 
+                                           border: none; border-radius: 5px; cursor: pointer;">
+                                <i class="fas fa-sync"></i>
+                            </button>
+                        </div>
+                        <small style="color: #6B7280;">المعرف الفريد (أحرف إنجليزية صغيرة وأرقام فقط)</small>
+                    </div>
+                    
+                    <!-- البريد الإلكتروني -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">
+                            <i class="fas fa-envelope"></i> البريد الإلكتروني
+                        </label>
+                        <input id="email" type="email" class="swal2-input" 
+                               value="${customer.email || ''}" 
+                               placeholder="email@example.com" required>
+                    </div>
+                    
+                    <!-- كلمة المرور -->
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">
+                            <i class="fas fa-lock"></i> كلمة المرور
+                        </label>
+                        <div style="display: flex; gap: 10px;">
+                            <input id="password" type="text" class="swal2-input" 
+                                   style="flex: 1; font-family: monospace; background: #F3F4F6;"
+                                   value="${generateStrongPassword()}" readonly>
+                            <button type="button" onclick="document.getElementById('password').value = generateStrongPassword()" 
+                                    style="padding: 10px 15px; background: #3B82F6; color: white; 
+                                           border: none; border-radius: 5px; cursor: pointer;">
+                                <i class="fas fa-key"></i> توليد
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- خيار الإرسال -->
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 8px;">
+                        <label style="cursor: pointer;">
+                            <input type="checkbox" id="sendCredentials" checked style="margin-left: 5px;">
+                            <strong>إرسال بيانات الدخول عبر WhatsApp</strong>
+                        </label>
+                    </div>
                 </div>
             `,
+            showCancelButton: true,
+            confirmButtonText: 'إنشاء الحساب',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#3B82F6',
+            width: '600px',
+            preConfirm: () => {
+                const slug = document.getElementById('userSlug').value.trim();
+                const email = document.getElementById('email').value.trim();
+                const password = document.getElementById('password').value;
+                const sendCredentials = document.getElementById('sendCredentials').checked;
+                
+                if (!slug || !email || !password) {
+                    Swal.showValidationMessage('الرجاء إكمال جميع البيانات');
+                    return false;
+                }
+                
+                if (!/^[a-z0-9-]+$/.test(slug)) {
+                    Swal.showValidationMessage('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
+                    return false;
+                }
+                
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    Swal.showValidationMessage('البريد الإلكتروني غير صحيح');
+                    return false;
+                }
+                
+                return { slug, email, password, sendCredentials };
+            }
+        });
+        
+        if (!formData) {
+            window.isCreatingAccount = false;
+            return;
+        }
+        
+        // عرض رسالة تحميل
+        Swal.fire({
+            title: 'جاري إنشاء الحساب...',
+            html: 'الرجاء الانتظار',
             allowOutsideClick: false,
             showConfirmButton: false,
             willOpen: () => { Swal.showLoading(); }
         });
         
-        // 1. التحقق من عدم وجود المعرف
-        const existingSlug = await db.collection('users').doc(slug).get();
+        // التحقق النهائي من عدم وجود المعرف
+        const existingSlug = await db.collection('users').doc(formData.slug).get();
         if (existingSlug.exists) {
             throw new Error('هذا المعرف مستخدم بالفعل');
         }
         
-        // 2. إنشاء المستخدم في users collection
+        // إنشاء المستخدم في users collection
         const userData = {
-            id: slug,
+            id: formData.slug,
             name: customer.name || 'غير محدد',
-            email: customer.email || `${slug}@student.com`, // بريد افتراضي إن لم يوجد
-            tempPassword: btoa(password),
+            email: formData.email,
+            tempPassword: btoa(formData.password),
             whatsapp: customer.whatsapp || '',
             phone: customer.whatsapp || '',
             age: customer.age || null,
@@ -1166,7 +1376,7 @@ async function createAccount(studentId) {
                 enrolledAt: new Date().toISOString(),
                 price: student.pricing?.finalPrice || 0,
                 status: 'active',
-                originalBookingId: student.originalBookingId || student.id
+                originalBookingId: originalId
             }],
             accountStatus: 'active',
             accountCreated: true,
@@ -1174,134 +1384,68 @@ async function createAccount(studentId) {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             createdFrom: 'individual-students-page',
-            originalBookingId: student.originalBookingId || student.id
+            originalBookingId: originalId // ⭐ مهم جداً
         };
         
-        // حفظ في users
-        await db.collection('users').doc(slug).set(userData);
+        await db.collection('users').doc(formData.slug).set(userData);
         console.log('✅ تم إنشاء المستخدم في users');
         
-        // 3. تحديث الطالب في individualStudents
+        // تحديث الطالب في individualStudents
         await db.collection('individualStudents').doc(studentId).update({
             accountCreated: true,
             accountCreatedAt: new Date().toISOString(),
             accountStatus: 'active',
-            userId: slug,
-            userEmail: userData.email,
-            userPassword: password // حفظ كلمة المرور مؤقتاً للإرسال
+            userId: formData.slug,
+            userEmail: formData.email
         });
         
         console.log('✅ تم تحديث individualStudents');
         
-        // 4. تحديث البيانات المحلية فوراً
-        const studentIndex = allStudents.findIndex(s => s.id === studentId);
-        if (studentIndex !== -1) {
-            allStudents[studentIndex] = {
-                ...allStudents[studentIndex],
-                accountCreated: true,
-                accountStatus: 'active',
-                userId: slug,
-                userEmail: userData.email,
-                accountCreatedAt: new Date().toISOString()
-            };
+        // إرسال البيانات عبر WhatsApp
+        if (formData.sendCredentials && customer.whatsapp) {
+            const message = `
+مرحباً ${customer.name} 👋
+
+تم إنشاء حسابك بنجاح! 🎉
+
+📧 البريد: ${formData.email}
+🔑 كلمة المرور: ${formData.password}
+🆔 معرف الحساب: ${formData.slug}
+
+🔗 رابط الدخول:
+https://fouad-perspective.web.app/login
+
+نتمنى لك رحلة تعليمية ممتعة 🚀
+            `.trim();
+            
+            const whatsappUrl = `https://wa.me/${customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+            
+            setTimeout(() => {
+                window.open(whatsappUrl, '_blank');
+            }, 1500);
         }
         
-        // 5. تحديث البطاقة فوراً في DOM
-        const card = document.querySelector(`[data-booking-id="${student.originalBookingId || studentId}"]`);
-        if (card) {
-            // إزالة الزر القديم وإضافة الجديد
-            const actionButtons = card.querySelector('.action-buttons');
-            if (actionButtons) {
-                // إزالة زر إنشاء الحساب
-                const createBtn = actionButtons.querySelector('.btn-primary');
-                if (createBtn && createBtn.textContent.includes('إنشاء حساب')) {
-                    createBtn.remove();
-                }
-                
-                // إضافة أزرار جديدة
-                const newButtons = `
-                    <button class="btn btn-success" onclick="sendCredentials('${studentId}')">
-                        <i class="fab fa-whatsapp"></i> إرسال البيانات
-                    </button>
-                    <button class="btn btn-info" onclick="resendWelcome('${studentId}')">
-                        <i class="fas fa-envelope"></i> رسالة ترحيب
-                    </button>
-                `;
-                
-                // إضافة الأزرار الجديدة في البداية
-                actionButtons.insertAdjacentHTML('afterbegin', newButtons);
-            }
-            
-            // تحديث حالة الحساب
-            const statusBadge = card.querySelector('.status-badge');
-            if (statusBadge) {
-                statusBadge.className = 'status-badge active';
-                statusBadge.textContent = 'نشط';
-            }
-            
-            // إضافة علامة الحساب المنشأ
-            const statusDiv = card.querySelector('.student-status');
-            if (statusDiv && !statusDiv.querySelector('.fa-check-circle')) {
-                statusDiv.insertAdjacentHTML('beforeend', `
-                    <span style="color: #10B981; font-size: 0.85rem;">
-                        <i class="fas fa-check-circle"></i> حساب مُنشأ
-                    </span>
-                `);
-            }
-        }
-        
-        // 6. تحديث الإحصائيات
-        updateStatistics();
-        
-        // 7. إظهار رسالة النجاح مع خيارات الإرسال
-        const result = await Swal.fire({
+        // عرض رسالة النجاح
+        await Swal.fire({
             icon: 'success',
             title: 'تم إنشاء الحساب بنجاح! 🎉',
             html: `
                 <div style="text-align: right; background: #F0FDF4; padding: 20px; border-radius: 10px;">
                     <h3 style="color: #166534; margin-bottom: 15px;">بيانات الحساب:</h3>
                     <div style="background: white; padding: 15px; border-radius: 8px;">
-                        <p><strong>🆔 المعرف:</strong> ${slug}</p>
-                        <p><strong>📧 البريد:</strong> ${userData.email}</p>
-                        <p><strong>🔑 كلمة المرور:</strong> <span style="font-family: monospace; background: #f3f4f6; padding: 5px; border-radius: 4px;">${password}</span></p>
+                        <p><strong>🆔 المعرف:</strong> ${formData.slug}</p>
+                        <p><strong>📧 البريد:</strong> ${formData.email}</p>
+                        <p><strong>🔑 كلمة المرور:</strong> ${formData.password}</p>
                     </div>
-                    <div style="margin-top: 15px; padding: 10px; background: #FEF3C7; border-radius: 8px;">
-                        <label style="cursor: pointer;">
-                            <input type="checkbox" id="sendNow" checked style="margin-left: 5px;">
-                            <strong>إرسال البيانات عبر WhatsApp الآن</strong>
-                        </label>
-                    </div>
+                    ${formData.sendCredentials ? '<p style="color: #10B981; margin-top: 10px;">✔ تم إرسال البيانات عبر WhatsApp</p>' : ''}
                 </div>
             `,
-            confirmButtonText: 'موافق',
-            confirmButtonColor: '#10B981',
-            showCancelButton: true,
-            cancelButtonText: 'إلغاء الإرسال',
-            cancelButtonColor: '#6B7280'
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#10B981'
         });
         
-        // 8. إرسال البيانات إذا تم الاختيار
-        if (result.isConfirmed && document.getElementById('sendNow')?.checked) {
-            if (customer.whatsapp) {
-                const message = `
-مرحباً ${customer.name} 👋
-
-تم إنشاء حسابك بنجاح! 🎉
-
-📧 البريد: ${userData.email}
-🔑 كلمة المرور: ${password}
-🆔 معرف الحساب: ${slug}
-
-🔗 رابط الدخول:
-https://fouad-perspective.web.app/login
-
-نتمنى لك رحلة تعليمية ممتعة 🚀
-                `.trim();
-                
-                const whatsappUrl = `https://wa.me/${customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
-                window.open(whatsappUrl, '_blank');
-            }
-        }
+        // إعادة تحميل البيانات
+        await loadStudents();
         
     } catch (error) {
         console.error('❌ خطأ:', error);
@@ -1312,9 +1456,13 @@ https://fouad-perspective.web.app/login
             confirmButtonColor: '#EF4444'
         });
     } finally {
+        // إلغاء القفل في كل الحالات
         window.isCreatingAccount = false;
     }
 }
+
+// إضافة الدالة للـ window
+window.createAccount = createAccount;
 // دمج التفعيل مع الإنشاء
 async function createAndActivateAccount(studentId) {
     await createAccount(studentId);
