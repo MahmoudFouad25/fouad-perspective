@@ -752,6 +752,64 @@ let availablePaths = [];
             }, 5000);
         }
 
+        // دالة للبحث عن المستخدم بأي طريقة ممكنة
+async function findExistingUser(student) {
+    try {
+        const customer = student.customer || {};
+        
+        // 1. البحث بالواتساب
+        if (customer.whatsapp) {
+            const cleanPhone = customer.whatsapp.replace(/[^\d]/g, '');
+            const phoneQuery = await db.collection('users')
+                .where('whatsapp', '==', customer.whatsapp)
+                .limit(1)
+                .get();
+            
+            if (!phoneQuery.empty) {
+                return phoneQuery.docs[0];
+            }
+            
+            // جرب بدون الصفر في الأول
+            if (cleanPhone.startsWith('0')) {
+                const phoneWithoutZero = cleanPhone.substring(1);
+                const query2 = await db.collection('users')
+                    .where('whatsapp', '==', phoneWithoutZero)
+                    .limit(1)
+                    .get();
+                if (!query2.empty) return query2.docs[0];
+            }
+        }
+        
+        // 2. البحث بالإيميل
+        if (customer.email) {
+            const emailQuery = await db.collection('users')
+                .where('email', '==', customer.email)
+                .limit(1)
+                .get();
+            
+            if (!emailQuery.empty) {
+                return emailQuery.docs[0];
+            }
+        }
+        
+        // 3. البحث بالاسم (لو نفس الاسم بالضبط)
+        if (customer.name && customer.name !== 'غير محدد') {
+            const nameQuery = await db.collection('users')
+                .where('name', '==', customer.name)
+                .limit(1)
+                .get();
+            
+            if (!nameQuery.empty) {
+                return nameQuery.docs[0];
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('خطأ في البحث عن المستخدم:', error);
+        return null;
+    }
+}
         // دالة للتحقق من وجود حساب المستخدم
 async function checkUserAccount(student) {
     try {
@@ -816,36 +874,67 @@ async function checkUserAccount(student) {
         
         allStudents = [];
         
-        if (!snapshot.empty) {
+       if (!snapshot.empty) {
+            const promises = [];
+            
             snapshot.forEach(doc => {
                 const data = doc.data();
-                // التحقق من وجود حساب
-                checkUserAccount({
-                    ...data,
-                    id: doc.id
-                }).then(hasAccount => {
-                    if (hasAccount && !data.accountCreated) {
-                        // حدث البيانات المحلية
-                        const index = allStudents.findIndex(s => s.id === doc.id);
-                        if (index !== -1) {
-                            allStudents[index].accountCreated = true;
-                            allStudents[index].accountStatus = 'active';
-                        }
-                    }
-                });
+                
                 // فقط نضيف الطلاب مع بيانات كاملة
                 if (data && data.customer && data.customer.name && data.customer.name !== 'غير محدد') {
-                    allStudents.push({
+                    const studentData = {
                         id: doc.id,
                         ...data,
                         transferredAt: data.transferredAt || new Date().toISOString()
-                    });
+                    };
+                    
+                    allStudents.push(studentData);
+                    
+                    // تحقق من وجود حساب موجود مسبقاً
+                    if (!data.accountCreated && !data.userId) {
+                        const promise = findExistingUser(studentData).then(userDoc => {
+                            if (userDoc) {
+                                const userData = userDoc.data();
+                                const index = allStudents.findIndex(s => s.id === doc.id);
+                                
+                                if (index !== -1) {
+                                    allStudents[index].accountCreated = true;
+                                    allStudents[index].accountStatus = 'active';
+                                    allStudents[index].userId = userData.id || userDoc.id;
+                                    allStudents[index].userEmail = userData.email;
+                                    
+                                    // حدث في Firebase
+                                    db.collection('individualStudents').doc(doc.id).set({
+                                        accountCreated: true,
+                                        accountStatus: 'active',
+                                        userId: userData.id || userDoc.id,
+                                        userEmail: userData.email,
+                                        existingUserLinked: true,
+                                        linkedAt: new Date().toISOString()
+                                    }, { merge: true });
+                                    
+                                    console.log('✅ تم ربط المستخدم الموجود:', userData.name);
+                                }
+                            }
+                        });
+                        
+                        promises.push(promise);
+                    }
                 }
             });
+            
+            // انتظر اكتمال كل عمليات البحث
+            if (promises.length > 0) {
+                await Promise.all(promises);
+            }
         }
         
         console.log('تم تحميل:', allStudents.length, 'طالب');
-        
+        // عد المستخدمين المرتبطين تلقائياً
+        const linkedUsers = allStudents.filter(s => s.existingUserLinked).length;
+        if (linkedUsers > 0) {
+            console.log(`🔗 تم ربط ${linkedUsers} مستخدم موجود تلقائياً`);
+        }
         updateStatistics();
         filterByTab(currentFilter);
         checkForNewTransfer();
@@ -1306,6 +1395,55 @@ async function createAccount(studentId) {
         });
         
         // 1. التحقق من عدم وجود المعرف
+        // التحقق أولاً من وجود المستخدم بالفعل
+        const existingUserDoc = await findExistingUser(student);
+        if (existingUserDoc) {
+            const existingUser = existingUserDoc.data();
+            
+            // ربط المستخدم الموجود بالطالب
+            await db.collection('individualStudents').doc(studentId).set({
+                accountCreated: true,
+                accountStatus: 'active',
+                userId: existingUser.id || existingUserDoc.id,
+                userEmail: existingUser.email,
+                existingUserLinked: true,
+                linkedAt: new Date().toISOString()
+            }, { merge: true });
+            
+            // تحديث البيانات المحلية
+            const studentIndex = allStudents.findIndex(s => s.id === studentId);
+            if (studentIndex !== -1) {
+                allStudents[studentIndex].accountCreated = true;
+                allStudents[studentIndex].accountStatus = 'active';
+                allStudents[studentIndex].userId = existingUser.id || existingUserDoc.id;
+                allStudents[studentIndex].userEmail = existingUser.email;
+            }
+            
+            window.isCreatingAccount = false;
+            
+            await Swal.fire({
+                icon: 'info',
+                title: 'المستخدم موجود بالفعل!',
+                html: `
+                    <div style="text-align: right;">
+                        <p>تم العثور على حساب موجود لهذا العميل:</p>
+                        <p><strong>الاسم:</strong> ${existingUser.name}</p>
+                        <p><strong>البريد:</strong> ${existingUser.email}</p>
+                        <p><strong>المعرف:</strong> ${existingUser.id || existingUserDoc.id}</p>
+                        <br>
+                        <p style="color: #10B981;">✅ تم ربط الحساب بنجاح!</p>
+                    </div>
+                `,
+                confirmButtonText: 'حسناً',
+                confirmButtonColor: '#3B82F6'
+            });
+            
+            // تحديث العرض
+            filterByTab(currentFilter || 'all');
+            updateStatistics();
+            
+            return;
+        }
         const existingSlug = await db.collection('users').doc(formData.slug).get();
         if (existingSlug.exists) {
             throw new Error('هذا المعرف مستخدم بالفعل');
