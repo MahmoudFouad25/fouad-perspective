@@ -751,7 +751,69 @@ let availablePaths = [];
                 alert.remove();
             }, 5000);
         }
+
+        // دالة للتحقق من وجود المستخدم مسبقاً
+async function checkIfUserExists(email, whatsapp) {
+    try {
+        if (!email && !whatsapp) return null;
         
+        // البحث بالإيميل أولاً
+        if (email) {
+            const emailQuery = await db.collection('users')
+                .where('email', '==', email)
+                .limit(1)
+                .get();
+            
+            if (!emailQuery.empty) {
+                const userData = emailQuery.docs[0].data();
+                return {
+                    exists: true,
+                    userId: emailQuery.docs[0].id,
+                    userData: userData
+                };
+            }
+        }
+        
+        // البحث برقم الواتساب
+        if (whatsapp) {
+            const cleanPhone = whatsapp.replace(/[^0-9]/g, '');
+            const phoneQuery = await db.collection('users')
+                .where('whatsapp', '==', whatsapp)
+                .limit(1)
+                .get();
+            
+            if (!phoneQuery.empty) {
+                const userData = phoneQuery.docs[0].data();
+                return {
+                    exists: true,
+                    userId: phoneQuery.docs[0].id,
+                    userData: userData
+                };
+            }
+            
+            // البحث أيضاً في حقل phone
+            const phoneQuery2 = await db.collection('users')
+                .where('phone', '==', whatsapp)
+                .limit(1)
+                .get();
+            
+            if (!phoneQuery2.empty) {
+                const userData = phoneQuery2.docs[0].data();
+                return {
+                    exists: true,
+                    userId: phoneQuery2.docs[0].id,
+                    userData: userData
+                };
+            }
+        }
+        
+        return { exists: false };
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من المستخدم:', error);
+        return { exists: false };
+    }
+}
         // تحميل البيانات
         async function loadStudents() {
     try {
@@ -766,12 +828,25 @@ let availablePaths = [];
                 const data = doc.data();
                 // فقط نضيف الطلاب مع بيانات كاملة
                 if (data && data.customer && data.customer.name && data.customer.name !== 'غير محدد') {
-                    allStudents.push({
-                        id: doc.id,
-                        ...data,
-                        transferredAt: data.transferredAt || new Date().toISOString()
-                    });
-                }
+    // التحقق من وجود المستخدم مسبقاً
+    const userCheck = await checkIfUserExists(
+        data.customer.email, 
+        data.customer.whatsapp
+    );
+    
+    allStudents.push({
+        id: doc.id,
+        ...data,
+        transferredAt: data.transferredAt || new Date().toISOString(),
+        // إضافة معلومات المستخدم إن وجد
+        existingUser: userCheck.exists,
+        existingUserId: userCheck.userId || null,
+        existingUserData: userCheck.userData || null,
+        accountCreated: userCheck.exists || data.accountCreated,
+        accountStatus: userCheck.exists ? 'active' : (data.accountStatus || 'pending'),
+        userId: userCheck.userId || data.userId
+    });
+}
             });
         }
         
@@ -941,8 +1016,8 @@ function createStudentCard(student) {
             
             <div class="action-buttons">
                 ${!hasAccount ? `
-    <button class="btn btn-primary" onclick="createAccount('${studentId}')">
-        <i class="fas fa-user-plus"></i> إنشاء حساب
+    <button class="btn btn-primary" onclick="createOrLinkAccount('${studentId}')">
+        <i class="fas fa-user-plus"></i> ${student.existingUser ? 'ربط الحساب الموجود' : 'إنشاء حساب'}
     </button>
 ` : `
     <button class="btn btn-success" onclick="sendCredentials('${studentId}')">
@@ -1099,6 +1174,114 @@ function generateUniqueSlug(name) {
     
     return `${cleanName}-${timestamp}`;
 }
+
+        // دالة موحدة للتعامل مع إنشاء أو ربط الحساب
+async function createOrLinkAccount(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student) return;
+    
+    // إذا كان المستخدم موجود بالفعل
+    if (student.existingUser && student.existingUserId) {
+        // ربط الحجز بالمستخدم الموجود
+        await linkExistingUser(studentId, student.existingUserId, student);
+    } else {
+        // إنشاء حساب جديد
+        await createAccount(studentId);
+    }
+}
+
+// دالة لربط المستخدم الموجود بالحجز الجديد
+async function linkExistingUser(studentId, userId, student) {
+    try {
+        Swal.fire({
+            title: 'تم العثور على حساب موجود!',
+            html: `
+                <div style="text-align: right;">
+                    <p><strong>الاسم:</strong> ${student.existingUserData?.name || student.customer.name}</p>
+                    <p><strong>البريد:</strong> ${student.existingUserData?.email || 'غير محدد'}</p>
+                    <p><strong>الواتساب:</strong> ${student.existingUserData?.whatsapp || student.customer.whatsapp}</p>
+                    <hr>
+                    <p style="color: #10B981;">سيتم ربط هذا الحجز بالحساب الموجود وإضافة الدورة الجديدة</p>
+                </div>
+            `,
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'ربط الحساب',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981'
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                Swal.fire({
+                    title: 'جاري الربط...',
+                    html: 'الرجاء الانتظار',
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    willOpen: () => { Swal.showLoading(); }
+                });
+                
+                // تحديث المستخدم بإضافة الدورة الجديدة
+                const userDoc = await db.collection('users').doc(userId).get();
+                const userData = userDoc.data();
+                
+                const courses = userData.courses || [];
+                courses.push({
+                    id: student.courseId || Date.now().toString(),
+                    title: student.courseName || 'دورة غير محددة',
+                    type: 'individual',
+                    enrolledAt: new Date().toISOString(),
+                    price: student.pricing?.finalPrice || 0,
+                    status: 'active',
+                    originalBookingId: student.originalBookingId || student.id
+                });
+                
+                await db.collection('users').doc(userId).update({
+                    courses: courses,
+                    updatedAt: new Date().toISOString()
+                });
+                
+                // تحديث individualStudents
+                await db.collection('individualStudents').doc(studentId).set({
+                    accountCreated: true,
+                    accountStatus: 'active',
+                    userId: userId,
+                    userEmail: userData.email,
+                    linkedAt: new Date().toISOString()
+                }, { merge: true });
+                
+                // تحديث البيانات المحلية
+                const studentIndex = allStudents.findIndex(s => s.id === studentId);
+                if (studentIndex !== -1) {
+                    allStudents[studentIndex].accountCreated = true;
+                    allStudents[studentIndex].accountStatus = 'active';
+                    allStudents[studentIndex].userId = userId;
+                }
+                
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم الربط بنجاح!',
+                    text: 'تم ربط الحجز بالحساب الموجود وإضافة الدورة',
+                    confirmButtonColor: '#10B981'
+                });
+                
+                // تحديث العرض
+                filterByTab(currentFilter || 'all');
+                updateStatistics();
+            }
+        });
+        
+    } catch (error) {
+        console.error('خطأ في ربط المستخدم:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ!',
+            text: 'حدث خطأ في ربط الحساب',
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+window.createOrLinkAccount = createOrLinkAccount;
+window.linkExistingUser = linkExistingUser;
 
 // إنشاء حساب محسّن
 // ==================== إنشاء حساب محسّن ونظيف ====================
