@@ -1349,5 +1349,415 @@ body {
     <footer class="main-footer">
         <p>© 2024 منظور الفؤاد - جميع الحقوق محفوظة</p>
     </footer>
+<script>
+// ==================== Firebase Configuration ====================
+const firebaseConfig = {
+    apiKey: "AIzaSyDGpAHia_wEmrhnmYjrPf1n1TrAzwEMiAI",
+    authDomain: "alfonsfouad.firebaseapp.com",
+    projectId: "alfonsfouad",
+    storageBucket: "alfonsfouad.appspot.com",
+    messagingSenderId: "317405464691",
+    appId: "1:317405464691:web:01a7fec6db6a1da3093b2b"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+
+// ==================== المتغيرات العامة ====================
+let currentUser = null;
+let editMode = false;
+let currentUserId = null;
+let selectedCourses = [];
+let availableCoursesData = [];
+let userRole = 'student';
+
+// ==================== بيانات المستخدم ====================
+const userData = {
+    basic: {
+        userId: '',
+        firstName: '',
+        lastName: '',
+        email: '',
+        password: '',
+        phone: '',
+        countryCode: '+20',
+        avatar: null,
+        status: 'active'
+    },
+    role: {
+        type: 'student',
+        permissions: []
+    },
+    courses: [],
+    financial: {
+        totalDue: 0,
+        totalPaid: 0,
+        totalGrants: 0,
+        payments: []
+    },
+    advanced: {
+        birthDate: '',
+        gender: '',
+        notes: '',
+        joinDate: new Date().toISOString()
+    }
+};
+
+// ==================== تحميل الصفحة ====================
+document.addEventListener('DOMContentLoaded', async function() {
+    // إظهار شاشة التحميل
+    showLoading();
+    
+    // التحقق من المصادقة
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            currentUser = user;
+            await initializePage();
+        } else {
+            window.location.href = '/login.html';
+        }
+    });
+});
+
+// ==================== تهيئة الصفحة ====================
+async function initializePage() {
+    try {
+        // التحقق من وضع التعديل
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('edit');
+        
+        if (userId) {
+            editMode = true;
+            currentUserId = userId;
+            document.getElementById('pageTitle').textContent = 'تعديل بيانات المستخدم';
+            document.getElementById('saveButtonText').textContent = 'حفظ التعديلات';
+            await loadUserData(userId);
+        } else {
+            // وضع الإنشاء
+            generatePreviewUserId();
+        }
+        
+        // تحميل البيانات الأساسية
+        await loadCourses();
+        loadPermissions();
+        updateWelcomeMessage();
+        
+        // إخفاء شاشة التحميل
+        hideLoading();
+        
+    } catch (error) {
+        console.error('خطأ في تهيئة الصفحة:', error);
+        hideLoading();
+        showError('حدث خطأ في تحميل الصفحة');
+    }
+}
+
+// ==================== وظائف التحكم في التبويبات ====================
+function switchTab(tabName) {
+    // تحديث التبويبات
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    
+    // تحديث المحتوى
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    document.getElementById(tabName + 'Tab').classList.add('active');
+    
+    // تحديث شريط التقدم
+    updateProgressBar(tabName);
+}
+
+function updateProgressBar(tabName) {
+    const tabs = ['basic', 'role', 'courses', 'financial', 'advanced'];
+    const currentIndex = tabs.indexOf(tabName);
+    const progress = ((currentIndex + 1) / tabs.length) * 100;
+    
+    document.getElementById('progressFill').style.width = progress + '%';
+    
+    // تحديث الخطوات
+    document.querySelectorAll('.step').forEach((step, index) => {
+        if (index <= currentIndex) {
+            step.classList.add('active');
+        } else {
+            step.classList.remove('active');
+        }
+    });
+}
+
+// ==================== وظائف معرف المستخدم ====================
+function generatePreviewUserId() {
+    const firstName = document.getElementById('firstName').value || '';
+    const lastName = document.getElementById('lastName').value || '';
+    
+    if (firstName || lastName) {
+        const preview = (firstName + '-' + lastName)
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^a-z0-9-]/g, '');
+        
+        document.getElementById('userIdPreview').value = preview || 'user-' + Date.now();
+    }
+}
+
+async function generateUserId() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    
+    if (!firstName || !lastName) {
+        showError('يجب إدخال الاسم الأول والأخير أولاً');
+        return;
+    }
+    
+    showLoading();
+    
+    try {
+        const baseId = (firstName + '-' + lastName)
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^a-z0-9-]/g, '');
+        
+        let userId = baseId;
+        let counter = 1;
+        
+        // التحقق من التكرار
+        while (true) {
+            const doc = await db.collection('users').doc(userId).get();
+            if (!doc.exists) {
+                break;
+            }
+            userId = baseId + '-' + counter;
+            counter++;
+        }
+        
+        currentUserId = userId;
+        userData.basic.userId = userId;
+        document.getElementById('userIdPreview').value = userId;
+        
+        // تعطيل الحقول
+        document.getElementById('firstName').setAttribute('readonly', true);
+        document.getElementById('lastName').setAttribute('readonly', true);
+        document.getElementById('userIdSection').style.display = 'none';
+        
+        hideLoading();
+        showSuccess('تم إنشاء معرف المستخدم بنجاح');
+        
+    } catch (error) {
+        hideLoading();
+        showError('خطأ في إنشاء المعرف');
+    }
+}
+
+// ==================== وظائف البريد الإلكتروني ====================
+async function checkEmail() {
+    const email = document.getElementById('email').value.trim();
+    
+    if (!email || !isValidEmail(email)) {
+        showError('البريد الإلكتروني غير صحيح');
+        return;
+    }
+    
+    showLoading();
+    
+    try {
+        // التحقق من Firebase Auth
+        const methods = await auth.fetchSignInMethodsForEmail(email);
+        
+        if (methods.length > 0) {
+            document.getElementById('email').classList.add('error');
+            showError('هذا البريد مستخدم بالفعل');
+        } else {
+            document.getElementById('email').classList.remove('error');
+            showSuccess('البريد متاح للاستخدام');
+        }
+        
+    } catch (error) {
+        console.error('خطأ في التحقق:', error);
+        showError('خطأ في التحقق من البريد');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ==================== وظائف كلمة المرور ====================
+function togglePassword() {
+    const passwordInput = document.getElementById('password');
+    const icon = event.target.querySelector('i');
+    
+    if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        passwordInput.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+}
+
+function generatePassword() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let password = '';
+    
+    for (let i = 0; i < 12; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    
+    document.getElementById('password').value = password;
+    document.getElementById('password').type = 'text';
+    checkPasswordStrength();
+    
+    // نسخ كلمة المرور
+    navigator.clipboard.writeText(password);
+    showSuccess('تم توليد ونسخ كلمة المرور');
+}
+
+function checkPasswordStrength() {
+    const password = document.getElementById('password').value;
+    const strengthDiv = document.getElementById('passwordStrength');
+    
+    let strength = 0;
+    if (password.length >= 8) strength++;
+    if (password.length >= 12) strength++;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
+    if (/[0-9]/.test(password)) strength++;
+    if (/[^A-Za-z0-9]/.test(password)) strength++;
+    
+    strengthDiv.className = 'password-strength';
+    if (strength <= 2) strengthDiv.classList.add('weak');
+    else if (strength <= 4) strengthDiv.classList.add('medium');
+    else strengthDiv.classList.add('strong');
+}
+
+// إضافة مستمع للتحقق من قوة كلمة المرور
+document.getElementById('password')?.addEventListener('input', checkPasswordStrength);
+
+// ==================== وظائف الصورة الشخصية ====================
+function selectAvatar() {
+    document.getElementById('avatarInput').click();
+}
+
+document.getElementById('avatarInput')?.addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('avatarImg').src = e.target.result;
+            document.getElementById('avatarImg').style.display = 'block';
+            document.querySelector('.avatar-preview i').style.display = 'none';
+            userData.basic.avatar = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+});
+
+// ==================== وظائف الأدوار والصلاحيات ====================
+function selectRole(role) {
+    // تحديث البطاقات
+    document.querySelectorAll('.role-card').forEach(card => {
+        card.classList.remove('active');
+    });
+    document.querySelector(`[data-role="${role}"]`).classList.add('active');
+    
+    userRole = role;
+    userData.role.type = role;
+    
+    // تحديث الصلاحيات
+    loadPermissions();
+}
+
+function loadPermissions() {
+    const permissions = {
+        student: [
+            { id: 'view_courses', name: 'عرض الدورات', checked: true },
+            { id: 'view_materials', name: 'عرض المواد التعليمية', checked: true },
+            { id: 'submit_assignments', name: 'تسليم الواجبات', checked: true },
+            { id: 'view_grades', name: 'عرض الدرجات', checked: true }
+        ],
+        instructor: [
+            { id: 'manage_courses', name: 'إدارة الدورات', checked: true },
+            { id: 'grade_students', name: 'تقييم الطلاب', checked: true },
+            { id: 'upload_materials', name: 'رفع المواد', checked: true },
+            { id: 'send_announcements', name: 'إرسال الإعلانات', checked: true }
+        ],
+        admin: [
+            { id: 'full_access', name: 'صلاحيات كاملة', checked: true },
+            { id: 'manage_users', name: 'إدارة المستخدمين', checked: true },
+            { id: 'manage_system', name: 'إدارة النظام', checked: true },
+            { id: 'view_reports', name: 'عرض التقارير', checked: true }
+        ]
+    };
+    
+    const permissionsList = document.getElementById('permissionsList');
+    permissionsList.innerHTML = '';
+    
+    const rolePermissions = permissions[userRole] || permissions.student;
+    
+    rolePermissions.forEach(perm => {
+        const div = document.createElement('div');
+        div.className = 'permission-item';
+        div.innerHTML = `
+            <input type="checkbox" id="${perm.id}" ${perm.checked ? 'checked' : ''}>
+            <label for="${perm.id}">${perm.name}</label>
+        `;
+        permissionsList.appendChild(div);
+    });
+}
+
+// ==================== وظائف مساعدة ====================
+function showLoading() {
+    document.getElementById('loadingScreen').classList.add('active');
+}
+
+function hideLoading() {
+    document.getElementById('loadingScreen').classList.remove('active');
+}
+
+function showSuccess(message) {
+    Swal.fire({
+        icon: 'success',
+        title: 'نجح',
+        text: message,
+        timer: 2000,
+        showConfirmButton: false
+    });
+}
+
+function showError(message) {
+    Swal.fire({
+        icon: 'error',
+        title: 'خطأ',
+        text: message,
+        confirmButtonText: 'حسناً'
+    });
+}
+
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// ==================== وظائف الحفظ والإعادة ====================
+function goBack() {
+    if (confirm('هل تريد الخروج؟ قد تفقد التغييرات غير المحفوظة')) {
+        window.location.href = '/admin/users.html';
+    }
+}
+
+function resetForm() {
+    if (confirm('هل تريد إعادة تعيين جميع الحقول؟')) {
+        document.querySelector('form')?.reset();
+        location.reload();
+    }
+}
+
+// ==================== مستمعات الأحداث للحقول ====================
+document.getElementById('firstName')?.addEventListener('input', generatePreviewUserId);
+document.getElementById('lastName')?.addEventListener('input', generatePreviewUserId);
+</script>
+
 </body>
 </html>
