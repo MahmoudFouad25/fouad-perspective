@@ -751,62 +751,7 @@ let availablePaths = [];
                 alert.remove();
             }, 5000);
         }
-
-        // دالة للتحقق من وجود حساب المستخدم
-async function checkUserAccount(student) {
-    try {
-        // لو في userId محفوظ
-        if (student.userId) {
-            const userDoc = await db.collection('users').doc(student.userId).get();
-            if (userDoc.exists) {
-                return true;
-            }
-        }
         
-        // لو في email محفوظ
-        if (student.userEmail) {
-            const emailQuery = await db.collection('users')
-                .where('email', '==', student.userEmail)
-                .limit(1)
-                .get();
-            if (!emailQuery.empty) {
-                return true;
-            }
-        }
-        
-        // لو في originalBookingId
-        if (student.originalBookingId || student.id) {
-            const bookingId = student.originalBookingId || student.id;
-            const bookingQuery = await db.collection('users')
-                .where('originalBookingId', '==', bookingId)
-                .limit(1)
-                .get();
-            if (!bookingQuery.empty) {
-                // حدث البيانات المحلية
-                const userData = bookingQuery.docs[0].data();
-                student.userId = userData.id;
-                student.userEmail = userData.email;
-                student.accountCreated = true;
-                student.accountStatus = 'active';
-                
-                // حدث في Firebase
-                await db.collection('individualStudents').doc(student.id).set({
-                    userId: userData.id,
-                    userEmail: userData.email,
-                    accountCreated: true,
-                    accountStatus: 'active'
-                }, { merge: true });
-                
-                return true;
-            }
-        }
-        
-        return false;
-    } catch (error) {
-        console.error('خطأ في التحقق من الحساب:', error);
-        return false;
-    }
-}
         // تحميل البيانات
         async function loadStudents() {
     try {
@@ -819,20 +764,6 @@ async function checkUserAccount(student) {
         if (!snapshot.empty) {
             snapshot.forEach(doc => {
                 const data = doc.data();
-                // التحقق من وجود حساب
-                checkUserAccount({
-                    ...data,
-                    id: doc.id
-                }).then(hasAccount => {
-                    if (hasAccount && !data.accountCreated) {
-                        // حدث البيانات المحلية
-                        const index = allStudents.findIndex(s => s.id === doc.id);
-                        if (index !== -1) {
-                            allStudents[index].accountCreated = true;
-                            allStudents[index].accountStatus = 'active';
-                        }
-                    }
-                });
                 // فقط نضيف الطلاب مع بيانات كاملة
                 if (data && data.customer && data.customer.name && data.customer.name !== 'غير محدد') {
                     allStudents.push({
@@ -917,20 +848,6 @@ function createStudentCard(student) {
     // تعريف المتغيرات
     const studentId = student.id;
     const hasAccount = student.accountCreated === true;
-    
-    // التحقق من وجود حساب في users collection
-    let userExists = false;
-    if (student.userId) {
-        // لو في userId يبقى اكيد في حساب
-        userExists = true;
-    } else if (student.userEmail) {
-        // لو في userEmail برضه يبقى في حساب
-        userExists = true;
-    }
-    
-    // استخدم القيمة الصحيحة
-    const accountCreated = hasAccount || userExists;
-    const reallyHasAccount = accountCreated; // للتأكيد
     const accountStatus = student.accountStatus || 'pending';
     const progress = student.progress || 0;
     const isNew = isNewStudent(student);
@@ -965,7 +882,7 @@ function createStudentCard(student) {
                           accountStatus === 'pending' ? 'قيد التفعيل' : 
                           'غير نشط'}
                     </span>
-                    ${accountCreated ? `
+                    ${hasAccount ? `
                         <span style="color: #10B981; font-size: 0.85rem;">
                             <i class="fas fa-check-circle"></i> حساب مُنشأ
                         </span>
@@ -1023,7 +940,7 @@ function createStudentCard(student) {
             </div>
             
             <div class="action-buttons">
-                ${!accountCreated ? `
+                ${!hasAccount ? `
     <button class="btn btn-primary" onclick="createAccount('${studentId}')">
         <i class="fas fa-user-plus"></i> إنشاء حساب
     </button>
@@ -1032,8 +949,8 @@ function createStudentCard(student) {
         <i class="fab fa-whatsapp"></i> إرسال البيانات
     </button>
     <button class="btn btn-warning" onclick="assignCourseToStudent('${studentId}')">
-        <i class="fas fa-graduation-cap"></i> تخصيص دورة
-    </button>
+    <i class="fas fa-graduation-cap"></i> تخصيص دورة
+</button>
     <button class="btn btn-info" onclick="resendWelcome('${studentId}')">
         <i class="fas fa-envelope"></i> رسالة ترحيب
     </button>
