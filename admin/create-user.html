@@ -1758,6 +1758,410 @@ function resetForm() {
 document.getElementById('firstName')?.addEventListener('input', generatePreviewUserId);
 document.getElementById('lastName')?.addEventListener('input', generatePreviewUserId);
 </script>
+<script>
+// ==================== تحميل وإدارة الدورات ====================
+async function loadCourses() {
+    try {
+        // تحميل المسارات
+        const pathsSnapshot = await db.collection('paths').where('isActive', '==', true).get();
+        const paths = [];
+        pathsSnapshot.forEach(doc => {
+            paths.push({
+                id: doc.id,
+                type: 'path',
+                ...doc.data()
+            });
+        });
+        
+        // تحميل الدورات المفردة
+        const coursesSnapshot = await db.collection('courses').where('isActive', '==', true).get();
+        const courses = [];
+        coursesSnapshot.forEach(doc => {
+            courses.push({
+                id: doc.id,
+                type: 'course',
+                ...doc.data()
+            });
+        });
+        
+        // دمج البيانات
+        availableCoursesData = [...paths, ...courses];
+        
+        // عرض الدورات
+        displayAvailableCourses(availableCoursesData);
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الدورات:', error);
+        showError('خطأ في تحميل الدورات');
+    }
+}
 
+function displayAvailableCourses(courses) {
+    const container = document.getElementById('availableCourses');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (courses.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #999;">لا توجد دورات متاحة</p>';
+        return;
+    }
+    
+    courses.forEach(course => {
+        const card = document.createElement('div');
+        card.className = 'course-card';
+        card.dataset.courseId = course.id;
+        
+        // التحقق من الاختيار المسبق
+        if (selectedCourses.find(c => c.id === course.id)) {
+            card.classList.add('selected');
+        }
+        
+        card.innerHTML = `
+            <h4>${course.title || course.name}</h4>
+            <p>${course.description || 'لا يوجد وصف'}</p>
+            <div class="course-price">
+                ${course.price ? course.price + ' جنيه' : 'مجاني'}
+            </div>
+            <span class="badge ${course.type === 'path' ? 'badge-primary' : 'badge-secondary'}">
+                ${course.type === 'path' ? 'مسار' : 'دورة'}
+            </span>
+        `;
+        
+        card.addEventListener('click', () => toggleCourseSelection(course));
+        container.appendChild(card);
+    });
+}
+
+function toggleCourseSelection(course) {
+    const index = selectedCourses.findIndex(c => c.id === course.id);
+    
+    if (index > -1) {
+        // إزالة من المختار
+        selectedCourses.splice(index, 1);
+        document.querySelector(`[data-course-id="${course.id}"]`).classList.remove('selected');
+    } else {
+        // إضافة للمختار
+        selectedCourses.push(course);
+        document.querySelector(`[data-course-id="${course.id}"]`).classList.add('selected');
+    }
+    
+    updateSelectedCoursesList();
+    updateFinancialSummary();
+}
+
+function updateSelectedCoursesList() {
+    const container = document.getElementById('selectedCoursesList');
+    const count = document.getElementById('selectedCount');
+    
+    if (!container) return;
+    
+    count.textContent = selectedCourses.length;
+    container.innerHTML = '';
+    
+    if (selectedCourses.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #999;">لم يتم اختيار دورات</p>';
+        return;
+    }
+    
+    selectedCourses.forEach(course => {
+        const item = document.createElement('div');
+        item.className = 'selected-course-item';
+        item.innerHTML = `
+            <div>
+                <strong>${course.title || course.name}</strong>
+                <span style="color: #999; font-size: 12px; margin-right: 10px;">
+                    ${course.type === 'path' ? 'مسار' : 'دورة'}
+                </span>
+            </div>
+            <button onclick="removeCourse('${course.id}')">
+                <i class="fas fa-times"></i> إزالة
+            </button>
+        `;
+        container.appendChild(item);
+    });
+    
+    // تحديث خيارات الدفع
+    updatePaymentOptions();
+}
+
+function removeCourse(courseId) {
+    selectedCourses = selectedCourses.filter(c => c.id !== courseId);
+    document.querySelector(`[data-course-id="${courseId}"]`)?.classList.remove('selected');
+    updateSelectedCoursesList();
+    updateFinancialSummary();
+}
+
+// ==================== البحث والفلترة ====================
+document.getElementById('courseSearch')?.addEventListener('input', function(e) {
+    const searchTerm = e.target.value.toLowerCase();
+    const filtered = availableCoursesData.filter(course => 
+        (course.title || course.name || '').toLowerCase().includes(searchTerm) ||
+        (course.description || '').toLowerCase().includes(searchTerm)
+    );
+    displayAvailableCourses(filtered);
+});
+
+document.getElementById('courseFilter')?.addEventListener('change', function(e) {
+    const filterType = e.target.value;
+    let filtered = availableCoursesData;
+    
+    if (filterType === 'paths') {
+        filtered = availableCoursesData.filter(c => c.type === 'path');
+    } else if (filterType === 'courses') {
+        filtered = availableCoursesData.filter(c => c.type === 'course');
+    }
+    
+    displayAvailableCourses(filtered);
+});
+
+// ==================== القسم المالي ====================
+function updateFinancialSummary() {
+    let totalDue = 0;
+    
+    selectedCourses.forEach(course => {
+        totalDue += course.price || 0;
+    });
+    
+    userData.financial.totalDue = totalDue;
+    
+    document.getElementById('totalDue').textContent = totalDue + ' جنيه';
+    document.getElementById('totalPaid').textContent = userData.financial.totalPaid + ' جنيه';
+    document.getElementById('totalGrants').textContent = userData.financial.totalGrants + ' جنيه';
+}
+
+function updatePaymentOptions() {
+    const container = document.getElementById('paymentOptionsList');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    selectedCourses.forEach(course => {
+        const optionCard = document.createElement('div');
+        optionCard.className = 'payment-option-card';
+        optionCard.innerHTML = `
+            <h4>${course.title || course.name}</h4>
+            <div class="payment-type-select">
+                <button class="active" onclick="setPaymentType('${course.id}', 'full', this)">
+                    دفع كامل (${course.price || 0} جنيه)
+                </button>
+                <button onclick="setPaymentType('${course.id}', 'installment', this)">
+                    تقسيط
+                </button>
+                <button onclick="setPaymentType('${course.id}', 'grant', this)">
+                    منحة
+                </button>
+            </div>
+            <div id="payment-details-${course.id}" style="margin-top: 10px;"></div>
+        `;
+        container.appendChild(optionCard);
+        
+        // تعيين نوع الدفع الافتراضي
+        course.paymentType = 'full';
+    });
+}
+
+function setPaymentType(courseId, type, button) {
+    // تحديث الأزرار
+    button.parentElement.querySelectorAll('button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    button.classList.add('active');
+    
+    // تحديث البيانات
+    const course = selectedCourses.find(c => c.id === courseId);
+    if (course) {
+        course.paymentType = type;
+        
+        // عرض تفاصيل إضافية حسب النوع
+        const detailsDiv = document.getElementById(`payment-details-${courseId}`);
+        
+        if (type === 'installment') {
+            detailsDiv.innerHTML = `
+                <div style="padding: 10px; background: #f0f0f0; border-radius: 5px;">
+                    <label>عدد الأقساط:</label>
+                    <select onchange="updateInstallments('${courseId}', this.value)" style="margin-right: 10px;">
+                        <option value="2">قسطين</option>
+                        <option value="3">3 أقساط</option>
+                        <option value="4">4 أقساط</option>
+                    </select>
+                    <div id="installment-preview-${courseId}" style="margin-top: 10px;"></div>
+                </div>
+            `;
+            updateInstallments(courseId, 2);
+        } else if (type === 'grant') {
+            detailsDiv.innerHTML = `
+                <div style="padding: 10px; background: #e8f5e9; border-radius: 5px;">
+                    <label>نسبة المنحة:</label>
+                    <select onchange="updateGrant('${courseId}', this.value)" style="margin-right: 10px;">
+                        <option value="100">100% (منحة كاملة)</option>
+                        <option value="75">75%</option>
+                        <option value="50">50%</option>
+                        <option value="25">25%</option>
+                    </select>
+                </div>
+            `;
+            updateGrant(courseId, 100);
+        } else {
+            detailsDiv.innerHTML = '';
+        }
+    }
+    
+    // تحديث الملخص المالي
+    recalculateFinancials();
+}
+
+function updateInstallments(courseId, count) {
+    const course = selectedCourses.find(c => c.id === courseId);
+    if (!course) return;
+    
+    const installmentAmount = Math.ceil((course.price || 0) / count);
+    course.installments = count;
+    course.installmentAmount = installmentAmount;
+    
+    const preview = document.getElementById(`installment-preview-${courseId}`);
+    if (preview) {
+        preview.innerHTML = `
+            <strong>قيمة القسط: ${installmentAmount} جنيه</strong>
+        `;
+    }
+}
+
+function updateGrant(courseId, percentage) {
+    const course = selectedCourses.find(c => c.id === courseId);
+    if (!course) return;
+    
+    course.grantPercentage = parseInt(percentage);
+    course.grantAmount = (course.price || 0) * (percentage / 100);
+    
+    recalculateFinancials();
+}
+
+function recalculateFinancials() {
+    let totalDue = 0;
+    let totalGrants = 0;
+    
+    selectedCourses.forEach(course => {
+        if (course.paymentType === 'grant' && course.grantPercentage === 100) {
+            totalGrants += course.price || 0;
+        } else if (course.paymentType === 'grant') {
+            const grantAmount = (course.price || 0) * (course.grantPercentage / 100);
+            totalGrants += grantAmount;
+            totalDue += (course.price || 0) - grantAmount;
+        } else {
+            totalDue += course.price || 0;
+        }
+    });
+    
+    userData.financial.totalDue = totalDue;
+    userData.financial.totalGrants = totalGrants;
+    
+    document.getElementById('totalDue').textContent = totalDue + ' جنيه';
+    document.getElementById('totalGrants').textContent = totalGrants + ' جنيه';
+}
+
+// ==================== رسالة الترحيب ====================
+function updateWelcomeMessage() {
+    const firstName = document.getElementById('firstName').value || '[الاسم]';
+    const email = document.getElementById('email').value || '[البريد]';
+    const password = document.getElementById('password').value || '[كلمة المرور]';
+    
+    const message = `مرحباً ${firstName} 👋
+
+تم تسجيلك بنجاح في منظور الفؤاد 🎉
+
+📧 البريد الإلكتروني: ${email}
+🔑 كلمة المرور: ${password}
+
+📚 الدورات المسجلة:
+${selectedCourses.map(c => `• ${c.title || c.name}`).join('\n') || '• لا توجد دورات'}
+
+🔗 رابط الدخول:
+https://fouad-academy.com/login
+
+نتمنى لك رحلة تعليمية ممتعة ومفيدة! 💪
+
+فريق منظور الفؤاد`;
+
+    const messageArea = document.getElementById('welcomeMessage');
+    if (messageArea) {
+        messageArea.value = message;
+    }
+}
+
+// تحديث الرسالة عند تغيير البيانات
+document.getElementById('firstName')?.addEventListener('input', updateWelcomeMessage);
+document.getElementById('email')?.addEventListener('input', updateWelcomeMessage);
+document.getElementById('password')?.addEventListener('input', updateWelcomeMessage);
+
+function copyWelcomeMessage() {
+    const message = document.getElementById('welcomeMessage');
+    message.select();
+    document.execCommand('copy');
+    showSuccess('تم نسخ الرسالة');
+}
+
+function sendWhatsApp() {
+    const phone = document.getElementById('phone').value;
+    const countryCode = document.getElementById('countryCode').value;
+    const message = document.getElementById('welcomeMessage').value;
+    
+    if (!phone) {
+        showError('يجب إدخال رقم الهاتف أولاً');
+        return;
+    }
+    
+    const fullNumber = countryCode.replace('+', '') + phone;
+    const whatsappURL = `https://wa.me/${fullNumber}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappURL, '_blank');
+}
+
+// ==================== حفظ المسودة ====================
+function saveDraft() {
+    collectFormData();
+    
+    const draft = {
+        userData: userData,
+        selectedCourses: selectedCourses,
+        timestamp: new Date().toISOString()
+    };
+    
+    localStorage.setItem('userDraft', JSON.stringify(draft));
+    
+    // عرض مؤشر الحفظ
+    const indicator = document.getElementById('autoSaveIndicator');
+    indicator.classList.add('show');
+    setTimeout(() => {
+        indicator.classList.remove('show');
+    }, 3000);
+    
+    showSuccess('تم حفظ المسودة');
+}
+
+// تحميل المسودة عند فتح الصفحة
+function loadDraft() {
+    const draft = localStorage.getItem('userDraft');
+    if (draft) {
+        const data = JSON.parse(draft);
+        const timeDiff = (new Date() - new Date(data.timestamp)) / 1000 / 60; // بالدقائق
+        
+        if (timeDiff < 60) { // أقل من ساعة
+            if (confirm('توجد مسودة محفوظة. هل تريد استعادتها؟')) {
+                // استعادة البيانات
+                userData.basic = data.userData.basic;
+                selectedCourses = data.selectedCourses;
+                
+                // ملء الحقول
+                fillFormFromData();
+            }
+        } else {
+            localStorage.removeItem('userDraft');
+        }
+    }
+}
+
+// استدعاء تحميل المسودة عند بدء التطبيق
+window.addEventListener('load', loadDraft);
+</script>
 </body>
 </html>
