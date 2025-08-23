@@ -4241,15 +4241,21 @@ function updateStatusCounts() {
 
         
        //دالة التحويل الذكية
-        function transferToSpecialized(bookingId, type) {
+        //دالة التحويل الذكية - النسخة المطورة لنقل كل البيانات
+function transferToSpecialized(bookingId, type) {
     const booking = allBookings.find(b => b.id === bookingId);
     
-    // تحديد الصفحة المستهدفة (مع المسار الصحيح)
+    if (!booking) {
+        Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
+        return;
+    }
+    
+    // تحديد الصفحة المستهدفة
     let targetPage = '';
     let targetCollection = '';
     
     if (type === 'individual') {
-        targetPage = 'bookings/individual.html';  // المسار الصحيح
+        targetPage = 'bookings/individual.html';
         targetCollection = 'individualStudents';
     } else if (type === 'group') {
         targetPage = 'bookings/groups.html';
@@ -4268,7 +4274,8 @@ function updateStatusCounts() {
                         <i class="fas fa-info-circle"></i> سيتم الآن:
                     </h4>
                     <ul style="text-align: right; color: #047857;">
-                        <li>نقل البيانات للقسم المختص</li>
+                        <li>نقل كل البيانات بالكامل للقسم المختص</li>
+                        <li>حفظ كل التفاصيل بدون أي فقدان</li>
                         <li>إنشاء ملف متابعة جديد</li>
                         <li>تحديث حالة الحجز</li>
                         ${type === 'individual' ? '<li>تجهيز إنشاء حساب فردي</li>' : ''}
@@ -4292,58 +4299,169 @@ function updateStatusCounts() {
     }).then(async (result) => {
         if (result.isConfirmed) {
             try {
-                // 1. نسخ البيانات للمجموعة الجديدة
-                // إنشاء المجموعة إذا لم تكن موجودة
-console.log('جاري النقل إلى:', targetCollection);
-               // استخدم نفس الـ ID من tempBookings
-await db.collection(targetCollection).doc(bookingId).set({
-    ...booking,
-    transferredAt: new Date().toISOString(),
-    transferredFrom: 'tempBookings',
-    originalBookingId: bookingId,
-    accountStatus: 'pending',
-    accountCreated: false,
-    courseAssigned: false,
-    progress: 0
-});         
-                console.log('تم النقل بنجاح - نفس الـ ID:', bookingId);
-                // 2. تحديث الحالة في الحجز الأصلي
+                // إظهار شاشة التحميل
+                Swal.fire({
+                    title: 'جاري النقل...',
+                    html: 'يرجى الانتظار، جاري نقل كل البيانات بالكامل...',
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                // إنشاء نسخة كاملة من البيانات مع إضافة معلومات التحويل
+                const completeData = {
+                    // نسخ كل البيانات الأصلية بالكامل
+                    ...booking,
+                    
+                    // معلومات التحويل
+                    transferInfo: {
+                        transferredAt: new Date().toISOString(),
+                        transferredFrom: 'tempBookings',
+                        transferredBy: 'admin',
+                        originalBookingId: bookingId,
+                        originalDocumentId: booking.id
+                    },
+                    
+                    // معلومات الحالة الجديدة
+                    accountStatus: 'pending_creation',
+                    accountCreated: false,
+                    courseAssigned: false,
+                    progress: {
+                        accountSetup: 0,
+                        courseAssignment: 0,
+                        firstPayment: booking.status === 'paid' ? 100 : 0,
+                        welcomeMessage: 0,
+                        totalProgress: 0
+                    },
+                    
+                    // الطوابع الزمنية
+                    timestamps: {
+                        originalBooking: booking.timestamp || booking.bookingDate,
+                        transferred: new Date().toISOString(),
+                        lastUpdated: new Date().toISOString()
+                    },
+                    
+                    // التحقق من اكتمال البيانات
+                    dataCompleteness: {
+                        hasName: !!(booking.customer?.name),
+                        hasWhatsapp: !!(booking.customer?.whatsapp),
+                        hasEmail: !!(booking.customer?.email),
+                        hasPaymentMethod: !!(booking.customer?.paymentMethods?.length > 0),
+                        hasPricing: !!(booking.pricing?.finalPrice),
+                        hasDiscounts: !!(booking.discounts?.length > 0),
+                        isComplete: false // سيتم تحديثه لاحقاً
+                    }
+                };
+                
+                // حساب نسبة اكتمال البيانات
+                const completenessValues = Object.values(completeData.dataCompleteness).filter(v => typeof v === 'boolean');
+                const trueCount = completenessValues.filter(v => v === true).length;
+                completeData.dataCompleteness.isComplete = (trueCount / completenessValues.length) > 0.7;
+                completeData.dataCompleteness.percentage = Math.round((trueCount / completenessValues.length) * 100);
+                
+                // التأكد من وجود كل الحقول المهمة
+                if (!completeData.bookingType) completeData.bookingType = type;
+                if (!completeData.courseName) completeData.courseName = 'غير محدد';
+                if (!completeData.pricing) completeData.pricing = { finalPrice: '0', basePriceCome: 0 };
+                if (!completeData.customer) completeData.customer = {};
+                if (!completeData.discounts) completeData.discounts = [];
+                if (!completeData.payment) completeData.payment = {};
+                if (!completeData.journey) completeData.journey = {};
+                
+                // حفظ في المجموعة الجديدة بنفس الـ ID
+                console.log('📦 نقل البيانات الكاملة إلى:', targetCollection);
+                console.log('📋 البيانات المنقولة:', completeData);
+                
+                await db.collection(targetCollection).doc(bookingId).set(completeData);
+                
+                console.log('✅ تم النقل بنجاح - نفس الـ ID:', bookingId);
+                
+                // تحديث الحالة في الحجز الأصلي
                 await db.collection('tempBookings').doc(bookingId).update({
                     status: 'transferred',
                     transferredAt: new Date().toISOString(),
-                    transferredTo: targetCollection
+                    transferredTo: targetCollection,
+                    transferredToPage: targetPage
                 });
                 
-                // 3. رسالة نجاح مع خيارات
+                // رسالة نجاح مع خيارات
                 await Swal.fire({
                     icon: 'success',
                     title: 'تم التحويل بنجاح!',
                     html: `
                         <div style="text-align: center;">
-                            <p>تم نقل البيانات للقسم المختص</p>
-                            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
+                            <p style="font-size: 1.1rem; color: #065F46; margin-bottom: 10px;">
+                                ✅ تم نقل كل البيانات بالكامل للقسم المختص
+                            </p>
+                            <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin: 20px 0;">
+                                <p style="margin: 5px 0; color: #047857;">
+                                    <strong>معرف الحجز:</strong> ${bookingId.slice(-8).toUpperCase()}
+                                </p>
+                                <p style="margin: 5px 0; color: #047857;">
+                                    <strong>نسبة اكتمال البيانات:</strong> ${completeData.dataCompleteness.percentage}%
+                                </p>
+                                <p style="margin: 5px 0; color: #047857;">
+                                    <strong>الحالة:</strong> جاهز للمعالجة
+                                </p>
+                            </div>
+                            <div style="margin-top: 25px; display: flex; gap: 15px; justify-content: center;">
                                 <button onclick="window.location.href='${targetPage}?id=${bookingId}&action=new'" 
-                                        style="background: #10B981; color: white; border: none; 
-                                               padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                                        style="background: linear-gradient(135deg, #10B981, #059669); 
+                                               color: white; border: none; 
+                                               padding: 12px 25px; border-radius: 10px; 
+                                               cursor: pointer; font-weight: bold;
+                                               box-shadow: 0 3px 10px rgba(16,185,129,0.3);">
                                     <i class="fas fa-arrow-right"></i> الذهاب للصفحة المختصة
                                 </button>
                                 <button onclick="location.reload()" 
-                                        style="background: #6B7280; color: white; border: none; 
-                                               padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                                        style="background: #6B7280; color: white; 
+                                               border: none; padding: 12px 25px; 
+                                               border-radius: 10px; cursor: pointer;
+                                               font-weight: bold;">
                                     <i class="fas fa-redo"></i> البقاء هنا
                                 </button>
                             </div>
                         </div>
                     `,
-                    showConfirmButton: false
+                    showConfirmButton: false,
+                    allowOutsideClick: false
                 });
                 
             } catch (error) {
-                console.error('خطأ في التحويل:', error);
-                Swal.fire('خطأ!', 'حدث خطأ في عملية التحويل', 'error');
+                console.error('❌ خطأ في التحويل:', error);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'خطأ!',
+                    text: 'حدث خطأ في عملية التحويل. حاول مرة أخرى.',
+                    confirmButtonColor: '#EF4444'
+                });
             }
         }
     });
+}
+
+        // دالة للتحقق من اكتمال نقل البيانات
+async function verifyDataTransfer(bookingId, targetCollection) {
+    try {
+        const doc = await db.collection(targetCollection).doc(bookingId).get();
+        if (doc.exists) {
+            const data = doc.data();
+            console.log('✅ التحقق من البيانات المنقولة:');
+            console.log('- الاسم:', data.customer?.name || '❌ مفقود');
+            console.log('- الواتساب:', data.customer?.whatsapp || '❌ مفقود');
+            console.log('- السعر النهائي:', data.pricing?.finalPrice || '❌ مفقود');
+            console.log('- الخصومات:', data.discounts?.length || 0, 'خصم');
+            console.log('- التوفير:', data.totalSavings || 0);
+            console.log('- طرق الدفع:', data.customer?.paymentMethods || []);
+            console.log('- نسبة الاكتمال:', data.dataCompleteness?.percentage || 0, '%');
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('❌ خطأ في التحقق:', error);
+        return false;
+    }
 }
         // دالة لملء قائمة الدورات ديناميكياً
         function populateCourseFilter() {
