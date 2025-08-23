@@ -816,85 +816,239 @@ async function checkIfUserExists(email, whatsapp) {
 }
         // تحميل البيانات
         // تحميل البيانات
+// تحميل البيانات المطورة - استقبال كل التفاصيل
 async function loadStudents() {
     try {
-        console.log('جاري تحميل البيانات...');
+        console.log('🔄 جاري تحميل البيانات الكاملة...');
         
         const snapshot = await db.collection('individualStudents').get();
         
         allStudents = [];
         
         if (!snapshot.empty) {
-            // معالجة البيانات بشكل متزامن
             for (const doc of snapshot.docs) {
                 const data = doc.data();
+                
                 // فقط نضيف الطلاب مع بيانات كاملة
                 if (data && data.customer && data.customer.name && data.customer.name !== 'غير محدد') {
-                    // التحقق من وجود المستخدم مسبقاً
-                    const userCheck = await checkIfUserExists(
-                        data.customer.email, 
-                        data.customer.whatsapp
-                    );
-                    
-                    allStudents.push({
+                    // دمج كل البيانات المنقولة
+                    const studentData = {
                         id: doc.id,
                         ...data,
-                        transferredAt: data.transferredAt || new Date().toISOString(),
-                        // إضافة معلومات المستخدم إن وجد
-                        existingUser: userCheck.exists,
-                        existingUserId: userCheck.userId || null,
-                        existingUserData: userCheck.userData || null,
-                        accountCreated: userCheck.exists || data.accountCreated,
-                        accountStatus: userCheck.exists ? 'active' : (data.accountStatus || 'pending'),
-                        userId: userCheck.userId || data.userId
-                    });
+                        
+                        // التأكد من وجود كل الحقول المهمة
+                        transferredAt: data.transferredAt || data.transferInfo?.transferredAt || new Date().toISOString(),
+                        originalBookingId: data.transferInfo?.originalBookingId || data.originalBookingId || doc.id,
+                        
+                        // معلومات الحساب
+                        accountCreated: data.accountCreated || false,
+                        accountStatus: data.accountStatus || 'pending',
+                        userId: data.userId || null,
+                        
+                        // بيانات التقدم
+                        progress: data.progress || {
+                            accountSetup: 0,
+                            courseAssignment: 0,
+                            firstPayment: 0,
+                            welcomeMessage: 0,
+                            totalProgress: 0
+                        },
+                        
+                        // نسبة اكتمال البيانات
+                        dataCompleteness: data.dataCompleteness || {
+                            percentage: 0,
+                            isComplete: false
+                        },
+                        
+                        // التسعير والخصومات
+                        pricing: data.pricing || { finalPrice: '0', basePrice: '0' },
+                        discounts: data.discounts || [],
+                        totalSavings: data.totalSavings || 0,
+                        totalSavingsText: data.totalSavingsText || '0 ج.م',
+                        
+                        // معلومات العروض والكوبونات
+                        activeOffer: data.activeOffer || null,
+                        coupon: data.coupon || null,
+                        
+                        // طريقة الدفع
+                        payment: data.payment || {},
+                        
+                        // نوع الرحلة
+                        journey: data.journey || { type: 'individual' }
+                    };
+                    
+                    allStudents.push(studentData);
                 }
             }
         }
         
-        console.log('تم تحميل:', allStudents.length, 'طالب');
+        console.log('✅ تم تحميل:', allStudents.length, 'طالب بكل البيانات');
         
         updateStatistics();
         filterByTab(currentFilter);
         checkForNewTransfer();
         populateCourseFilter();
         
+        // عرض إحصائيات الخصومات في الـ Console
+        calculateAndShowDiscountStats();
+        
     } catch (error) {
-        console.error('خطأ في التحميل:', error);
+        console.error('❌ خطأ في التحميل:', error);
     }
+}
+
+        // دالة حساب وعرض إحصائيات الخصومات
+function calculateAndShowDiscountStats() {
+    let stats = {
+        totalSavings: 0,
+        totalBasePrice: 0,
+        totalFinalPrice: 0,
+        discountsByType: {
+            time: { count: 0, total: 0 },
+            group: { count: 0, total: 0 },
+            cash: { count: 0, total: 0 },
+            coupon: { count: 0, total: 0 }
+        },
+        activeOffers: {},
+        couponsUsed: {},
+        paymentMethods: {},
+        averageSavings: 0
+    };
+    
+    allStudents.forEach(student => {
+        // حساب الأسعار
+        if (student.pricing) {
+            stats.totalBasePrice += student.pricing.basePriceNumber || 0;
+            stats.totalFinalPrice += student.pricing.finalPriceNumber || 0;
+        }
+        
+        // حساب التوفير
+        if (student.totalSavings) {
+            stats.totalSavings += student.totalSavings;
+        }
+        
+        // تحليل الخصومات
+        if (student.discounts && Array.isArray(student.discounts)) {
+            student.discounts.forEach(discount => {
+                if (discount.type && stats.discountsByType[discount.type]) {
+                    stats.discountsByType[discount.type].count++;
+                    stats.discountsByType[discount.type].total += discount.amount || 0;
+                }
+            });
+        }
+        
+        // العروض النشطة
+        if (student.activeOffer && student.activeOffer.name) {
+            stats.activeOffers[student.activeOffer.name] = (stats.activeOffers[student.activeOffer.name] || 0) + 1;
+        }
+        
+        // الكوبونات المستخدمة
+        if (student.coupon && student.coupon.code) {
+            stats.couponsUsed[student.coupon.code] = (stats.couponsUsed[student.coupon.code] || 0) + 1;
+        }
+        
+        // طرق الدفع
+        if (student.customer && student.customer.paymentMethods) {
+            student.customer.paymentMethods.forEach(method => {
+                stats.paymentMethods[method] = (stats.paymentMethods[method] || 0) + 1;
+            });
+        }
+    });
+    
+    // حساب متوسط التوفير
+    if (allStudents.length > 0) {
+        stats.averageSavings = Math.round(stats.totalSavings / allStudents.length);
+    }
+    
+    console.log('📊 إحصائيات الخصومات والتوفير:');
+    console.log('💰 إجمالي التوفير:', stats.totalSavings.toLocaleString('ar-EG') + ' ج.م');
+    console.log('📈 متوسط التوفير لكل طالب:', stats.averageSavings.toLocaleString('ar-EG') + ' ج.م');
+    console.log('🎯 تفصيل الخصومات:', stats.discountsByType);
+    console.log('🎁 العروض النشطة:', stats.activeOffers);
+    console.log('🎫 الكوبونات المستخدمة:', stats.couponsUsed);
+    console.log('💳 طرق الدفع المفضلة:', stats.paymentMethods);
+    
+    return stats;
 }
         
         // تحديث الإحصائيات
-        function updateStatistics() {
-            if (allStudents.length === 0) return;
-            const stats = {
-                total: allStudents.length,
-                active: allStudents.filter(s => s.accountStatus === 'active' || s.accountStatus === undefined).length,
-                pending: allStudents.filter(s => !s.accountCreated || s.accountStatus === 'pending').length,
-                coursesAssigned: allStudents.filter(s => s.courseAssigned).length,
-                completionRate: 0
-            };
-            
-            // حساب معدل الإنجاز
-            if (stats.total > 0) {
-                const totalProgress = allStudents.reduce((sum, s) => sum + (s.progress || 0), 0);
-                stats.completionRate = Math.round(totalProgress / stats.total);
-            }
-            
-            // تحديث العرض
-            document.getElementById('total-students').textContent = stats.total;
-            document.getElementById('active-students').textContent = stats.active;
-            document.getElementById('pending-students').textContent = stats.pending;
-            document.getElementById('courses-assigned').textContent = stats.coursesAssigned;
-            document.getElementById('completion-rate').textContent = stats.completionRate + '%';
-            
-            // تحديث badges التبويبات
-            document.getElementById('tab-all').textContent = stats.total;
-            document.getElementById('tab-new').textContent = allStudents.filter(s => isNewStudent(s)).length;
-            document.getElementById('tab-pending').textContent = stats.pending;
-            document.getElementById('tab-active').textContent = stats.active;
-            document.getElementById('tab-inactive').textContent = allStudents.filter(s => s.accountStatus === 'inactive').length;
+        // تحديث الإحصائيات المطورة
+function updateStatistics() {
+    if (allStudents.length === 0) {
+        document.getElementById('total-students').textContent = '0';
+        document.getElementById('active-students').textContent = '0';
+        document.getElementById('pending-students').textContent = '0';
+        document.getElementById('courses-assigned').textContent = '0';
+        document.getElementById('completion-rate').textContent = '0%';
+        return;
+    }
+    
+    const stats = {
+        total: allStudents.length,
+        active: 0,
+        pending: 0,
+        coursesAssigned: 0,
+        completionRate: 0,
+        totalSavings: 0,
+        withDiscounts: 0,
+        vipStudents: 0
+    };
+    
+    allStudents.forEach(student => {
+        // حالة الحساب
+        if (student.accountStatus === 'active' || student.accountCreated === true) {
+            stats.active++;
+        } else if (!student.accountCreated || student.accountStatus === 'pending') {
+            stats.pending++;
         }
+        
+        // الدورات المخصصة
+        if (student.courseAssigned || student.assignedCourseId) {
+            stats.coursesAssigned++;
+        }
+        
+        // حساب التوفير
+        if (student.totalSavings > 0) {
+            stats.totalSavings += student.totalSavings;
+            stats.withDiscounts++;
+        }
+        
+        // حساب طلاب VIP
+        if (student.totalSavings > 1000 || (student.dataCompleteness?.percentage || 0) > 80) {
+            stats.vipStudents++;
+        }
+    });
+    
+    // حساب معدل الإنجاز
+    if (stats.total > 0) {
+        const totalProgress = allStudents.reduce((sum, s) => {
+            const progress = s.progress?.totalProgress || 0;
+            return sum + progress;
+        }, 0);
+        stats.completionRate = Math.round(totalProgress / stats.total);
+    }
+    
+    // تحديث العرض
+    document.getElementById('total-students').textContent = stats.total;
+    document.getElementById('active-students').textContent = stats.active;
+    document.getElementById('pending-students').textContent = stats.pending;
+    document.getElementById('courses-assigned').textContent = stats.coursesAssigned;
+    document.getElementById('completion-rate').textContent = stats.completionRate + '%';
+    
+    // تحديث badges التبويبات
+    document.getElementById('tab-all').textContent = stats.total;
+    document.getElementById('tab-new').textContent = allStudents.filter(s => isNewStudent(s)).length;
+    document.getElementById('tab-pending').textContent = stats.pending;
+    document.getElementById('tab-active').textContent = stats.active;
+    document.getElementById('tab-inactive').textContent = allStudents.filter(s => s.accountStatus === 'inactive').length;
+    
+    // عرض إحصائيات إضافية في الـ Console
+    console.log('📊 إحصائيات إضافية:');
+    console.log(`💰 إجمالي التوفير: ${stats.totalSavings.toLocaleString('ar-EG')} ج.م`);
+    console.log(`🎯 طلاب حصلوا على خصومات: ${stats.withDiscounts} من ${stats.total}`);
+    console.log(`⭐ طلاب VIP: ${stats.vipStudents}`);
+    console.log(`📈 نسبة التحويل: ${Math.round((stats.active / stats.total) * 100)}%`);
+}
         
         // التحقق من طالب جديد (خلال آخر 24 ساعة)
         function isNewStudent(student) {
@@ -909,6 +1063,7 @@ async function loadStudents() {
         
         // إنشاء بطاقة الطالب
        // إنشاء بطاقة الطالب
+// إنشاء بطاقة الطالب المطورة الكاملة
 function createStudentCard(student) {
     // التحقق من وجود البيانات الأساسية
     if (!student || !student.customer) {
@@ -926,8 +1081,9 @@ function createStudentCard(student) {
     const studentId = student.id;
     const hasAccount = student.accountCreated === true;
     const accountStatus = student.accountStatus || 'pending';
-    const progress = student.progress || 0;
+    const totalProgress = student.progress?.totalProgress || 0;
     const isNew = isNewStudent(student);
+    const completeness = student.dataCompleteness?.percentage || 0;
     
     // الحصول على الأحرف الأولى
     const initials = customer.name.split(' ')
@@ -936,19 +1092,78 @@ function createStudentCard(student) {
         .substring(0, 2)
         .toUpperCase();
     
+    // تحديد مستوى الطالب بناءً على البيانات
+    let studentLevel = 'عادي';
+    let levelColor = '#6B7280';
+    let levelIcon = 'fa-user';
+    
+    if (student.totalSavings > 2000) {
+        studentLevel = 'VIP ذهبي';
+        levelColor = '#FFD700';
+        levelIcon = 'fa-crown';
+    } else if (student.totalSavings > 1000) {
+        studentLevel = 'VIP';
+        levelColor = '#9333EA';
+        levelIcon = 'fa-gem';
+    } else if (completeness > 80) {
+        studentLevel = 'متميز';
+        levelColor = '#10B981';
+        levelIcon = 'fa-star';
+    }
+    
     // HTML البطاقة
     return `
-        <div class="student-card ${isNew ? 'new' : ''}" data-booking-id="${student.originalBookingId || studentId}">
+        <div class="student-card ${isNew ? 'new' : ''} ${hasAccount ? '' : 'new-account'}" 
+             data-booking-id="${student.originalBookingId || studentId}"
+             data-student-id="${studentId}">
+            
+            <!-- شريط الحالة العلوي -->
+            <div style="background: linear-gradient(135deg, ${levelColor}20, ${levelColor}10); 
+                        padding: 10px 20px; display: flex; justify-content: space-between; 
+                        align-items: center; border-bottom: 2px solid ${levelColor};">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="background: ${levelColor}; color: white; padding: 5px 15px; 
+                                 border-radius: 20px; font-size: 0.85rem; font-weight: bold;">
+                        <i class="fas ${levelIcon}"></i> ${studentLevel}
+                    </span>
+                    ${isNew ? `
+                        <span style="background: #10B981; color: white; padding: 5px 15px; 
+                                     border-radius: 20px; font-size: 0.85rem; animation: pulse 2s infinite;">
+                            <i class="fas fa-sparkles"></i> جديد
+                        </span>
+                    ` : ''}
+                    ${student.totalSavings > 0 ? `
+                        <span style="background: linear-gradient(135deg, #EF4444, #DC2626); color: white; 
+                                     padding: 5px 15px; border-radius: 20px; font-size: 0.85rem;">
+                            <i class="fas fa-piggy-bank"></i> وفر ${student.totalSavingsText}
+                        </span>
+                    ` : ''}
+                </div>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 0.8rem; color: #6B7280;">اكتمال البيانات</div>
+                        <div style="font-weight: bold; color: ${completeness > 70 ? '#10B981' : completeness > 40 ? '#F59E0B' : '#EF4444'};">
+                            ${completeness}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="student-header">
                 <div class="student-basic">
-                    <div class="student-avatar">
+                    <div class="student-avatar" style="background: linear-gradient(135deg, ${levelColor}, ${levelColor}DD);">
                         ${initials}
                     </div>
                     <div class="student-info">
                         <h3>${customer.name}</h3>
                         <p>
                             <i class="fas fa-book"></i> ${student.courseName || 'غير محدد'}
-                            ${isNew ? '<span style="background: #10B981; color: white; padding: 2px 8px; border-radius: 10px; margin-right: 10px; font-size: 0.8rem;">جديد</span>' : ''}
+                            ${student.activeOffer ? `
+                                <span style="background: #F59E0B; color: white; padding: 2px 8px; 
+                                             border-radius: 10px; margin-right: 10px; font-size: 0.8rem;">
+                                    ${student.activeOffer.name}
+                                </span>
+                            ` : ''}
                         </p>
                     </div>
                 </div>
@@ -968,10 +1183,41 @@ function createStudentCard(student) {
             </div>
             
             <div class="student-body">
+                <!-- شريط التسعير والخصومات -->
+                ${student.pricing ? `
+                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                            padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); 
+                                gap: 15px; text-align: center;">
+                        <div>
+                            <div style="color: #92400E; font-size: 0.85rem;">السعر الأساسي</div>
+                            <div style="font-weight: bold; color: #6B7280; text-decoration: line-through;">
+                                ${student.pricing.basePrice}
+                            </div>
+                        </div>
+                        <div>
+                            <div style="color: #065F46; font-size: 0.85rem;">السعر النهائي</div>
+                            <div style="font-weight: bold; color: #10B981; font-size: 1.2rem;">
+                                ${student.pricing.finalPrice}
+                            </div>
+                        </div>
+                        ${student.totalSavings > 0 ? `
+                        <div>
+                            <div style="color: #991B1B; font-size: 0.85rem;">التوفير</div>
+                            <div style="font-weight: bold; color: #DC2626; font-size: 1.1rem;">
+                                ${student.totalSavingsText}
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+                ` : ''}
+                
+                <!-- معلومات أساسية -->
                 <div class="info-grid">
                     ${customer.whatsapp ? `
                         <div class="info-item">
-                            <i class="fab fa-whatsapp"></i>
+                            <i class="fab fa-whatsapp" style="color: #25D366;"></i>
                             <span>واتساب: <strong style="direction: ltr;">${customer.whatsapp}</strong></span>
                         </div>
                     ` : ''}
@@ -994,52 +1240,97 @@ function createStudentCard(student) {
                         <i class="fas fa-calendar"></i>
                         <span>التسجيل: <strong>${new Date(student.transferredAt || new Date()).toLocaleDateString('ar-EG')}</strong></span>
                     </div>
-                    
-                    ${student.pricing && student.pricing.finalPrice ? `
-                        <div class="info-item">
-                            <i class="fas fa-money-bill"></i>
-                            <span>المبلغ: <strong style="color: #10B981;">${student.pricing.finalPrice} جنيه</strong></span>
-                        </div>
-                    ` : ''}
                 </div>
                 
-                ${student.courseAssigned ? `
-                    <div class="progress-section">
+                <!-- شريط التقدم المفصل -->
+                ${hasAccount ? `
+                    <div class="progress-section" style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                                                         padding: 15px; border-radius: 10px; margin: 20px 0;">
                         <div class="progress-header">
-                            <span><i class="fas fa-chart-line"></i> التقدم في الدورة</span>
-                            <span><strong>${progress}%</strong></span>
+                            <span><i class="fas fa-tasks"></i> تقدم العمليات</span>
+                            <span><strong>${totalProgress}%</strong></span>
                         </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${progress}%"></div>
+                        <div style="display: grid; gap: 10px; margin-top: 15px;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <span style="font-size: 0.85rem;">إنشاء الحساب</span>
+                                    <span style="font-size: 0.85rem; font-weight: bold;">
+                                        ${student.progress?.accountSetup || 0}%
+                                    </span>
+                                </div>
+                                <div style="height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden;">
+                                    <div style="height: 100%; width: ${student.progress?.accountSetup || 0}%; 
+                                                background: #3B82F6; transition: width 0.5s;"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <span style="font-size: 0.85rem;">تخصيص الدورة</span>
+                                    <span style="font-size: 0.85rem; font-weight: bold;">
+                                        ${student.progress?.courseAssignment || 0}%
+                                    </span>
+                                </div>
+                                <div style="height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden;">
+                                    <div style="height: 100%; width: ${student.progress?.courseAssignment || 0}%; 
+                                                background: #8B5CF6; transition: width 0.5s;"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                ` : ''}
+                
+                <!-- طرق الدفع المختارة -->
+                ${customer.paymentMethods && customer.paymentMethods.length > 0 ? `
+                <div style="background: #F9FAFB; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                    <div style="font-size: 0.85rem; color: #6B7280; margin-bottom: 8px;">
+                        <i class="fas fa-credit-card"></i> طرق الدفع المفضلة
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        ${customer.paymentMethods.map(method => {
+                            const methodInfo = {
+                                'vodafone': { color: '#E60000', icon: 'fa-mobile-alt', text: 'فودافون كاش' },
+                                'instapay': { color: '#5B21B6', icon: 'fa-bolt', text: 'انستاباي' },
+                                'bank': { color: '#1E40AF', icon: 'fa-university', text: 'تحويل بنكي' },
+                                'card': { color: '#059669', icon: 'fa-credit-card', text: 'بطاقة' }
+                            };
+                            const info = methodInfo[method] || { color: '#6B7280', icon: 'fa-money-bill', text: method };
+                            return `
+                                <span style="background: ${info.color}20; color: ${info.color}; 
+                                             padding: 4px 10px; border-radius: 15px; font-size: 0.8rem; 
+                                             font-weight: bold;">
+                                    <i class="fas ${info.icon}"></i> ${info.text}
+                                </span>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
                 ` : ''}
             </div>
             
             <div class="action-buttons">
                 ${!hasAccount ? `
-    <button class="btn btn-primary" onclick="createOrLinkAccount('${studentId}')">
-        <i class="fas fa-user-plus"></i> ${student.existingUser ? 'ربط الحساب الموجود' : 'إنشاء حساب'}
-    </button>
-` : `
-    <button class="btn btn-success" onclick="sendCredentials('${studentId}')">
-        <i class="fab fa-whatsapp"></i> إرسال البيانات
-    </button>
-    <button class="btn btn-warning" onclick="assignCourseToStudent('${studentId}')">
-    <i class="fas fa-graduation-cap"></i> تخصيص دورة
-</button>
-    <button class="btn btn-info" onclick="resendWelcome('${studentId}')">
-        <i class="fas fa-envelope"></i> رسالة ترحيب
-    </button>
-`}
-                
-                <button class="btn btn-success" onclick="sendMessage('${studentId}')">
-                    <i class="fab fa-whatsapp"></i> رسالة
-                </button>
+                    <button class="btn btn-primary" onclick="createOrLinkAccount('${studentId}')">
+                        <i class="fas fa-user-plus"></i> 
+                        ${student.existingUser ? 'ربط الحساب الموجود' : 'إنشاء حساب'}
+                    </button>
+                ` : `
+                    <button class="btn btn-success" onclick="sendCredentials('${studentId}')">
+                        <i class="fab fa-whatsapp"></i> إرسال البيانات
+                    </button>
+                    <button class="btn btn-warning" onclick="assignCourseToStudent('${studentId}')">
+                        <i class="fas fa-graduation-cap"></i> تخصيص دورة
+                    </button>
+                `}
                 
                 <button class="btn btn-primary" onclick="viewFullDetails('${studentId}')">
                     <i class="fas fa-info-circle"></i> التفاصيل الكاملة
                 </button>
+                
+                ${customer.whatsapp ? `
+                    <button class="btn btn-success" onclick="sendMessage('${studentId}')">
+                        <i class="fab fa-whatsapp"></i> رسالة
+                    </button>
+                ` : ''}
             </div>
         </div>
     `;
@@ -1750,50 +2041,338 @@ function sendMessage(studentId) {
 window.sendMessage = sendMessage;
         
         // عرض التفاصيل الكاملة
-        function viewFullDetails(studentId) {
-            const student = allStudents.find(s => s.id === studentId);
-            
-            // يمكنك هنا فتح نافذة منبثقة أو صفحة جديدة
-            console.log('التفاصيل الكاملة:', student);
-            
-            // أو استخدام SweetAlert لعرض كل التفاصيل
-            const customer = student.customer || {};
-            
-            Swal.fire({
-                title: 'التفاصيل الكاملة',
-                html: `
-                    <div style="text-align: right; max-height: 400px; overflow-y: auto;">
-                        <h4>المعلومات الشخصية</h4>
-                        <p><strong>الاسم:</strong> ${customer.name || 'غير محدد'}</p>
-                        <p><strong>الواتساب:</strong> ${customer.whatsapp || 'غير محدد'}</p>
-                        <p><strong>البريد:</strong> ${customer.email || 'غير محدد'}</p>
-                        <p><strong>العمر:</strong> ${customer.age || 'غير محدد'}</p>
-                        <p><strong>الوظيفة:</strong> ${customer.job || 'غير محدد'}</p>
-                        
-                        <hr>
-                        <h4>معلومات الدورة</h4>
-                        <p><strong>اسم الدورة:</strong> ${student.courseName || 'غير محدد'}</p>
-                        <p><strong>السعر:</strong> ${student.pricing?.finalPrice || 0} جنيه</p>
-                        
-                        <hr>
-                        <h4>التوقعات والخطط</h4>
-                        <p><strong>التوقعات:</strong> ${customer.expectations || 'غير محدد'}</p>
-                        <p><strong>الخبرة:</strong> ${customer.experience || 'غير محدد'}</p>
-                        <p><strong>خطة التطبيق:</strong> ${customer.applicationPlan || 'غير محدد'}</p>
-                        
-                        <hr>
-                        <h4>معلومات النظام</h4>
-                        <p><strong>معرف الحجز الأصلي:</strong> ${student.originalBookingId || student.id}</p>
-                        <p><strong>تاريخ التحويل:</strong> ${new Date(student.transferredAt).toLocaleString('ar-EG')}</p>
-                        <p><strong>حالة الحساب:</strong> ${student.accountStatus || 'غير مُنشأ'}</p>
+        // عرض التفاصيل الكاملة المطورة
+function viewFullDetails(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    
+    if (!student) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+        return;
+    }
+    
+    const customer = student.customer || {};
+    const pricing = student.pricing || {};
+    const discounts = student.discounts || [];
+    const payment = student.payment || {};
+    const progress = student.progress || {};
+    const completeness = student.dataCompleteness?.percentage || 0;
+    
+    // تحديد مستوى الطالب
+    let studentLevel = 'عادي';
+    let levelColor = '#6B7280';
+    if (student.totalSavings > 2000) {
+        studentLevel = 'VIP ذهبي';
+        levelColor = '#FFD700';
+    } else if (student.totalSavings > 1000) {
+        studentLevel = 'VIP';
+        levelColor = '#9333EA';
+    } else if (completeness > 80) {
+        studentLevel = 'متميز';
+        levelColor = '#10B981';
+    }
+    
+    Swal.fire({
+        title: '📋 التفاصيل الكاملة للطالب',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto; padding: 20px;">
+                
+                <!-- رأس البطاقة -->
+                <div style="background: linear-gradient(135deg, ${levelColor}20, ${levelColor}10); 
+                            padding: 20px; border-radius: 15px; margin-bottom: 20px; 
+                            border: 2px solid ${levelColor};">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3 style="margin: 0; color: #1F2937;">${customer.name || 'غير محدد'}</h3>
+                            <p style="margin: 5px 0; color: #6B7280;">
+                                ${customer.title ? `${customer.title} • ` : ''}
+                                ${customer.age ? `${customer.age} سنة • ` : ''}
+                                ${customer.job || ''}
+                            </p>
+                        </div>
+                        <div style="text-align: center;">
+                            <span style="background: ${levelColor}; color: white; 
+                                         padding: 8px 20px; border-radius: 25px; 
+                                         font-weight: bold; display: block; margin-bottom: 10px;">
+                                ${studentLevel}
+                            </span>
+                            <div style="font-size: 0.9rem; color: #6B7280;">
+                                اكتمال البيانات: <strong>${completeness}%</strong>
+                            </div>
+                        </div>
                     </div>
-                `,
-                width: '600px',
-                confirmButtonText: 'إغلاق',
-                confirmButtonColor: '#6B7280'
-            });
+                </div>
+                
+                <!-- معلومات الاتصال -->
+                <div style="background: white; border: 1px solid #E5E7EB; padding: 20px; 
+                            border-radius: 10px; margin-bottom: 20px;">
+                    <h4 style="color: #1F2937; margin-bottom: 15px;">
+                        <i class="fas fa-address-card"></i> معلومات الاتصال
+                    </h4>
+                    <div style="display: grid; gap: 12px;">
+                        ${customer.whatsapp ? `
+                            <div style="display: flex; align-items: center;">
+                                <i class="fab fa-whatsapp" style="color: #25D366; width: 30px;"></i>
+                                <span style="direction: ltr; font-weight: bold;">${customer.whatsapp}</span>
+                                <button onclick="window.open('https://wa.me/${customer.whatsapp.replace(/[^0-9]/g, '')}', '_blank')" 
+                                        style="margin-right: auto; background: #25D366; color: white; 
+                                               border: none; padding: 5px 15px; border-radius: 20px; 
+                                               cursor: pointer; font-size: 0.85rem;">
+                                    <i class="fab fa-whatsapp"></i> تواصل
+                                </button>
+                            </div>
+                        ` : '<div style="color: #EF4444;">لا يوجد رقم واتساب</div>'}
+                        
+                        ${customer.email ? `
+                            <div style="display: flex; align-items: center;">
+                                <i class="fas fa-envelope" style="color: #3B82F6; width: 30px;"></i>
+                                <span>${customer.email}</span>
+                            </div>
+                        ` : ''}
+                        
+                        ${customer.country || customer.city ? `
+                            <div style="display: flex; align-items: center;">
+                                <i class="fas fa-map-marker-alt" style="color: #EC4899; width: 30px;"></i>
+                                <span>${customer.country || ''} ${customer.city ? `- ${customer.city}` : ''}</span>
+                            </div>
+                        ` : ''}
+                        
+                        ${customer.source ? `
+                            <div style="display: flex; align-items: center;">
+                                <i class="fas fa-share-alt" style="color: #06B6D4; width: 30px;"></i>
+                                <span>عرف عنا من: <strong>${customer.source}</strong></span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <!-- معلومات الدورة والتسعير -->
+                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                            padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <h4 style="color: #92400E; margin-bottom: 15px;">
+                        <i class="fas fa-book"></i> معلومات الدورة والتسعير
+                    </h4>
+                    
+                    <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: #6B7280;">الدورة:</span>
+                            <strong style="color: #1F2937; font-size: 1.1rem;">
+                                ${student.courseName || 'غير محدد'}
+                            </strong>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
+                        <div style="background: white; padding: 15px; border-radius: 8px;">
+                            <div style="color: #6B7280; font-size: 0.85rem; margin-bottom: 5px;">السعر الأساسي</div>
+                            <div style="font-weight: bold; color: #6B7280; text-decoration: line-through;">
+                                ${pricing.basePrice || '0 ج.م'}
+                            </div>
+                        </div>
+                        <div style="background: #DCFCE7; padding: 15px; border-radius: 8px;">
+                            <div style="color: #065F46; font-size: 0.85rem; margin-bottom: 5px;">السعر النهائي</div>
+                            <div style="font-weight: bold; color: #10B981; font-size: 1.3rem;">
+                                ${pricing.finalPrice || '0 ج.م'}
+                            </div>
+                        </div>
+                        <div style="background: #FEE2E2; padding: 15px; border-radius: 8px;">
+                            <div style="color: #991B1B; font-size: 0.85rem; margin-bottom: 5px;">التوفير</div>
+                            <div style="font-weight: bold; color: #DC2626; font-size: 1.2rem;">
+                                ${student.totalSavingsText || '0 ج.م'}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    ${student.activeOffer ? `
+                        <div style="background: white; padding: 10px; border-radius: 8px; margin-top: 15px; 
+                                    text-align: center;">
+                            <span style="color: #F59E0B; font-weight: bold;">
+                                <i class="fas fa-fire"></i> ${student.activeOffer.name} - ${student.activeOffer.discount}
+                            </span>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <!-- الخصومات التفصيلية -->
+                ${discounts.length > 0 ? `
+                    <div style="background: white; border: 1px solid #E5E7EB; padding: 20px; 
+                                border-radius: 10px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-percentage"></i> الخصومات المطبقة
+                        </h4>
+                        <div style="display: grid; gap: 10px;">
+                            ${discounts.map(discount => {
+                                const colors = {
+                                    'time': '#F59E0B',
+                                    'group': '#9333EA',
+                                    'cash': '#10B981',
+                                    'coupon': '#3B82F6'
+                                };
+                                const color = colors[discount.type] || '#6B7280';
+                                return `
+                                    <div style="display: flex; justify-content: space-between; 
+                                                padding: 10px; background: #F9FAFB; 
+                                                border-radius: 8px; border-right: 3px solid ${color};">
+                                        <span>${discount.label}</span>
+                                        <strong style="color: ${color};">${discount.value}</strong>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <!-- طريقة الدفع -->
+                ${payment.method ? `
+                    <div style="background: white; border: 1px solid #E5E7EB; padding: 20px; 
+                                border-radius: 10px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-credit-card"></i> طريقة الدفع
+                        </h4>
+                        <div style="background: #F9FAFB; padding: 15px; border-radius: 8px;">
+                            <div style="font-weight: bold; color: #1F2937; margin-bottom: 10px;">
+                                ${payment.method}
+                            </div>
+                            ${payment.installmentDetails ? `
+                                <div style="color: #6B7280;">
+                                    <i class="fas fa-calendar-alt"></i> ${payment.installmentDetails}
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        ${customer.paymentMethods && customer.paymentMethods.length > 0 ? `
+                            <div style="margin-top: 15px;">
+                                <div style="color: #6B7280; font-size: 0.9rem; margin-bottom: 10px;">
+                                    طرق الدفع المفضلة:
+                                </div>
+                                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                    ${customer.paymentMethods.map(method => `
+                                        <span style="background: #3B82F6; color: white; 
+                                                     padding: 5px 15px; border-radius: 20px; 
+                                                     font-size: 0.85rem;">
+                                            ${method === 'vodafone' ? 'فودافون كاش' :
+                                              method === 'instapay' ? 'انستاباي' :
+                                              method === 'bank' ? 'تحويل بنكي' :
+                                              method === 'card' ? 'بطاقة' : method}
+                                        </span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : ''}
+                
+                <!-- التوقعات والخطط -->
+                ${customer.expectations || customer.experience || customer.applicationPlan ? `
+                    <div style="background: white; border: 1px solid #E5E7EB; padding: 20px; 
+                                border-radius: 10px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-rocket"></i> التوقعات والخطط
+                        </h4>
+                        
+                        ${customer.experience ? `
+                            <div style="margin-bottom: 15px;">
+                                <strong style="color: #6B7280;">مستوى الخبرة:</strong>
+                                <span style="background: #F3F4F6; padding: 5px 15px; 
+                                             border-radius: 20px; margin-right: 10px;">
+                                    ${customer.experience}
+                                </span>
+                            </div>
+                        ` : ''}
+                        
+                        ${customer.expectations ? `
+                            <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; 
+                                        margin-bottom: 15px;">
+                                <strong style="color: #6B7280; display: block; margin-bottom: 10px;">
+                                    التوقعات من الدورة:
+                                </strong>
+                                <p style="margin: 0; color: #374151; line-height: 1.8;">
+                                    ${customer.expectations}
+                                </p>
+                            </div>
+                        ` : ''}
+                        
+                        ${customer.applicationPlan ? `
+                            <div style="background: #F0FDF4; padding: 15px; border-radius: 8px;">
+                                <strong style="color: #065F46; display: block; margin-bottom: 10px;">
+                                    خطة التطبيق:
+                                </strong>
+                                <p style="margin: 0; color: #14532D; line-height: 1.8;">
+                                    ${customer.applicationPlan}
+                                </p>
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : ''}
+                
+                <!-- الملاحظات -->
+                ${customer.notes ? `
+                    <div style="background: #FEF3C7; padding: 20px; border-radius: 10px; 
+                                margin-bottom: 20px;">
+                        <h4 style="color: #92400E; margin-bottom: 10px;">
+                            <i class="fas fa-sticky-note"></i> ملاحظات
+                        </h4>
+                        <p style="margin: 0; color: #78350F; line-height: 1.8;">
+                            ${customer.notes}
+                        </p>
+                    </div>
+                ` : ''}
+                
+                <!-- معلومات النظام -->
+                <div style="background: #F3F4F6; padding: 20px; border-radius: 10px;">
+                    <h4 style="color: #4B5563; margin-bottom: 15px;">
+                        <i class="fas fa-cog"></i> معلومات النظام
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                        <div>
+                            <span style="color: #6B7280;">معرف الحجز الأصلي:</span>
+                            <strong style="display: block; margin-top: 5px;">
+                                ${student.originalBookingId || student.id}
+                            </strong>
+                        </div>
+                        <div>
+                            <span style="color: #6B7280;">تاريخ التحويل:</span>
+                            <strong style="display: block; margin-top: 5px;">
+                                ${new Date(student.transferredAt || student.transferInfo?.transferredAt || new Date()).toLocaleString('ar-EG')}
+                            </strong>
+                        </div>
+                        <div>
+                            <span style="color: #6B7280;">حالة الحساب:</span>
+                            <strong style="display: block; margin-top: 5px;">
+                                ${student.accountStatus === 'active' ? 'نشط' :
+                                  student.accountStatus === 'pending' ? 'قيد التفعيل' : 'غير نشط'}
+                            </strong>
+                        </div>
+                        <div>
+                            <span style="color: #6B7280;">معرف المستخدم:</span>
+                            <strong style="display: block; margin-top: 5px;">
+                                ${student.userId || 'لم يُنشأ بعد'}
+                            </strong>
+                        </div>
+                    </div>
+                    
+                    <!-- شريط التقدم الإجمالي -->
+                    <div style="margin-top: 20px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span style="color: #6B7280;">التقدم الإجمالي:</span>
+                            <strong>${progress.totalProgress || 0}%</strong>
+                        </div>
+                        <div style="height: 10px; background: #E5E7EB; border-radius: 5px; overflow: hidden;">
+                            <div style="height: 100%; width: ${progress.totalProgress || 0}%; 
+                                        background: linear-gradient(90deg, #3B82F6, #10B981); 
+                                        transition: width 0.5s;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `,
+        width: '900px',
+        showCloseButton: true,
+        showConfirmButton: false,
+        customClass: {
+            popup: 'detailed-popup'
         }
-        
+    });
+}
         // توليد كلمة مرور
         function generatePassword() {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
