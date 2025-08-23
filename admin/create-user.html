@@ -1532,22 +1532,50 @@ async function initializePage() {
             await loadUserDataFromDB(editUserId);
             
         } else if (newUserId) {
-            // وضع إنشاء مع معرف جاهز
+            // وضع إنشاء مع معرف جاهز أو تعديل مستخدم موجود
             currentUserId = newUserId;
-            userData.basic.userId = newUserId;
-            document.getElementById('userIdPreview').value = newUserId;
-            document.getElementById('userIdSection').style.display = 'none';
             
-            // استرجاع البيانات المؤقتة إن وجدت
-            const tempData = sessionStorage.getItem('tempUserData_' + newUserId);
-            if (tempData) {
-                const data = JSON.parse(tempData);
-                fillFormWithData(data);
-            }
-            
-            // إذا كان قادم من الحجوزات
-            if (fromBooking === 'individual') {
-                await loadDataFromIndividualStudents(newUserId);
+            // التحقق من وجود المستخدم في قاعدة البيانات
+            try {
+                const userDoc = await db.collection('users').doc(newUserId).get();
+                
+                if (userDoc.exists) {
+                    // المستخدم موجود - نحول لوضع التعديل
+                    console.log('✅ المستخدم موجود، التحويل لوضع التعديل');
+                    editMode = true;
+                    document.getElementById('pageTitle').textContent = 'تعديل بيانات المستخدم';
+                    document.getElementById('saveButtonText').textContent = 'حفظ التعديلات';
+                    
+                    // تحميل بيانات المستخدم
+                    await loadUserDataFromDB(newUserId);
+                    
+                    // إخفاء قسم المعرف
+                    document.getElementById('userIdSection').style.display = 'none';
+                    
+                    // عدم السماح بتغيير البريد
+                    document.getElementById('email').setAttribute('readonly', true);
+                    
+                } else {
+                    // مستخدم جديد مع معرف
+                    console.log('📝 إنشاء مستخدم جديد بمعرف:', newUserId);
+                    userData.basic.userId = newUserId;
+                    document.getElementById('userIdPreview').value = newUserId;
+                    document.getElementById('userIdSection').style.display = 'none';
+                    
+                    // استرجاع البيانات المؤقتة إن وجدت
+                    const tempData = sessionStorage.getItem('tempUserData_' + newUserId);
+                    if (tempData) {
+                        const data = JSON.parse(tempData);
+                        fillFormWithData(data);
+                    }
+                    
+                    // إذا كان قادم من الحجوزات
+                    if (fromBooking === 'individual') {
+                        await loadDataFromIndividualStudents(newUserId);
+                    }
+                }
+            } catch (error) {
+                console.error('خطأ في التحقق من المستخدم:', error);
             }
             
         } else {
@@ -1561,6 +1589,11 @@ async function initializePage() {
         updateWelcomeMessage();
         calculateDataCompleteness();
         
+        // إظهار زر تخصيص الدورات إذا كنا في وضع التعديل
+        if (editMode) {
+            showAssignCourseButton();
+        }
+        
         // إخفاء شاشة التحميل
         hideLoading();
         
@@ -1570,7 +1603,6 @@ async function initializePage() {
         showError('حدث خطأ في تحميل الصفحة');
     }
 }
-
     // ==================== دوال التكامل مع individualStudents ====================
 
 // تحميل البيانات من individualStudents
@@ -2386,7 +2418,118 @@ function updateFinancialSummary() {
     if (totalPaidElement) totalPaidElement.textContent = userData.financial.totalPaid + ' جنيه';
     if (totalGrantsElement) totalGrantsElement.textContent = userData.financial.totalGrants + ' جنيه';
 }
+// ==================== وظائف التعامل مع الدورات ====================
 
+// تخصيص دورة للطالب
+async function assignCourseToStudent() {
+    if (!currentUserId) {
+        showError('يجب حفظ المستخدم أولاً قبل تخصيص دورة');
+        return;
+    }
+    
+    // التحقق من وجود دورات مختارة
+    if (selectedCourses.length === 0) {
+        showError('يجب اختيار دورة واحدة على الأقل');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        // جلب بيانات المستخدم الحالية
+        const userDoc = await db.collection('users').doc(currentUserId).get();
+        if (!userDoc.exists) {
+            showError('المستخدم غير موجود');
+            hideLoading();
+            return;
+        }
+        
+        const currentUserData = userDoc.data();
+        const currentEnrollments = currentUserData.enrollments || [];
+        
+        // دمج الدورات الجديدة مع القديمة
+        const updatedEnrollments = [...currentEnrollments];
+        
+        selectedCourses.forEach(newCourse => {
+            const existingIndex = updatedEnrollments.findIndex(e => e.id === newCourse.id);
+            
+            if (existingIndex > -1) {
+                // تحديث الدورة الموجودة
+                updatedEnrollments[existingIndex] = {
+                    ...updatedEnrollments[existingIndex],
+                    ...newCourse,
+                    lastUpdated: new Date().toISOString()
+                };
+            } else {
+                // إضافة دورة جديدة
+                updatedEnrollments.push({
+                    id: newCourse.id,
+                    type: newCourse.type || 'course',
+                    title: newCourse.title || newCourse.name,
+                    price: newCourse.price || 0,
+                    enrolledAt: new Date().toISOString(),
+                    startDate: new Date().toISOString(),
+                    endDate: getEndDate(6), // 6 أشهر افتراضياً
+                    status: 'active',
+                    accessType: 'full'
+                });
+            }
+        });
+        
+        // تحديث المستخدم في قاعدة البيانات
+        await db.collection('users').doc(currentUserId).update({
+            enrollments: updatedEnrollments,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        hideLoading();
+        
+        await Swal.fire({
+            icon: 'success',
+            title: 'تم تخصيص الدورات بنجاح!',
+            html: `
+                <div style="text-align: right;">
+                    <p>تم تخصيص ${selectedCourses.length} دورة للطالب</p>
+                    <ul style="text-align: right;">
+                        ${selectedCourses.map(c => `<li>${c.title || c.name}</li>`).join('')}
+                    </ul>
+                </div>
+            `,
+            confirmButtonText: 'حسناً'
+        });
+        
+        // تحديث البيانات المحلية
+        userData.enrollments = updatedEnrollments;
+        
+    } catch (error) {
+        console.error('خطأ في تخصيص الدورة:', error);
+        hideLoading();
+        showError('حدث خطأ في تخصيص الدورة');
+    }
+}
+
+// حساب تاريخ النهاية
+function getEndDate(months) {
+    const date = new Date();
+    date.setMonth(date.getMonth() + months);
+    return date.toISOString();
+}
+
+// زر تخصيص دورة في واجهة المستخدم
+function showAssignCourseButton() {
+    // إضافة زر تخصيص الدورات إذا كان المستخدم موجود
+    if (editMode && currentUserId) {
+        const actionsDiv = document.querySelector('.form-actions');
+        if (actionsDiv && !document.getElementById('assignCourseBtn')) {
+            const assignBtn = document.createElement('button');
+            assignBtn.id = 'assignCourseBtn';
+            assignBtn.className = 'btn btn-success';
+            assignBtn.innerHTML = '<i class="fas fa-graduation-cap"></i> تخصيص الدورات المختارة';
+            assignBtn.onclick = assignCourseToStudent;
+            actionsDiv.appendChild(assignBtn);
+        }
+    }
+}
 
 function updatePaymentOptions() {
     const container = document.getElementById('paymentOptionsList');
@@ -2604,7 +2747,14 @@ function saveDraft() {
 }
 
 // تحميل المسودة عند فتح الصفحة
+// تحميل المسودة عند فتح الصفحة - محسّن
 function loadDraft() {
+    // لا نحمل المسودة إذا كنا في وضع التعديل أو معرف موجود
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('edit') || urlParams.get('id')) {
+        return; // لا نحمل المسودة في هذه الحالات
+    }
+    
     const draft = localStorage.getItem('userDraft');
     if (draft) {
         const data = JSON.parse(draft);
@@ -2618,6 +2768,9 @@ function loadDraft() {
                 
                 // ملء الحقول
                 fillFormFromData();
+            } else {
+                // حذف المسودة إذا رفض المستخدم
+                localStorage.removeItem('userDraft');
             }
         } else {
             localStorage.removeItem('userDraft');
@@ -2626,7 +2779,7 @@ function loadDraft() {
 }
 
 // استدعاء تحميل المسودة عند بدء التطبيق
-window.addEventListener('load', loadDraft);
+//window.addEventListener('load', loadDraft);
 
 // ==================== جمع بيانات النموذج ====================
 // ==================== جمع بيانات النموذج ====================
@@ -2779,6 +2932,17 @@ async function createNewUser() {
             if (existingUser.exists) {
                 // المستخدم موجود - نحدثه بدلاً من إنشاء جديد
                 editMode = true;
+                // تحديث الواجهة
+document.getElementById('pageTitle').textContent = 'تعديل بيانات المستخدم';
+document.getElementById('saveButtonText').textContent = 'حفظ التعديلات';
+document.getElementById('userIdSection').style.display = 'none';
+document.getElementById('email').setAttribute('readonly', true);
+
+// إضافة زر تخصيص الدورات
+showAssignCourseButton();
+
+// حذف المسودة
+localStorage.removeItem('userDraft');
                 await updateExistingUser();
                 return;
             }
@@ -3219,6 +3383,62 @@ window.addEventListener('beforeunload', (e) => {
         e.returnValue = 'لديك تغييرات غير محفوظة. هل تريد المغادرة؟';
     }
 });
+
+    // ==================== وظائف مساعدة ====================
+
+function showLoading() {
+    document.getElementById('loadingScreen').classList.add('active');
+}
+
+function hideLoading() {
+    document.getElementById('loadingScreen').classList.remove('active');
+}
+
+function showSuccess(message) {
+    Swal.fire({
+        icon: 'success',
+        title: 'نجح',
+        text: message,
+        timer: 2000,
+        showConfirmButton: false
+    });
+}
+
+function showError(message) {
+    Swal.fire({
+        icon: 'error',
+        title: 'خطأ',
+        text: message,
+        confirmButtonText: 'حسناً'
+    });
+}
+
+// حذف كل المسودات عند الخروج من الصفحة
+window.addEventListener('beforeunload', () => {
+    // إذا كنا في وضع التعديل، لا نحذف شيء
+    if (editMode) return;
+    
+    // حذف المسودات المؤقتة فقط إذا تم حفظ المستخدم
+    if (currentUserId && editMode) {
+        localStorage.removeItem('userDraft');
+        sessionStorage.removeItem('tempUserData_' + currentUserId);
+    }
+});
+
+// تحديث الواجهة عند تغيير الحقول
+document.addEventListener('DOMContentLoaded', function() {
+    // إضافة مستمعات للحقول المهمة
+    document.getElementById('firstName')?.addEventListener('input', updateWelcomeMessage);
+    document.getElementById('email')?.addEventListener('input', updateWelcomeMessage);
+    document.getElementById('password')?.addEventListener('input', updateWelcomeMessage);
+    
+    // إظهار زر تخصيص الدورات إذا كنا في وضع التعديل
+    if (editMode) {
+        showAssignCourseButton();
+    }
+});
+
+console.log('✅ تم تحميل جميع الوظائف بنجاح');
 
 console.log('✅ تم تحميل جميع الوظائف بنجاح');
 </script>
