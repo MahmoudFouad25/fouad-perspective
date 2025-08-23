@@ -2762,227 +2762,363 @@ async function loadAvailableCourses() {
 }
 
 // ==================== دالة تخصيص الدورة الصحيحة ====================
+// دالة تخصيص الدورة المطورة بالكامل
 async function assignCourseToStudent(studentId) {
     try {
-        if (availableCourses.length === 0 && availablePaths.length === 0) {
-            await loadAvailableCourses();
-        }
-        
         const student = allStudents.find(s => s.id === studentId);
         if (!student) {
             Swal.fire('خطأ', 'لم يتم العثور على الطالب', 'error');
             return;
         }
         
-        const allItems = [...availableCourses, ...availablePaths];
+        // جلب بيانات المستخدم من users collection إن وجد
+        let existingUserData = null;
+        let existingEnrollments = [];
         
-        const coursesOptionsHTML = allItems.map(item => 
-            '<div class="course-option" style="' +
-            'border: 2px solid #E5E7EB;' +
-            'border-radius: 8px;' +
-            'padding: 12px;' +
-            'margin-bottom: 10px;' +
-            'cursor: pointer;' +
-            'transition: all 0.3s;' +
-            '" onclick="selectCourse(this, \'' + item.id + '\', \'' + item.type + '\', ' + item.price + ')">' +
-            '<div style="display: flex; justify-content: space-between; align-items: center;">' +
-            '<div>' +
-            '<strong>' + item.title + '</strong>' +
-            '<span style="' +
-            'background: ' + (item.type === 'course' ? '#3B82F6' : '#8B5CF6') + ';' +
-            'color: white;' +
-            'padding: 2px 8px;' +
-            'border-radius: 4px;' +
-            'font-size: 0.75rem;' +
-            'margin-right: 8px;' +
-            '">' + (item.type === 'course' ? 'دورة' : 'مسار') + '</span>' +
-            '</div>' +
-            '<div style="text-align: left;">' +
-            '<div style="color: #10B981; font-weight: bold;">' + item.price + ' جنيه</div>' +
-            (item.instructor ? '<small style="color: #6B7280;">' + item.instructor + '</small>' : '') +
-            '</div>' +
-            '</div>' +
-            (item.type === 'path' ? '<small style="color: #6B7280;">يحتوي على ' + item.coursesCount + ' دورات</small>' : '') +
-            '</div>'
-        ).join('');
-
-        // تعريف الدوال للنافذة
-        window.selectCourse = function(element, courseId, courseType, price) {
-            document.querySelectorAll('.course-option').forEach(el => {
-                el.style.border = '2px solid #E5E7EB';
-                el.style.background = 'white';
-            });
-            element.style.border = '2px solid #10B981';
-            element.style.background = '#F0FDF4';
-            document.getElementById('selectedCourseId').value = courseId;
-            document.getElementById('selectedCourseType').value = courseType;
-            document.getElementById('selectedCoursePrice').value = price;
-            document.getElementById('selectedCourseInfo').style.display = 'block';
-            document.getElementById('selectedCourseName').textContent = element.querySelector('strong').textContent;
-            document.getElementById('originalPrice').textContent = price;
-            window.updateFinalPrice();
-        };
-        
-        window.updateFinalPrice = function() {
-            const price = parseFloat(document.getElementById('selectedCoursePrice').value) || 0;
-            const discount = parseFloat(document.getElementById('discount').value) || 0;
-            const isFree = document.getElementById('isFree').checked;
-            if (isFree) {
-                document.getElementById('finalPrice').textContent = '0';
-            } else {
-                const finalPrice = price - (price * discount / 100);
-                document.getElementById('finalPrice').textContent = finalPrice.toFixed(2);
+        if (student.userId) {
+            const userDoc = await db.collection('users').doc(student.userId).get();
+            if (userDoc.exists) {
+                existingUserData = userDoc.data();
+                existingEnrollments = existingUserData.enrollments || [];
             }
-        };
+        }
         
-        window.toggleFree = function() {
-            const isFree = document.getElementById('isFree').checked;
-            document.getElementById('discount').disabled = isFree;
-            if (isFree) {
-                document.getElementById('discount').value = 100;
-            }
-            window.updateFinalPrice();
-        };
-       
+        // تحديد الدورة الحالية من البيانات المنقولة
+        const currentCourseName = student.courseName || 'غير محدد';
+        const currentCourseId = student.courseId || `course-${Date.now()}`;
+        
+        // البيانات المالية الكاملة
+        const pricing = student.pricing || {};
+        const discounts = student.discounts || [];
+        const totalSavings = student.totalSavings || 0;
+        const activeOffer = student.activeOffer || null;
+        const coupon = student.coupon || null;
+        
+        // تحضير HTML الدورات السابقة
+        let previousCoursesHTML = '';
+        if (existingEnrollments.length > 0) {
+            previousCoursesHTML = `
+                <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                            padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="color: #1E40AF; margin-bottom: 15px;">
+                        <i class="fas fa-history"></i> الدورات المخصصة سابقاً
+                    </h4>
+                    <div style="display: grid; gap: 12px;">
+                        ${existingEnrollments.map(enrollment => {
+                            const endDate = enrollment.endDate ? new Date(enrollment.endDate) : null;
+                            const isActive = endDate ? endDate > new Date() : true;
+                            const isSameCourse = enrollment.title === currentCourseName;
+                            
+                            return `
+                                <div style="background: white; padding: 15px; border-radius: 10px; 
+                                            border-right: 4px solid ${isActive ? '#10B981' : '#EF4444'};">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <div style="font-weight: bold; color: #1F2937; margin-bottom: 5px;">
+                                                ${enrollment.title}
+                                                ${isSameCourse ? `
+                                                    <span style="background: #FEF3C7; color: #92400E; 
+                                                                 padding: 2px 8px; border-radius: 10px; 
+                                                                 font-size: 0.8rem; margin-right: 10px;">
+                                                        نفس الدورة الحالية
+                                                    </span>
+                                                ` : ''}
+                                            </div>
+                                            <div style="color: #6B7280; font-size: 0.9rem;">
+                                                <i class="fas fa-calendar-alt"></i>
+                                                من ${new Date(enrollment.startDate).toLocaleDateString('ar-EG')}
+                                                ${endDate ? ` إلى ${endDate.toLocaleDateString('ar-EG')}` : ' - غير محدد'}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            ${isActive ? `
+                                                <span style="background: #DCFCE7; color: #166534; 
+                                                             padding: 5px 15px; border-radius: 20px; 
+                                                             font-weight: bold;">
+                                                    <i class="fas fa-check-circle"></i> نشطة
+                                                </span>
+                                            ` : `
+                                                <span style="background: #FEE2E2; color: #991B1B; 
+                                                             padding: 5px 15px; border-radius: 20px; 
+                                                             font-weight: bold;">
+                                                    <i class="fas fa-times-circle"></i> منتهية
+                                                </span>
+                                            `}
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>`;
+        }
+        
+        // تحديد إذا كانت الدورة الحالية مخصصة بالفعل ونشطة
+        const currentCourseActive = existingEnrollments.find(e => 
+            e.title === currentCourseName && 
+            (e.endDate ? new Date(e.endDate) > new Date() : true)
+        );
+        
         const result = await Swal.fire({
             title: 'تخصيص دورة للطالب',
-            html: '<div style="text-align: right; direction: rtl;">' +
-                '<div style="background: #F0F9FF; padding: 15px; border-radius: 8px; margin-bottom: 20px;">' +
-                '<h4 style="margin: 0 0 10px 0; color: #0369A1;">' +
-                '<i class="fas fa-user"></i> ' + (student.customer?.name || 'الطالب') +
-                '</h4>' +
-                '<p style="margin: 0; color: #64748B;">' +
-                '<i class="fas fa-book"></i> الدورة الأصلية: ' + (student.courseName || 'غير محددة') +
-                '</p>' +
-                '</div>' +
-                '<div style="margin-bottom: 20px;">' +
-                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
-                '<i class="fas fa-graduation-cap"></i> اختر الدورة أو المسار' +
-                '</label>' +
-                '<div style="max-height: 200px; overflow-y: auto; border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px;">' +
-                coursesOptionsHTML +
-                '</div>' +
-                '<input type="hidden" id="selectedCourseId" value="">' +
-                '<input type="hidden" id="selectedCourseType" value="">' +
-                '<input type="hidden" id="selectedCoursePrice" value="">' +
-                '</div>' +
-                '<div id="selectedCourseInfo" style="display: none; background: #F0FDF4; padding: 12px; border-radius: 8px; margin-bottom: 20px;">' +
-                '<strong>الدورة المختارة: </strong>' +
-                '<span id="selectedCourseName"></span>' +
-                '</div>' +
-                '<div style="margin-bottom: 20px;">' +
-                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
-                '<i class="fas fa-calendar-alt"></i> فترة الوصول' +
-                '</label>' +
-                '<div style="display: flex; gap: 10px; align-items: center;">' +
-                '<input type="date" id="startDate" class="swal2-input" value="' + new Date().toISOString().split('T')[0] + '" style="flex: 1;">' +
-                '<span>إلى</span>' +
-                '<input type="date" id="endDate" class="swal2-input" style="flex: 1;">' +
-                '</div>' +
-                '</div>' +
-                '<div style="margin-bottom: 20px;">' +
-                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
-                '<i class="fas fa-key"></i> نوع الوصول' +
-                '</label>' +
-                '<select id="accessType" class="swal2-input" style="width: 100%;">' +
-                '<option value="full">وصول كامل</option>' +
-                '<option value="limited">وصول محدود</option>' +
-                '<option value="preview">معاينة فقط</option>' +
-                '</select>' +
-                '</div>' +
-                '<div style="margin-bottom: 20px;">' +
-                '<label style="display: block; margin-bottom: 8px; font-weight: bold;">' +
-                '<i class="fas fa-percentage"></i> الخصم %' +
-                '</label>' +
-                '<input type="number" id="discount" class="swal2-input" value="0" min="0" max="100" style="width: 100%;" onchange="updateFinalPrice()">' +
-                '</div>' +
-                '<div style="background: white; padding: 15px; border-radius: 8px; text-align: center;">' +
-                '<div>السعر الأصلي: <span id="originalPrice">0</span> جنيه</div>' +
-                '<div style="font-size: 1.5rem; color: #10B981; font-weight: bold; margin-top: 10px;">' +
-                'السعر النهائي: <span id="finalPrice">0</span> جنيه' +
-                '</div>' +
-                '</div>' +
-                '<div style="margin-top: 20px;">' +
-                '<label>' +
-                '<input type="checkbox" id="isFree" onchange="toggleFree()">' +
-                '<strong>مجاني بالكامل</strong>' +
-                '</label>' +
-                '</div>' +
-                '</div>' +
-                '<script>' +
-                'function selectCourse(element, courseId, courseType, price) {' +
-                'document.querySelectorAll(".course-option").forEach(el => {' +
-                'el.style.border = "2px solid #E5E7EB";' +
-                'el.style.background = "white";' +
-                '});' +
-                'element.style.border = "2px solid #10B981";' +
-                'element.style.background = "#F0FDF4";' +
-                'document.getElementById("selectedCourseId").value = courseId;' +
-                'document.getElementById("selectedCourseType").value = courseType;' +
-                'document.getElementById("selectedCoursePrice").value = price;' +
-                'document.getElementById("selectedCourseInfo").style.display = "block";' +
-                'document.getElementById("selectedCourseName").textContent = element.querySelector("strong").textContent;' +
-                'document.getElementById("originalPrice").textContent = price;' +
-                'updateFinalPrice();' +
-                '}' +
-                'function updateFinalPrice() {' +
-                'const price = parseFloat(document.getElementById("selectedCoursePrice").value) || 0;' +
-                'const discount = parseFloat(document.getElementById("discount").value) || 0;' +
-                'const isFree = document.getElementById("isFree").checked;' +
-                'if (isFree) {' +
-                'document.getElementById("finalPrice").textContent = "0";' +
-                '} else {' +
-                'const finalPrice = price - (price * discount / 100);' +
-                'document.getElementById("finalPrice").textContent = finalPrice.toFixed(2);' +
-                '}' +
-                '}' +
-                'function toggleFree() {' +
-                'const isFree = document.getElementById("isFree").checked;' +
-                'document.getElementById("discount").disabled = isFree;' +
-                'if (isFree) {' +
-                'document.getElementById("discount").value = 100;' +
-                '}' +
-                'updateFinalPrice();' +
-                '}' +
-                '</' + 'script>',
-            showCancelButton: true,
-            confirmButtonText: 'تخصيص الدورة',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#10B981',
-            width: '800px',
-            preConfirm: () => {
-                const selectedCourseId = document.getElementById('selectedCourseId').value;
-                const selectedCourseType = document.getElementById('selectedCourseType').value;
-                const selectedCoursePrice = parseFloat(document.getElementById('selectedCoursePrice').value) || 0;
-                const startDate = document.getElementById('startDate').value;
-                const endDate = document.getElementById('endDate').value;
-                const accessType = document.getElementById('accessType').value;
-                const discount = parseFloat(document.getElementById('discount').value) || 0;
-                const isFree = document.getElementById('isFree').checked;
+            html: `
+                <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                    
+                    <!-- معلومات الطالب -->
+                    <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h4 style="margin: 0; color: #0369A1;">
+                                    <i class="fas fa-user-graduate"></i> ${student.customer?.name || 'الطالب'}
+                                </h4>
+                                <p style="margin: 5px 0; color: #64748B;">
+                                    ${student.customer?.whatsapp || ''} 
+                                    ${student.customer?.email ? `• ${student.customer.email}` : ''}
+                                </p>
+                            </div>
+                            ${student.userId ? `
+                                <span style="background: #10B981; color: white; 
+                                             padding: 8px 20px; border-radius: 25px; 
+                                             font-weight: bold;">
+                                    <i class="fas fa-check-circle"></i> حساب مُنشأ
+                                </span>
+                            ` : `
+                                <span style="background: #EF4444; color: white; 
+                                             padding: 8px 20px; border-radius: 25px; 
+                                             font-weight: bold;">
+                                    <i class="fas fa-exclamation-circle"></i> لم يُنشأ حساب بعد
+                                </span>
+                            `}
+                        </div>
+                    </div>
+                    
+                    <!-- الدورات السابقة إن وجدت -->
+                    ${previousCoursesHTML}
+                    
+                    <!-- الدورة المراد تخصيصها -->
+                    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #92400E; margin-bottom: 15px;">
+                            <i class="fas fa-graduation-cap"></i> الدورة المراد تخصيصها
+                        </h4>
+                        
+                        ${currentCourseActive ? `
+                            <div style="background: #FEE2E2; padding: 15px; border-radius: 10px; 
+                                        text-align: center; margin-bottom: 15px;">
+                                <i class="fas fa-exclamation-triangle" style="color: #EF4444; font-size: 2rem; margin-bottom: 10px;"></i>
+                                <p style="color: #991B1B; font-weight: bold; margin: 0;">
+                                    هذه الدورة مخصصة بالفعل وما زالت نشطة!
+                                </p>
+                                <p style="color: #7F1D1D; font-size: 0.9rem; margin-top: 5px;">
+                                    تنتهي في: ${new Date(currentCourseActive.endDate).toLocaleDateString('ar-EG')}
+                                </p>
+                            </div>
+                        ` : ''}
+                        
+                        <div style="background: white; padding: 20px; border-radius: 10px;">
+                            <div style="font-size: 1.3rem; font-weight: bold; color: #1F2937; 
+                                        text-align: center; margin-bottom: 20px; 
+                                        padding: 15px; background: #F9FAFB; border-radius: 8px;">
+                                <i class="fas fa-book" style="color: #F59E0B;"></i> ${currentCourseName}
+                            </div>
+                            
+                            <!-- المعلومات المالية الكاملة -->
+                            <div style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
+                                        padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                                <h5 style="color: #065F46; margin-bottom: 12px;">
+                                    <i class="fas fa-money-bill-wave"></i> التفاصيل المالية
+                                </h5>
+                                
+                                <!-- الأسعار -->
+                                <div style="display: grid; grid-template-columns: repeat(3, 1fr); 
+                                            gap: 10px; text-align: center; margin-bottom: 15px;">
+                                    <div style="background: white; padding: 10px; border-radius: 8px;">
+                                        <div style="color: #6B7280; font-size: 0.85rem;">السعر الأصلي</div>
+                                        <div style="font-weight: bold; color: #6B7280; text-decoration: line-through;">
+                                            ${pricing.basePrice || '0 ج.م'}
+                                        </div>
+                                    </div>
+                                    <div style="background: #DCFCE7; padding: 10px; border-radius: 8px;">
+                                        <div style="color: #065F46; font-size: 0.85rem;">السعر النهائي</div>
+                                        <div style="font-weight: bold; color: #10B981; font-size: 1.2rem;">
+                                            ${pricing.finalPrice || '0 ج.م'}
+                                        </div>
+                                    </div>
+                                    <div style="background: #FEE2E2; padding: 10px; border-radius: 8px;">
+                                        <div style="color: #991B1B; font-size: 0.85rem;">التوفير</div>
+                                        <div style="font-weight: bold; color: #DC2626;">
+                                            ${student.totalSavingsText || '0 ج.م'}
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- الخصومات المطبقة -->
+                                ${discounts.length > 0 ? `
+                                    <div style="background: white; padding: 12px; border-radius: 8px;">
+                                        <div style="font-weight: bold; color: #374151; margin-bottom: 8px; font-size: 0.9rem;">
+                                            الخصومات المطبقة:
+                                        </div>
+                                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                            ${discounts.map(discount => `
+                                                <span style="background: linear-gradient(135deg, #F59E0B20, #F59E0B10); 
+                                                             color: #92400E; padding: 4px 12px; 
+                                                             border-radius: 15px; font-size: 0.85rem;">
+                                                    ${discount.label}: ${discount.value}
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                
+                                <!-- العرض النشط -->
+                                ${activeOffer ? `
+                                    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                                                padding: 10px; border-radius: 8px; margin-top: 10px; 
+                                                text-align: center;">
+                                        <span style="color: #92400E; font-weight: bold;">
+                                            <i class="fas fa-fire"></i> ${activeOffer.name} - ${activeOffer.discount}
+                                        </span>
+                                    </div>
+                                ` : ''}
+                                
+                                <!-- الكوبون المستخدم -->
+                                ${coupon && coupon.code ? `
+                                    <div style="background: #F3E8FF; padding: 10px; border-radius: 8px; 
+                                                margin-top: 10px; text-align: center;">
+                                        <span style="color: #6B21A8; font-weight: bold;">
+                                            <i class="fas fa-ticket-alt"></i> كود خصم: ${coupon.code} (${coupon.discount})
+                                        </span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            
+                            <!-- إعدادات التخصيص -->
+                            <div style="background: #F9FAFB; padding: 15px; border-radius: 10px;">
+                                <h5 style="color: #374151; margin-bottom: 15px;">
+                                    <i class="fas fa-cog"></i> إعدادات التخصيص
+                                </h5>
+                                
+                                <!-- تاريخ البداية -->
+                                <div style="margin-bottom: 15px;">
+                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
+                                        <i class="fas fa-calendar-check"></i> تاريخ البداية
+                                    </label>
+                                    <input type="date" id="startDate" class="swal2-input" 
+                                           value="${new Date().toISOString().split('T')[0]}" 
+                                           style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
+                                                  border-radius: 8px;">
+                                </div>
+                                
+                                <!-- فترة الوصول -->
+                                <div style="margin-bottom: 15px;">
+                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
+                                        <i class="fas fa-clock"></i> فترة الوصول
+                                    </label>
+                                    <select id="accessPeriod" class="swal2-input" 
+                                            style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
+                                                   border-radius: 8px;"
+                                            onchange="toggleCustomEndDate()">
+                                        <option value="3">3 أشهر</option>
+                                        <option value="6" selected>6 أشهر</option>
+                                        <option value="9">9 أشهر</option>
+                                        <option value="12">سنة كاملة</option>
+                                        <option value="custom">فترة مخصصة</option>
+                                    </select>
+                                </div>
+                                
+                                <!-- تاريخ النهاية المخصص -->
+                                <div id="customEndDateDiv" style="display: none; margin-bottom: 15px;">
+                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
+                                        <i class="fas fa-calendar-times"></i> تاريخ النهاية
+                                    </label>
+                                    <input type="date" id="customEndDate" class="swal2-input" 
+                                           style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
+                                                  border-radius: 8px;">
+                                </div>
+                                
+                                <!-- ملاحظات -->
+                                <div>
+                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
+                                        <i class="fas fa-sticky-note"></i> ملاحظات (اختياري)
+                                    </label>
+                                    <textarea id="assignmentNotes" class="swal2-textarea" 
+                                              placeholder="أي ملاحظات خاصة بالتخصيص..."
+                                              style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
+                                                     border-radius: 8px; height: 80px;"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- تنبيه مهم -->
+                    ${!student.userId ? `
+                        <div style="background: #FEE2E2; padding: 15px; border-radius: 10px; 
+                                    border-right: 4px solid #EF4444;">
+                            <p style="color: #991B1B; margin: 0;">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>تنبيه:</strong> لم يتم إنشاء حساب لهذا الطالب بعد. 
+                                يُرجى إنشاء الحساب أولاً قبل تخصيص الدورة.
+                            </p>
+                        </div>
+                    ` : ''}
+                </div>
                 
-                if (!selectedCourseId) {
-                    Swal.showValidationMessage('يجب اختيار دورة أو مسار');
+                                <${'script'}>
+
+                    function toggleCustomEndDate() {
+                        const period = document.getElementById('accessPeriod').value;
+                        const customDiv = document.getElementById('customEndDateDiv');
+                        if (period === 'custom') {
+                            customDiv.style.display = 'block';
+                        } else {
+                            customDiv.style.display = 'none';
+                        }
+                    }
+                                </${'script'}>
+
+            `,
+            showCancelButton: true,
+            confirmButtonText: currentCourseActive ? 'تمديد الفترة' : 'تخصيص الدورة',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: currentCourseActive ? '#F59E0B' : '#10B981',
+            width: '900px',
+            preConfirm: () => {
+                if (!student.userId) {
+                    Swal.showValidationMessage('يجب إنشاء حساب للطالب أولاً');
                     return false;
                 }
+                
+                const startDate = document.getElementById('startDate').value;
+                const accessPeriod = document.getElementById('accessPeriod').value;
+                const customEndDate = document.getElementById('customEndDate').value;
+                const notes = document.getElementById('assignmentNotes').value;
                 
                 if (!startDate) {
                     Swal.showValidationMessage('يجب تحديد تاريخ البداية');
                     return false;
                 }
                 
-                const selectedCourse = allItems.find(item => item.id === selectedCourseId);
+                let endDate;
+                if (accessPeriod === 'custom') {
+                    if (!customEndDate) {
+                        Swal.showValidationMessage('يجب تحديد تاريخ النهاية');
+                        return false;
+                    }
+                    endDate = customEndDate;
+                } else {
+                    const start = new Date(startDate);
+                    const months = parseInt(accessPeriod);
+                    const end = new Date(start);
+                    end.setMonth(end.getMonth() + months);
+                    endDate = end.toISOString().split('T')[0];
+                }
                 
                 return {
-                    courseId: selectedCourseId,
-                    courseType: selectedCourseType,
-                    courseTitle: selectedCourse?.title || 'غير محدد',
-                    coursePrice: selectedCoursePrice,
                     startDate,
                     endDate,
-                    accessType,
-                    discount,
-                    isFree,
-                    finalPrice: isFree ? 0 : (selectedCoursePrice - (selectedCoursePrice * discount / 100))
+                    accessPeriod,
+                    notes
                 };
             }
         });
@@ -2991,6 +3127,7 @@ async function assignCourseToStudent(studentId) {
         
         const formData = result.value;
         
+        // عرض رسالة التحميل
         Swal.fire({
             title: 'جاري تخصيص الدورة...',
             html: 'الرجاء الانتظار',
@@ -2999,74 +3136,102 @@ async function assignCourseToStudent(studentId) {
             willOpen: () => { Swal.showLoading(); }
         });
         
-        let userData = null;
-        if (student.userId) {
-            const userDoc = await db.collection('users').doc(student.userId).get();
-            if (userDoc.exists) {
-                userData = userDoc.data();
-            }
-        }
-        
-        if (!userData) {
-            throw new Error('لم يتم العثور على بيانات المستخدم');
-        }
-        
+        // إعداد بيانات التخصيص
         const enrollmentData = {
-            id: formData.courseId,
-            type: formData.courseType,
-            title: formData.courseTitle,
-            price: formData.coursePrice,
+            id: currentCourseId,
+            type: 'individual',
+            title: currentCourseName,
             startDate: formData.startDate,
-            endDate: formData.endDate || null,
-            accessType: formData.accessType,
-            isFree: formData.isFree,
-            currency: 'EGP',
+            endDate: formData.endDate,
+            accessType: 'full',
             enrolledAt: new Date().toISOString(),
-            notes: ''
+            lastUpdated: new Date().toISOString(),
+            notes: formData.notes || '',
+            
+            // البيانات المالية الكاملة
+            financialData: {
+                originalPrice: pricing.basePriceNumber || 0,
+                finalPrice: pricing.finalPriceNumber || 0,
+                totalSavings: totalSavings,
+                discounts: discounts,
+                activeOffer: activeOffer,
+                coupon: coupon,
+                currency: 'EGP'
+            },
+            
+            // معلومات الحجز الأصلي
+            originalBookingId: student.originalBookingId || student.id,
+            assignedBy: 'admin',
+            assignedAt: new Date().toISOString()
         };
         
-        const enrollments = userData.enrollments || [];
-        const existingIndex = enrollments.findIndex(e => e.id === formData.courseId);
+        // تحديث أو إضافة في enrollments
+        const updatedEnrollments = [...existingEnrollments];
+        const existingIndex = updatedEnrollments.findIndex(e => e.title === currentCourseName);
         
         if (existingIndex !== -1) {
-            enrollments[existingIndex] = enrollmentData;
+            // تحديث الدورة الموجودة
+            updatedEnrollments[existingIndex] = {
+                ...updatedEnrollments[existingIndex],
+                ...enrollmentData,
+                renewedAt: new Date().toISOString()
+            };
         } else {
-            enrollments.push(enrollmentData);
+            // إضافة دورة جديدة
+            updatedEnrollments.push(enrollmentData);
         }
         
+        // حفظ في users collection
         await db.collection('users').doc(student.userId).update({
-            enrollments: enrollments,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            lastUpdatedBy: 'individual-students-page'
+            enrollments: updatedEnrollments,
+            lastEnrollmentUpdate: new Date().toISOString()
         });
         
-        await db.collection('individualStudents').doc(studentId).set({
+        // تحديث individualStudents
+        await db.collection('individualStudents').doc(studentId).update({
             courseAssigned: true,
             courseAssignedAt: new Date().toISOString(),
-            assignedCourseId: formData.courseId,
-            assignedCourseTitle: formData.courseTitle
-        }, { merge: true });
+            assignedCourseId: currentCourseId,
+            assignedCourseTitle: currentCourseName,
+            courseAccessEndDate: formData.endDate,
+            'progress.courseAssignment': 100,
+            'progress.totalProgress': 50
+        });
         
+        // تحديث البيانات المحلية
         const studentIndex = allStudents.findIndex(s => s.id === studentId);
         if (studentIndex !== -1) {
             allStudents[studentIndex].courseAssigned = true;
-            allStudents[studentIndex].assignedCourseId = formData.courseId;
-            allStudents[studentIndex].assignedCourseTitle = formData.courseTitle;
+            allStudents[studentIndex].assignedCourseId = currentCourseId;
+            allStudents[studentIndex].assignedCourseTitle = currentCourseName;
+            allStudents[studentIndex].courseAccessEndDate = formData.endDate;
+            if (!allStudents[studentIndex].progress) {
+                allStudents[studentIndex].progress = {};
+            }
+            allStudents[studentIndex].progress.courseAssignment = 100;
+            allStudents[studentIndex].progress.totalProgress = 50;
         }
         
+        // رسالة النجاح
         await Swal.fire({
             icon: 'success',
-            title: 'تم تخصيص الدورة بنجاح! 🎉',
-            html: '<div style="text-align: right;">' +
-                '<p><strong>الطالب:</strong> ' + (student.customer?.name || 'غير محدد') + '</p>' +
-                '<p><strong>الدورة:</strong> ' + formData.courseTitle + '</p>' +
-                '<p><strong>السعر النهائي:</strong> ' + formData.finalPrice + ' جنيه</p>' +
-                '<p><strong>نوع الوصول:</strong> ' + (formData.accessType === 'full' ? 'كامل' : formData.accessType === 'limited' ? 'محدود' : 'معاينة') + '</p>' +
-                '</div>',
+            title: currentCourseActive ? 'تم تمديد فترة الوصول بنجاح! 🎉' : 'تم تخصيص الدورة بنجاح! 🎉',
+            html: `
+                <div style="text-align: right;">
+                    <p><strong>الطالب:</strong> ${student.customer?.name}</p>
+                    <p><strong>الدورة:</strong> ${currentCourseName}</p>
+                    <p><strong>الفترة:</strong> من ${new Date(formData.startDate).toLocaleDateString('ar-EG')} 
+                       إلى ${new Date(formData.endDate).toLocaleDateString('ar-EG')}</p>
+                    <p><strong>السعر النهائي:</strong> ${pricing.finalPrice}</p>
+                    ${totalSavings > 0 ? `<p><strong>التوفير:</strong> ${student.totalSavingsText}</p>` : ''}
+                </div>
+            `,
             confirmButtonColor: '#10B981'
         });
         
+        // تحديث العرض
         filterByTab(currentFilter);
+        updateStatistics();
         
     } catch (error) {
         console.error('خطأ في تخصيص الدورة:', error);
