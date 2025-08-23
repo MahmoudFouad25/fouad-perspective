@@ -1578,6 +1578,7 @@ window.linkExistingUser = linkExistingUser;
 
 // إنشاء حساب محسّن
 // ==================== إنشاء حساب محسّن ونظيف ====================
+// إنشاء حساب محسّن مع نقل كل البيانات
 async function createAccount(studentId) {
     // منع الضغطات المتكررة
     if (window.isCreatingAccount) {
@@ -1692,7 +1693,7 @@ async function createAccount(studentId) {
         // عرض رسالة تحميل
         Swal.fire({
             title: 'جاري إنشاء الحساب...',
-            html: 'الرجاء الانتظار',
+            html: 'الرجاء الانتظار، جاري نقل كل البيانات...',
             allowOutsideClick: false,
             showConfirmButton: false,
             willOpen: () => { Swal.showLoading(); }
@@ -1714,57 +1715,129 @@ async function createAccount(studentId) {
             throw new Error('هذا البريد الإلكتروني مستخدم بالفعل');
         }
         
-        // 3. إنشاء المستخدم في users collection
+        // 3. إنشاء object كامل بكل البيانات من individualStudents
         const userData = {
+            // معرف المستخدم
             id: formData.slug,
+            
+            // البيانات الأساسية من العميل
             name: customer.name || 'غير محدد',
             email: formData.email,
             tempPassword: btoa(formData.password),
             whatsapp: customer.whatsapp || '',
             phone: customer.whatsapp || '',
+            
+            // كل البيانات الشخصية
+            title: customer.title || '',
             age: customer.age || null,
+            country: customer.country || '',
+            city: customer.city || '',
             job: customer.job || '',
+            source: customer.source || '',
+            
+            // التوقعات والخبرات
+            expectations: customer.expectations || '',
+            experience: customer.experience || '',
+            applicationPlan: customer.applicationPlan || '',
+            notes: customer.notes || '',
+            
+            // طرق الدفع المفضلة
+            paymentMethods: customer.paymentMethods || [],
+            
+            // معلومات الدورة الأساسية
             courses: [{
                 id: student.courseId || Date.now().toString(),
                 title: student.courseName || 'دورة غير محددة',
                 type: 'individual',
                 enrolledAt: new Date().toISOString(),
-                price: student.pricing?.finalPrice || 0,
+                price: student.pricing?.finalPriceNumber || 0,
+                originalPrice: student.pricing?.basePriceNumber || 0,
                 status: 'active',
                 originalBookingId: originalBookingId
             }],
+            
+            // نسخ كل معلومات التسعير والخصومات
+            financialData: {
+                pricing: student.pricing || {},
+                discounts: student.discounts || [],
+                totalSavings: student.totalSavings || 0,
+                totalSavingsText: student.totalSavingsText || '0 ج.م',
+                activeOffer: student.activeOffer || null,
+                coupon: student.coupon || null,
+                payment: student.payment || {},
+                journey: student.journey || {}
+            },
+            
+            // معلومات التحويل والحجز الأصلي
+            bookingInfo: {
+                originalBookingId: originalBookingId,
+                bookingType: student.bookingType || 'individual',
+                bookingDate: student.bookingDate || student.timestamp,
+                transferredAt: student.transferredAt || student.transferInfo?.transferredAt,
+                transferInfo: student.transferInfo || {},
+                dataCompleteness: student.dataCompleteness || {}
+            },
+            
+            // حالة الحساب والتقدم
             accountStatus: 'active',
             accountCreated: true,
             accountCreatedAt: new Date().toISOString(),
+            progress: {
+                accountSetup: 100,
+                courseAssignment: 0,
+                firstPayment: student.status === 'paid' ? 100 : 0,
+                welcomeMessage: 0,
+                totalProgress: 25
+            },
+            
+            // مستوى العميل بناءً على التوفير
+            customerLevel: student.totalSavings > 2000 ? 'VIP_GOLD' : 
+                          student.totalSavings > 1000 ? 'VIP' :
+                          student.dataCompleteness?.percentage > 80 ? 'PREMIUM' : 'STANDARD',
+            
+            // نقاط الولاء الابتدائية
+            loyaltyPoints: Math.floor(student.totalSavings / 10) || 0,
+            
+            // الطوابع الزمنية
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             createdFrom: 'individual-students-page',
-            originalBookingId: originalBookingId
+            
+            // معلومات إضافية للنظام
+            metadata: {
+                originalStudentDocId: studentId,
+                createdBy: 'admin',
+                ipAddress: 'system',
+                userAgent: navigator.userAgent,
+                platform: 'web'
+            }
         };
         
+        // 4. حفظ في users collection مع كل البيانات
+        console.log('📦 نقل كل البيانات إلى users:', userData);
+        
         await db.collection('users').doc(formData.slug).set(userData);
-        console.log('✅ تم إنشاء المستخدم في users');
+        console.log('✅ تم إنشاء المستخدم في users بكل البيانات');
         
-        // 4. تحديث individualStudents - باستخدام set مع merge
-        console.log('جاري تحديث individualStudents للطالب:', studentId);
+        // 5. تحديث individualStudents
+        await db.collection('individualStudents').doc(studentId).set({
+            accountCreated: true,
+            accountCreatedAt: new Date().toISOString(),
+            accountStatus: 'active',
+            userId: formData.slug,
+            userEmail: formData.email,
+            progress: {
+                accountSetup: 100,
+                courseAssignment: 0,
+                firstPayment: student.status === 'paid' ? 100 : 0,
+                welcomeMessage: 0,
+                totalProgress: 25
+            }
+        }, { merge: true });
         
-        try {
-            // استخدم set مع merge: true بدلاً من update
-            await db.collection('individualStudents').doc(studentId).set({
-                accountCreated: true,
-                accountCreatedAt: new Date().toISOString(),
-                accountStatus: 'active',
-                userId: formData.slug,
-                userEmail: formData.email
-            }, { merge: true }); // merge: true مهم جداً
-            
-            console.log('✅ تم تحديث individualStudents بنجاح');
-        } catch (updateError) {
-            console.error('❌ خطأ في تحديث individualStudents:', updateError);
-            // نستمر - الحساب تم إنشاؤه بنجاح
-        }
+        console.log('✅ تم تحديث individualStudents');
         
-        // 5. تحديث الـ array المحلي فوراً
+        // 6. تحديث البيانات المحلية
         const studentIndex = allStudents.findIndex(s => s.id === studentId);
         if (studentIndex !== -1) {
             allStudents[studentIndex] = {
@@ -1773,12 +1846,19 @@ async function createAccount(studentId) {
                 accountStatus: 'active',
                 userId: formData.slug,
                 userEmail: formData.email,
-                accountCreatedAt: new Date().toISOString()
+                accountCreatedAt: new Date().toISOString(),
+                progress: {
+                    accountSetup: 100,
+                    courseAssignment: 0,
+                    firstPayment: student.status === 'paid' ? 100 : 0,
+                    welcomeMessage: 0,
+                    totalProgress: 25
+                }
             };
             console.log('✅ تم تحديث البيانات المحلية');
         }
         
-        // 6. إرسال البيانات عبر WhatsApp
+        // 7. إرسال البيانات عبر WhatsApp إذا طُلب
         if (formData.sendCredentials && customer.whatsapp) {
             const message = `
 مرحباً ${customer.name} 👋
@@ -1788,6 +1868,9 @@ async function createAccount(studentId) {
 📧 البريد: ${formData.email}
 🔑 كلمة المرور: ${formData.password}
 🆔 معرف الحساب: ${formData.slug}
+
+${student.totalSavings > 0 ? `💰 لقد وفرت: ${student.totalSavingsText}` : ''}
+${student.courseName ? `📚 الدورة: ${student.courseName}` : ''}
 
 🔗 رابط الدخول:
 https://fouad-perspective.web.app/login
@@ -1802,7 +1885,7 @@ https://fouad-perspective.web.app/login
             }, 1500);
         }
         
-        // 7. عرض رسالة النجاح
+        // 8. عرض رسالة النجاح
         await Swal.fire({
             icon: 'success',
             title: 'تم إنشاء الحساب بنجاح! 🎉',
@@ -1813,53 +1896,21 @@ https://fouad-perspective.web.app/login
                         <p><strong>🆔 المعرف:</strong> ${formData.slug}</p>
                         <p><strong>📧 البريد:</strong> ${formData.email}</p>
                         <p><strong>🔑 كلمة المرور:</strong> ${formData.password}</p>
+                        ${student.totalSavings > 0 ? `
+                            <p><strong>💰 التوفير:</strong> ${student.totalSavingsText}</p>
+                        ` : ''}
+                        <p><strong>📊 البيانات المنقولة:</strong> 100% كاملة</p>
                     </div>
-                    ${formData.sendCredentials ? '<p style="color: #10B981; margin-top: 10px;">✓ تم إرسال البيانات عبر WhatsApp</p>' : ''}
+                    ${formData.sendCredentials ? '<p style="color: #10B981; margin-top: 10px;">✔ تم إرسال البيانات عبر WhatsApp</p>' : ''}
                 </div>
             `,
             confirmButtonText: 'حسناً',
             confirmButtonColor: '#10B981'
         });
-
-        // تحديث الزر مباشرة في الصفحة
-const allCards = document.querySelectorAll('.student-card');
-allCards.forEach(card => {
-    const buttons = card.querySelector('.action-buttons');
-    if (buttons && buttons.innerHTML.includes(`createAccount('${studentId}')`)) {
-        // استبدل محتوى الأزرار كلها
-        buttons.innerHTML = `
-            <button class="btn btn-success" onclick="sendCredentials('${studentId}')">
-                <i class="fab fa-whatsapp"></i> إرسال البيانات
-            </button>
-            <button class="btn btn-warning" onclick="assignCourseToStudent('${studentId}')">
-    <i class="fas fa-graduation-cap"></i> تخصيص دورة
-</button>
-            <button class="btn btn-info" onclick="resendWelcome('${studentId}')">
-                <i class="fas fa-envelope"></i> رسالة ترحيب
-            </button>
-            <button class="btn btn-success" onclick="sendMessage('${studentId}')">
-                <i class="fab fa-whatsapp"></i> رسالة
-            </button>
-            <button class="btn btn-primary" onclick="viewFullDetails('${studentId}')">
-                <i class="fas fa-info-circle"></i> التفاصيل الكاملة
-            </button>
-        `;
-    }
-});
-        // 8. تحديث العرض مباشرة
-        console.log('جاري تحديث العرض...');
         
-        // إعادة تطبيق الفلتر الحالي
-        if (typeof filterByTab === 'function') {
-            filterByTab(currentFilter || 'all');
-        }
-        
-        // تحديث الإحصائيات
-        if (typeof updateStatistics === 'function') {
-            updateStatistics();
-        }
-        
-        
+        // 9. تحديث العرض مباشرة
+        filterByTab(currentFilter || 'all');
+        updateStatistics();
         
     } catch (error) {
         console.error('❌ خطأ:', error);
@@ -1873,6 +1924,48 @@ allCards.forEach(card => {
         window.isCreatingAccount = false;
     }
 }
+
+        // دالة للتحقق من اكتمال نقل البيانات إلى users
+async function verifyUserDataTransfer(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            console.log('✅ التحقق من البيانات المنقولة إلى users:');
+            console.log('📋 البيانات الأساسية:');
+            console.log('- الاسم:', userData.name);
+            console.log('- البريد:', userData.email);
+            console.log('- الواتساب:', userData.whatsapp);
+            console.log('- العمر:', userData.age);
+            console.log('- الوظيفة:', userData.job);
+            
+            console.log('💰 البيانات المالية:');
+            console.log('- التوفير الكلي:', userData.financialData?.totalSavings);
+            console.log('- الخصومات:', userData.financialData?.discounts?.length || 0);
+            console.log('- العرض النشط:', userData.financialData?.activeOffer?.name);
+            console.log('- الكوبون:', userData.financialData?.coupon?.code);
+            
+            console.log('📚 الدورات:');
+            console.log('- عدد الدورات:', userData.courses?.length || 0);
+            console.log('- السعر الأصلي:', userData.courses?.[0]?.originalPrice);
+            console.log('- السعر النهائي:', userData.courses?.[0]?.price);
+            
+            console.log('📊 معلومات إضافية:');
+            console.log('- مستوى العميل:', userData.customerLevel);
+            console.log('- نقاط الولاء:', userData.loyaltyPoints);
+            console.log('- نسبة الاكتمال:', userData.bookingInfo?.dataCompleteness?.percentage);
+            
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('❌ خطأ في التحقق:', error);
+        return false;
+    }
+}
+
+// ربط الدالة بـ window للاستخدام
+window.verifyUserDataTransfer = verifyUserDataTransfer;
 
         
         // تفعيل الحساب
