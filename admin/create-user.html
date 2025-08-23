@@ -1746,6 +1746,149 @@ function calculateDataCompleteness() {
     
     return percentage;
 }
+
+    // ==================== دوال تحميل البيانات ====================
+
+// تحميل الدورات والمسارات
+async function loadCoursesAndPaths() {
+    try {
+        // تحميل المسارات
+        const pathsSnapshot = await db.collection('paths').get();
+        availablePaths = [];
+        pathsSnapshot.forEach(doc => {
+            availablePaths.push({
+                id: doc.id,
+                type: 'path',
+                ...doc.data()
+            });
+        });
+        
+        // تحميل الدورات
+        const coursesSnapshot = await db.collection('courses').get();
+        availableCoursesData = [];
+        coursesSnapshot.forEach(doc => {
+            availableCoursesData.push({
+                id: doc.id,
+                type: 'course',
+                ...doc.data()
+            });
+        });
+        
+        // دمج البيانات
+        const allCourses = [...availablePaths, ...availableCoursesData];
+        
+        // عرض الدورات في الصفحة
+        displayAvailableCourses(allCourses);
+        
+        console.log('✅ تم تحميل الدورات والمسارات');
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الدورات:', error);
+    }
+}
+
+// تحميل بيانات المستخدم من قاعدة البيانات
+async function loadUserDataFromDB(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        
+        if (!userDoc.exists) {
+            showError('المستخدم غير موجود');
+            setTimeout(() => {
+                window.location.href = 'dashboard.html';
+            }, 2000);
+            return;
+        }
+        
+        const data = userDoc.data();
+        
+        // نقل البيانات إلى userData
+        mapUserDataFromDB(data);
+        
+        // ملء النموذج
+        fillFormWithUserData();
+        
+        // إخفاء قسم إنشاء المعرف
+        document.getElementById('userIdSection').style.display = 'none';
+        
+        // تعطيل تغيير البريد
+        document.getElementById('email').setAttribute('readonly', true);
+        
+        console.log('✅ تم تحميل بيانات المستخدم');
+        
+    } catch (error) {
+        console.error('خطأ في تحميل البيانات:', error);
+        showError('خطأ في تحميل بيانات المستخدم');
+    }
+}
+
+    // تحويل بيانات قاعدة البيانات إلى userData
+function mapUserDataFromDB(data) {
+    // البيانات الأساسية
+    userData.basic.firstName = data.firstName || '';
+    userData.basic.lastName = data.lastName || '';
+    userData.basic.name = data.name || '';
+    userData.basic.email = data.email || '';
+    userData.basic.phone = data.phone || data.whatsapp || '';
+    userData.basic.whatsapp = data.whatsapp || data.phone || '';
+    userData.basic.avatar = data.avatar || null;
+    userData.basic.status = data.status || 'active';
+    
+    // البيانات الشخصية
+    userData.personal.title = data.title || '';
+    userData.personal.age = data.age || null;
+    userData.personal.gender = data.gender || '';
+    userData.personal.birthDate = data.birthDate || '';
+    userData.personal.country = data.country || '';
+    userData.personal.city = data.city || '';
+    userData.personal.job = data.job || '';
+    userData.personal.source = data.source || '';
+    
+    // التوقعات
+    userData.expectations.expectations = data.expectations || '';
+    userData.expectations.experience = data.experience || '';
+    userData.expectations.applicationPlan = data.applicationPlan || '';
+    userData.expectations.notes = data.notes || '';
+    
+    // الدور والصلاحيات
+    userData.role.type = data.role || 'student';
+    userData.role.permissions = data.permissions || [];
+    
+    // الدورات
+    userData.enrollments = data.enrollments || [];
+    selectedCourses = data.enrollments || [];
+    
+    // البيانات المالية
+    if (data.financial) {
+        userData.financial = { ...userData.financial, ...data.financial };
+    }
+    if (data.financialData) {
+        userData.financial = { ...userData.financial, ...data.financialData };
+    }
+    
+    // معلومات النظام
+    if (data.metadata) {
+        userData.metadata = { ...userData.metadata, ...data.metadata };
+    }
+    userData.metadata.customerLevel = data.customerLevel || 'STANDARD';
+    userData.metadata.loyaltyPoints = data.loyaltyPoints || 0;
+    if (data.dataCompleteness) {
+        userData.metadata.dataCompleteness = data.dataCompleteness;
+    }
+}
+
+// ملء النموذج ببيانات محددة
+function fillFormWithData(data) {
+    if (data.firstName) document.getElementById('firstName').value = data.firstName;
+    if (data.lastName) document.getElementById('lastName').value = data.lastName;
+    if (data.email) document.getElementById('email').value = data.email;
+    if (data.phone) document.getElementById('phone').value = data.phone;
+    
+    // تحديث باقي الحقول حسب البيانات المتاحة
+    updateWelcomeMessage();
+}
+
+
 // ==================== وظائف التحكم في التبويبات ====================
 function switchTab(tabName) {
     // تحديث التبويبات
@@ -1782,9 +1925,10 @@ function updateProgressBar(tabName) {
 }
 
 // ==================== وظائف معرف المستخدم ====================
+// توليد معرف مؤقت
 function generatePreviewUserId() {
-    const firstName = document.getElementById('firstName').value || '';
-    const lastName = document.getElementById('lastName').value || '';
+    const firstName = document.getElementById('firstName')?.value || '';
+    const lastName = document.getElementById('lastName')?.value || '';
     
     if (firstName || lastName) {
         const preview = (firstName + '-' + lastName)
@@ -1792,9 +1936,13 @@ function generatePreviewUserId() {
             .replace(/\s+/g, '-')
             .replace(/[^a-z0-9-]/g, '');
         
-        document.getElementById('userIdPreview').value = preview || 'user-' + Date.now();
+        const userIdPreview = document.getElementById('userIdPreview');
+        if (userIdPreview) {
+            userIdPreview.value = preview || 'user-' + Date.now();
+        }
     }
 }
+
 
 async function generateUserId() {
     const firstName = document.getElementById('firstName').value.trim();
@@ -1960,12 +2108,15 @@ document.getElementById('avatarInput')?.addEventListener('change', function(e) {
 });
 
 // ==================== وظائف الأدوار والصلاحيات ====================
+// اختيار الدور
 function selectRole(role) {
     // تحديث البطاقات
     document.querySelectorAll('.role-card').forEach(card => {
         card.classList.remove('active');
     });
-    document.querySelector(`[data-role="${role}"]`).classList.add('active');
+    
+    const roleCard = document.querySelector(`[data-role="${role}"]`);
+    if (roleCard) roleCard.classList.add('active');
     
     userRole = role;
     userData.role.type = role;
@@ -1974,29 +2125,25 @@ function selectRole(role) {
     loadPermissions();
 }
 
+// تحميل الصلاحيات
 function loadPermissions() {
     const permissions = {
         student: [
             { id: 'view_courses', name: 'عرض الدورات', checked: true },
-            { id: 'view_materials', name: 'عرض المواد التعليمية', checked: true },
-            { id: 'submit_assignments', name: 'تسليم الواجبات', checked: true },
-            { id: 'view_grades', name: 'عرض الدرجات', checked: true }
+            { id: 'view_materials', name: 'عرض المواد التعليمية', checked: true }
         ],
         instructor: [
             { id: 'manage_courses', name: 'إدارة الدورات', checked: true },
-            { id: 'grade_students', name: 'تقييم الطلاب', checked: true },
-            { id: 'upload_materials', name: 'رفع المواد', checked: true },
-            { id: 'send_announcements', name: 'إرسال الإعلانات', checked: true }
+            { id: 'grade_students', name: 'تقييم الطلاب', checked: true }
         ],
         admin: [
-            { id: 'full_access', name: 'صلاحيات كاملة', checked: true },
-            { id: 'manage_users', name: 'إدارة المستخدمين', checked: true },
-            { id: 'manage_system', name: 'إدارة النظام', checked: true },
-            { id: 'view_reports', name: 'عرض التقارير', checked: true }
+            { id: 'full_access', name: 'صلاحيات كاملة', checked: true }
         ]
     };
     
     const permissionsList = document.getElementById('permissionsList');
+    if (!permissionsList) return;
+    
     permissionsList.innerHTML = '';
     
     const rolePermissions = permissions[userRole] || permissions.student;
@@ -2098,6 +2245,7 @@ async function loadCourses() {
     }
 }
 
+// عرض الدورات المتاحة
 function displayAvailableCourses(courses) {
     const container = document.getElementById('availableCourses');
     if (!container) return;
@@ -2135,6 +2283,9 @@ function displayAvailableCourses(courses) {
     });
 }
 
+
+
+// تبديل اختيار الدورة
 function toggleCourseSelection(course) {
     const index = selectedCourses.findIndex(c => c.id === course.id);
     
@@ -2152,13 +2303,15 @@ function toggleCourseSelection(course) {
     updateFinancialSummary();
 }
 
+// تحديث قائمة الدورات المختارة
 function updateSelectedCoursesList() {
     const container = document.getElementById('selectedCoursesList');
     const count = document.getElementById('selectedCount');
     
     if (!container) return;
     
-    count.textContent = selectedCourses.length;
+    if (count) count.textContent = selectedCourses.length;
+    
     container.innerHTML = '';
     
     if (selectedCourses.length === 0) {
@@ -2182,17 +2335,16 @@ function updateSelectedCoursesList() {
         `;
         container.appendChild(item);
     });
-    
-    // تحديث خيارات الدفع
-    updatePaymentOptions();
 }
 
+// إزالة دورة
 function removeCourse(courseId) {
     selectedCourses = selectedCourses.filter(c => c.id !== courseId);
     document.querySelector(`[data-course-id="${courseId}"]`)?.classList.remove('selected');
     updateSelectedCoursesList();
     updateFinancialSummary();
 }
+
 
 // ==================== البحث والفلترة ====================
 document.getElementById('courseSearch')?.addEventListener('input', function(e) {
@@ -2218,6 +2370,7 @@ document.getElementById('courseFilter')?.addEventListener('change', function(e) 
 });
 
 // ==================== القسم المالي ====================
+// تحديث الملخص المالي
 function updateFinancialSummary() {
     let totalDue = 0;
     
@@ -2227,10 +2380,15 @@ function updateFinancialSummary() {
     
     userData.financial.totalDue = totalDue;
     
-    document.getElementById('totalDue').textContent = totalDue + ' جنيه';
-    document.getElementById('totalPaid').textContent = userData.financial.totalPaid + ' جنيه';
-    document.getElementById('totalGrants').textContent = userData.financial.totalGrants + ' جنيه';
+    const totalDueElement = document.getElementById('totalDue');
+    const totalPaidElement = document.getElementById('totalPaid');
+    const totalGrantsElement = document.getElementById('totalGrants');
+    
+    if (totalDueElement) totalDueElement.textContent = totalDue + ' جنيه';
+    if (totalPaidElement) totalPaidElement.textContent = userData.financial.totalPaid + ' جنيه';
+    if (totalGrantsElement) totalGrantsElement.textContent = userData.financial.totalGrants + ' جنيه';
 }
+
 
 function updatePaymentOptions() {
     const container = document.getElementById('paymentOptionsList');
@@ -2363,10 +2521,15 @@ function recalculateFinancials() {
 }
 
 // ==================== رسالة الترحيب ====================
+// تحديث رسالة الترحيب
 function updateWelcomeMessage() {
     const firstName = document.getElementById('firstName').value || '[الاسم]';
     const email = document.getElementById('email').value || '[البريد]';
     const password = document.getElementById('password').value || '[كلمة المرور]';
+    
+    const coursesText = selectedCourses.length > 0 
+        ? selectedCourses.map(c => `• ${c.title || c.name}`).join('\n')
+        : '• لا توجد دورات';
     
     const message = `مرحباً ${firstName} 👋
 
@@ -2376,7 +2539,7 @@ function updateWelcomeMessage() {
 🔑 كلمة المرور: ${password}
 
 📚 الدورات المسجلة:
-${selectedCourses.map(c => `• ${c.title || c.name}`).join('\n') || '• لا توجد دورات'}
+${coursesText}
 
 🔗 رابط الدخول:
 https://fouad-academy.com/login
@@ -2390,6 +2553,8 @@ https://fouad-academy.com/login
         messageArea.value = message;
     }
 }
+
+
 
 // تحديث الرسالة عند تغيير البيانات
 document.getElementById('firstName')?.addEventListener('input', updateWelcomeMessage);
