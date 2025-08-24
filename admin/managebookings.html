@@ -854,6 +854,25 @@ function updateStatusCounts() {
     });
 }
 
+        // دالة لتحويل النص العربي لرقم صحيح
+function extractNumberFromArabicText(text) {
+    if (!text) return 0;
+    
+    // تحويل الأرقام العربية للإنجليزية
+    const arabicNumbers = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+    const englishNumbers = ['0','1','2','3','4','5','6','7','8','9'];
+    
+    let result = text.toString();
+    for (let i = 0; i < arabicNumbers.length; i++) {
+        result = result.replace(new RegExp(arabicNumbers[i], 'g'), englishNumbers[i]);
+    }
+    
+    // إزالة كل شيء عدا الأرقام
+    result = result.replace(/[^\d]/g, '');
+    
+    return parseInt(result) || 0;
+}
+
         // دالة حساب إحصائيات الخصومات والتوفير
 function calculateDiscountStats() {
     let totalSavings = 0;
@@ -3964,18 +3983,20 @@ async function markAsPaid(bookingId) {
                         <i class="fas fa-book"></i> ${booking.courseName || 'الدورة'}
                     </h4>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <span style="color: #6B7280;">السعر الكلي:</span>
-                            <strong style="color: #1F2937; margin-right: 10px;">
-                                ${booking.pricing?.finalPrice || '0 ج.م'}
-                            </strong>
-                        </div>
-                        <div>
-                            <span style="color: #6B7280;">نوع الدفع:</span>
-                            <strong style="color: ${isInstallment ? '#F59E0B' : '#10B981'}; margin-right: 10px;">
-                                ${isInstallment ? 'أقساط' : 'دفعة واحدة'}
-                            </strong>
-                        </div>
+                    
+<div>
+    <span style="color: #6B7280;">السعر الكلي:</span>
+    <strong style="color: #1F2937; margin-right: 10px; font-size: 1.2rem;">
+        ${totalAmount > 0 ? totalAmount.toLocaleString('ar-EG') + ' ج.م' : 
+          booking.pricing?.finalPrice || '0 ج.م'}
+    </strong>
+</div>
+<div>
+    <span style="color: #6B7280;">نوع الدفع:</span>
+    <strong style="color: ${isInstallment ? '#F59E0B' : '#10B981'}; margin-right: 10px;">
+        ${isInstallment ? 'أقساط' : 'دفعة واحدة'}
+    </strong>
+</div>
                     </div>
                 </div>
                 
@@ -4069,12 +4090,37 @@ async function markAsPaid(bookingId) {
             // إضافة دالة حساب الأقساط للنافذة
             window.calculateInstallments = function() {
                 const firstPayment = parseFloat(document.getElementById('firstPaymentAmount')?.value) || 0;
-                const totalAmount = parseInt(booking.pricing?.finalPrice?.replace(/[^\d]/g, '')) || 0;
+                // استخراج السعر الصحيح
+const totalAmount = booking.pricing?.finalPriceNumber || 
+                   extractNumberFromArabicText(booking.pricing?.finalPrice) || 
+                   0;
+
+console.log('💰 السعر المستخرج:', totalAmount);
+console.log('📊 بيانات التسعير:', booking.pricing);
                 const numInstallments = parseInt(document.getElementById('remainingInstallments')?.value) || 0;
                 
-                if (firstPayment > 0 && numInstallments > 0) {
-                    const remaining = totalAmount - firstPayment;
+if (firstPayment > 0 && numInstallments > 0 && totalAmount > 0) {
+    const remaining = Math.max(0, totalAmount - firstPayment);
+    
+    // التحقق من صحة المبالغ
+    if (firstPayment > totalAmount) {
+        document.getElementById('installmentDetails').innerHTML = `
+            <div style="background: #FEE2E2; padding: 15px; border-radius: 8px; color: #991B1B;">
+                <i class="fas fa-exclamation-triangle"></i> 
+                الدفعة الأولى أكبر من إجمالي المبلغ!
+            </div>`;
+        document.getElementById('installmentPreview').style.display = 'block';
+        return;
+    }
                     const monthlyAmount = Math.ceil(remaining / numInstallments);
+    // التأكد من صحة الحسابات
+console.log('📊 حسابات الأقساط:', {
+    'المبلغ الكلي': totalAmount,
+    'الدفعة الأولى': firstPayment,
+    'المتبقي': remaining,
+    'عدد الأقساط': numInstallments,
+    'قيمة القسط': monthlyAmount
+});
                     
                     let installmentHTML = '<div style="display: grid; gap: 10px;">';
                     
@@ -4117,6 +4163,39 @@ async function markAsPaid(bookingId) {
                     document.getElementById('installmentPreview').style.display = 'block';
                 }
             };
+            // إضافة تحقق عند إدخال الدفعة الأولى
+const firstPaymentInput = document.getElementById('firstPaymentAmount');
+if (firstPaymentInput) {
+    // عرض السعر الإجمالي كـ placeholder
+    firstPaymentInput.placeholder = `السعر الكلي: ${totalAmount.toLocaleString('ar-EG')} ج.م`;
+    
+    firstPaymentInput.addEventListener('input', function() {
+        const value = parseFloat(this.value) || 0;
+        if (value > totalAmount) {
+            this.style.borderColor = '#EF4444';
+            this.style.backgroundColor = '#FEE2E2';
+            
+            // عرض تحذير
+            if (!document.getElementById('paymentWarning')) {
+                const warning = document.createElement('div');
+                warning.id = 'paymentWarning';
+                warning.style.cssText = 'background: #FEE2E2; color: #991B1B; padding: 10px; border-radius: 8px; margin-top: 10px;';
+                warning.innerHTML = '<i class="fas fa-exclamation-triangle"></i> المبلغ أكبر من السعر الكلي!';
+                this.parentElement.appendChild(warning);
+            }
+        } else {
+            this.style.borderColor = '#FCD34D';
+            this.style.backgroundColor = 'white';
+            
+            // إزالة التحذير
+            const warning = document.getElementById('paymentWarning');
+            if (warning) warning.remove();
+            
+            // إعادة حساب الأقساط
+            window.calculateInstallments();
+        }
+    });
+}
         },
         preConfirm: () => {
             const method = document.getElementById('paymentMethodUsed').value;
@@ -4168,7 +4247,13 @@ async function markAsPaid(bookingId) {
                 }
             });
             
-            const totalAmount = parseInt(booking.pricing?.finalPrice?.replace(/[^\d]/g, '')) || 0;
+            // استخراج السعر الصحيح
+const totalAmount = booking.pricing?.finalPriceNumber || 
+                   extractNumberFromArabicText(booking.pricing?.finalPrice) || 
+                   0;
+
+console.log('💰 السعر المستخرج:', totalAmount);
+console.log('📊 بيانات التسعير:', booking.pricing);
             let updateData = {
                 status: 'paid',
                 paidAt: new Date().toISOString(),
@@ -4180,10 +4265,26 @@ async function markAsPaid(bookingId) {
             };
             
             if (result.value.isInstallment) {
-                // حالة الأقساط
-                const firstPayment = result.value.firstPaymentAmount;
-                const numInstallments = result.value.remainingInstallments;
-                const remaining = totalAmount - firstPayment;
+    // حالة الأقساط
+    const firstPayment = result.value.firstPaymentAmount;
+    const numInstallments = result.value.remainingInstallments;
+    
+    // التحقق من صحة المبالغ قبل الحفظ
+    if (firstPayment > totalAmount) {
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ في المبلغ!',
+            html: `
+                <div style="text-align: right;">
+                    <p>الدفعة الأولى (${firstPayment.toLocaleString('ar-EG')} ج.م) 
+                       أكبر من إجمالي المبلغ (${totalAmount.toLocaleString('ar-EG')} ج.م)</p>
+                </div>`,
+            confirmButtonColor: '#EF4444'
+        });
+        return;
+    }
+    
+    const remaining = Math.max(0, totalAmount - firstPayment);
                 const monthlyAmount = Math.ceil(remaining / numInstallments);
                 
                 // إنشاء جدول الأقساط
