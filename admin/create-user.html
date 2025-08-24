@@ -2147,11 +2147,96 @@ async function loadCoursesAndPaths() {
 }
 
 // تحميل بيانات المستخدم من قاعدة البيانات
+
 async function loadUserDataFromDB(userId) {
     try {
+        // أولاً: جلب من users
         const userDoc = await db.collection('users').doc(userId).get();
         
         if (!userDoc.exists) {
+            // ثانياً: إذا لم يكن موجود في users، ابحث في individualStudents
+            const individualQuery = await db.collection('individualStudents')
+                .where('userId', '==', userId)
+                .limit(1)
+                .get();
+            
+            if (!individualQuery.empty) {
+                const studentData = individualQuery.docs[0].data();
+                console.log('📥 تم جلب البيانات من individualStudents:', studentData);
+                
+                // نقل كل البيانات من individualStudents
+                if (studentData.customer) {
+                    // الاسم الكامل - مهم جداً!
+                    userData.basic.name = studentData.customer.name || '';
+                    
+                    // تقسيم الاسم الكامل إلى أول وأخير
+                    const nameParts = userData.basic.name.split(' ');
+                    userData.basic.firstName = studentData.customer.firstName || nameParts[0] || '';
+                    userData.basic.lastName = studentData.customer.lastName || nameParts.slice(1).join(' ') || '';
+                    
+                    // البريد والهاتف
+                    userData.basic.email = studentData.customer.email || studentData.userEmail || '';
+                    userData.basic.phone = studentData.customer.whatsapp || studentData.customer.phone || '';
+                    userData.basic.whatsapp = userData.basic.phone;
+                    
+                    // كلمة المرور المؤقتة - فك التشفير!
+                    if (studentData.tempPassword) {
+                        userData.basic.password = atob(studentData.tempPassword);
+                    }
+                    
+                    // البيانات الشخصية
+                    userData.personal.title = studentData.customer.title || '';
+                    userData.personal.age = studentData.customer.age || null;
+                    userData.personal.gender = studentData.customer.gender || '';
+                    userData.personal.birthDate = studentData.customer.birthDate || '';
+                    userData.personal.country = studentData.customer.country || '';
+                    userData.personal.city = studentData.customer.city || '';
+                    userData.personal.job = studentData.customer.job || '';
+                    userData.personal.source = studentData.customer.source || '';
+                    
+                    // التوقعات والخطط
+                    userData.expectations.expectations = studentData.customer.expectations || '';
+                    userData.expectations.experience = studentData.customer.experience || '';
+                    userData.expectations.applicationPlan = studentData.customer.applicationPlan || '';
+                    userData.expectations.notes = studentData.customer.notes || '';
+                    
+                    // طرق الدفع
+                    if (studentData.customer.paymentMethods) {
+                        userData.financial.paymentMethods = studentData.customer.paymentMethods;
+                    }
+                }
+                
+                // البيانات المالية
+                if (studentData.pricing) {
+                    userData.financial.pricing = studentData.pricing;
+                }
+                if (studentData.discounts) {
+                    userData.financial.discounts = studentData.discounts;
+                }
+                userData.financial.totalSavings = studentData.totalSavings || 0;
+                userData.financial.totalSavingsText = studentData.totalSavingsText || '0 ج.م';
+                userData.financial.activeOffer = studentData.activeOffer || null;
+                userData.financial.coupon = studentData.coupon || null;
+                
+                // الدورات
+                if (studentData.enrollments && studentData.enrollments.length > 0) {
+                    userData.enrollments = studentData.enrollments;
+                    selectedCourses = [...studentData.enrollments];
+                }
+                
+                // معلومات النظام
+                userData.metadata.customerLevel = studentData.customerLevel || 'STANDARD';
+                userData.metadata.loyaltyPoints = studentData.loyaltyPoints || 0;
+                userData.metadata.originalBookingId = studentData.originalBookingId || null;
+                userData.metadata.createdAt = studentData.accountCreatedAt || studentData.createdAt || '';
+                
+                // ملء النموذج
+                fillFormWithData();
+                
+                showSuccess('تم تحميل بيانات الطالب من الحجوزات الفردية');
+                return;
+            }
+            
             showError('المستخدم غير موجود');
             setTimeout(() => {
                 window.location.href = 'dashboard.html';
@@ -2159,21 +2244,65 @@ async function loadUserDataFromDB(userId) {
             return;
         }
         
+        // إذا كان موجود في users
         const data = userDoc.data();
+        console.log('📥 تم جلب البيانات من users:', data);
         
-        // نقل البيانات إلى userData
-        mapUserDataFromDB(data);
+        // نقل البيانات من users
+        userData.basic.name = data.name || '';
+        userData.basic.firstName = data.firstName || '';
+        userData.basic.lastName = data.lastName || '';
+        userData.basic.email = data.email || '';
+        userData.basic.phone = data.phone || data.whatsapp || '';
+        userData.basic.whatsapp = data.whatsapp || data.phone || '';
+        userData.basic.status = data.status || 'active';
+        userData.basic.avatar = data.avatar || null;
+        
+        // كلمة المرور إذا كانت مشفرة
+        if (data.tempPassword) {
+            userData.basic.password = atob(data.tempPassword);
+        }
+        
+        // البيانات الشخصية
+        userData.personal = {
+            title: data.title || '',
+            age: data.age || null,
+            gender: data.gender || '',
+            birthDate: data.birthDate || '',
+            country: data.country || '',
+            city: data.city || '',
+            job: data.job || '',
+            source: data.source || ''
+        };
+        
+        // التوقعات
+        userData.expectations = {
+            expectations: data.expectations || '',
+            experience: data.experience || '',
+            applicationPlan: data.applicationPlan || '',
+            notes: data.notes || ''
+        };
+        
+        // الدور والصلاحيات
+        userData.role.type = data.role || 'student';
+        userData.role.permissions = data.permissions || [];
+        
+        // الدورات
+        userData.enrollments = data.enrollments || [];
+        selectedCourses = data.enrollments || [];
+        
+        // البيانات المالية
+        if (data.financialData) {
+            userData.financial = { ...userData.financial, ...data.financialData };
+        }
+        
+        // معلومات النظام
+        userData.metadata.customerLevel = data.customerLevel || 'STANDARD';
+        userData.metadata.loyaltyPoints = data.loyaltyPoints || 0;
+        userData.metadata.createdAt = data.accountCreatedAt || data.createdAt || '';
         
         // ملء النموذج
-        fillFormWithUserData();
-        
-        // إخفاء قسم إنشاء المعرف
-        document.getElementById('userIdSection').style.display = 'none';
-        
-        // تعطيل تغيير البريد
-        document.getElementById('email').setAttribute('readonly', true);
-        
-        console.log('✅ تم تحميل بيانات المستخدم');
+        fillFormWithData();
         
     } catch (error) {
         console.error('خطأ في تحميل البيانات:', error);
@@ -2181,6 +2310,66 @@ async function loadUserDataFromDB(userId) {
     }
 }
 
+// دالة ملء النموذج بالبيانات
+function fillFormWithData() {
+    // الاسم الكامل - أهم حاجة!
+    document.getElementById('fullName').value = userData.basic.name || '';
+    
+    // الأسماء
+    document.getElementById('firstName').value = userData.basic.firstName || '';
+    document.getElementById('lastName').value = userData.basic.lastName || '';
+    
+    // البريد وكلمة المرور
+    document.getElementById('email').value = userData.basic.email || '';
+    document.getElementById('password').value = userData.basic.password || '';
+    
+    // الهاتف
+    document.getElementById('phone').value = userData.basic.phone || '';
+    
+    // المعرف
+    document.getElementById('userIdPreview').value = currentUserId || '';
+    
+    // الحالة
+    if (userData.basic.status) {
+        const statusRadio = document.querySelector(`input[name="status"][value="${userData.basic.status}"]`);
+        if (statusRadio) statusRadio.checked = true;
+    }
+    
+    // الصورة
+    if (userData.basic.avatar) {
+        document.getElementById('avatarImg').src = userData.basic.avatar;
+        document.getElementById('avatarImg').style.display = 'block';
+        document.querySelector('.avatar-preview i').style.display = 'none';
+    }
+    
+    // البيانات المتقدمة
+    document.getElementById('birthDate').value = userData.personal.birthDate || '';
+    document.getElementById('gender').value = userData.personal.gender || '';
+    document.getElementById('notes').value = userData.expectations.notes || '';
+    
+    // الدور
+    if (userData.role.type) {
+        selectRole(userData.role.type);
+    }
+    
+    // الدورات
+    if (selectedCourses.length > 0) {
+        updateSelectedCoursesList();
+        updatePaymentOptions();
+    }
+    
+    // تحديث الملخصات
+    updateFinancialSummary();
+    updateWelcomeMessage();
+    
+    // إخفاء قسم إنشاء المعرف
+    if (editMode) {
+        document.getElementById('userIdSection').style.display = 'none';
+        document.getElementById('email').setAttribute('readonly', true);
+    }
+    
+    console.log('✅ تم ملء جميع الحقول بالبيانات');
+}
     // تحويل بيانات قاعدة البيانات إلى userData
 function mapUserDataFromDB(data) {
     // البيانات الأساسية
@@ -2236,16 +2425,6 @@ function mapUserDataFromDB(data) {
     }
 }
 
-// ملء النموذج ببيانات محددة
-function fillFormWithData(data) {
-    if (data.firstName) document.getElementById('firstName').value = data.firstName;
-    if (data.lastName) document.getElementById('lastName').value = data.lastName;
-    if (data.email) document.getElementById('email').value = data.email;
-    if (data.phone) document.getElementById('phone').value = data.phone;
-    
-    // تحديث باقي الحقول حسب البيانات المتاحة
-    updateWelcomeMessage();
-}
 
 
 // ==================== وظائف التحكم في التبويبات ====================
@@ -2565,6 +2744,18 @@ function resetForm() {
 // ==================== مستمعات الأحداث للحقول ====================
 document.getElementById('firstName')?.addEventListener('input', generatePreviewUserId);
 document.getElementById('lastName')?.addEventListener('input', generatePreviewUserId);
+    // تحديث الاسم الكامل ورسالة الترحيب
+document.getElementById('firstName')?.addEventListener('input', () => {
+    updateFullName();
+    updateWelcomeMessage();
+});
+document.getElementById('lastName')?.addEventListener('input', () => {
+    updateFullName();
+    updateWelcomeMessage();
+});
+document.getElementById('email')?.addEventListener('input', updateWelcomeMessage);
+document.getElementById('password')?.addEventListener('input', updateWelcomeMessage);
+document.getElementById('phone')?.addEventListener('input', updateWelcomeMessage);
 // ==================== تحميل وإدارة الدورات ====================
 async function loadCourses() {
     try {
@@ -2991,24 +3182,44 @@ function recalculateFinancials() {
 // ==================== رسالة الترحيب ====================
 // تحديث رسالة الترحيب
 function updateWelcomeMessage() {
-    const firstName = document.getElementById('firstName').value || '[الاسم]';
-    const email = document.getElementById('email').value || '[البريد]';
-    const password = document.getElementById('password').value || '[كلمة المرور]';
+    // استخدم الاسم الكامل أولاً، وإذا لم يكن موجود استخدم الاسم الأول
+    const fullName = document.getElementById('fullName')?.value || 
+                     document.getElementById('firstName')?.value || 
+                     userData.basic.name || 
+                     '[الاسم]';
+    
+    const email = document.getElementById('email')?.value || userData.basic.email || '[البريد]';
+    const password = document.getElementById('password')?.value || userData.basic.password || '[كلمة المرور]';
+    const phone = document.getElementById('phone')?.value || userData.basic.phone || '[الهاتف]';
     
     const coursesText = selectedCourses.length > 0 
         ? selectedCourses.map(c => `• ${c.title || c.name}`).join('\n')
-        : '• لا توجد دورات';
+        : '• لا توجد دورات مخصصة بعد';
     
-    const message = `مرحباً ${firstName} 👋
+    // معلومات مالية إضافية
+    let financialInfo = '';
+    if (userData.financial.pricing && userData.financial.pricing.finalPriceNumber > 0) {
+        financialInfo = `
+💰 التفاصيل المالية:
+- السعر الأصلي: ${userData.financial.pricing.basePrice || '0 ج.م'}
+- السعر النهائي: ${userData.financial.pricing.finalPrice || '0 ج.م'}
+- التوفير: ${userData.financial.totalSavingsText || '0 ج.م'}
+${userData.financial.activeOffer ? `• العرض النشط: ${userData.financial.activeOffer.name}` : ''}
+${userData.financial.coupon && userData.financial.coupon.code ? `• كود الخصم: ${userData.financial.coupon.code}` : ''}
+`;
+    }
+    
+    const message = `مرحباً ${fullName} 👋
 
 تم تسجيلك بنجاح في منظور الفؤاد 🎉
 
 📧 البريد الإلكتروني: ${email}
 🔑 كلمة المرور: ${password}
+📱 الواتساب: ${phone}
 
 📚 الدورات المسجلة:
 ${coursesText}
-
+${financialInfo}
 🔗 رابط الدخول:
 https://fouad-academy.com/login
 
@@ -3020,6 +3231,8 @@ https://fouad-academy.com/login
     if (messageArea) {
         messageArea.value = message;
     }
+    
+    console.log('✅ تم تحديث رسالة الترحيب بجميع البيانات');
 }
 
 
