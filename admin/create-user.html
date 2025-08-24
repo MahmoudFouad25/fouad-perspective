@@ -1654,21 +1654,36 @@ async function loadDataFromIndividualStudents(userId) {
 }
 
 // تحويل بيانات individualStudents إلى userData
-// تحويل بيانات individualStudents إلى userData بشكل كامل
+// تحويل بيانات individualStudents إلى userData بشكل كامل مع تقسيم الاسم الذكي
 function mapIndividualStudentToUserData(studentData) {
     console.log('📋 بدء نقل كل البيانات التفصيلية...');
+    console.log('البيانات الأصلية:', studentData);
     
-    // البيانات الأساسية
+    // البيانات الأساسية مع تقسيم الاسم الذكي
     if (studentData.customer) {
         const customer = studentData.customer;
-        userData.basic.firstName = customer.firstName || customer.name?.split(' ')[0] || '';
-        userData.basic.lastName = customer.lastName || customer.name?.split(' ').slice(1).join(' ') || '';
-        userData.basic.name = customer.name || '';
-        userData.basic.email = customer.email || '';
+        
+        // تقسيم الاسم بذكاء
+        const fullName = customer.name || '';
+        const nameParts = fullName.trim().split(' ');
+        
+        // إذا كان الاسم من جزء واحد، نضعه في الاسم الأول
+        // إذا كان من جزئين، الأول والأخير
+        // إذا كان أكثر، الأول والباقي في الأخير
+        userData.basic.firstName = customer.firstName || nameParts[0] || '';
+        userData.basic.lastName = customer.lastName || nameParts.slice(1).join(' ') || nameParts[0] || '';
+        userData.basic.name = fullName;
+        userData.basic.email = customer.email || studentData.userEmail || '';
         userData.basic.phone = customer.phone || customer.whatsapp || '';
         userData.basic.whatsapp = customer.whatsapp || customer.phone || '';
         userData.basic.countryCode = customer.countryCode || '+20';
         userData.basic.status = studentData.accountStatus === 'active' ? 'active' : 'pending';
+        userData.basic.userId = studentData.userId || '';
+        
+        // كلمة المرور المؤقتة إن وجدت
+        if (studentData.tempPassword) {
+            userData.basic.password = atob(studentData.tempPassword);
+        }
         
         // البيانات الشخصية الكاملة
         userData.personal.title = customer.title || '';
@@ -1687,13 +1702,13 @@ function mapIndividualStudentToUserData(studentData) {
         userData.expectations.notes = customer.notes || '';
     }
     
-    // البيانات المالية الكاملة
+    // البيانات المالية الكاملة من الحجز
     if (studentData.pricing) {
         userData.financial.pricing = {
             basePrice: studentData.pricing.basePrice || '0 ج.م',
-            basePriceNumber: studentData.pricing.basePriceNumber || 0,
+            basePriceNumber: parseFloat(studentData.pricing.basePriceNumber) || 0,
             finalPrice: studentData.pricing.finalPrice || '0 ج.م',
-            finalPriceNumber: studentData.pricing.finalPriceNumber || 0
+            finalPriceNumber: parseFloat(studentData.pricing.finalPriceNumber) || 0
         };
     }
     
@@ -1709,6 +1724,11 @@ function mapIndividualStudentToUserData(studentData) {
         userData.financial.paymentMethods = studentData.customer.paymentMethods;
     }
     
+    // حساب المبالغ المالية
+    userData.financial.totalDue = studentData.pricing?.finalPriceNumber || 0;
+    userData.financial.totalPaid = studentData.totalPaid || 0;
+    userData.financial.totalGrants = studentData.totalGrants || 0;
+    
     // معلومات النظام والحجز
     userData.metadata.customerLevel = studentData.customerLevel || 'STANDARD';
     userData.metadata.loyaltyPoints = studentData.loyaltyPoints || 0;
@@ -1716,13 +1736,13 @@ function mapIndividualStudentToUserData(studentData) {
     userData.metadata.originalBookingId = studentData.originalBookingId || studentData.transferInfo?.originalBookingId || null;
     userData.metadata.transferredAt = studentData.transferredAt || studentData.transferInfo?.transferredAt || null;
     
-    // الدورات والتخصيصات
+    // الدورات والتخصيصات مع البيانات المالية
     if (studentData.enrollments && studentData.enrollments.length > 0) {
         userData.enrollments = studentData.enrollments.map(enrollment => ({
             ...enrollment,
             financialData: enrollment.financialData || {
-                originalPrice: enrollment.originalPrice || 0,
-                finalPrice: enrollment.price || 0,
+                originalPrice: studentData.pricing?.basePriceNumber || 0,
+                finalPrice: studentData.pricing?.finalPriceNumber || 0,
                 discounts: studentData.discounts || [],
                 totalSavings: studentData.totalSavings || 0,
                 activeOffer: studentData.activeOffer || null,
@@ -1730,10 +1750,29 @@ function mapIndividualStudentToUserData(studentData) {
             }
         }));
         selectedCourses = [...userData.enrollments];
+    } else if (studentData.courseName) {
+        // إذا كان هناك دورة محددة بدون enrollments
+        userData.enrollments = [{
+            id: studentData.courseId || `course-${Date.now()}`,
+            title: studentData.courseName,
+            type: 'course',
+            price: studentData.pricing?.finalPriceNumber || 0,
+            originalPrice: studentData.pricing?.basePriceNumber || 0,
+            enrolledAt: new Date().toISOString(),
+            status: 'pending',
+            financialData: {
+                originalPrice: studentData.pricing?.basePriceNumber || 0,
+                finalPrice: studentData.pricing?.finalPriceNumber || 0,
+                discounts: studentData.discounts || [],
+                totalSavings: studentData.totalSavings || 0,
+                activeOffer: studentData.activeOffer || null,
+                coupon: studentData.coupon || null
+            }
+        }];
+        selectedCourses = [...userData.enrollments];
     }
     
     // معلومات الحساب
-    userData.basic.userId = studentData.userId || '';
     userData.basic.status = studentData.accountStatus === 'active' ? 'active' : 'pending';
     
     // معلومات الدفع والرحلة
@@ -1741,49 +1780,268 @@ function mapIndividualStudentToUserData(studentData) {
     userData.financial.journey = studentData.journey || {};
     userData.financial.bookingType = studentData.bookingType || 'individual';
     
-    console.log('✅ تم نقل كل البيانات بنجاح:', userData);
+    console.log('✅ البيانات بعد التحويل:', userData);
 }
 
 // ملء النموذج بالبيانات
+// ملء النموذج بالبيانات الكاملة في كل التبويبات
 function fillFormWithUserData() {
-    // البيانات الأساسية
-    document.getElementById('firstName').value = userData.basic.firstName;
-    document.getElementById('lastName').value = userData.basic.lastName;
-    document.getElementById('email').value = userData.basic.email;
-    document.getElementById('password').value = ''; // لا نعرض كلمة المرور
-    document.getElementById('phone').value = userData.basic.phone || userData.basic.whatsapp || '';
-    document.getElementById('userIdPreview').value = userData.basic.userId;
+    console.log('📝 ملء النموذج بالبيانات...');
+    
+    // === تبويب البيانات الأساسية ===
+    // الأسماء
+    const firstNameField = document.getElementById('firstName');
+    const lastNameField = document.getElementById('lastName');
+    if (firstNameField) firstNameField.value = userData.basic.firstName || '';
+    if (lastNameField) lastNameField.value = userData.basic.lastName || '';
+    
+    // البريد وكلمة المرور
+    const emailField = document.getElementById('email');
+    if (emailField) emailField.value = userData.basic.email || '';
+    
+    const passwordField = document.getElementById('password');
+    if (passwordField && userData.basic.password) {
+        passwordField.value = userData.basic.password;
+    }
+    
+    // الهاتف
+    const phoneField = document.getElementById('phone');
+    const countryCodeField = document.getElementById('countryCode');
+    if (phoneField) phoneField.value = userData.basic.phone || userData.basic.whatsapp || '';
+    if (countryCodeField) countryCodeField.value = userData.basic.countryCode || '+20';
+    
+    // معرف المستخدم
+    const userIdField = document.getElementById('userIdPreview');
+    if (userIdField) userIdField.value = userData.basic.userId || currentUserId || '';
     
     // الحالة
     const statusRadio = document.querySelector(`input[name="status"][value="${userData.basic.status}"]`);
     if (statusRadio) statusRadio.checked = true;
     
-    // البيانات المتقدمة - تحديث التبويب المتقدم
-    document.getElementById('birthDate').value = userData.personal.birthDate || '';
-    document.getElementById('gender').value = userData.personal.gender || '';
-    document.getElementById('notes').value = userData.expectations.notes || '';
+    // الصورة الشخصية
+    if (userData.basic.avatar) {
+        const avatarImg = document.getElementById('avatarImg');
+        const avatarIcon = document.querySelector('.avatar-preview i');
+        if (avatarImg) {
+            avatarImg.src = userData.basic.avatar;
+            avatarImg.style.display = 'block';
+        }
+        if (avatarIcon) avatarIcon.style.display = 'none';
+    }
     
-    // تحديث الدور
+    // === تبويب البيانات المتقدمة ===
+    // البيانات الشخصية الإضافية
+    const birthDateField = document.getElementById('birthDate');
+    const genderField = document.getElementById('gender');
+    const notesField = document.getElementById('notes');
+    
+    if (birthDateField) birthDateField.value = userData.personal.birthDate || '';
+    if (genderField) genderField.value = userData.personal.gender || '';
+    if (notesField) notesField.value = userData.expectations.notes || '';
+    
+    // إضافة حقول إضافية إن لم تكن موجودة
+    addMissingPersonalFields();
+    
+    // === تبويب الدور والصلاحيات ===
     if (userData.role.type) {
         selectRole(userData.role.type);
     }
     
-    // تحديث قائمة الدورات المختارة
+    // === تبويب الدورات ===
     if (userData.enrollments && userData.enrollments.length > 0) {
         selectedCourses = userData.enrollments;
         updateSelectedCoursesList();
+        updatePaymentOptions();
     }
     
-    // تحديث المعلومات المالية
+    // === تبويب المالية ===
     updateFinancialSummary();
+    displayFinancialDetails();
     
     // تحديث رسالة الترحيب
     updateWelcomeMessage();
     
     // حساب اكتمال البيانات
-    calculateDataCompleteness();
+    const completeness = calculateDataCompleteness();
+    displayDataCompleteness(completeness);
+    
+    console.log('✅ تم ملء جميع الحقول');
 }
 
+// إضافة الحقول الناقصة في النموذج
+function addMissingPersonalFields() {
+    // البحث عن قسم البيانات المتقدمة
+    const advancedTab = document.getElementById('advancedTab');
+    if (!advancedTab) return;
+    
+    // التحقق من وجود الحقول الإضافية
+    if (!document.getElementById('personalTitle')) {
+        const formGrid = advancedTab.querySelector('.form-grid');
+        if (formGrid) {
+            // إضافة حقول البيانات الشخصية الكاملة
+            const additionalFieldsHTML = `
+                <!-- البيانات الشخصية الإضافية -->
+                <div class="form-section">
+                    <h3>البيانات الشخصية التفصيلية</h3>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="personalTitle">اللقب/المسمى</label>
+                            <input type="text" id="personalTitle" class="form-control" 
+                                   value="${userData.personal.title || ''}" placeholder="مثال: أستاذ، مهندس، دكتور">
+                        </div>
+                        <div class="form-group">
+                            <label for="personalAge">العمر</label>
+                            <input type="number" id="personalAge" class="form-control" 
+                                   value="${userData.personal.age || ''}" placeholder="العمر">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="personalCountry">البلد</label>
+                            <input type="text" id="personalCountry" class="form-control" 
+                                   value="${userData.personal.country || ''}" placeholder="مصر">
+                        </div>
+                        <div class="form-group">
+                            <label for="personalCity">المدينة</label>
+                            <input type="text" id="personalCity" class="form-control" 
+                                   value="${userData.personal.city || ''}" placeholder="القاهرة">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="personalJob">الوظيفة</label>
+                            <input type="text" id="personalJob" class="form-control" 
+                                   value="${userData.personal.job || ''}" placeholder="المسمى الوظيفي">
+                        </div>
+                        <div class="form-group">
+                            <label for="personalSource">كيف عرفت عنا؟</label>
+                            <input type="text" id="personalSource" class="form-control" 
+                                   value="${userData.personal.source || ''}" placeholder="مثال: فيسبوك، صديق">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- التوقعات والخطط -->
+                <div class="form-section">
+                    <h3>التوقعات والخطط</h3>
+                    
+                    <div class="form-group">
+                        <label for="personalExpectations">التوقعات من الدورة</label>
+                        <textarea id="personalExpectations" class="form-control" rows="3">${userData.expectations.expectations || ''}</textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="personalExperience">مستوى الخبرة</label>
+                        <select id="personalExperience" class="form-control">
+                            <option value="">-- اختر المستوى --</option>
+                            <option value="مبتدئ" ${userData.expectations.experience === 'مبتدئ' ? 'selected' : ''}>مبتدئ</option>
+                            <option value="متوسط" ${userData.expectations.experience === 'متوسط' ? 'selected' : ''}>متوسط</option>
+                            <option value="متقدم" ${userData.expectations.experience === 'متقدم' ? 'selected' : ''}>متقدم</option>
+                            <option value="خبير" ${userData.expectations.experience === 'خبير' ? 'selected' : ''}>خبير</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="personalApplicationPlan">خطة التطبيق</label>
+                        <textarea id="personalApplicationPlan" class="form-control" rows="3">${userData.expectations.applicationPlan || ''}</textarea>
+                    </div>
+                </div>
+            `;
+            
+            // إدراج الحقول الجديدة
+            formGrid.insertAdjacentHTML('afterbegin', additionalFieldsHTML);
+        }
+    }
+}
+
+// عرض التفاصيل المالية في التبويب المالي
+function displayFinancialDetails() {
+    const financialTab = document.getElementById('financialTab');
+    if (!financialTab) return;
+    
+    // إضافة قسم للتفاصيل المالية الكاملة
+    if (!document.getElementById('financialDetailsSection')) {
+        const detailsHTML = `
+            <div id="financialDetailsSection" class="form-section" style="margin-top: 20px;">
+                <h3>التفاصيل المالية للحجز</h3>
+                
+                ${userData.financial.pricing ? `
+                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                            padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
+                        <div style="background: white; padding: 15px; border-radius: 8px;">
+                            <div style="color: #92400E; font-size: 0.9rem;">السعر الأصلي</div>
+                            <div style="font-weight: bold; color: #6B7280; text-decoration: line-through; font-size: 1.2rem;">
+                                ${userData.financial.pricing.basePrice}
+                            </div>
+                        </div>
+                        <div style="background: #DCFCE7; padding: 15px; border-radius: 8px;">
+                            <div style="color: #065F46; font-size: 0.9rem;">السعر النهائي</div>
+                            <div style="font-weight: bold; color: #10B981; font-size: 1.4rem;">
+                                ${userData.financial.pricing.finalPrice}
+                            </div>
+                        </div>
+                        <div style="background: #FEE2E2; padding: 15px; border-radius: 8px;">
+                            <div style="color: #991B1B; font-size: 0.9rem;">التوفير</div>
+                            <div style="font-weight: bold; color: #DC2626; font-size: 1.3rem;">
+                                ${userData.financial.totalSavingsText}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${userData.financial.discounts && userData.financial.discounts.length > 0 ? `
+                <div style="margin-bottom: 20px;">
+                    <h4>الخصومات المطبقة:</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        ${userData.financial.discounts.map(discount => `
+                            <span style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                                        color: white; padding: 5px 15px; border-radius: 20px;">
+                                ${discount.label}: ${discount.value}
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${userData.financial.activeOffer ? `
+                <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                    <strong style="color: #92400E;">
+                        <i class="fas fa-fire"></i> العرض النشط: ${userData.financial.activeOffer.name}
+                    </strong>
+                    ${userData.financial.activeOffer.discount ? `
+                        <span style="margin-right: 15px;">الخصم: ${userData.financial.activeOffer.discount}</span>
+                    ` : ''}
+                </div>
+                ` : ''}
+                
+                ${userData.financial.coupon && userData.financial.coupon.code ? `
+                <div style="background: #F3E8FF; padding: 15px; border-radius: 10px;">
+                    <strong style="color: #6B21A8;">
+                        <i class="fas fa-ticket-alt"></i> كود الخصم: ${userData.financial.coupon.code}
+                    </strong>
+                    ${userData.financial.coupon.discount ? `
+                        <span style="margin-right: 15px;">الخصم: ${userData.financial.coupon.discount}</span>
+                    ` : ''}
+                </div>
+                ` : ''}
+            </div>
+        `;
+        
+        financialTab.insertAdjacentHTML('beforeend', detailsHTML);
+    }
+}
+
+// عرض نسبة اكتمال البيانات
+function displayDataCompleteness(percentage) {
+    // يمكنك إضافة عنصر في الواجهة لعرض النسبة
+    console.log(`📊 نسبة اكتمال البيانات: ${percentage}%`);
+}
+    
 // حساب نسبة اكتمال البيانات
 function calculateDataCompleteness() {
     let filledFields = 0;
