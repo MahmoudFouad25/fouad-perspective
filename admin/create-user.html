@@ -2207,6 +2207,7 @@ async function loadCoursesAndPaths() {
 
 // تحميل بيانات المستخدم من قاعدة البيانات
 // تحميل بيانات المستخدم من قاعدة البيانات
+// تحميل بيانات المستخدم من قاعدة البيانات
 async function loadUserDataFromDB(userId) {
     try {
         const userDoc = await db.collection('users').doc(userId).get();
@@ -2220,115 +2221,96 @@ async function loadUserDataFromDB(userId) {
         }
         
         const data = userDoc.data();
-        console.log('📥 البيانات المسترجعة:', data);
         
-        // ملء البيانات الأساسية
-        document.getElementById('firstName').value = data.firstName || '';
-        document.getElementById('lastName').value = data.lastName || '';
+        // ملء userData object أولاً (هذا الجزء كان مفقود!)
+        userData.basic.firstName = data.firstName || '';
+        userData.basic.lastName = data.lastName || '';
+        userData.basic.name = data.name || '';
+        userData.basic.email = data.email || '';
+        userData.basic.phone = data.phone || data.whatsapp || '';
+        userData.basic.whatsapp = data.whatsapp || data.phone || '';
+        userData.basic.avatar = data.avatar || null;
+        userData.basic.status = data.status || 'active';
+        
+        userData.personal.birthDate = data.birthDate || '';
+        userData.personal.gender = data.gender || '';
+        
+        userData.expectations.notes = data.notes || '';
+        
+        userData.role.type = data.role || 'student';
+        userData.role.permissions = data.permissions || [];
+        
+        userData.enrollments = data.enrollments || [];
+        selectedCourses = data.enrollments || [];
+        
+        // البيانات المالية - مهم جداً
+        if (data.financialData) {
+            userData.financial = data.financialData;
+        }
+        
+        // الآن نملأ حقول HTML
+        document.getElementById('firstName').value = userData.basic.firstName;
+        document.getElementById('lastName').value = userData.basic.lastName;
         
         // الاسم الكامل
         const fullNameField = document.getElementById('fullName');
         if (fullNameField) {
-            fullNameField.value = data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim();
+            fullNameField.value = userData.basic.name || `${userData.basic.firstName} ${userData.basic.lastName}`.trim();
         }
         
-        document.getElementById('email').value = data.email || '';
+        document.getElementById('email').value = userData.basic.email;
         
-        // كلمة المرور المؤقتة (مشفرة)
-        const passwordField = document.getElementById('password');
-        if (passwordField && data.tempPassword) {
+        // كلمة المرور
+        if (data.tempPassword) {
             try {
-                // فك التشفير
                 const decodedPassword = atob(data.tempPassword);
-                passwordField.value = decodedPassword;
-                console.log('✅ تم استرجاع كلمة المرور');
+                document.getElementById('password').value = decodedPassword;
             } catch (e) {
-                console.log('⚠️ كلمة المرور غير مشفرة أو غير موجودة');
+                console.log('كلمة المرور غير مشفرة');
             }
         }
         
-        // الهاتف - مع كود الدولة
-        const phone = data.phone || data.whatsapp || '';
-        document.getElementById('phone').value = phone;
+        document.getElementById('phone').value = userData.basic.phone;
+        document.getElementById('userIdPreview').value = userId;
         
         // الحالة
-        if (data.status) {
-            const statusRadio = document.querySelector(`input[name="status"][value="${data.status}"]`);
+        if (userData.basic.status) {
+            const statusRadio = document.querySelector(`input[name="status"][value="${userData.basic.status}"]`);
             if (statusRadio) statusRadio.checked = true;
         }
         
         // الصورة
-        if (data.avatar) {
-            document.getElementById('avatarImg').src = data.avatar;
+        if (userData.basic.avatar) {
+            document.getElementById('avatarImg').src = userData.basic.avatar;
             document.getElementById('avatarImg').style.display = 'block';
             document.querySelector('.avatar-preview i').style.display = 'none';
-            userData.basic.avatar = data.avatar;
         }
         
-        // البيانات الشخصية الإضافية
-        if (data.birthDate) document.getElementById('birthDate').value = data.birthDate;
-        if (data.gender) document.getElementById('gender').value = data.gender;
-        if (data.notes) document.getElementById('notes').value = data.notes;
+        // البيانات المتقدمة
+        document.getElementById('birthDate').value = userData.personal.birthDate;
+        document.getElementById('gender').value = userData.personal.gender;
+        document.getElementById('notes').value = userData.expectations.notes;
         
-        // الدور والصلاحيات
-        if (data.role) {
-            selectRole(data.role);
+        // الدور
+        if (userData.role.type) {
+            selectRole(userData.role.type);
         }
         
-        // الدورات المخصصة
-        if (data.enrollments && data.enrollments.length > 0) {
-            selectedCourses = data.enrollments;
+        // الدورات
+        if (selectedCourses.length > 0) {
             updateSelectedCoursesList();
             updatePaymentOptions();
-            
-            // عرض تواريخ الدورات
-            data.enrollments.forEach(enrollment => {
-                console.log('📚 دورة:', enrollment.title);
-                console.log('📅 من:', enrollment.startDate, 'إلى:', enrollment.endDate);
-                console.log('💰 السعر:', enrollment.financialData);
-            });
         }
         
-       // البيانات المالية
-if (data.financialData) {
-    userData.financial = data.financialData;
-    
-    // تحديث الحقول المالية في الواجهة
-    if (data.financialData.totalDue !== undefined) {
-        document.getElementById('totalDue').textContent = data.financialData.totalDue + ' جنيه';
-    }
-    if (data.financialData.totalPaid !== undefined) {
-        document.getElementById('totalPaid').textContent = data.financialData.totalPaid + ' جنيه';
-    }
-    if (data.financialData.totalGrants !== undefined) {
-        document.getElementById('totalGrants').textContent = data.financialData.totalGrants + ' جنيه';
-    }
-    
-    // استدعاء الدالة لتحديث باقي التفاصيل
-    updateFinancialSummary();
-    updatePaymentOptions();
-            
-            // عرض طرق الدفع المفضلة
-            if (data.financialData.paymentMethods) {
-                console.log('💳 طرق الدفع المفضلة:', data.financialData.paymentMethods);
-            }
-        }
-        
-        // التواريخ المهمة
-        if (data.accountCreatedAt) {
-            console.log('📅 تاريخ إنشاء الحساب:', data.accountCreatedAt);
-        }
-        
-        // تحديث رسالة الترحيب
+        // تحديث الملخصات - الآن ستعمل لأن userData ممتلئة
+        updateFinancialSummary();
         updateWelcomeMessage();
         
-        // إخفاء قسم إنشاء المعرف
+        // إخفاء قسم المعرف
         document.getElementById('userIdSection').style.display = 'none';
         
-        // تعطيل تغيير البريد
+        // تعطيل البريد
         document.getElementById('email').setAttribute('readonly', true);
-        
-        console.log('✅ تم تحميل كل البيانات بنجاح');
         
     } catch (error) {
         console.error('خطأ في تحميل البيانات:', error);
