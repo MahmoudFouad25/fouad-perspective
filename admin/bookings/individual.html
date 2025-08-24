@@ -1609,6 +1609,7 @@ window.linkExistingUser = linkExistingUser;
 // إنشاء حساب محسّن
 // ==================== إنشاء حساب محسّن ونظيف ====================
 // إنشاء حساب محسّن مع نقل كل البيانات
+// إنشاء حساب محسّن مع بنية منظمة
 async function createAccount(studentId) {
     // منع الضغطات المتكررة
     if (window.isCreatingAccount) {
@@ -1723,7 +1724,7 @@ async function createAccount(studentId) {
         // عرض رسالة تحميل
         Swal.fire({
             title: 'جاري إنشاء الحساب...',
-            html: 'الرجاء الانتظار، جاري نقل كل البيانات...',
+            html: 'الرجاء الانتظار، جاري تنظيم البيانات...',
             allowOutsideClick: false,
             showConfirmButton: false,
             willOpen: () => { Swal.showLoading(); }
@@ -1745,126 +1746,132 @@ async function createAccount(studentId) {
             throw new Error('هذا البريد الإلكتروني مستخدم بالفعل');
         }
         
-        // 3. إنشاء object كامل بكل البيانات من individualStudents
+        // 3. إنشاء بنية منظمة للمستخدم
         const userData = {
-            // معرف المستخدم
+            // ============ 1. معرف الحساب الأساسي ============
             id: formData.slug,
             
-            // البيانات الأساسية من العميل
-            name: customer.name || 'غير محدد',
-            email: formData.email,
-            tempPassword: btoa(formData.password),
-            whatsapp: customer.whatsapp || '',
-            phone: customer.whatsapp || '',
+            // ============ 2. البيانات الشخصية الأساسية ============
+            personalInfo: {
+                name: customer.name || 'غير محدد',
+                title: customer.title || '',
+                email: formData.email,
+                whatsapp: customer.whatsapp || '',
+                phone: customer.phone || customer.whatsapp || '',
+                age: customer.age || null,
+                gender: customer.gender || '',
+                country: customer.country || '',
+                city: customer.city || '',
+                job: customer.job || '',
+                source: customer.source || ''
+            },
             
-            // كل البيانات الشخصية
-            title: customer.title || '',
-            age: customer.age || null,
-            country: customer.country || '',
-            city: customer.city || '',
-            job: customer.job || '',
-            source: customer.source || '',
+            // ============ 3. بيانات الحماية والوصول ============
+            auth: {
+                tempPassword: btoa(formData.password),
+                lastLogin: null,
+                loginCount: 0,
+                createdAt: new Date().toISOString(),
+                createdBy: 'admin',
+                createdFrom: 'individual-students-page'
+            },
             
-            // التوقعات والخبرات
-            expectations: customer.expectations || '',
-            experience: customer.experience || '',
-            applicationPlan: customer.applicationPlan || '',
-            notes: customer.notes || '',
+            // ============ 4. التفضيلات والتوقعات ============
+            preferences: {
+                expectations: customer.expectations || '',
+                experience: customer.experience || '',
+                applicationPlan: customer.applicationPlan || '',
+                notes: customer.notes || '',
+                paymentMethods: customer.paymentMethods || []
+            },
             
-            // طرق الدفع المفضلة
-            paymentMethods: customer.paymentMethods || [],
-            
-            // معلومات الدورة الأساسية
-            courses: [{
-                id: student.courseId || Date.now().toString(),
-                title: student.courseName || 'دورة غير محددة',
-                type: 'individual',
-                enrolledAt: new Date().toISOString(),
-                price: student.pricing?.finalPriceNumber || 0,
-                originalPrice: student.pricing?.basePriceNumber || 0,
+            // ============ 5. حالة الحساب ============
+            accountStatus: {
                 status: 'active',
-                originalBookingId: originalBookingId
+                level: student.totalSavings > 2000 ? 'VIP_GOLD' : 
+                       student.totalSavings > 1000 ? 'VIP' :
+                       student.dataCompleteness?.percentage > 80 ? 'PREMIUM' : 'STANDARD',
+                verified: false,
+                suspended: false,
+                suspendReason: null
+            },
+            
+            // ============ 6. الدورات المسجلة (منظمة) ============
+            enrollments: [],  // سيتم ملؤها لاحقاً عند تخصيص الدورات
+            
+            // ============ 7. المعلومات المالية العامة ============
+            financial: {
+                totalPaid: student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0,
+                totalDue: 0,
+                totalSavings: student.totalSavings || 0,
+                loyaltyPoints: Math.floor(student.totalSavings / 10) || 0,
+                wallet: {
+                    balance: 0,
+                    transactions: []
+                }
+            },
+            
+            // ============ 8. سجل الحجوزات ============
+            bookingHistory: [{
+                bookingId: originalBookingId,
+                bookingDate: student.bookingDate || student.timestamp,
+                courseName: student.courseName || 'غير محدد',
+                courseId: student.courseId || '',
+                transferredAt: student.transferredAt || student.transferInfo?.transferredAt,
+                
+                // البيانات المالية للحجز
+                pricing: {
+                    basePrice: student.pricing?.basePriceNumber || 0,
+                    finalPrice: student.pricing?.finalPriceNumber || 0,
+                    discounts: student.discounts || [],
+                    activeOffer: student.activeOffer || null,
+                    coupon: student.coupon || null,
+                    totalSavings: student.totalSavings || 0
+                },
+                
+                // حالة الدفع للحجز
+                payment: {
+                    status: student.paymentInfo?.status || 'pending',
+                    confirmed: student.paymentConfirmed || false,
+                    method: student.paymentMethod || null,
+                    reference: student.paymentReference || null,
+                    paidAt: student.paymentInfo?.paidAt || null,
+                    confirmedAt: student.paymentInfo?.paymentConfirmedAt || null,
+                    confirmedBy: student.paymentInfo?.paymentConfirmedBy || null
+                }
             }],
             
-            // نسخ كل معلومات التسعير والخصومات
-           // نسخ كل معلومات التسعير والخصومات والدفع
-financialData: {
-    pricing: student.pricing || {},
-    discounts: student.discounts || [],
-    totalSavings: student.totalSavings || 0,
-    totalSavingsText: student.totalSavingsText || '0 ج.م',
-    activeOffer: student.activeOffer || null,
-    coupon: student.coupon || null,
-    payment: student.payment || {},
-    journey: student.journey || {},
-    
-    // معلومات الدفع المؤكدة - مهم جداً
-    paymentStatus: {
-        confirmed: student.paymentConfirmed || false,
-        method: student.paymentMethod || null,
-        reference: student.paymentReference || null,
-        confirmedAt: student.paymentInfo?.paymentConfirmedAt || null,
-        confirmedBy: student.paymentInfo?.paymentConfirmedBy || null,
-        paidAt: student.paymentInfo?.paidAt || null,
-        details: student.paymentInfo?.paymentDetails || null
-    }
-},
-
-// معلومات الدفع في المستوى الرئيسي أيضاً للتوافق
-paymentConfirmed: student.paymentConfirmed || false,
-paymentMethod: student.paymentMethod || null,
-paymentReference: student.paymentReference || null,
-paymentInfo: student.paymentInfo || {},
-            // معلومات التحويل والحجز الأصلي
-            bookingInfo: {
-                originalBookingId: originalBookingId,
-                bookingType: student.bookingType || 'individual',
-                bookingDate: student.bookingDate || student.timestamp,
-                transferredAt: student.transferredAt || student.transferInfo?.transferredAt,
-                transferInfo: student.transferInfo || {},
-                dataCompleteness: student.dataCompleteness || {}
+            // ============ 9. الإحصائيات والتقدم ============
+            statistics: {
+                coursesEnrolled: 1,
+                coursesCompleted: 0,
+                totalSpent: student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0,
+                averageProgress: 0,
+                lastActivityDate: new Date().toISOString()
             },
             
-            // حالة الحساب والتقدم
-            accountStatus: 'active',
-            accountCreated: true,
-            accountCreatedAt: new Date().toISOString(),
-            progress: {
-                accountSetup: 100,
-                courseAssignment: 0,
-                firstPayment: student.status === 'paid' ? 100 : 0,
-                welcomeMessage: 0,
-                totalProgress: 25
-            },
-            
-            // مستوى العميل بناءً على التوفير
-            customerLevel: student.totalSavings > 2000 ? 'VIP_GOLD' : 
-                          student.totalSavings > 1000 ? 'VIP' :
-                          student.dataCompleteness?.percentage > 80 ? 'PREMIUM' : 'STANDARD',
-            
-            // نقاط الولاء الابتدائية
-            loyaltyPoints: Math.floor(student.totalSavings / 10) || 0,
-            
-            // الطوابع الزمنية
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            createdFrom: 'individual-students-page',
-            
-            // معلومات إضافية للنظام
+            // ============ 10. البيانات الفنية ============
             metadata: {
+                dataCompleteness: student.dataCompleteness || {},
                 originalStudentDocId: studentId,
-                createdBy: 'admin',
                 ipAddress: 'system',
                 userAgent: navigator.userAgent,
                 platform: 'web'
+            },
+            
+            // ============ 11. الطوابع الزمنية ============
+            timestamps: {
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastModifiedBy: 'admin'
             }
         };
         
-        // 4. حفظ في users collection مع كل البيانات
-        console.log('📦 نقل كل البيانات إلى users:', userData);
+        // 4. حفظ في users collection
+        console.log('📦 حفظ البيانات المنظمة:', userData);
         
         await db.collection('users').doc(formData.slug).set(userData);
-        console.log('✅ تم إنشاء المستخدم في users بكل البيانات');
+        console.log('✅ تم إنشاء المستخدم بالبنية المنظمة');
         
         // 5. تحديث individualStudents
         await db.collection('individualStudents').doc(studentId).set({
@@ -1876,7 +1883,7 @@ paymentInfo: student.paymentInfo || {},
             progress: {
                 accountSetup: 100,
                 courseAssignment: 0,
-                firstPayment: student.status === 'paid' ? 100 : 0,
+                firstPayment: student.paymentConfirmed ? 100 : 0,
                 welcomeMessage: 0,
                 totalProgress: 25
             }
@@ -1897,12 +1904,11 @@ paymentInfo: student.paymentInfo || {},
                 progress: {
                     accountSetup: 100,
                     courseAssignment: 0,
-                    firstPayment: student.status === 'paid' ? 100 : 0,
+                    firstPayment: student.paymentConfirmed ? 100 : 0,
                     welcomeMessage: 0,
                     totalProgress: 25
                 }
             };
-            console.log('✅ تم تحديث البيانات المحلية');
         }
         
         // 7. إرسال البيانات عبر WhatsApp إذا طُلب
@@ -1918,6 +1924,7 @@ paymentInfo: student.paymentInfo || {},
 
 ${student.totalSavings > 0 ? `💰 لقد وفرت: ${student.totalSavingsText}` : ''}
 ${student.courseName ? `📚 الدورة: ${student.courseName}` : ''}
+${student.paymentConfirmed ? '✅ الدفع: مؤكد' : '⏳ الدفع: بانتظار التأكيد'}
 
 🔗 رابط الدخول:
 https://fouad-perspective.web.app/login
@@ -1943,10 +1950,8 @@ https://fouad-perspective.web.app/login
                         <p><strong>🆔 المعرف:</strong> ${formData.slug}</p>
                         <p><strong>📧 البريد:</strong> ${formData.email}</p>
                         <p><strong>🔑 كلمة المرور:</strong> ${formData.password}</p>
-                        ${student.totalSavings > 0 ? `
-                            <p><strong>💰 التوفير:</strong> ${student.totalSavingsText}</p>
-                        ` : ''}
-                        <p><strong>📊 البيانات المنقولة:</strong> 100% كاملة</p>
+                        <p><strong>📊 البنية:</strong> منظمة 100%</p>
+                        ${student.paymentConfirmed ? '<p><strong>💳 الدفع:</strong> مؤكد ✓</p>' : ''}
                     </div>
                     ${formData.sendCredentials ? '<p style="color: #10B981; margin-top: 10px;">✔ تم إرسال البيانات عبر WhatsApp</p>' : ''}
                 </div>
@@ -1955,7 +1960,7 @@ https://fouad-perspective.web.app/login
             confirmButtonColor: '#10B981'
         });
         
-        // 9. تحديث العرض مباشرة
+        // 9. تحديث العرض
         filterByTab(currentFilter || 'all');
         updateStatistics();
         
@@ -2030,6 +2035,55 @@ async function verifyPaymentTransfer(userId) {
         return false;
     }
 }
+        // دالة لعرض البنية المنظمة للمستخدم
+async function displayOrganizedUserStructure(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            console.log('========================================');
+            console.log('📋 البنية المنظمة للمستخدم');
+            console.log('========================================');
+            
+            console.log('\n1️⃣ المعلومات الشخصية:');
+            console.table(userData.personalInfo);
+            
+            console.log('\n2️⃣ حالة الحساب:');
+            console.table(userData.accountStatus);
+            
+            console.log('\n3️⃣ المعلومات المالية:');
+            console.table(userData.financial);
+            
+            console.log('\n4️⃣ الدورات المسجلة:');
+            if (userData.enrollments?.length > 0) {
+                userData.enrollments.forEach((e, i) => {
+                    console.log(`   دورة ${i+1}: ${e.title} - ${e.startDate} إلى ${e.endDate}`);
+                });
+            } else {
+                console.log('   لا توجد دورات مسجلة');
+            }
+            
+            console.log('\n5️⃣ سجل الحجوزات:');
+            if (userData.bookingHistory?.length > 0) {
+                userData.bookingHistory.forEach((b, i) => {
+                    console.log(`   حجز ${i+1}: ${b.courseName} - ${b.pricing?.finalPrice} ج.م - دفع ${b.payment?.confirmed ? 'مؤكد ✓' : 'غير مؤكد'}`);
+                });
+            }
+            
+            console.log('\n6️⃣ الإحصائيات:');
+            console.table(userData.statistics);
+            
+            console.log('========================================');
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('❌ خطأ في عرض البنية:', error);
+        return false;
+    }
+}
+
+window.displayOrganizedUserStructure = displayOrganizedUserStructure;
 
 window.verifyPaymentTransfer = verifyPaymentTransfer;
 // ربط الدالة بـ window للاستخدام
@@ -3327,10 +3381,67 @@ async function assignCourseToStudent(studentId) {
         }
         
         // حفظ في users collection
-        await db.collection('users').doc(student.userId).update({
-            enrollments: updatedEnrollments,
-            lastEnrollmentUpdate: new Date().toISOString()
+      // حفظ في users collection بالبنية المنظمة
+const userDoc = await db.collection('users').doc(student.userId).get();
+if (userDoc.exists) {
+    const userData = userDoc.data();
+    
+    // تحديث enrollments فقط
+    const updatedEnrollments = userData.enrollments || [];
+    const existingIndex = updatedEnrollments.findIndex(e => e.title === currentCourseName);
+    
+    if (existingIndex !== -1) {
+        updatedEnrollments[existingIndex] = {
+            ...updatedEnrollments[existingIndex],
+            ...enrollmentData,
+            renewedAt: new Date().toISOString()
+        };
+    } else {
+        updatedEnrollments.push(enrollmentData);
+    }
+    
+    // إضافة الحجز الجديد في التاريخ إذا كان مختلف
+    const bookingHistory = userData.bookingHistory || [];
+    const existingBooking = bookingHistory.find(b => b.bookingId === student.originalBookingId);
+    
+    if (!existingBooking) {
+        bookingHistory.push({
+            bookingId: student.originalBookingId || student.id,
+            bookingDate: new Date().toISOString(),
+            courseName: currentCourseName,
+            courseId: currentCourseId,
+            pricing: {
+                basePrice: pricing.basePriceNumber || 0,
+                finalPrice: pricing.finalPriceNumber || 0,
+                discounts: discounts,
+                activeOffer: activeOffer,
+                coupon: coupon,
+                totalSavings: totalSavings
+            },
+            payment: {
+                status: student.paymentInfo?.status || 'pending',
+                confirmed: student.paymentConfirmed || false,
+                method: student.paymentMethod || null,
+                reference: student.paymentReference || null
+            },
+            assignedAt: new Date().toISOString()
         });
+    }
+    
+    // تحديث الإحصائيات
+    const newTotalSpent = (userData.financial?.totalPaid || 0) + (pricing.finalPriceNumber || 0);
+    const newTotalSavings = (userData.financial?.totalSavings || 0) + totalSavings;
+    
+    await db.collection('users').doc(student.userId).update({
+        'enrollments': updatedEnrollments,
+        'bookingHistory': bookingHistory,
+        'financial.totalSavings': newTotalSavings,
+        'statistics.coursesEnrolled': updatedEnrollments.length,
+        'statistics.lastActivityDate': new Date().toISOString(),
+        'timestamps.updatedAt': new Date().toISOString(),
+        'timestamps.lastModifiedBy': 'admin'
+    });
+}
         
         // تحديث individualStudents
         await db.collection('individualStudents').doc(studentId).update({
