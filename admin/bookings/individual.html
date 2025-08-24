@@ -1799,47 +1799,89 @@ async function createAccount(studentId) {
             // ============ 6. الدورات المسجلة (منظمة) ============
             enrollments: [],  // سيتم ملؤها لاحقاً عند تخصيص الدورات
             
-            // ============ 7. المعلومات المالية العامة ============
-            financial: {
-                totalPaid: student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0,
-                totalDue: 0,
-                totalSavings: student.totalSavings || 0,
-                loyaltyPoints: Math.floor(student.totalSavings / 10) || 0,
-                wallet: {
-                    balance: 0,
-                    transactions: []
-                }
-            },
+           // ============ 7. المعلومات المالية العامة ============
+financial: {
+    totalPaid: student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0,
+    totalDue: !student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0,
+    totalSavings: student.totalSavings || 0,
+    loyaltyPoints: Math.floor(student.totalSavings / 10) || 0,
+    
+    // تفاصيل طرق الدفع المفضلة
+    preferredPaymentMethods: customer.paymentMethods || [],
+    
+    // سجل المدفوعات
+    paymentHistory: student.paymentConfirmed ? [{
+        date: student.paymentInfo?.paidAt || new Date().toISOString(),
+        amount: student.pricing?.finalPriceNumber || 0,
+        method: student.paymentMethod || null,
+        reference: student.paymentReference || null,
+        confirmed: true,
+        courseId: student.courseId || '',
+        courseName: student.courseName || ''
+    }] : [],
+    
+    // المحفظة
+    wallet: {
+        balance: 0,
+        transactions: [],
+        lastUpdated: new Date().toISOString()
+    },
+    
+    // ملخص الخصومات
+    discountsSummary: {
+        totalDiscountsAmount: student.totalSavings || 0,
+        timeDiscounts: student.discounts?.filter(d => d.type === 'time').reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
+        couponDiscounts: student.discounts?.filter(d => d.type === 'coupon').reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
+        cashDiscounts: student.discounts?.filter(d => d.type === 'cash').reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
+        groupDiscounts: student.discounts?.filter(d => d.type === 'group').reduce((sum, d) => sum + (d.amount || 0), 0) || 0
+    }
+},
             
-            // ============ 8. سجل الحجوزات ============
-            bookingHistory: [{
-                bookingId: originalBookingId,
-                bookingDate: student.bookingDate || student.timestamp,
-                courseName: student.courseName || 'غير محدد',
-                courseId: student.courseId || '',
-                transferredAt: student.transferredAt || student.transferInfo?.transferredAt,
-                
-                // البيانات المالية للحجز
-                pricing: {
-                    basePrice: student.pricing?.basePriceNumber || 0,
-                    finalPrice: student.pricing?.finalPriceNumber || 0,
-                    discounts: student.discounts || [],
-                    activeOffer: student.activeOffer || null,
-                    coupon: student.coupon || null,
-                    totalSavings: student.totalSavings || 0
-                },
-                
-                // حالة الدفع للحجز
-                payment: {
-                    status: student.paymentInfo?.status || 'pending',
-                    confirmed: student.paymentConfirmed || false,
-                    method: student.paymentMethod || null,
-                    reference: student.paymentReference || null,
-                    paidAt: student.paymentInfo?.paidAt || null,
-                    confirmedAt: student.paymentInfo?.paymentConfirmedAt || null,
-                    confirmedBy: student.paymentInfo?.paymentConfirmedBy || null
-                }
-            }],
+           // ============ 8. سجل الحجوزات ============
+bookingHistory: [{
+    bookingId: originalBookingId,
+    bookingDate: student.bookingDate || student.timestamp,
+    courseName: student.courseName || 'غير محدد',
+    courseId: student.courseId || '',
+    transferredAt: student.transferredAt || student.transferInfo?.transferredAt,
+    
+    // البيانات المالية الكاملة للحجز
+    pricing: {
+        basePrice: student.pricing?.basePriceNumber || 0,
+        basePriceText: student.pricing?.basePrice || '0 ج.م',
+        finalPrice: student.pricing?.finalPriceNumber || 0,
+        finalPriceText: student.pricing?.finalPrice || '0 ج.م',
+        discounts: student.discounts || [],
+        activeOffer: student.activeOffer || null,
+        coupon: student.coupon || null,
+        totalSavings: student.totalSavings || 0,
+        totalSavingsText: student.totalSavingsText || '0 ج.م'
+    },
+    
+    // تفاصيل طريقة الدفع الكاملة
+    payment: {
+        status: student.paymentInfo?.status || student.status || 'pending',
+        confirmed: student.paymentConfirmed || false,
+        method: student.paymentMethod || null,
+        methodText: student.payment?.method || null,
+        reference: student.paymentReference || null,
+        paidAt: student.paymentInfo?.paidAt || null,
+        confirmedAt: student.paymentInfo?.paymentConfirmedAt || null,
+        confirmedBy: student.paymentInfo?.paymentConfirmedBy || null,
+        
+        // تفاصيل الأقساط إن وجدت
+        installmentPlan: {
+            type: student.payment?.code || 'cash', // cash أو installment
+            details: student.payment?.installmentDetails || null,
+            htmlDetails: student.payment?.installmentHTML || null,
+            numberOfInstallments: null, // سيتم حسابها من التفاصيل
+            installmentAmount: null // سيتم حسابها
+        }
+    },
+    
+    // نوع الرحلة
+    journey: student.journey || { type: 'individual' }
+}],
             
             // ============ 9. الإحصائيات والتقدم ============
             statistics: {
@@ -2082,7 +2124,70 @@ async function displayOrganizedUserStructure(userId) {
         return false;
     }
 }
+// دالة للتحقق من اكتمال المعلومات المالية
+async function verifyFinancialDataTransfer(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            console.log('💰 ========= التحقق من المعلومات المالية =========');
+            
+            console.log('\n📊 الملخص المالي:');
+            console.log('- إجمالي المدفوع:', userData.financial?.totalPaid || 0);
+            console.log('- إجمالي المستحق:', userData.financial?.totalDue || 0);
+            console.log('- إجمالي التوفير:', userData.financial?.totalSavings || 0);
+            console.log('- نقاط الولاء:', userData.financial?.loyaltyPoints || 0);
+            
+            console.log('\n💳 طرق الدفع المفضلة:');
+            console.log(userData.financial?.preferredPaymentMethods || []);
+            
+            console.log('\n📝 سجل المدفوعات:');
+            if (userData.financial?.paymentHistory?.length > 0) {
+                userData.financial.paymentHistory.forEach((p, i) => {
+                    console.log(`   دفعة ${i+1}: ${p.amount} ج.م - ${p.method} - ${p.confirmed ? 'مؤكدة ✓' : 'غير مؤكدة'}`);
+                });
+            }
+            
+            console.log('\n🎫 ملخص الخصومات:');
+            console.table(userData.financial?.discountsSummary || {});
+            
+            console.log('\n📚 تفاصيل الدورات المالية:');
+            if (userData.enrollments?.length > 0) {
+                userData.enrollments.forEach((e, i) => {
+                    console.log(`\n   دورة ${i+1}: ${e.title}`);
+                    console.log('   - السعر الأصلي:', e.financialData?.originalPrice || 0);
+                    console.log('   - السعر النهائي:', e.financialData?.finalPrice || 0);
+                    console.log('   - طريقة الدفع:', e.financialData?.paymentDetails?.method || 'غير محدد');
+                    console.log('   - نوع الدفع:', e.financialData?.paymentDetails?.methodCode || 'cash');
+                    console.log('   - تفاصيل الأقساط:', e.financialData?.paymentDetails?.installmentDetails || 'لا يوجد');
+                    console.log('   - الدفع مؤكد:', e.financialData?.paymentDetails?.paymentConfirmed ? 'نعم ✓' : 'لا');
+                });
+            }
+            
+            console.log('\n📋 سجل الحجوزات المالي:');
+            if (userData.bookingHistory?.length > 0) {
+                userData.bookingHistory.forEach((b, i) => {
+                    console.log(`\n   حجز ${i+1}: ${b.courseName}`);
+                    console.log('   - السعر الأساسي:', b.pricing?.basePrice || 0);
+                    console.log('   - السعر النهائي:', b.pricing?.finalPrice || 0);
+                    console.log('   - التوفير:', b.pricing?.totalSavings || 0);
+                    console.log('   - طريقة الدفع:', b.payment?.method || 'غير محدد');
+                    console.log('   - نوع الخطة:', b.payment?.installmentPlan?.type || 'cash');
+                    console.log('   - تفاصيل الأقساط:', b.payment?.installmentPlan?.details || 'دفعة واحدة');
+                });
+            }
+            
+            console.log('=====================================');
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('❌ خطأ في التحقق المالي:', error);
+        return false;
+    }
+}
 
+window.verifyFinancialDataTransfer = verifyFinancialDataTransfer;
 window.displayOrganizedUserStructure = displayOrganizedUserStructure;
 
 window.verifyPaymentTransfer = verifyPaymentTransfer;
@@ -3335,34 +3440,49 @@ async function assignCourseToStudent(studentId) {
             willOpen: () => { Swal.showLoading(); }
         });
         
-        // إعداد بيانات التخصيص
-        const enrollmentData = {
-            id: currentCourseId,
-            type: 'individual',
-            title: currentCourseName,
-            startDate: formData.startDate,
-            endDate: formData.endDate,
-            accessType: 'full',
-            enrolledAt: new Date().toISOString(),
-            lastUpdated: new Date().toISOString(),
-            notes: formData.notes || '',
-            
-            // البيانات المالية الكاملة
-            financialData: {
-                originalPrice: pricing.basePriceNumber || 0,
-                finalPrice: pricing.finalPriceNumber || 0,
-                totalSavings: totalSavings,
-                discounts: discounts,
-                activeOffer: activeOffer,
-                coupon: coupon,
-                currency: 'EGP'
-            },
-            
-            // معلومات الحجز الأصلي
-            originalBookingId: student.originalBookingId || student.id,
-            assignedBy: 'admin',
-            assignedAt: new Date().toISOString()
-        };
+      // إعداد بيانات التخصيص الكاملة
+const enrollmentData = {
+    id: currentCourseId,
+    type: 'individual',
+    title: currentCourseName,
+    startDate: formData.startDate,
+    endDate: formData.endDate,
+    accessType: 'full',
+    enrolledAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+    notes: formData.notes || '',
+    
+    // البيانات المالية الكاملة مع تفاصيل الدفع
+    financialData: {
+        originalPrice: pricing.basePriceNumber || 0,
+        originalPriceText: pricing.basePrice || '0 ج.م',
+        finalPrice: pricing.finalPriceNumber || 0,
+        finalPriceText: pricing.finalPrice || '0 ج.م',
+        totalSavings: totalSavings,
+        totalSavingsText: student.totalSavingsText || '0 ج.م',
+        discounts: discounts,
+        activeOffer: activeOffer,
+        coupon: coupon,
+        currency: 'EGP',
+        
+        // تفاصيل طريقة الدفع
+        paymentDetails: {
+            method: student.paymentMethod || student.payment?.method || null,
+            methodCode: student.payment?.code || 'cash',
+            installmentDetails: student.payment?.installmentDetails || null,
+            installmentHTML: student.payment?.installmentHTML || null,
+            paymentConfirmed: student.paymentConfirmed || false,
+            paymentReference: student.paymentReference || null,
+            paidAt: student.paymentInfo?.paidAt || null,
+            confirmedAt: student.paymentInfo?.paymentConfirmedAt || null
+        }
+    },
+    
+    // معلومات الحجز الأصلي
+    originalBookingId: student.originalBookingId || student.id,
+    assignedBy: 'admin',
+    assignedAt: new Date().toISOString()
+};
         
         // تحديث أو إضافة في enrollments
         const updatedEnrollments = [...existingEnrollments];
