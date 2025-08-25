@@ -1580,23 +1580,10 @@ async function linkExistingUser(studentId, userId, student) {
                     originalBookingId: student.originalBookingId || student.id
                 });
                 
-              // جلب البيانات الحالية للمستخدم
-const currentUserData = userDoc.data();
-
-// حساب المجاميع المالية الجديدة
-const smartTotals = await calculateSmartFinancialTotals(student, currentUserData);
-
-// تحديث البيانات
-await db.collection('users').doc(userId).update({
-    courses: courses,
-    'financial.totalPaid': smartTotals.totalPaid,
-    'financial.totalDue': smartTotals.totalDue,
-    'financial.totalSavings': smartTotals.totalSavings,
-    'financial.loyaltyPoints': smartTotals.loyaltyPoints,
-    updatedAt: new Date().toISOString()
-});
-
-console.log('💰 تم تحديث المجاميع المالية للمستخدم الموجود');
+                await db.collection('users').doc(userId).update({
+                    courses: courses,
+                    updatedAt: new Date().toISOString()
+                });
                 
                 // تحديث individualStudents
                 await db.collection('individualStudents').doc(studentId).set({
@@ -1642,7 +1629,6 @@ console.log('💰 تم تحديث المجاميع المالية للمستخد
 window.createOrLinkAccount = createOrLinkAccount;
 window.linkExistingUser = linkExistingUser;
 
-        
 // إنشاء حساب محسّن
 // ==================== إنشاء حساب محسّن ونظيف ====================
 // إنشاء حساب محسّن مع نقل كل البيانات
@@ -1782,14 +1768,8 @@ async function createAccount(studentId) {
         if (!emailQuery.empty) {
             throw new Error('هذا البريد الإلكتروني مستخدم بالفعل');
         }
-
-        const smartTotals = await calculateSmartFinancialTotals(student, null);
-console.log('💰 المجاميع المالية المحسوبة:', smartTotals);
         
         // 3. إنشاء بنية منظمة للمستخدم
-// حساب المجاميع المالية أولاً
-
-        
         const userData = {
             // ============ 1. معرف الحساب الأساسي ============
             id: formData.slug,
@@ -1842,20 +1822,49 @@ console.log('💰 المجاميع المالية المحسوبة:', smartTotal
             // ============ 6. الدورات المسجلة (منظمة) ============
             enrollments: [],  // سيتم ملؤها لاحقاً عند تخصيص الدورات
             
-       // ============ 7. المعلومات المالية العامة ============
+          // ============ 7. المعلومات المالية العامة ============
 financial: {
-    totalPaid: smartTotals.totalPaid,
-    totalDue: smartTotals.totalDue,
-    totalSavings: smartTotals.totalSavings,
-    loyaltyPoints: smartTotals.loyaltyPoints,
+    // حساب المدفوع الفعلي بناءً على نوع الدفع
+    totalPaid: (() => {
+        if (student.paymentInfo?.isInstallment) {
+            // في حالة الأقساط - المدفوع الفعلي فقط
+            return student.paymentInfo.paidAmount || 0;
+        } else if (student.paymentConfirmed || student.paymentInfo?.fullyPaid) {
+            // في حالة الدفع الكامل
+            return student.pricing?.finalPriceNumber || 0;
+        }
+        // غير مدفوع
+        return 0;
+    })(),
+    
+    // حساب المستحق
+    totalDue: (() => {
+        if (student.paymentInfo?.isInstallment) {
+            // في حالة الأقساط - المتبقي
+            return student.paymentInfo.remainingAmount || 0;
+        } else if (!student.paymentConfirmed && !student.paymentInfo?.fullyPaid) {
+            // غير مدفوع بالكامل
+            return student.pricing?.finalPriceNumber || 0;
+        }
+        // مدفوع بالكامل
+        return 0;
+    })(),
+    
+    // التوفير الصحيح (مرة واحدة فقط!)
+    totalSavings: student.totalSavings || 0,
+    
+    // نقاط الولاء
+    loyaltyPoints: Math.floor((student.totalSavings || 0) / 10),
     
     // تفاصيل طرق الدفع المفضلة
     preferredPaymentMethods: customer.paymentMethods || [],
     
     // سجل المدفوعات
-    paymentHistory: student.paymentConfirmed ? [{
-        date: student.paymentInfo?.paidAt || new Date().toISOString(),
-        amount: student.pricing?.finalPriceNumber || 0,
+    paymentHistory: (student.paymentConfirmed || student.paymentInfo?.paidAmount > 0) ? [{
+    date: student.paymentInfo?.paidAt || new Date().toISOString(),
+    amount: student.paymentInfo?.isInstallment ? 
+            (student.paymentInfo?.paidAmount || 0) : 
+            (student.pricing?.finalPriceNumber || 0),
         method: student.paymentMethod || null,
         reference: student.paymentReference || null,
         confirmed: true,
@@ -1866,7 +1875,7 @@ financial: {
     // معلومات الأقساط إن وجدت
 installmentInfo: student.paymentInfo?.isInstallment ? {
     isActive: true,
-    totalAmount: student.paymentInfo?.totalAmount || 0,
+    totalAmount: student.paymentInfo?.totalAmount || student.pricing?.finalPriceNumber || 0,
     paidAmount: student.paymentInfo?.paidAmount || 0,
     remainingAmount: student.paymentInfo?.remainingAmount || 0,
     schedule: student.paymentInfo?.installmentSchedule || [],
@@ -3757,38 +3766,14 @@ if (userDoc.exists) {
         });
     }
     
-    // حساب المجاميع المالية بشكل صحيح
-let newFinancialTotals = {
-    totalPaid: userData.financial?.totalPaid || 0,
-    totalDue: userData.financial?.totalDue || 0,
-    totalSavings: (userData.financial?.totalSavings || 0) + totalSavings
-};
-
-// تحديد كيفية إضافة السعر الجديد
-if (student.paymentConfirmed) {
-    // دورة مدفوعة بالكامل
-    newFinancialTotals.totalPaid += (pricing.finalPriceNumber || 0);
-} else if (student.paymentInfo?.isInstallment) {
-    // دورة بالأقساط
-    newFinancialTotals.totalPaid += (student.paymentInfo.paidAmount || 0);
-    newFinancialTotals.totalDue += (student.paymentInfo.remainingAmount || 0);
-} else {
-    // دورة غير مدفوعة
-    newFinancialTotals.totalDue += (pricing.finalPriceNumber || 0);
-}
-
-// إعادة حساب نقاط الولاء
-newFinancialTotals.loyaltyPoints = Math.floor(newFinancialTotals.totalSavings / 10);
-
-console.log('💰 المجاميع المالية الجديدة:', newFinancialTotals);
+    // تحديث الإحصائيات
+    const newTotalSpent = (userData.financial?.totalPaid || 0) + (pricing.finalPriceNumber || 0);
+    const newTotalSavings = (userData.financial?.totalSavings || 0) + totalSavings;
     
-   await db.collection('users').doc(student.userId).update({
-    'enrollments': updatedEnrollments,
-    'bookingHistory': bookingHistory,
-    'financial.totalPaid': newFinancialTotals.totalPaid,
-    'financial.totalDue': newFinancialTotals.totalDue,
-    'financial.totalSavings': newFinancialTotals.totalSavings,
-    'financial.loyaltyPoints': newFinancialTotals.loyaltyPoints,
+    await db.collection('users').doc(student.userId).update({
+        'enrollments': updatedEnrollments,
+        'bookingHistory': bookingHistory,
+        'financial.totalSavings': newTotalSavings,
         'statistics.coursesEnrolled': updatedEnrollments.length,
         'statistics.lastActivityDate': new Date().toISOString(),
         'timestamps.updatedAt': new Date().toISOString(),
@@ -3862,63 +3847,6 @@ window.resendWelcome = resendWelcome;
 window.generateStrongPassword = generateStrongPassword;
 window.generateUniqueSlug = generateUniqueSlug;
 
-        // ==================== دالة حساب المجاميع المالية الذكية ====================
-async function calculateSmartFinancialTotals(student, existingUserData = null) {
-    console.log('🧮 حساب المجاميع المالية الذكية...');
-    
-    let totals = {
-        totalPaid: 0,
-        totalDue: 0,
-        totalSavings: 0,
-        loyaltyPoints: 0
-    };
-    
-    // 1. إذا كان هناك بيانات مستخدم موجودة، نبدأ بها
-    if (existingUserData && existingUserData.financial) {
-        totals.totalPaid = existingUserData.financial.totalPaid || 0;
-        totals.totalDue = existingUserData.financial.totalDue || 0;
-        totals.totalSavings = existingUserData.financial.totalSavings || 0;
-        totals.loyaltyPoints = existingUserData.financial.loyaltyPoints || 0;
-        
-        console.log('📊 القيم الموجودة مسبقاً:', totals);
-    }
-    
-    // 2. حساب قيم الحجز الحالي
-    const currentPrice = student.pricing?.finalPriceNumber || 0;
-    const currentSavings = student.totalSavings || 0;
-    
-    // 3. تحديد حالة الدفع للحجز الحالي
-    if (student.paymentInfo?.isInstallment) {
-        // حالة الأقساط
-        const paidAmount = student.paymentInfo?.paidAmount || 0;
-        const remainingAmount = student.paymentInfo?.remainingAmount || 0;
-        
-        totals.totalPaid += paidAmount;
-        totals.totalDue += remainingAmount;
-        
-        console.log('💳 حجز بالأقساط - مدفوع:', paidAmount, 'متبقي:', remainingAmount);
-    } else if (student.paymentConfirmed || student.paymentInfo?.fullyPaid) {
-        // حالة الدفع الكامل
-        totals.totalPaid += currentPrice;
-        
-        console.log('✅ حجز مدفوع بالكامل:', currentPrice);
-    } else {
-        // حالة عدم الدفع
-        totals.totalDue += currentPrice;
-        
-        console.log('⏳ حجز غير مدفوع:', currentPrice);
-    }
-    
-    // 4. إضافة التوفير
-    totals.totalSavings += currentSavings;
-    
-    // 5. إعادة حساب نقاط الولاء الكلية
-    totals.loyaltyPoints = Math.floor(totals.totalSavings / 10);
-    
-    console.log('✅ المجاميع النهائية:', totals);
-    return totals;
-}
-        
     </script>
 </body>
 </html>
