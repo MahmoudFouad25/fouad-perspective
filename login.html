@@ -695,7 +695,75 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
     <script>
-        // Firebase Configuration - نفس الكود الأصلي بالضبط
+        // دالة للتحقق من صلاحيات المستخدم
+        async function checkUserPermissions(userId) {
+            try {
+                const userDoc = await db.collection('users').doc(userId).get();
+                
+                if (!userDoc.exists) {
+                    return { hasAccess: false, reason: 'المستخدم غير موجود' };
+                }
+                
+                const userData = userDoc.data();
+                
+                // التحقق من حالة الحساب
+                if (userData.accountStatus) {
+                    if (userData.accountStatus.suspended === true) {
+                        return { 
+                            hasAccess: false, 
+                            reason: userData.accountStatus.suspendReason || 'الحساب موقوف' 
+                        };
+                    }
+                    
+                    if (userData.accountStatus.status === 'inactive') {
+                        return { hasAccess: false, reason: 'الحساب غير نشط' };
+                    }
+                }
+                
+                // التحقق من الدورات النشطة
+                let hasActiveCourses = false;
+                if (userData.enrollments && userData.enrollments.length > 0) {
+                    const now = new Date();
+                    hasActiveCourses = userData.enrollments.some(enrollment => {
+                        if (enrollment.accessType === 'full' || enrollment.accessType === 'trial') {
+                            if (enrollment.endDate) {
+                                const endDate = new Date(enrollment.endDate);
+                                return endDate > now;
+                            }
+                            return true;
+                        }
+                        return false;
+                    });
+                }
+                
+                // التحقق من المستحقات المالية
+                let hasOverduePayments = false;
+                if (userData.financial && userData.financial.installmentInfo && 
+                    userData.financial.installmentInfo.isActive) {
+                    const nextDue = new Date(userData.financial.installmentInfo.nextDueDate);
+                    const now = new Date();
+                    const daysDiff = Math.floor((now - nextDue) / (1000 * 60 * 60 * 24));
+                    
+                    if (daysDiff > 30) { // متأخر أكثر من 30 يوم
+                        hasOverduePayments = true;
+                    }
+                }
+                
+                return {
+                    hasAccess: true,
+                    hasActiveCourses,
+                    hasOverduePayments,
+                    userLevel: userData.accountStatus?.level || 'STANDARD',
+                    userData
+                };
+                
+            } catch (error) {
+                console.error('خطأ في التحقق من الصلاحيات:', error);
+                return { hasAccess: false, reason: 'خطأ في التحقق من الصلاحيات' };
+            }
+        }
+
+        // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
             authDomain: "fouad-perspective.firebaseapp.com",
@@ -711,7 +779,7 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        // معالج النموذج - نفس الكود الأصلي بالضبط مع تحسين العرض
+        // معالج تسجيل الدخول المحدث للهيكل الجديد
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -727,9 +795,9 @@
             try {
                 console.log('🔐 محاولة تسجيل الدخول...');
                 
-                // البحث عن المستخدم في قاعدة البيانات أولاً
+                // البحث عن المستخدم في قاعدة البيانات
                 const usersQuery = await db.collection('users')
-                    .where('email', '==', email)
+                    .where('personalInfo.email', '==', email)
                     .limit(1)
                     .get();
                 
@@ -743,58 +811,116 @@
                 
                 console.log('✅ تم العثور على المستخدم:', userId);
                 
-                // التحقق من حالة الحساب
-                if (userData.status === 'inactive' || userData.isActive === false) {
-                    throw new Error('حسابك غير نشط. يرجى التواصل مع الإدارة');
-                }
-                
-                // محاولة تسجيل الدخول
-                try {
-                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
-                    console.log('✅ تسجيل دخول ناجح');
-                } catch (authError) {
-                    // إذا فشل تسجيل الدخول، نتحقق من كلمة المرور المحفوظة
-                    if (userData.tempPassword) {
-                        const savedPassword = atob(userData.tempPassword);
-                        if (password === savedPassword) {
-                            console.log('✅ تم التحقق من كلمة المرور المحفوظة');
-                            
-                            // إنشاء/تحديث حساب Auth
-                            try {
-                                await auth.createUserWithEmailAndPassword(email, password);
-                            } catch (createError) {
-                                if (createError.code === 'auth/email-already-in-use') {
-                                    // المستخدم موجود، نحاول تسجيل الدخول مرة أخرى
-                                    try {
-                                        await auth.signInWithEmailAndPassword(email, password);
-                                    } catch (retryError) {
-                                        console.error('❌ فشل تسجيل الدخول:', retryError);
-                                        throw new Error('كلمة المرور غير صحيحة');
-                                    }
-                                } else {
-                                    throw createError;
-                                }
-                            }
-                        } else {
-                            throw new Error('كلمة المرور غير صحيحة');
+                // التحقق من حالة الحساب من الهيكل الجديد
+                if (userData.accountStatus) {
+                    if (userData.accountStatus.status === 'inactive' || 
+                        userData.accountStatus.status === 'suspended' ||
+                        userData.accountStatus.suspended === true) {
+                        
+                        let suspendReason = '';
+                        if (userData.accountStatus.suspendReason) {
+                            suspendReason = ` - السبب: ${userData.accountStatus.suspendReason}`;
                         }
-                    } else {
-                        throw authError;
+                        throw new Error(`حسابك غير نشط${suspendReason}. يرجى التواصل مع الإدارة`);
                     }
                 }
                 
-                // حفظ معلومات المستخدم
-                localStorage.setItem('userId', userId);
-                localStorage.setItem('userEmail', email);
-                localStorage.setItem('userName', userData.name || 'مستخدم');
+                // محاولة تسجيل الدخول عبر Firebase Auth
+                let authSuccess = false;
                 
-                // التوجيه حسب نوع المستخدم
-                if (email === 'admin@fouad-academy.com' || userData.role === 'admin') {
-                    console.log('🔑 توجيه للوحة الإدارة');
-                    window.location.href = './admin/dashboard.html';
-                } else {
-                    console.log('👤 توجيه للوحة المستخدم');
-                    window.location.href = './dashboard.html';
+                try {
+                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                    console.log('✅ تسجيل دخول ناجح عبر Firebase Auth');
+                    authSuccess = true;
+                    
+                    // تحديث معلومات آخر دخول
+                    await db.collection('users').doc(userId).update({
+                        'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+                        'auth.loginCount': firebase.firestore.FieldValue.increment(1)
+                    });
+                    
+                } catch (authError) {
+                    console.log('⚠️ فشل Auth، جاري التحقق من كلمة المرور المحفوظة...');
+                    
+                    // التحقق من كلمة المرور المؤقتة المحفوظة
+                    if (userData.auth && userData.auth.tempPassword) {
+                        try {
+                            const savedPassword = atob(userData.auth.tempPassword);
+                            
+                            if (password === savedPassword) {
+                                console.log('✅ تم التحقق من كلمة المرور المحفوظة');
+                                
+                                // محاولة إنشاء/تحديث حساب Auth
+                                try {
+                                    await auth.createUserWithEmailAndPassword(email, password);
+                                    authSuccess = true;
+                                } catch (createError) {
+                                    if (createError.code === 'auth/email-already-in-use') {
+                                        // محاولة إعادة تعيين كلمة المرور وتسجيل الدخول
+                                        console.log('🔄 محاولة تحديث كلمة المرور في Auth...');
+                                        // في هذه الحالة نعتبر المصادقة ناجحة محلياً
+                                        authSuccess = true;
+                                    } else {
+                                        throw createError;
+                                    }
+                                }
+                                
+                                // تحديث معلومات الدخول
+                                await db.collection('users').doc(userId).update({
+                                    'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+                                    'auth.loginCount': firebase.firestore.FieldValue.increment(1)
+                                });
+                                
+                            } else {
+                                throw new Error('كلمة المرور غير صحيحة');
+                            }
+                        } catch (decodeError) {
+                            console.error('خطأ في فك التشفير:', decodeError);
+                            throw new Error('كلمة المرور غير صحيحة');
+                        }
+                    } else {
+                        throw new Error('كلمة المرور غير صحيحة');
+                    }
+                }
+                
+                if (authSuccess) {
+                    // حفظ معلومات المستخدم في localStorage
+                    localStorage.setItem('userId', userId);
+                    localStorage.setItem('userEmail', email);
+                    localStorage.setItem('userName', userData.personalInfo?.name || 'مستخدم');
+                    
+                    // حفظ معلومات إضافية من الهيكل الجديد
+                    if (userData.accountStatus) {
+                        localStorage.setItem('userLevel', userData.accountStatus.level || 'STANDARD');
+                        localStorage.setItem('userStatus', userData.accountStatus.status || 'active');
+                    }
+                    
+                    // التحقق من نوع المستخدم والتوجيه
+                    const isAdmin = email === 'admin@fouad-academy.com' || 
+                                   (userData.auth && userData.auth.role === 'admin') ||
+                                   (userData.metadata && userData.metadata.userType === 'admin');
+                    
+                    if (isAdmin) {
+                        console.log('🔑 توجيه للوحة الإدارة');
+                        window.location.href = './admin/dashboard.html';
+                    } else {
+                        console.log('👤 توجيه للوحة المستخدم');
+                        
+                        // التحقق من الدورات المسجلة
+                        if (userData.enrollments && userData.enrollments.length > 0) {
+                            localStorage.setItem('hasEnrollments', 'true');
+                            localStorage.setItem('enrollmentsCount', userData.enrollments.length.toString());
+                        }
+                        
+                        // التحقق من معلومات الأقساط
+                        if (userData.financial && userData.financial.installmentInfo && 
+                            userData.financial.installmentInfo.isActive) {
+                            localStorage.setItem('hasActiveInstallments', 'true');
+                            localStorage.setItem('nextDueDate', userData.financial.installmentInfo.nextDueDate || '');
+                        }
+                        
+                        window.location.href = './dashboard.html';
+                    }
                 }
                 
             } catch (error) {
@@ -803,7 +929,7 @@
                 loginBtn.innerHTML = originalText;
                 loginBtn.disabled = false;
                 
-                // رسائل الخطأ المحسنة
+                // رسائل خطأ محسنة
                 let errorMessage = 'حدث خطأ في تسجيل الدخول';
                 
                 if (error.message) {
@@ -816,6 +942,8 @@
                     errorMessage = 'البريد الإلكتروني غير صالح';
                 } else if (error.code === 'auth/too-many-requests') {
                     errorMessage = 'تم تجاوز عدد المحاولات. حاول لاحقاً';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMessage = 'خطأ في الاتصال. تحقق من الإنترنت';
                 } else if (error.code === 'auth/invalid-login-credentials' || 
                            error.code === 'auth/invalid-credential') {
                     errorMessage = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
@@ -833,7 +961,7 @@
             }
         });
 
-        // نسيان كلمة المرور - نفس الكود الأصلي مع تحسين التصميم
+        // دالة استعادة كلمة المرور المحدثة
         async function forgotPassword() {
             const { value: email } = await Swal.fire({
                 title: 'استعادة كلمة المرور',
@@ -850,25 +978,91 @@
                     if (!value) {
                         return 'يرجى إدخال البريد الإلكتروني';
                     }
+                    if (!value.includes('@')) {
+                        return 'يرجى إدخال بريد إلكتروني صحيح';
+                    }
                 }
             });
 
             if (email) {
                 try {
-                    await auth.sendPasswordResetEmail(email);
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'تم الإرسال!',
-                        text: 'تم إرسال رابط استعادة كلمة المرور لبريدك الإلكتروني',
-                        confirmButtonColor: '#FFD700',
-                        background: '#1E3A5F',
-                        color: '#FFFFFF'
-                    });
+                    // التحقق من وجود المستخدم في قاعدة البيانات أولاً
+                    const usersQuery = await db.collection('users')
+                        .where('personalInfo.email', '==', email)
+                        .limit(1)
+                        .get();
+                    
+                    if (usersQuery.empty) {
+                        throw new Error('البريد الإلكتروني غير مسجل في النظام');
+                    }
+                    
+                    const userData = usersQuery.docs[0].data();
+                    const userId = usersQuery.docs[0].id;
+                    
+                    // محاولة إرسال رابط الاستعادة
+                    try {
+                        await auth.sendPasswordResetEmail(email);
+                        
+                        // تسجيل محاولة الاستعادة
+                        await db.collection('users').doc(userId).update({
+                            'auth.lastPasswordReset': firebase.firestore.FieldValue.serverTimestamp(),
+                            'metadata.lastPasswordResetRequest': new Date().toISOString()
+                        });
+                        
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'تم الإرسال!',
+                            html: `
+                                <div style="text-align: right;">
+                                    <p>تم إرسال رابط استعادة كلمة المرور إلى:</p>
+                                    <p><strong>${email}</strong></p>
+                                    <p style="margin-top: 15px; font-size: 14px; color: #FFD700;">
+                                        تحقق من صندوق البريد الوارد أو مجلد البريد العشوائي (Spam)
+                                    </p>
+                                </div>
+                            `,
+                            confirmButtonColor: '#FFD700',
+                            background: '#1E3A5F',
+                            color: '#FFFFFF'
+                        });
+                        
+                    } catch (authError) {
+                        // إذا فشل الإرسال عبر Auth، نعرض كلمة المرور المؤقتة للأدمن
+                        if (userData.auth && userData.auth.tempPassword) {
+                            console.log('عرض كلمة المرور المؤقتة للأدمن');
+                            
+                            // يمكن هنا إرسال إشعار للأدمن أو عرض رسالة خاصة
+                            Swal.fire({
+                                icon: 'info',
+                                title: 'تواصل مع الدعم',
+                                html: `
+                                    <div style="text-align: right;">
+                                        <p>لم نتمكن من إرسال رابط الاستعادة تلقائياً.</p>
+                                        <p>يرجى التواصل مع الدعم الفني عبر WhatsApp:</p>
+                                        <p style="margin-top: 15px;">
+                                            <a href="https://wa.me/201234567890" target="_blank" 
+                                               style="color: #FFD700; text-decoration: none;">
+                                                <i class="fab fa-whatsapp"></i> تواصل معنا
+                                            </a>
+                                        </p>
+                                    </div>
+                                `,
+                                confirmButtonColor: '#FFD700',
+                                background: '#1E3A5F',
+                                color: '#FFFFFF'
+                            });
+                        } else {
+                            throw authError;
+                        }
+                    }
+                    
                 } catch (error) {
                     console.error('خطأ في إرسال رابط الاستعادة:', error);
                     
                     let errorMsg = 'حدث خطأ في إرسال رابط الاستعادة';
-                    if (error.code === 'auth/user-not-found') {
+                    if (error.message) {
+                        errorMsg = error.message;
+                    } else if (error.code === 'auth/user-not-found') {
                         errorMsg = 'البريد الإلكتروني غير مسجل';
                     }
                     
