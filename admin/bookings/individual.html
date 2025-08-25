@@ -718,6 +718,223 @@
         let currentFilter = 'all';
         let availableCourses = [];
 let availablePaths = [];
+// ==================== 🏗️ البنية الجديدة للمستخدم ====================
+const UserStructure = {
+    // دالة إنشاء مستخدم جديد بالبنية الصحيحة
+    createNewUser: function(studentData) {
+        const now = new Date().toISOString();
+        const customer = studentData.customer || {};
+        
+        return {
+            // المعرف الأساسي
+            id: this.generateUniqueSlug(customer.name),
+            
+            // البيانات الشخصية
+            personalInfo: {
+                name: customer.name || '',
+                title: customer.title || '',
+                email: customer.email || '',
+                whatsapp: customer.whatsapp || '',
+                phone: customer.phone || customer.whatsapp || '',
+                age: customer.age || null,
+                gender: customer.gender || '',
+                country: customer.country || '',
+                city: customer.city || '',
+                job: customer.job || '',
+                source: customer.source || ''
+            },
+            
+            // بيانات الوصول
+            auth: {
+                tempPassword: btoa(this.generateStrongPassword()),
+                lastLogin: null,
+                loginCount: 0,
+                createdAt: now,
+                createdBy: 'admin',
+                createdFrom: 'individual-students'
+            },
+            
+            // حالة الحساب
+            accountStatus: {
+                status: 'active',
+                level: this.calculateUserLevel(studentData),
+                verified: false,
+                suspended: false
+            },
+            
+            // الدورات - مصفوفة فارغة تنتظر التخصيص
+            enrollments: [],
+            
+            // المالية - إجماليات فقط
+            financial: {
+                totalPaid: 0,
+                totalDue: 0,
+                totalSavings: 0,
+                wallet: { balance: 0, transactions: [] },
+                paymentHistory: []
+            },
+            
+            // السجلات
+            bookingHistory: [],
+            referralProgram: null,
+            loyaltyPoints: { balance: 0, tier: 'BRONZE', history: [] },
+            
+            // البيانات الفنية
+            metadata: {
+                originalStudentDocId: studentData.id,
+                dataCompleteness: studentData.dataCompleteness || {}
+            },
+            
+            timestamps: {
+                createdAt: now,
+                updatedAt: now
+            }
+        };
+    },
+    
+    // دالة توليد معرف فريد
+    generateUniqueSlug: function(name) {
+        const timestamp = Date.now().toString().slice(-6);
+        const clean = (name || 'user')
+            .toLowerCase()
+            .trim()
+            .replace(/[\u0600-\u06FF]/g, '')
+            .replace(/[^\w\s-]/g, '')
+            .replace(/[\s_-]+/g, '-')
+            .slice(0, 20);
+        return `${clean}-${timestamp}`;
+    },
+    
+    // دالة توليد كلمة مرور قوية
+    generateStrongPassword: function() {
+        const sets = {
+            upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            lower: 'abcdefghijklmnopqrstuvwxyz',
+            numbers: '0123456789',
+            special: '!@#$%^&*'
+        };
+        
+        let password = '';
+        password += sets.upper[Math.floor(Math.random() * 26)];
+        password += sets.lower[Math.floor(Math.random() * 26)];
+        password += sets.numbers[Math.floor(Math.random() * 10)];
+        password += sets.special[Math.floor(Math.random() * 8)];
+        
+        const all = Object.values(sets).join('');
+        for(let i = 4; i < 12; i++) {
+            password += all[Math.floor(Math.random() * all.length)];
+        }
+        
+        return password.split('').sort(() => Math.random() - 0.5).join('');
+    },
+    
+    // دالة تحديد مستوى المستخدم
+    calculateUserLevel: function(studentData) {
+        const savings = studentData.totalSavings || 0;
+        const completeness = studentData.dataCompleteness?.percentage || 0;
+        
+        if (savings > 5000) return 'PLATINUM';
+        if (savings > 3000) return 'GOLD';
+        if (savings > 1000) return 'SILVER';
+        if (completeness > 80) return 'PREMIUM';
+        return 'STANDARD';
+    }
+};
+
+// ==================== 📚 إدارة الدورات ====================
+const EnrollmentManager = {
+    // إنشاء تخصيص دورة جديد
+    createEnrollment: function(studentData, courseSettings) {
+        const now = new Date().toISOString();
+        const pricing = studentData.pricing || {};
+        
+        return {
+            id: `enrollment-${Date.now()}`,
+            courseId: studentData.courseId || `course-${Date.now()}`,
+            title: studentData.courseName || 'دورة غير محددة',
+            type: 'individual',
+            
+            // التواريخ
+            startDate: courseSettings.startDate,
+            endDate: courseSettings.endDate,
+            enrolledAt: now,
+            
+            // البيانات المالية للدورة
+            pricing: {
+                originalPrice: pricing.basePriceNumber || 0,
+                finalPrice: pricing.finalPriceNumber || 0,
+                discounts: studentData.discounts || [],
+                savings: studentData.totalSavings || 0,
+                activeOffer: studentData.activeOffer || null,
+                coupon: studentData.coupon || null
+            },
+            
+            // حالة الدفع للدورة
+            payment: {
+                method: studentData.paymentMethod || null,
+                totalAmount: pricing.finalPriceNumber || 0,
+                paidAmount: this.calculatePaidAmount(studentData),
+                remainingAmount: this.calculateRemainingAmount(studentData),
+                status: this.determinePaymentStatus(studentData),
+                installments: this.createInstallmentSchedule(studentData)
+            },
+            
+            // معلومات إضافية
+            originalBookingId: studentData.originalBookingId || studentData.id,
+            notes: courseSettings.notes || '',
+            status: 'active'
+        };
+    },
+    
+    // حساب المدفوع
+    calculatePaidAmount: function(studentData) {
+        if (studentData.paymentInfo?.isInstallment) {
+            return studentData.paymentInfo.paidAmount || 0;
+        }
+        if (studentData.paymentConfirmed || studentData.paymentInfo?.fullyPaid) {
+            return studentData.pricing?.finalPriceNumber || 0;
+        }
+        return 0;
+    },
+    
+    // حساب المتبقي
+    calculateRemainingAmount: function(studentData) {
+        const total = studentData.pricing?.finalPriceNumber || 0;
+        const paid = this.calculatePaidAmount(studentData);
+        return Math.max(0, total - paid);
+    },
+    
+    // تحديد حالة الدفع
+    determinePaymentStatus: function(studentData) {
+        if (studentData.paymentConfirmed || studentData.paymentInfo?.fullyPaid) {
+            return 'paid';
+        }
+        if (studentData.paymentInfo?.paidAmount > 0) {
+            return 'partial';
+        }
+        return 'pending';
+    },
+    
+    // إنشاء جدول الأقساط
+    createInstallmentSchedule: function(studentData) {
+        if (!studentData.paymentInfo?.isInstallment) return null;
+        
+        return {
+            totalInstallments: studentData.paymentInfo.totalInstallments || 0,
+            paidInstallments: studentData.paymentInfo.paidInstallments || 0,
+            schedule: studentData.paymentInfo.installmentSchedule || [],
+            nextDueDate: studentData.paymentInfo.nextDueDate || null
+        };
+    }
+};
+        
+
+
+
+
+
+
+        
         // التحقق من وجود طالب جديد محول
         function checkForNewTransfer() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -1098,6 +1315,14 @@ function createStudentCard(student) {
     }
     
     const customer = student.customer;
+    // حساب الإجماليات الصحيحة بناءً على المنطق الجديد
+const hasAccount = student.accountCreated === true;
+const totalPaidActual = student.paymentInfo?.isInstallment ? 
+    (student.paymentInfo?.paidAmount || 0) : 
+    (student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0);
+const totalDueActual = student.paymentInfo?.isInstallment ? 
+    (student.paymentInfo?.remainingAmount || 0) : 
+    (!student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0);
     
     // تجاهل الطلاب بدون اسم
     if (!customer.name || customer.name === 'غير محدد' || customer.name === '') {
@@ -1361,18 +1586,14 @@ ${student.paymentInfo?.isInstallment && student.paymentInfo?.remainingAmount > 0
             
             <div class="action-buttons">
                 ${!hasAccount ? `
-                    <button class="btn btn-primary" onclick="createOrLinkAccount('${studentId}')">
-                        <i class="fas fa-user-plus"></i> 
-                        ${student.existingUser ? 'ربط الحساب الموجود' : 'إنشاء حساب'}
-                    </button>
-                ` : `
-                    <button class="btn btn-success" onclick="sendCredentials('${studentId}')">
-                        <i class="fab fa-whatsapp"></i> إرسال البيانات
-                    </button>
-                    <button class="btn btn-warning" onclick="assignCourseToStudent('${studentId}')">
-                        <i class="fas fa-graduation-cap"></i> تخصيص دورة
-                    </button>
-                `}
+    <button class="btn btn-primary" onclick="createAccount('${studentId}')">
+        <i class="fas fa-user-plus"></i> إنشاء حساب
+    </button>
+` : `
+    <button class="btn btn-success" onclick="assignCourseToStudent('${studentId}')">
+        <i class="fas fa-graduation-cap"></i> تخصيص دورة
+    </button>
+`}
                 
                 <button class="btn btn-primary" onclick="viewFullDetails('${studentId}')">
                     <i class="fas fa-info-circle"></i> التفاصيل الكاملة
@@ -1487,832 +1708,7 @@ grid.innerHTML = cardsHTML || '<div class="no-data">لا توجد بيانات</
         }
         
         // إنشاء حساب
-        // ==================== دوال مساعدة لإنشاء الحساب ====================
-function generateStrongPassword() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-    let password = '';
-    
-    // ضمان تضمين حرف كبير وصغير ورقم ورمز خاص
-    password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
-    password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
-    password += '0123456789'[Math.floor(Math.random() * 10)];
-    password += '!@#$%^&*'[Math.floor(Math.random() * 8)];
-    
-    // ملء باقي الأحرف (حتى 12 حرف)
-    for (let i = 4; i < 12; i++) {
-        password += chars[Math.floor(Math.random() * chars.length)];
-    }
-    
-    // خلط الأحرف عشوائياً
-    return password.split('').sort(() => Math.random() - 0.5).join('');
-}
-
-function generateUniqueSlug(name) {
-    const timestamp = Date.now().toString().slice(-4);
-    const cleanName = (name || 'user')
-        .toLowerCase()
-        .trim()
-        .replace(/[\u0600-\u06FF]/g, '') // إزالة الأحرف العربية
-        .replace(/[^\w\s-]/g, '')
-        .replace(/[\s_-]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    
-    return `${cleanName}-${timestamp}`;
-}
-
-        // دالة موحدة للتعامل مع إنشاء أو ربط الحساب
-async function createOrLinkAccount(studentId) {
-    const student = allStudents.find(s => s.id === studentId);
-    if (!student) return;
-    
-    // إذا كان المستخدم موجود بالفعل
-    if (student.existingUser && student.existingUserId) {
-        // ربط الحجز بالمستخدم الموجود
-        await linkExistingUser(studentId, student.existingUserId, student);
-    } else {
-        // إنشاء حساب جديد
-        await createAccount(studentId);
-    }
-}
-
-// دالة لربط المستخدم الموجود بالحجز الجديد
-async function linkExistingUser(studentId, userId, student) {
-    try {
-        Swal.fire({
-            title: 'تم العثور على حساب موجود!',
-            html: `
-                <div style="text-align: right;">
-                   <p><strong>الاسم:</strong> ${student.existingUserData?.personalInfo?.name || student.customer.name}</p>
-<p><strong>البريد:</strong> ${student.existingUserData?.personalInfo?.email || 'غير محدد'}</p>
-<p><strong>الواتساب:</strong> ${student.existingUserData?.personalInfo?.whatsapp || student.customer.whatsapp}</p>
-                    <hr>
-                    <p style="color: #10B981;">سيتم ربط هذا الحجز بالحساب الموجود وإضافة الدورة الجديدة</p>
-                </div>
-            `,
-            icon: 'info',
-            showCancelButton: true,
-            confirmButtonText: 'ربط الحساب',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#10B981'
-        }).then(async (result) => {
-            if (result.isConfirmed) {
-                Swal.fire({
-                    title: 'جاري الربط...',
-                    html: 'الرجاء الانتظار',
-                    allowOutsideClick: false,
-                    showConfirmButton: false,
-                    willOpen: () => { Swal.showLoading(); }
-                });
-                
-                // تحديث المستخدم بإضافة الدورة الجديدة
-                const userDoc = await db.collection('users').doc(userId).get();
-                const userData = userDoc.data();
-                
-                const courses = userData.enrollments || [];  // بدلاً من userData.courses
-                courses.push({
-                    id: student.courseId || Date.now().toString(),
-                    title: student.courseName || 'دورة غير محددة',
-                    type: 'individual',
-                    enrolledAt: new Date().toISOString(),
-                    price: student.pricing?.finalPrice || 0,
-                    status: 'active',
-                    originalBookingId: student.originalBookingId || student.id
-                });
-                
-                await db.collection('users').doc(userId).update({
-                    courses: courses,
-                    updatedAt: new Date().toISOString()
-                });
-                
-                // تحديث individualStudents
-                await db.collection('individualStudents').doc(studentId).set({
-                    accountCreated: true,
-                    accountStatus: 'active',
-                    userId: userId,
-                    userEmail: userData.email,
-                    linkedAt: new Date().toISOString()
-                }, { merge: true });
-                
-                // تحديث البيانات المحلية
-                const studentIndex = allStudents.findIndex(s => s.id === studentId);
-                if (studentIndex !== -1) {
-                    allStudents[studentIndex].accountCreated = true;
-                    allStudents[studentIndex].accountStatus = 'active';
-                    allStudents[studentIndex].userId = userId;
-                }
-                
-                Swal.fire({
-                    icon: 'success',
-                    title: 'تم الربط بنجاح!',
-                    text: 'تم ربط الحجز بالحساب الموجود وإضافة الدورة',
-                    confirmButtonColor: '#10B981'
-                });
-                
-                // تحديث العرض
-                filterByTab(currentFilter || 'all');
-                updateStatistics();
-            }
-        });
         
-    } catch (error) {
-        console.error('خطأ في ربط المستخدم:', error);
-        Swal.fire({
-            icon: 'error',
-            title: 'خطأ!',
-            text: 'حدث خطأ في ربط الحساب',
-            confirmButtonColor: '#EF4444'
-        });
-    }
-}
-
-window.createOrLinkAccount = createOrLinkAccount;
-window.linkExistingUser = linkExistingUser;
-
-// إنشاء حساب محسّن
-// ==================== إنشاء حساب محسّن ونظيف ====================
-// إنشاء حساب محسّن مع نقل كل البيانات
-// إنشاء حساب محسّن مع بنية منظمة
-async function createAccount(studentId) {
-    // منع الضغطات المتكررة
-    if (window.isCreatingAccount) {
-        Swal.fire('انتظر', 'جاري إنشاء الحساب...', 'info');
-        return;
-    }
-    window.isCreatingAccount = true;
-    
-    try {
-        const student = allStudents.find(s => s.id === studentId);
-        if (!student) {
-            throw new Error('لم يتم العثور على الطالب');
-        }
-        
-        // التحقق من عدم وجود حساب مسبق
-        if (student.accountCreated === true) {
-            window.isCreatingAccount = false;
-            
-            const result = await Swal.fire({
-                icon: 'warning',
-                title: 'تنبيه!',
-                text: 'تم إنشاء حساب لهذا الطالب بالفعل. هل تريد إرسال البيانات؟',
-                showCancelButton: true,
-                confirmButtonText: 'إرسال البيانات',
-                cancelButtonText: 'إلغاء',
-                confirmButtonColor: '#25D366'
-            });
-            
-            if (result.isConfirmed && typeof sendCredentials === 'function') {
-                sendCredentials(studentId);
-            }
-            return;
-        }
-        
-        const customer = student.customer || {};
-        const originalBookingId = student.originalBookingId || student.id;
-        
-        const { value: formData } = await Swal.fire({
-            title: 'إنشاء حساب جديد',
-            html: `
-                <div style="text-align: right;">
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">
-                            <i class="fas fa-fingerprint"></i> معرف المستخدم
-                        </label>
-                        <input id="userSlug" class="swal2-input" style="font-family: monospace;" 
-                               value="${generateUniqueSlug(customer.name)}" 
-                               placeholder="user-slug-1234">
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">
-                            <i class="fas fa-envelope"></i> البريد الإلكتروني
-                        </label>
-                        <input id="email" type="email" class="swal2-input" 
-                               value="${customer.email || ''}" 
-                               placeholder="email@example.com" required>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">
-                            <i class="fas fa-lock"></i> كلمة المرور
-                        </label>
-                        <input id="password" type="text" class="swal2-input" 
-                               style="font-family: monospace; background: #F3F4F6;"
-                               value="${generateStrongPassword()}" readonly>
-                    </div>
-                    
-                    <div style="background: #F0FDF4; padding: 15px; border-radius: 8px;">
-                        <label style="cursor: pointer;">
-                            <input type="checkbox" id="sendCredentials" checked style="margin-left: 5px;">
-                            <strong>إرسال بيانات الدخول عبر WhatsApp</strong>
-                        </label>
-                    </div>
-                </div>
-            `,
-            showCancelButton: true,
-            confirmButtonText: 'إنشاء الحساب',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#3B82F6',
-            width: '600px',
-            preConfirm: () => {
-                const slug = document.getElementById('userSlug').value.trim();
-                const email = document.getElementById('email').value.trim();
-                const password = document.getElementById('password').value;
-                const sendCredentials = document.getElementById('sendCredentials').checked;
-                
-                if (!slug || !email || !password) {
-                    Swal.showValidationMessage('الرجاء إكمال جميع البيانات');
-                    return false;
-                }
-                
-                if (!/^[a-z0-9-]+$/.test(slug)) {
-                    Swal.showValidationMessage('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
-                    return false;
-                }
-                
-                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                    Swal.showValidationMessage('البريد الإلكتروني غير صحيح');
-                    return false;
-                }
-                
-                return { slug, email, password, sendCredentials };
-            }
-        });
-        
-        if (!formData) {
-            window.isCreatingAccount = false;
-            return;
-        }
-        
-        // عرض رسالة تحميل
-        Swal.fire({
-            title: 'جاري إنشاء الحساب...',
-            html: 'الرجاء الانتظار، جاري تنظيم البيانات...',
-            allowOutsideClick: false,
-            showConfirmButton: false,
-            willOpen: () => { Swal.showLoading(); }
-        });
-        
-        // 1. التحقق من عدم وجود المعرف
-        const existingSlug = await db.collection('users').doc(formData.slug).get();
-        if (existingSlug.exists) {
-            throw new Error('هذا المعرف مستخدم بالفعل');
-        }
-        
-        // 2. التحقق من عدم وجود الإيميل
-        const emailQuery = await db.collection('users')
-    .where('personalInfo.email', '==', formData.email)
-    .limit(1)
-    .get();
-        
-        if (!emailQuery.empty) {
-            throw new Error('هذا البريد الإلكتروني مستخدم بالفعل');
-        }
-        
-        // 3. إنشاء بنية منظمة للمستخدم
-        const userData = {
-            // ============ 1. معرف الحساب الأساسي ============
-            id: formData.slug,
-            
-            // ============ 2. البيانات الشخصية الأساسية ============
-            personalInfo: {
-                name: customer.name || 'غير محدد',
-                title: customer.title || '',
-                email: formData.email,
-                whatsapp: customer.whatsapp || '',
-                phone: customer.phone || customer.whatsapp || '',
-                age: customer.age || null,
-                gender: customer.gender || '',
-                country: customer.country || '',
-                city: customer.city || '',
-                job: customer.job || '',
-                source: customer.source || ''
-            },
-            
-            // ============ 3. بيانات الحماية والوصول ============
-            auth: {
-                tempPassword: btoa(formData.password),
-                lastLogin: null,
-                loginCount: 0,
-                createdAt: new Date().toISOString(),
-                createdBy: 'admin',
-                createdFrom: 'individual-students-page'
-            },
-            
-            // ============ 4. التفضيلات والتوقعات ============
-            preferences: {
-                expectations: customer.expectations || '',
-                experience: customer.experience || '',
-                applicationPlan: customer.applicationPlan || '',
-                notes: customer.notes || '',
-                paymentMethods: customer.paymentMethods || []
-            },
-            
-            // ============ 5. حالة الحساب ============
-            accountStatus: {
-                status: 'active',
-                level: student.totalSavings > 2000 ? 'VIP_GOLD' : 
-                       student.totalSavings > 1000 ? 'VIP' :
-                       student.dataCompleteness?.percentage > 80 ? 'PREMIUM' : 'STANDARD',
-                verified: false,
-                suspended: false,
-                suspendReason: null
-            },
-            
-            // ============ 6. الدورات المسجلة (منظمة) ============
-            enrollments: [],  // سيتم ملؤها لاحقاً عند تخصيص الدورات
-            
-          // ============ 7. المعلومات المالية العامة ============
-financial: {
-    // حساب المدفوع الفعلي بناءً على نوع الدفع
-    totalPaid: (() => {
-        if (student.paymentInfo?.isInstallment) {
-            // في حالة الأقساط - المدفوع الفعلي فقط
-            return student.paymentInfo.paidAmount || 0;
-        } else if (student.paymentConfirmed || student.paymentInfo?.fullyPaid) {
-            // في حالة الدفع الكامل
-            return student.pricing?.finalPriceNumber || 0;
-        }
-        // غير مدفوع
-        return 0;
-    })(),
-    
-    // حساب المستحق
-    totalDue: (() => {
-        if (student.paymentInfo?.isInstallment) {
-            // في حالة الأقساط - المتبقي
-            return student.paymentInfo.remainingAmount || 0;
-        } else if (!student.paymentConfirmed && !student.paymentInfo?.fullyPaid) {
-            // غير مدفوع بالكامل
-            return student.pricing?.finalPriceNumber || 0;
-        }
-        // مدفوع بالكامل
-        return 0;
-    })(),
-    
-    // التوفير الصحيح (مرة واحدة فقط!)
-    totalSavings: student.totalSavings || 0,
-    
-    // نقاط الولاء
-    loyaltyPoints: Math.floor((student.totalSavings || 0) / 10),
-    
-    // تفاصيل طرق الدفع المفضلة
-    preferredPaymentMethods: customer.paymentMethods || [],
-    
-    // سجل المدفوعات
-    paymentHistory: (student.paymentConfirmed || student.paymentInfo?.paidAmount > 0) ? [{
-    date: student.paymentInfo?.paidAt || new Date().toISOString(),
-    amount: student.paymentInfo?.isInstallment ? 
-            (student.paymentInfo?.paidAmount || 0) : 
-            (student.pricing?.finalPriceNumber || 0),
-        method: student.paymentMethod || null,
-        reference: student.paymentReference || null,
-        confirmed: true,
-        courseId: student.courseId || '',
-        courseName: student.courseName || ''
-    }] : [],
-
-    // معلومات الأقساط إن وجدت
-installmentInfo: student.paymentInfo?.isInstallment ? {
-    isActive: true,
-    totalAmount: student.paymentInfo?.totalAmount || student.pricing?.finalPriceNumber || 0,
-    paidAmount: student.paymentInfo?.paidAmount || 0,
-    remainingAmount: student.paymentInfo?.remainingAmount || 0,
-    schedule: student.paymentInfo?.installmentSchedule || [],
-    nextDueDate: student.paymentInfo?.nextDueDate || null,
-    totalInstallments: student.paymentInfo?.totalInstallments || 0,
-    paidInstallments: student.paymentInfo?.paidInstallments || 0,
-    lastPaymentDate: student.paymentInfo?.paidAt || null
-} : null,
-    // المحفظة
-    wallet: {
-        balance: 0,
-        transactions: [],
-        lastUpdated: new Date().toISOString()
-    },
-    
-    // ملخص الخصومات
-    discountsSummary: {
-        totalDiscountsAmount: student.totalSavings || 0,
-        timeDiscounts: student.discounts?.filter(d => d.type === 'time').reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
-        couponDiscounts: student.discounts?.filter(d => d.type === 'coupon').reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
-        cashDiscounts: student.discounts?.filter(d => d.type === 'cash').reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
-        groupDiscounts: student.discounts?.filter(d => d.type === 'group').reduce((sum, d) => sum + (d.amount || 0), 0) || 0
-    }
-},
-            
-           // ============ 8. سجل الحجوزات ============
-bookingHistory: [{
-    bookingId: originalBookingId,
-    bookingDate: student.bookingDate || student.timestamp,
-    courseName: student.courseName || 'غير محدد',
-    courseId: student.courseId || '',
-    transferredAt: student.transferredAt || student.transferInfo?.transferredAt,
-    
-    // البيانات المالية الكاملة للحجز
-    pricing: {
-        basePrice: student.pricing?.basePriceNumber || 0,
-        basePriceText: student.pricing?.basePrice || '0 ج.م',
-        finalPrice: student.pricing?.finalPriceNumber || 0,
-        finalPriceText: student.pricing?.finalPrice || '0 ج.م',
-        discounts: student.discounts || [],
-        activeOffer: student.activeOffer || null,
-        coupon: student.coupon || null,
-        totalSavings: student.totalSavings || 0,
-        totalSavingsText: student.totalSavingsText || '0 ج.م'
-    },
-    
-    // تفاصيل طريقة الدفع الكاملة
-// حالة الدفع الكاملة للحجز
-                payment: {
-                    status: student.paymentInfo?.status || student.status || 'pending',
-                    confirmed: student.paymentConfirmed || student.paymentInfo?.paymentConfirmed || false,
-                    method: student.paymentMethod || student.paymentInfo?.paymentMethod || null,
-                    reference: student.paymentReference || student.paymentInfo?.paymentReference || null,
-                    paidAt: student.paymentInfo?.paidAt || student.paidAt || null,
-                    confirmedAt: student.paymentInfo?.paymentConfirmedAt || null,
-                    confirmedBy: student.paymentInfo?.paymentConfirmedBy || null,
-                    
-                    // معلومات الأقساط الكاملة
-                    isInstallment: student.paymentInfo?.isInstallment || false,
-                    fullyPaid: student.paymentInfo?.fullyPaid || student.paymentConfirmed || false,
-                    totalAmount: student.paymentInfo?.totalAmount || student.pricing?.finalPriceNumber || 0,
-                    paidAmount: student.paymentInfo?.paidAmount || 0,
-                    remainingAmount: student.paymentInfo?.remainingAmount || 0,
-                    
-                    // جدول الأقساط التفصيلي
-                    installmentSchedule: student.paymentInfo?.installmentSchedule || [],
-                    nextDueDate: student.paymentInfo?.nextDueDate || null,
-                    totalInstallments: student.paymentInfo?.totalInstallments || 0,
-                    paidInstallments: student.paymentInfo?.paidInstallments || 0,
-                    
-                    // تفاصيل الخطة الأصلية
-                    installmentPlan: {
-                        type: student.payment?.code || student.paymentInfo?.type || 'cash',
-                        details: student.payment?.installmentDetails || student.paymentInfo?.installmentDetails || null,
-                        htmlDetails: student.payment?.installmentHTML || null
-                    }
-                },
-    
-    // نوع الرحلة
-    journey: student.journey || { type: 'individual' }
-}],
-            
-            // ============ 9. الإحصائيات والتقدم ============
-            statistics: {
-                coursesEnrolled: 1,
-                coursesCompleted: 0,
-                totalSpent: student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0,
-                averageProgress: 0,
-                lastActivityDate: new Date().toISOString()
-            },
-            
-            // ============ 10. البيانات الفنية ============
-            metadata: {
-                dataCompleteness: student.dataCompleteness || {},
-                originalStudentDocId: studentId,
-                ipAddress: 'system',
-                userAgent: navigator.userAgent,
-                platform: 'web'
-            },
-            
-            // ============ 11. الطوابع الزمنية ============
-            timestamps: {
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                lastModifiedBy: 'admin'
-            }
-        };
-        
-        // 4. حفظ في users collection
-        console.log('📦 حفظ البيانات المنظمة:', userData);
-        
-        await db.collection('users').doc(formData.slug).set(userData);
-        console.log('✅ تم إنشاء المستخدم بالبنية المنظمة');
-        
-        // 5. تحديث individualStudents
-        await db.collection('individualStudents').doc(studentId).set({
-            accountCreated: true,
-            accountCreatedAt: new Date().toISOString(),
-            accountStatus: 'active',
-            userId: formData.slug,
-            userEmail: formData.email,
-            progress: {
-                accountSetup: 100,
-                courseAssignment: 0,
-                firstPayment: student.paymentConfirmed ? 100 : 0,
-                welcomeMessage: 0,
-                totalProgress: 25
-            }
-        }, { merge: true });
-        
-        console.log('✅ تم تحديث individualStudents');
-        
-        // 6. تحديث البيانات المحلية
-        const studentIndex = allStudents.findIndex(s => s.id === studentId);
-        if (studentIndex !== -1) {
-            allStudents[studentIndex] = {
-                ...allStudents[studentIndex],
-                accountCreated: true,
-                accountStatus: 'active',
-                userId: formData.slug,
-                userEmail: formData.email,
-                accountCreatedAt: new Date().toISOString(),
-                progress: {
-                    accountSetup: 100,
-                    courseAssignment: 0,
-                    firstPayment: student.paymentConfirmed ? 100 : 0,
-                    welcomeMessage: 0,
-                    totalProgress: 25
-                }
-            };
-        }
-        
-        // 7. إرسال البيانات عبر WhatsApp إذا طُلب
-        if (formData.sendCredentials && customer.whatsapp) {
-            const message = `
-مرحباً ${customer.name} 👋
-
-تم إنشاء حسابك بنجاح! 🎉
-
-📧 البريد: ${formData.email}
-🔑 كلمة المرور: ${formData.password}
-🆔 معرف الحساب: ${formData.slug}
-
-${student.totalSavings > 0 ? `💰 لقد وفرت: ${student.totalSavingsText}` : ''}
-${student.courseName ? `📚 الدورة: ${student.courseName}` : ''}
-${student.paymentConfirmed ? '✅ الدفع: مؤكد' : '⏳ الدفع: بانتظار التأكيد'}
-
-🔗 رابط الدخول:
-https://fouad-perspective.web.app/login
-
-نتمنى لك رحلة تعليمية ممتعة 🚀
-            `.trim();
-            
-            const whatsappUrl = `https://wa.me/${customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
-            
-            setTimeout(() => {
-                window.open(whatsappUrl, '_blank');
-            }, 1500);
-        }
-        
-        // 8. عرض رسالة النجاح
-        await Swal.fire({
-            icon: 'success',
-            title: 'تم إنشاء الحساب بنجاح! 🎉',
-            html: `
-                <div style="text-align: right; background: #F0FDF4; padding: 20px; border-radius: 10px;">
-                    <h3 style="color: #166534; margin-bottom: 15px;">بيانات الحساب:</h3>
-                    <div style="background: white; padding: 15px; border-radius: 8px;">
-                        <p><strong>🆔 المعرف:</strong> ${formData.slug}</p>
-                        <p><strong>📧 البريد:</strong> ${formData.email}</p>
-                        <p><strong>🔑 كلمة المرور:</strong> ${formData.password}</p>
-                        <p><strong>📊 البنية:</strong> منظمة 100%</p>
-                        ${student.paymentConfirmed ? '<p><strong>💳 الدفع:</strong> مؤكد ✓</p>' : ''}
-                    </div>
-                    ${formData.sendCredentials ? '<p style="color: #10B981; margin-top: 10px;">✔ تم إرسال البيانات عبر WhatsApp</p>' : ''}
-                </div>
-            `,
-            confirmButtonText: 'حسناً',
-            confirmButtonColor: '#10B981'
-        });
-        
-        // 9. تحديث العرض
-        filterByTab(currentFilter || 'all');
-        updateStatistics();
-        
-    } catch (error) {
-        console.error('❌ خطأ:', error);
-        Swal.fire({
-            icon: 'error',
-            title: 'خطأ!',
-            text: error.message || 'حدث خطأ في إنشاء الحساب',
-            confirmButtonColor: '#EF4444'
-        });
-    } finally {
-        window.isCreatingAccount = false;
-    }
-}
-
-        // دالة للتحقق من اكتمال نقل البيانات إلى users
-async function verifyUserDataTransfer(userId) {
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            console.log('✅ التحقق من البيانات المنقولة إلى users:');
-            console.log('📋 البيانات الأساسية:');
-            console.log('- الاسم:', userData.name);
-            console.log('- البريد:', userData.email);
-            console.log('- الواتساب:', userData.whatsapp);
-            console.log('- العمر:', userData.age);
-            console.log('- الوظيفة:', userData.job);
-            
-            console.log('💰 البيانات المالية:');
-            console.log('- التوفير الكلي:', userData.financialData?.totalSavings);
-            console.log('- الخصومات:', userData.financialData?.discounts?.length || 0);
-            console.log('- العرض النشط:', userData.financialData?.activeOffer?.name);
-            console.log('- الكوبون:', userData.financialData?.coupon?.code);
-            
-            console.log('📚 الدورات:');
-            console.log('- عدد الدورات:', userData.courses?.length || 0);
-            console.log('- السعر الأصلي:', userData.courses?.[0]?.originalPrice);
-            console.log('- السعر النهائي:', userData.courses?.[0]?.price);
-            
-            console.log('📊 معلومات إضافية:');
-            console.log('- مستوى العميل:', userData.customerLevel);
-            console.log('- نقاط الولاء:', userData.loyaltyPoints);
-            console.log('- نسبة الاكتمال:', userData.bookingInfo?.dataCompleteness?.percentage);
-            
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.error('❌ خطأ في التحقق:', error);
-        return false;
-    }
-}
-// دالة للتحقق من معلومات الدفع في المستخدم
-async function verifyPaymentTransfer(userId) {
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            console.log('💳 التحقق من معلومات الدفع:');
-            console.log('- حالة التأكيد:', userData.paymentConfirmed || userData.financialData?.paymentStatus?.confirmed);
-            console.log('- طريقة الدفع:', userData.paymentMethod || userData.financialData?.paymentStatus?.method);
-            console.log('- رقم المرجع:', userData.paymentReference || userData.financialData?.paymentStatus?.reference);
-            console.log('- تاريخ التأكيد:', userData.financialData?.paymentStatus?.confirmedAt);
-            console.log('- تم التأكيد بواسطة:', userData.financialData?.paymentStatus?.confirmedBy);
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.error('❌ خطأ في التحقق من معلومات الدفع:', error);
-        return false;
-    }
-}
-        // دالة لعرض البنية المنظمة للمستخدم
-async function displayOrganizedUserStructure(userId) {
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            console.log('========================================');
-            console.log('📋 البنية المنظمة للمستخدم');
-            console.log('========================================');
-            
-            console.log('\n1️⃣ المعلومات الشخصية:');
-            console.table(userData.personalInfo);
-            
-            console.log('\n2️⃣ حالة الحساب:');
-            console.table(userData.accountStatus);
-            
-            console.log('\n3️⃣ المعلومات المالية:');
-            console.table(userData.financial);
-            
-            console.log('\n4️⃣ الدورات المسجلة:');
-            if (userData.enrollments?.length > 0) {
-                userData.enrollments.forEach((e, i) => {
-                    console.log(`   دورة ${i+1}: ${e.title} - ${e.startDate} إلى ${e.endDate}`);
-                });
-            } else {
-                console.log('   لا توجد دورات مسجلة');
-            }
-            
-            console.log('\n5️⃣ سجل الحجوزات:');
-            if (userData.bookingHistory?.length > 0) {
-                userData.bookingHistory.forEach((b, i) => {
-                    console.log(`   حجز ${i+1}: ${b.courseName} - ${b.pricing?.finalPrice} ج.م - دفع ${b.payment?.confirmed ? 'مؤكد ✓' : 'غير مؤكد'}`);
-                });
-            }
-            
-            console.log('\n6️⃣ الإحصائيات:');
-            console.table(userData.statistics);
-            
-            console.log('========================================');
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.error('❌ خطأ في عرض البنية:', error);
-        return false;
-    }
-}
-// دالة للتحقق من اكتمال المعلومات المالية
-async function verifyFinancialDataTransfer(userId) {
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            console.log('💰 ========= التحقق من المعلومات المالية =========');
-            
-            console.log('\n📊 الملخص المالي:');
-            console.log('- إجمالي المدفوع:', userData.financial?.totalPaid || 0);
-            console.log('- إجمالي المستحق:', userData.financial?.totalDue || 0);
-            console.log('- إجمالي التوفير:', userData.financial?.totalSavings || 0);
-            console.log('- نقاط الولاء:', userData.financial?.loyaltyPoints || 0);
-            
-            console.log('\n💳 طرق الدفع المفضلة:');
-            console.log(userData.financial?.preferredPaymentMethods || []);
-            
-            console.log('\n📝 سجل المدفوعات:');
-            if (userData.financial?.paymentHistory?.length > 0) {
-                userData.financial.paymentHistory.forEach((p, i) => {
-                    console.log(`   دفعة ${i+1}: ${p.amount} ج.م - ${p.method} - ${p.confirmed ? 'مؤكدة ✓' : 'غير مؤكدة'}`);
-                });
-            }
-            
-            console.log('\n🎫 ملخص الخصومات:');
-            console.table(userData.financial?.discountsSummary || {});
-            
-            console.log('\n📚 تفاصيل الدورات المالية:');
-            if (userData.enrollments?.length > 0) {
-                userData.enrollments.forEach((e, i) => {
-                    console.log(`\n   دورة ${i+1}: ${e.title}`);
-                    console.log('   - السعر الأصلي:', e.financialData?.originalPrice || 0);
-                    console.log('   - السعر النهائي:', e.financialData?.finalPrice || 0);
-                    console.log('   - طريقة الدفع:', e.financialData?.paymentDetails?.method || 'غير محدد');
-                    console.log('   - نوع الدفع:', e.financialData?.paymentDetails?.methodCode || 'cash');
-                    console.log('   - تفاصيل الأقساط:', e.financialData?.paymentDetails?.installmentDetails || 'لا يوجد');
-                    console.log('   - الدفع مؤكد:', e.financialData?.paymentDetails?.paymentConfirmed ? 'نعم ✓' : 'لا');
-                });
-            }
-            
-            console.log('\n📋 سجل الحجوزات المالي:');
-            if (userData.bookingHistory?.length > 0) {
-                userData.bookingHistory.forEach((b, i) => {
-                    console.log(`\n   حجز ${i+1}: ${b.courseName}`);
-                    console.log('   - السعر الأساسي:', b.pricing?.basePrice || 0);
-                    console.log('   - السعر النهائي:', b.pricing?.finalPrice || 0);
-                    console.log('   - التوفير:', b.pricing?.totalSavings || 0);
-                    console.log('   - طريقة الدفع:', b.payment?.method || 'غير محدد');
-                    console.log('   - نوع الخطة:', b.payment?.installmentPlan?.type || 'cash');
-                    console.log('   - تفاصيل الأقساط:', b.payment?.installmentPlan?.details || 'دفعة واحدة');
-                });
-            }
-            
-            console.log('=====================================');
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.error('❌ خطأ في التحقق المالي:', error);
-        return false;
-    }
-}
-        // دالة للتحقق من نقل معلومات الأقساط
-async function verifyInstallmentTransfer(userId) {
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            console.log('💳 ========= التحقق من معلومات الأقساط =========');
-            
-            // التحقق من المعلومات المالية
-            if (userData.financial?.installmentInfo) {
-                console.log('\n📊 معلومات الأقساط النشطة:');
-                console.log('- المبلغ الكلي:', userData.financial.installmentInfo.totalAmount);
-                console.log('- المدفوع:', userData.financial.installmentInfo.paidAmount);
-                console.log('- المتبقي:', userData.financial.installmentInfo.remainingAmount);
-                console.log('- عدد الأقساط الكلي:', userData.financial.installmentInfo.totalInstallments);
-                console.log('- الأقساط المدفوعة:', userData.financial.installmentInfo.paidInstallments);
-                console.log('- القسط القادم:', userData.financial.installmentInfo.nextDueDate);
-                
-                console.log('\n📅 جدول الأقساط:');
-                if (userData.financial.installmentInfo.schedule?.length > 0) {
-                    userData.financial.installmentInfo.schedule.forEach((inst, i) => {
-                        console.log(`   قسط ${i+1}: ${inst.amount} ج.م - ${inst.status} - ${new Date(inst.dueDate).toLocaleDateString('ar-EG')}`);
-                    });
-                }
-            } else {
-                console.log('✅ دفع كامل - لا توجد أقساط');
-            }
-            
-            // التحقق من سجل الحجوزات
-            console.log('\n📋 معلومات الأقساط في سجل الحجوزات:');
-            if (userData.bookingHistory?.length > 0) {
-                userData.bookingHistory.forEach((booking, i) => {
-                    if (booking.payment?.isInstallment) {
-                        console.log(`\n   حجز ${i+1}: ${booking.courseName}`);
-                        console.log('   - نوع الدفع: أقساط');
-                        console.log('   - المدفوع:', booking.payment.paidAmount);
-                        console.log('   - المتبقي:', booking.payment.remainingAmount);
-                        console.log('   - الأقساط:', `${booking.payment.paidInstallments}/${booking.payment.totalInstallments}`);
-                    }
-                });
-            }
-            
-            console.log('=====================================');
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.error('❌ خطأ في التحقق من الأقساط:', error);
-        return false;
-    }
-}
-
-window.verifyInstallmentTransfer = verifyInstallmentTransfer;
 
 window.verifyFinancialDataTransfer = verifyFinancialDataTransfer;
 window.displayOrganizedUserStructure = displayOrganizedUserStructure;
@@ -3282,106 +2678,292 @@ async function loadAvailableCourses() {
     }
 }
 
-// ==================== دالة تخصيص الدورة الصحيحة ====================
-// دالة تخصيص الدورة المطورة بالكامل
+
+// ==================== 🚀 دالة إنشاء الحساب الجديدة ====================
+async function createAccount(studentId) {
+    try {
+        const student = allStudents.find(s => s.id === studentId);
+        if (!student) {
+            throw new Error('لم يتم العثور على بيانات الطالب');
+        }
+        
+        // التحقق من عدم وجود حساب مسبق
+        if (student.accountCreated === true) {
+            Swal.fire({
+                icon: 'info',
+                title: 'الحساب موجود بالفعل',
+                text: 'تم إنشاء حساب لهذا الطالب مسبقاً',
+                confirmButtonColor: '#3B82F6'
+            });
+            return;
+        }
+        
+        // نافذة إدخال البيانات
+        const { value: formData } = await Swal.fire({
+            title: '🆕 إنشاء حساب جديد',
+            html: `
+                <div style="text-align: right; direction: rtl;">
+                    <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #0369A1; margin: 0;">
+                            <i class="fas fa-user"></i> ${student.customer?.name || 'عميل جديد'}
+                        </h4>
+                        <p style="color: #64748B; margin: 5px 0;">
+                            ${student.customer?.whatsapp || ''} 
+                            ${student.customer?.email ? `• ${student.customer.email}` : ''}
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #374151;">
+                            <i class="fas fa-fingerprint"></i> معرف المستخدم
+                        </label>
+                        <input id="userSlug" class="swal2-input" 
+                               style="font-family: monospace; direction: ltr;" 
+                               value="${UserStructure.generateUniqueSlug(student.customer?.name)}" 
+                               placeholder="user-slug-123456">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #374151;">
+                            <i class="fas fa-envelope"></i> البريد الإلكتروني
+                        </label>
+                        <input id="email" type="email" class="swal2-input" 
+                               value="${student.customer?.email || ''}" 
+                               placeholder="email@example.com" required>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #374151;">
+                            <i class="fas fa-lock"></i> كلمة المرور
+                        </label>
+                        <div style="position: relative;">
+                            <input id="password" type="text" class="swal2-input" 
+                                   style="font-family: monospace; background: #F3F4F6; padding-left: 50px;" 
+                                   value="${UserStructure.generateStrongPassword()}" readonly>
+                            <button type="button" onclick="document.getElementById('password').value = UserStructure.generateStrongPassword()" 
+                                    style="position: absolute; left: 5px; top: 50%; transform: translateY(-50%); 
+                                           background: #3B82F6; color: white; border: none; 
+                                           padding: 5px 10px; border-radius: 5px; cursor: pointer;">
+                                <i class="fas fa-sync"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px;">
+                        <label style="cursor: pointer; display: flex; align-items: center;">
+                            <input type="checkbox" id="sendCredentials" checked 
+                                   style="margin-left: 10px; width: 20px; height: 20px;">
+                            <span style="font-weight: bold; color: #065F46;">
+                                <i class="fab fa-whatsapp"></i> إرسال بيانات الدخول عبر WhatsApp
+                            </span>
+                        </label>
+                    </div>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: '✨ إنشاء الحساب',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981',
+            width: '600px',
+            preConfirm: () => {
+                const slug = document.getElementById('userSlug').value.trim();
+                const email = document.getElementById('email').value.trim();
+                const password = document.getElementById('password').value;
+                const sendCredentials = document.getElementById('sendCredentials').checked;
+                
+                if (!slug || !email || !password) {
+                    Swal.showValidationMessage('يرجى إكمال جميع البيانات');
+                    return false;
+                }
+                
+                if (!/^[a-z0-9-]+$/.test(slug)) {
+                    Swal.showValidationMessage('المعرف يجب أن يحتوي على أحرف صغيرة وأرقام وشرطات فقط');
+                    return false;
+                }
+                
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    Swal.showValidationMessage('البريد الإلكتروني غير صحيح');
+                    return false;
+                }
+                
+                return { slug, email, password, sendCredentials };
+            }
+        });
+        
+        if (!formData) return;
+        
+        // عرض رسالة التحميل
+        Swal.fire({
+            title: 'جاري إنشاء الحساب...',
+            html: `
+                <div style="text-align: center;">
+                    <div class="loading-spinner" style="margin: 20px auto;"></div>
+                    <p>يتم الآن إنشاء حساب العميل بالبنية الجديدة المنظمة...</p>
+                </div>
+            `,
+            allowOutsideClick: false,
+            showConfirmButton: false,
+            willOpen: () => { Swal.showLoading(); }
+        });
+        
+        // التحقق من عدم تكرار المعرف
+        const existingDoc = await db.collection('users').doc(formData.slug).get();
+        if (existingDoc.exists) {
+            throw new Error('هذا المعرف مستخدم بالفعل، يرجى اختيار معرف آخر');
+        }
+        
+        // التحقق من عدم تكرار الإيميل
+        const emailQuery = await db.collection('users')
+            .where('personalInfo.email', '==', formData.email)
+            .limit(1)
+            .get();
+        
+        if (!emailQuery.empty) {
+            throw new Error('هذا البريد الإلكتروني مسجل بالفعل');
+        }
+        
+        // إنشاء بنية المستخدم الجديدة
+        const newUser = UserStructure.createNewUser(student);
+        newUser.id = formData.slug;
+        newUser.personalInfo.email = formData.email;
+        newUser.auth.tempPassword = btoa(formData.password);
+        
+        // حفظ في Firebase
+        await db.collection('users').doc(formData.slug).set(newUser);
+        
+        // تحديث individualStudents
+        await db.collection('individualStudents').doc(studentId).update({
+            accountCreated: true,
+            accountCreatedAt: new Date().toISOString(),
+            accountStatus: 'active',
+            userId: formData.slug,
+            userEmail: formData.email,
+            progress: {
+                accountSetup: 100,
+                courseAssignment: 0,
+                firstPayment: student.paymentConfirmed ? 100 : 0,
+                welcomeMessage: 0,
+                totalProgress: 25
+            }
+        });
+        
+        // تحديث البيانات المحلية
+        const studentIndex = allStudents.findIndex(s => s.id === studentId);
+        if (studentIndex !== -1) {
+            allStudents[studentIndex].accountCreated = true;
+            allStudents[studentIndex].accountStatus = 'active';
+            allStudents[studentIndex].userId = formData.slug;
+            allStudents[studentIndex].userEmail = formData.email;
+        }
+        
+        // إرسال البيانات عبر WhatsApp إذا طُلب
+        if (formData.sendCredentials && student.customer?.whatsapp) {
+            const message = `
+🎉 *مرحباً ${student.customer.name}*
+
+تم إنشاء حسابك بنجاح! 
+
+📧 *البريد:* ${formData.email}
+🔑 *كلمة المرور:* ${formData.password}
+🆔 *المعرف:* ${formData.slug}
+
+🔗 *رابط الدخول:*
+https://fouad-perspective.web.app/login
+
+مع تحيات فريق منظور الفؤاد 💜
+            `.trim();
+            
+            const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+            setTimeout(() => window.open(whatsappUrl, '_blank'), 1500);
+        }
+        
+        // رسالة النجاح
+        await Swal.fire({
+            icon: 'success',
+            title: '✅ تم إنشاء الحساب بنجاح!',
+            html: `
+                <div style="text-align: right; background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
+                            padding: 20px; border-radius: 15px;">
+                    <h3 style="color: #166534; margin-bottom: 15px;">بيانات الحساب:</h3>
+                    <div style="background: white; padding: 15px; border-radius: 10px;">
+                        <p><strong>🆔 المعرف:</strong> ${formData.slug}</p>
+                        <p><strong>📧 البريد:</strong> ${formData.email}</p>
+                        <p><strong>🔑 كلمة المرور:</strong> <span style="font-family: monospace; background: #F3F4F6; padding: 5px; border-radius: 5px;">${formData.password}</span></p>
+                    </div>
+                    <div style="margin-top: 15px; padding: 10px; background: #FEF3C7; border-radius: 8px;">
+                        <p style="color: #92400E; margin: 0;">
+                            <i class="fas fa-info-circle"></i> 
+                            الخطوة التالية: تخصيص دورة للطالب
+                        </p>
+                    </div>
+                </div>
+            `,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#10B981'
+        });
+        
+        // تحديث العرض
+        filterByTab(currentFilter || 'all');
+        updateStatistics();
+        
+    } catch (error) {
+        console..error('خطأ في إنشاء الحساب:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ!',
+            text: error.message || 'حدث خطأ في إنشاء الحساب',
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+// ربط الدالة بـ window
+window.createAccount = createAccount;
+  // ==================== 📚 دالة تخصيص الدورة الجديدة ====================
 async function assignCourseToStudent(studentId) {
     try {
         const student = allStudents.find(s => s.id === studentId);
         if (!student) {
-            Swal.fire('خطأ', 'لم يتم العثور على الطالب', 'error');
+            throw new Error('لم يتم العثور على الطالب');
+        }
+        
+        // التحقق من وجود حساب
+        if (!student.userId) {
+            const result = await Swal.fire({
+                icon: 'warning',
+                title: 'لم يتم إنشاء حساب بعد',
+                text: 'يجب إنشاء حساب للطالب أولاً قبل تخصيص الدورة',
+                showCancelButton: true,
+                confirmButtonText: 'إنشاء حساب الآن',
+                cancelButtonText: 'إلغاء',
+                confirmButtonColor: '#10B981'
+            });
+            
+            if (result.isConfirmed) {
+                await createAccount(studentId);
+            }
             return;
         }
         
-        // جلب بيانات المستخدم من users collection إن وجد
-        let existingUserData = null;
-        let existingEnrollments = [];
-        
-        if (student.userId) {
-            const userDoc = await db.collection('users').doc(student.userId).get();
-            if (userDoc.exists) {
-                existingUserData = userDoc.data();
-                existingEnrollments = existingUserData.enrollments || [];
-            }
+        // جلب بيانات المستخدم الحالية
+        const userDoc = await db.collection('users').doc(student.userId).get();
+        if (!userDoc.exists) {
+            throw new Error('لم يتم العثور على بيانات المستخدم');
         }
         
-        // تحديد الدورة الحالية من البيانات المنقولة
-        const currentCourseName = student.courseName || 'غير محدد';
-        const currentCourseId = student.courseId || `course-${Date.now()}`;
+        const userData = userDoc.data();
+        const existingEnrollments = userData.enrollments || [];
         
-        // البيانات المالية الكاملة
-        const pricing = student.pricing || {};
-        const discounts = student.discounts || [];
-        const totalSavings = student.totalSavings || 0;
-        const activeOffer = student.activeOffer || null;
-        const coupon = student.coupon || null;
-        
-        // تحضير HTML الدورات السابقة
-        let previousCoursesHTML = '';
-        if (existingEnrollments.length > 0) {
-            previousCoursesHTML = `
-                <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
-                            padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                    <h4 style="color: #1E40AF; margin-bottom: 15px;">
-                        <i class="fas fa-history"></i> الدورات المخصصة سابقاً
-                    </h4>
-                    <div style="display: grid; gap: 12px;">
-                        ${existingEnrollments.map(enrollment => {
-                            const endDate = enrollment.endDate ? new Date(enrollment.endDate) : null;
-                            const isActive = endDate ? endDate > new Date() : true;
-                            const isSameCourse = enrollment.title === currentCourseName;
-                            
-                            return `
-                                <div style="background: white; padding: 15px; border-radius: 10px; 
-                                            border-right: 4px solid ${isActive ? '#10B981' : '#EF4444'};">
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <div>
-                                            <div style="font-weight: bold; color: #1F2937; margin-bottom: 5px;">
-                                                ${enrollment.title}
-                                                ${isSameCourse ? `
-                                                    <span style="background: #FEF3C7; color: #92400E; 
-                                                                 padding: 2px 8px; border-radius: 10px; 
-                                                                 font-size: 0.8rem; margin-right: 10px;">
-                                                        نفس الدورة الحالية
-                                                    </span>
-                                                ` : ''}
-                                            </div>
-                                            <div style="color: #6B7280; font-size: 0.9rem;">
-                                                <i class="fas fa-calendar-alt"></i>
-                                                من ${new Date(enrollment.startDate).toLocaleDateString('ar-EG')}
-                                                ${endDate ? ` إلى ${endDate.toLocaleDateString('ar-EG')}` : ' - غير محدد'}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            ${isActive ? `
-                                                <span style="background: #DCFCE7; color: #166534; 
-                                                             padding: 5px 15px; border-radius: 20px; 
-                                                             font-weight: bold;">
-                                                    <i class="fas fa-check-circle"></i> نشطة
-                                                </span>
-                                            ` : `
-                                                <span style="background: #FEE2E2; color: #991B1B; 
-                                                             padding: 5px 15px; border-radius: 20px; 
-                                                             font-weight: bold;">
-                                                    <i class="fas fa-times-circle"></i> منتهية
-                                                </span>
-                                            `}
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>`;
-        }
-        
-        // تحديد إذا كانت الدورة الحالية مخصصة بالفعل ونشطة
-        const currentCourseActive = existingEnrollments.find(e => 
-            e.title === currentCourseName && 
-            (e.endDate ? new Date(e.endDate) > new Date() : true)
+        // التحقق من الدورات السابقة
+        const hasSameCourse = existingEnrollments.find(e => 
+            e.title === student.courseName && 
+            new Date(e.endDate) > new Date()
         );
         
-        const result = await Swal.fire({
-            title: 'تخصيص دورة للطالب',
+        // نافذة التخصيص
+        const { value: formData } = await Swal.fire({
+            title: '🎓 تخصيص دورة',
             html: `
                 <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
                     
@@ -3391,229 +2973,159 @@ async function assignCourseToStudent(studentId) {
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
                                 <h4 style="margin: 0; color: #0369A1;">
-                                    <i class="fas fa-user-graduate"></i> ${student.customer?.name || 'الطالب'}
+                                    <i class="fas fa-user-graduate"></i> ${student.customer?.name}
                                 </h4>
                                 <p style="margin: 5px 0; color: #64748B;">
-                                    ${student.customer?.whatsapp || ''} 
-                                    ${student.customer?.email ? `• ${student.customer.email}` : ''}
+                                    ${existingEnrollments.length} دورة مسجلة سابقاً
                                 </p>
                             </div>
-                            ${student.userId ? `
-                                <span style="background: #10B981; color: white; 
-                                             padding: 8px 20px; border-radius: 25px; 
-                                             font-weight: bold;">
-                                    <i class="fas fa-check-circle"></i> حساب مُنشأ
-                                </span>
-                            ` : `
-                                <span style="background: #EF4444; color: white; 
-                                             padding: 8px 20px; border-radius: 25px; 
-                                             font-weight: bold;">
-                                    <i class="fas fa-exclamation-circle"></i> لم يُنشأ حساب بعد
-                                </span>
-                            `}
-                        </div>
-                    </div>
-                    
-                    <!-- الدورات السابقة إن وجدت -->
-                    ${previousCoursesHTML}
-                    
-                    <!-- الدورة المراد تخصيصها -->
-                    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
-                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                        <h4 style="color: #92400E; margin-bottom: 15px;">
-                            <i class="fas fa-graduation-cap"></i> الدورة المراد تخصيصها
-                        </h4>
-                        
-                        ${currentCourseActive ? `
-                            <div style="background: #FEE2E2; padding: 15px; border-radius: 10px; 
-                                        text-align: center; margin-bottom: 15px;">
-                                <i class="fas fa-exclamation-triangle" style="color: #EF4444; font-size: 2rem; margin-bottom: 10px;"></i>
-                                <p style="color: #991B1B; font-weight: bold; margin: 0;">
-                                    هذه الدورة مخصصة بالفعل وما زالت نشطة!
-                                </p>
-                                <p style="color: #7F1D1D; font-size: 0.9rem; margin-top: 5px;">
-                                    تنتهي في: ${new Date(currentCourseActive.endDate).toLocaleDateString('ar-EG')}
-                                </p>
-                            </div>
-                        ` : ''}
-                        
-                        <div style="background: white; padding: 20px; border-radius: 10px;">
-                            <div style="font-size: 1.3rem; font-weight: bold; color: #1F2937; 
-                                        text-align: center; margin-bottom: 20px; 
-                                        padding: 15px; background: #F9FAFB; border-radius: 8px;">
-                                <i class="fas fa-book" style="color: #F59E0B;"></i> ${currentCourseName}
-                            </div>
-                            
-                            <!-- المعلومات المالية الكاملة -->
-                            <div style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
-                                        padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                                <h5 style="color: #065F46; margin-bottom: 12px;">
-                                    <i class="fas fa-money-bill-wave"></i> التفاصيل المالية
-                                </h5>
-                                
-                                <!-- الأسعار -->
-                                <div style="display: grid; grid-template-columns: repeat(3, 1fr); 
-                                            gap: 10px; text-align: center; margin-bottom: 15px;">
-                                    <div style="background: white; padding: 10px; border-radius: 8px;">
-                                        <div style="color: #6B7280; font-size: 0.85rem;">السعر الأصلي</div>
-                                        <div style="font-weight: bold; color: #6B7280; text-decoration: line-through;">
-                                            ${pricing.basePrice || '0 ج.م'}
-                                        </div>
-                                    </div>
-                                    <div style="background: #DCFCE7; padding: 10px; border-radius: 8px;">
-                                        <div style="color: #065F46; font-size: 0.85rem;">السعر النهائي</div>
-                                        <div style="font-weight: bold; color: #10B981; font-size: 1.2rem;">
-                                            ${pricing.finalPrice || '0 ج.م'}
-                                        </div>
-                                    </div>
-                                    <div style="background: #FEE2E2; padding: 10px; border-radius: 8px;">
-                                        <div style="color: #991B1B; font-size: 0.85rem;">التوفير</div>
-                                        <div style="font-weight: bold; color: #DC2626;">
-                                            ${student.totalSavingsText || '0 ج.م'}
-                                        </div>
-                                    </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 2rem; font-weight: bold; color: #10B981;">
+                                    ${userData.financial?.totalPaid?.toLocaleString('ar-EG') || 0}
                                 </div>
-                                
-                                <!-- الخصومات المطبقة -->
-                                ${discounts.length > 0 ? `
-                                    <div style="background: white; padding: 12px; border-radius: 8px;">
-                                        <div style="font-weight: bold; color: #374151; margin-bottom: 8px; font-size: 0.9rem;">
-                                            الخصومات المطبقة:
-                                        </div>
-                                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                            ${discounts.map(discount => `
-                                                <span style="background: linear-gradient(135deg, #F59E0B20, #F59E0B10); 
-                                                             color: #92400E; padding: 4px 12px; 
-                                                             border-radius: 15px; font-size: 0.85rem;">
-                                                    ${discount.label}: ${discount.value}
-                                                </span>
-                                            `).join('')}
-                                        </div>
-                                    </div>
-                                ` : ''}
-                                
-                                <!-- العرض النشط -->
-                                ${activeOffer ? `
-                                    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
-                                                padding: 10px; border-radius: 8px; margin-top: 10px; 
-                                                text-align: center;">
-                                        <span style="color: #92400E; font-weight: bold;">
-                                            <i class="fas fa-fire"></i> ${activeOffer.name} - ${activeOffer.discount}
-                                        </span>
-                                    </div>
-                                ` : ''}
-                                
-                                <!-- الكوبون المستخدم -->
-                                ${coupon && coupon.code ? `
-                                    <div style="background: #F3E8FF; padding: 10px; border-radius: 8px; 
-                                                margin-top: 10px; text-align: center;">
-                                        <span style="color: #6B21A8; font-weight: bold;">
-                                            <i class="fas fa-ticket-alt"></i> كود خصم: ${coupon.code} (${coupon.discount})
-                                        </span>
-                                    </div>
-                                ` : ''}
-                            </div>
-                            
-                            <!-- إعدادات التخصيص -->
-                            <div style="background: #F9FAFB; padding: 15px; border-radius: 10px;">
-                                <h5 style="color: #374151; margin-bottom: 15px;">
-                                    <i class="fas fa-cog"></i> إعدادات التخصيص
-                                </h5>
-                                
-                                <!-- تاريخ البداية -->
-                                <div style="margin-bottom: 15px;">
-                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
-                                        <i class="fas fa-calendar-check"></i> تاريخ البداية
-                                    </label>
-                                    <input type="date" id="startDate" class="swal2-input" 
-                                           value="${new Date().toISOString().split('T')[0]}" 
-                                           style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
-                                                  border-radius: 8px;">
-                                </div>
-                                
-                                <!-- فترة الوصول -->
-                                <div style="margin-bottom: 15px;">
-                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
-                                        <i class="fas fa-clock"></i> فترة الوصول
-                                    </label>
-                                    <select id="accessPeriod" class="swal2-input" 
-                                            style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
-                                                   border-radius: 8px;"
-                                            onchange="toggleCustomEndDate()">
-                                        <option value="3">3 أشهر</option>
-                                        <option value="6" selected>6 أشهر</option>
-                                        <option value="9">9 أشهر</option>
-                                        <option value="12">سنة كاملة</option>
-                                        <option value="custom">فترة مخصصة</option>
-                                    </select>
-                                </div>
-                                
-                                <!-- تاريخ النهاية المخصص -->
-                                <div id="customEndDateDiv" style="display: none; margin-bottom: 15px;">
-                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
-                                        <i class="fas fa-calendar-times"></i> تاريخ النهاية
-                                    </label>
-                                    <input type="date" id="customEndDate" class="swal2-input" 
-                                           style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
-                                                  border-radius: 8px;">
-                                </div>
-                                
-                                <!-- ملاحظات -->
-                                <div>
-                                    <label style="display: block; margin-bottom: 8px; color: #4B5563; font-weight: bold;">
-                                        <i class="fas fa-sticky-note"></i> ملاحظات (اختياري)
-                                    </label>
-                                    <textarea id="assignmentNotes" class="swal2-textarea" 
-                                              placeholder="أي ملاحظات خاصة بالتخصيص..."
-                                              style="width: 100%; padding: 10px; border: 2px solid #E5E7EB; 
-                                                     border-radius: 8px; height: 80px;"></textarea>
-                                </div>
+                                <div style="color: #6B7280; font-size: 0.9rem;">إجمالي المدفوع</div>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- تنبيه مهم -->
-                    ${!student.userId ? `
-                        <div style="background: #FEE2E2; padding: 15px; border-radius: 10px; 
-                                    border-right: 4px solid #EF4444;">
-                            <p style="color: #991B1B; margin: 0;">
+                    ${hasSameCourse ? `
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; 
+                                    margin-bottom: 20px; border-right: 4px solid #F59E0B;">
+                            <p style="color: #92400E; margin: 0;">
                                 <i class="fas fa-exclamation-triangle"></i>
-                                <strong>تنبيه:</strong> لم يتم إنشاء حساب لهذا الطالب بعد. 
-                                يُرجى إنشاء الحساب أولاً قبل تخصيص الدورة.
+                                <strong>تنبيه:</strong> هذه الدورة مخصصة بالفعل وما زالت نشطة
+                                (تنتهي في ${new Date(hasSameCourse.endDate).toLocaleDateString('ar-EG')})
                             </p>
                         </div>
                     ` : ''}
+                    
+                    <!-- الدورة المراد تخصيصها -->
+                    <div style="background: white; border: 2px solid #E5E7EB; 
+                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-book"></i> ${student.courseName}
+                        </h4>
+                        
+                        <!-- المعلومات المالية -->
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); 
+                                    gap: 15px; margin-bottom: 20px;">
+                            <div style="text-align: center; padding: 15px; background: #F9FAFB; border-radius: 10px;">
+                                <div style="color: #6B7280; font-size: 0.9rem;">السعر الأصلي</div>
+                                <div style="font-weight: bold; color: #6B7280; text-decoration: line-through;">
+                                    ${student.pricing?.basePrice || '0 ج.م'}
+                                </div>
+                            </div>
+                            <div style="text-align: center; padding: 15px; background: #F0FDF4; border-radius: 10px;">
+                                <div style="color: #065F46; font-size: 0.9rem;">السعر النهائي</div>
+                                <div style="font-weight: bold; color: #10B981; font-size: 1.3rem;">
+                                    ${student.pricing?.finalPrice || '0 ج.م'}
+                                </div>
+                            </div>
+                            <div style="text-align: center; padding: 15px; background: #FEF3C7; border-radius: 10px;">
+                                <div style="color: #92400E; font-size: 0.9rem;">التوفير</div>
+                                <div style="font-weight: bold; color: #F59E0B;">
+                                    ${student.totalSavingsText || '0 ج.م'}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- حالة الدفع -->
+                        ${student.paymentInfo?.isInstallment ? `
+                            <div style="background: linear-gradient(135deg, #FFF7ED, #FED7AA); 
+                                        padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                                <h5 style="color: #92400E; margin-bottom: 10px;">
+                                    <i class="fas fa-coins"></i> نظام الأقساط
+                                </h5>
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                    <div style="background: white; padding: 10px; border-radius: 8px;">
+                                        <span style="color: #6B7280;">المدفوع:</span>
+                                        <strong style="color: #10B981;">
+                                            ${student.paymentInfo.paidAmount?.toLocaleString('ar-EG')} ج.م
+                                        </strong>
+                                    </div>
+                                    <div style="background: white; padding: 10px; border-radius: 8px;">
+                                        <span style="color: #6B7280;">المتبقي:</span>
+                                        <strong style="color: #F59E0B;">
+                                            ${student.paymentInfo.remainingAmount?.toLocaleString('ar-EG')} ج.م
+                                        </strong>
+                                    </div>
+                                </div>
+                            </div>
+                        ` : `
+                            <div style="background: ${student.paymentConfirmed ? '#F0FDF4' : '#FEF3C7'}; 
+                                        padding: 15px; border-radius: 10px; margin-bottom: 20px; 
+                                        text-align: center;">
+                                ${student.paymentConfirmed ? `
+                                    <i class="fas fa-check-circle" style="color: #10B981; font-size: 2rem;"></i>
+                                    <p style="color: #065F46; font-weight: bold; margin: 10px 0 0 0;">
+                                        الدفع مؤكد بالكامل
+                                    </p>
+                                ` : `
+                                    <i class="fas fa-clock" style="color: #F59E0B; font-size: 2rem;"></i>
+                                    <p style="color: #92400E; font-weight: bold; margin: 10px 0 0 0;">
+                                        بانتظار تأكيد الدفع
+                                    </p>
+                                `}
+                            </div>
+                        `}
+                    </div>
+                    
+                    <!-- إعدادات التخصيص -->
+                    <div style="background: white; padding: 20px; border-radius: 15px;">
+                        <h4 style="color: #1F2937; margin-bottom: 20px;">
+                            <i class="fas fa-cog"></i> إعدادات التخصيص
+                        </h4>
+                        
+                        <div style="display: grid; gap: 15px;">
+                            <!-- تاريخ البداية -->
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; color: #374151; font-weight: bold;">
+                                    <i class="fas fa-calendar-check"></i> تاريخ البداية
+                                </label>
+                                <input type="date" id="startDate" class="swal2-input" 
+                                       value="${new Date().toISOString().split('T')[0]}"
+                                       style="width: 100%; padding: 12px; border: 2px solid #E5E7EB; 
+                                              border-radius: 10px;">
+                            </div>
+                            
+                            <!-- فترة الوصول -->
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; color: #374151; font-weight: bold;">
+                                    <i class="fas fa-clock"></i> فترة الوصول
+                                </label>
+                                <select id="accessPeriod" class="swal2-input" 
+                                        style="width: 100%; padding: 12px; border: 2px solid #E5E7EB; 
+                                               border-radius: 10px;">
+                                    <option value="3">3 أشهر</option>
+                                    <option value="6" selected>6 أشهر</option>
+                                    <option value="12">سنة كاملة</option>
+                                    <option value="unlimited">غير محدود</option>
+                                </select>
+                            </div>
+                            
+                            <!-- ملاحظات -->
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; color: #374151; font-weight: bold;">
+                                    <i class="fas fa-sticky-note"></i> ملاحظات (اختياري)
+                                </label>
+                                <textarea id="notes" class="swal2-textarea" 
+                                          placeholder="أي ملاحظات خاصة..."
+                                          style="width: 100%; padding: 12px; border: 2px solid #E5E7EB; 
+                                                 border-radius: 10px; height: 100px;"></textarea>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                
-                                <${'script'}>
-
-                    function toggleCustomEndDate() {
-                        const period = document.getElementById('accessPeriod').value;
-                        const customDiv = document.getElementById('customEndDateDiv');
-                        if (period === 'custom') {
-                            customDiv.style.display = 'block';
-                        } else {
-                            customDiv.style.display = 'none';
-                        }
-                    }
-                                </${'script'}>
-
             `,
             showCancelButton: true,
-            confirmButtonText: currentCourseActive ? 'تمديد الفترة' : 'تخصيص الدورة',
+            confirmButtonText: hasSameCourse ? '🔄 تجديد الفترة' : '✅ تخصيص الدورة',
             cancelButtonText: 'إلغاء',
-            confirmButtonColor: currentCourseActive ? '#F59E0B' : '#10B981',
-            width: '900px',
+            confirmButtonColor: hasSameCourse ? '#F59E0B' : '#10B981',
+            width: '800px',
             preConfirm: () => {
-                if (!student.userId) {
-                    Swal.showValidationMessage('يجب إنشاء حساب للطالب أولاً');
-                    return false;
-                }
-                
                 const startDate = document.getElementById('startDate').value;
                 const accessPeriod = document.getElementById('accessPeriod').value;
-                const customEndDate = document.getElementById('customEndDate').value;
-                const notes = document.getElementById('assignmentNotes').value;
+                const notes = document.getElementById('notes').value;
                 
                 if (!startDate) {
                     Swal.showValidationMessage('يجب تحديد تاريخ البداية');
@@ -3621,212 +3133,80 @@ async function assignCourseToStudent(studentId) {
                 }
                 
                 let endDate;
-                if (accessPeriod === 'custom') {
-                    if (!customEndDate) {
-                        Swal.showValidationMessage('يجب تحديد تاريخ النهاية');
-                        return false;
-                    }
-                    endDate = customEndDate;
+                if (accessPeriod === 'unlimited') {
+                    endDate = new Date('2099-12-31').toISOString().split('T')[0];
                 } else {
                     const start = new Date(startDate);
-                    const months = parseInt(accessPeriod);
-                    const end = new Date(start);
-                    end.setMonth(end.getMonth() + months);
-                    endDate = end.toISOString().split('T')[0];
+                    start.setMonth(start.getMonth() + parseInt(accessPeriod));
+                    endDate = start.toISOString().split('T')[0];
                 }
                 
-                return {
-                    startDate,
-                    endDate,
-                    accessPeriod,
-                    notes
-                };
+                return { startDate, endDate, notes };
             }
         });
         
-        if (!result.isConfirmed || !result.value) return;
-        
-        const formData = result.value;
+        if (!formData) return;
         
         // عرض رسالة التحميل
         Swal.fire({
             title: 'جاري تخصيص الدورة...',
-            html: 'الرجاء الانتظار',
+            html: 'يتم الآن تحديث البيانات بالمنطق الجديد...',
             allowOutsideClick: false,
             showConfirmButton: false,
             willOpen: () => { Swal.showLoading(); }
         });
         
-      // إعداد بيانات التخصيص الكاملة
-const enrollmentData = {
-    id: currentCourseId,
-    type: 'individual',
-    title: currentCourseName,
-    startDate: formData.startDate,
-    endDate: formData.endDate,
-    accessType: 'full',
-    enrolledAt: new Date().toISOString(),
-    lastUpdated: new Date().toISOString(),
-    notes: formData.notes || '',
-    
-    // البيانات المالية الكاملة مع تفاصيل الدفع
-    financialData: {
-        originalPrice: pricing.basePriceNumber || 0,
-        originalPriceText: pricing.basePrice || '0 ج.م',
-        finalPrice: pricing.finalPriceNumber || 0,
-        finalPriceText: pricing.finalPrice || '0 ج.م',
-        totalSavings: totalSavings,
-        totalSavingsText: student.totalSavingsText || '0 ج.م',
-        discounts: discounts,
-        activeOffer: activeOffer,
-        coupon: coupon,
-        currency: 'EGP',
+        // إنشاء enrollment جديد
+        const newEnrollment = EnrollmentManager.createEnrollment(student, formData);
         
-        // تفاصيل طريقة الدفع
-        paymentDetails: {
-            method: student.paymentMethod || student.payment?.method || null,
-            methodCode: student.payment?.code || 'cash',
-            installmentDetails: student.payment?.installmentDetails || null,
-            installmentHTML: student.payment?.installmentHTML || null,
-            paymentConfirmed: student.paymentConfirmed || false,
-            paymentReference: student.paymentReference || null,
-            paidAt: student.paymentInfo?.paidAt || null,
-            confirmedAt: student.paymentInfo?.paymentConfirmedAt || null
-        }
-    },
-    
-    // معلومات الحجز الأصلي
-    originalBookingId: student.originalBookingId || student.id,
-    assignedBy: 'admin',
-    assignedAt: new Date().toISOString()
-};
+        // تحديث الإجماليات المالية
+        const paidAmount = EnrollmentManager.calculatePaidAmount(student);
+        const remainingAmount = EnrollmentManager.calculateRemainingAmount(student);
         
-        // تحديث أو إضافة في enrollments
-        const updatedEnrollments = [...existingEnrollments];
-        const existingIndex = updatedEnrollments.findIndex(e => e.title === currentCourseName);
+        // إضافة أو تحديث enrollment
+        let enrollments = [...existingEnrollments];
+        const existingIndex = enrollments.findIndex(e => e.title === student.courseName);
         
         if (existingIndex !== -1) {
-            // تحديث الدورة الموجودة
-            updatedEnrollments[existingIndex] = {
-                ...updatedEnrollments[existingIndex],
-                ...enrollmentData,
-                renewedAt: new Date().toISOString()
-            };
+            enrollments[existingIndex] = { ...enrollments[existingIndex], ...newEnrollment, renewedAt: new Date().toISOString() };
         } else {
-            // إضافة دورة جديدة
-            updatedEnrollments.push(enrollmentData);
+            enrollments.push(newEnrollment);
         }
         
-        // حفظ في users collection
-      // حفظ في users collection بالبنية المنظمة
-const userDoc = await db.collection('users').doc(student.userId).get();
-if (userDoc.exists) {
-    const userData = userDoc.data();
-    
-    // تحديث enrollments فقط
-    const updatedEnrollments = userData.enrollments || [];
-    const existingIndex = updatedEnrollments.findIndex(e => e.title === currentCourseName);
-    
-    if (existingIndex !== -1) {
-        updatedEnrollments[existingIndex] = {
-            ...updatedEnrollments[existingIndex],
-            ...enrollmentData,
-            renewedAt: new Date().toISOString()
-        };
-    } else {
-        updatedEnrollments.push(enrollmentData);
-    }
-    
-    // إضافة الحجز الجديد في التاريخ إذا كان مختلف
-    const bookingHistory = userData.bookingHistory || [];
-    const existingBooking = bookingHistory.find(b => b.bookingId === student.originalBookingId);
-    
-    if (!existingBooking) {
-        bookingHistory.push({
-            bookingId: student.originalBookingId || student.id,
-            bookingDate: new Date().toISOString(),
-            courseName: currentCourseName,
-            courseId: currentCourseId,
-            pricing: {
-                basePrice: pricing.basePriceNumber || 0,
-                finalPrice: pricing.finalPriceNumber || 0,
-                discounts: discounts,
-                activeOffer: activeOffer,
-                coupon: coupon,
-                totalSavings: totalSavings
-            },
-            payment: {
-                status: student.paymentInfo?.status || 'pending',
-                confirmed: student.paymentConfirmed || false,
-                method: student.paymentMethod || null,
-                reference: student.paymentReference || null
-            },
-            assignedAt: new Date().toISOString()
+        // تحديث المستخدم في Firebase
+        await db.collection('users').doc(student.userId).update({
+            enrollments: enrollments,
+            'financial.totalPaid': userData.financial.totalPaid + paidAmount,
+            'financial.totalDue': userData.financial.totalDue + remainingAmount,
+            'financial.totalSavings': userData.financial.totalSavings + (student.totalSavings || 0),
+            'timestamps.updatedAt': new Date().toISOString()
         });
-    }
-    
-    // تحديث الإحصائيات
-// تحديث الإحصائيات - بدون تكرار التوفير!
-// التوفير موجود بالفعل من إنشاء الحساب، لا نضيفه مرة أخرى
-const newTotalSpent = userData.financial?.totalPaid || 0; // لا نغير المدفوع لأنه محسوب صح
-const newTotalSavings = userData.financial?.totalSavings || 0; // لا نضاعف التوفير!
-    
-    await db.collection('users').doc(student.userId).update({
-        'enrollments': updatedEnrollments,
-        'bookingHistory': bookingHistory,
-      //  'financial.totalSavings': newTotalSavings,
-        'statistics.coursesEnrolled': updatedEnrollments.length,
-        'statistics.lastActivityDate': new Date().toISOString(),
-        'timestamps.updatedAt': new Date().toISOString(),
-        'timestamps.lastModifiedBy': 'admin'
-    });
-}
         
         // تحديث individualStudents
         await db.collection('individualStudents').doc(studentId).update({
             courseAssigned: true,
             courseAssignedAt: new Date().toISOString(),
-            assignedCourseId: currentCourseId,
-            assignedCourseTitle: currentCourseName,
-            courseAccessEndDate: formData.endDate,
             'progress.courseAssignment': 100,
-            'progress.totalProgress': 50
+            'progress.totalProgress': 75
         });
-        
-        // تحديث البيانات المحلية
-        const studentIndex = allStudents.findIndex(s => s.id === studentId);
-        if (studentIndex !== -1) {
-            allStudents[studentIndex].courseAssigned = true;
-            allStudents[studentIndex].assignedCourseId = currentCourseId;
-            allStudents[studentIndex].assignedCourseTitle = currentCourseName;
-            allStudents[studentIndex].courseAccessEndDate = formData.endDate;
-            if (!allStudents[studentIndex].progress) {
-                allStudents[studentIndex].progress = {};
-            }
-            allStudents[studentIndex].progress.courseAssignment = 100;
-            allStudents[studentIndex].progress.totalProgress = 50;
-        }
         
         // رسالة النجاح
         await Swal.fire({
             icon: 'success',
-            title: currentCourseActive ? 'تم تمديد فترة الوصول بنجاح! 🎉' : 'تم تخصيص الدورة بنجاح! 🎉',
+            title: '✅ تم تخصيص الدورة بنجاح!',
             html: `
                 <div style="text-align: right;">
                     <p><strong>الطالب:</strong> ${student.customer?.name}</p>
-                    <p><strong>الدورة:</strong> ${currentCourseName}</p>
+                    <p><strong>الدورة:</strong> ${student.courseName}</p>
                     <p><strong>الفترة:</strong> من ${new Date(formData.startDate).toLocaleDateString('ar-EG')} 
                        إلى ${new Date(formData.endDate).toLocaleDateString('ar-EG')}</p>
-                    <p><strong>السعر النهائي:</strong> ${pricing.finalPrice}</p>
-                    ${totalSavings > 0 ? `<p><strong>التوفير:</strong> ${student.totalSavingsText}</p>` : ''}
                 </div>
             `,
             confirmButtonColor: '#10B981'
         });
         
         // تحديث العرض
-        filterByTab(currentFilter);
-        updateStatistics();
+        loadStudents();
         
     } catch (error) {
         console.error('خطأ في تخصيص الدورة:', error);
@@ -3839,8 +3219,9 @@ const newTotalSavings = userData.financial?.totalSavings || 0; // لا نضاع�
     }
 }
 
-window.assignCourseToStudent = assignCourseToStudent;
-
+window.assignCourseToStudent = assignCourseToStudent;      
+window.UserStructure = UserStructure;
+window.EnrollmentManager = EnrollmentManager;
 // إضافة الدوال للـ window
 window.sendCredentials = sendCredentials;
 window.resendWelcome = resendWelcome;
