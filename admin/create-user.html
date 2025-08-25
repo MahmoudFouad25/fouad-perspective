@@ -2369,6 +2369,153 @@ async function loadDataFromIndividualStudents(userId) {
         return false;
     }
 }
+    // دالة جديدة لتحميل البيانات من users collection
+function loadUserDataFromFirebase(firebaseUserData) {
+    console.log('📥 بدء تحميل بيانات المستخدم من Firebase...');
+    console.log('البيانات الواردة:', firebaseUserData);
+    
+    // البيانات الأساسية
+    if (firebaseUserData.personalInfo) {
+        const info = firebaseUserData.personalInfo;
+        userData.basic.name = info.name || '';
+        userData.basic.firstName = info.name ? info.name.split(' ')[0] : '';
+        userData.basic.lastName = info.name ? info.name.split(' ').slice(1).join(' ') : '';
+        userData.basic.email = info.email || '';
+        userData.basic.phone = info.phone || info.whatsapp || '';
+        userData.basic.whatsapp = info.whatsapp || '';
+        userData.basic.userId = firebaseUserData.id || '';
+        
+        // البيانات الشخصية
+        userData.personal.title = info.title || '';
+        userData.personal.age = info.age || null;
+        userData.personal.gender = info.gender || '';
+        userData.personal.country = info.country || '';
+        userData.personal.city = info.city || '';
+        userData.personal.job = info.job || '';
+        userData.personal.source = info.source || '';
+    }
+    
+    // كلمة المرور المؤقتة
+    if (firebaseUserData.auth && firebaseUserData.auth.tempPassword) {
+        userData.basic.password = atob(firebaseUserData.auth.tempPassword);
+    }
+    
+    // التفضيلات والتوقعات
+    if (firebaseUserData.preferences) {
+        userData.expectations.expectations = firebaseUserData.preferences.expectations || '';
+        userData.expectations.experience = firebaseUserData.preferences.experience || '';
+        userData.expectations.applicationPlan = firebaseUserData.preferences.applicationPlan || '';
+        userData.expectations.notes = firebaseUserData.preferences.notes || '';
+    }
+    
+    // حالة الحساب
+    if (firebaseUserData.accountStatus) {
+        userData.basic.status = firebaseUserData.accountStatus.status || 'pending';
+        userData.metadata.customerLevel = firebaseUserData.accountStatus.level || 'STANDARD';
+    }
+    
+    // ========== المعلومات المالية ومعلومات الأقساط ==========
+    if (firebaseUserData.financial) {
+        const financial = firebaseUserData.financial;
+        
+        // المبالغ الأساسية
+        userData.financial.totalPaid = financial.totalPaid || 0;
+        userData.financial.totalDue = financial.totalDue || 0;
+        userData.financial.totalSavings = financial.totalSavings || 0;
+        userData.financial.loyaltyPoints = financial.loyaltyPoints || 0;
+        
+        // طرق الدفع المفضلة
+        userData.financial.paymentMethods = financial.preferredPaymentMethods || [];
+        
+        // ========== معلومات الأقساط الكاملة ==========
+        if (financial.installmentInfo && financial.installmentInfo.isActive) {
+            console.log('💳 تم العثور على معلومات أقساط نشطة!');
+            
+            userData.financial.installmentInfo = {
+                isActive: true,
+                totalAmount: financial.installmentInfo.totalAmount || 0,
+                paidAmount: financial.installmentInfo.paidAmount || 0,
+                remainingAmount: financial.installmentInfo.remainingAmount || 0,
+                totalInstallments: financial.installmentInfo.totalInstallments || 0,
+                paidInstallments: financial.installmentInfo.paidInstallments || 0,
+                nextDueDate: financial.installmentInfo.nextDueDate || null,
+                lastPaymentDate: financial.installmentInfo.lastPaymentDate || null,
+                schedule: financial.installmentInfo.schedule || []
+            };
+            
+            // حفظ الجدول في متغير عام
+            window.currentInstallmentSchedule = financial.installmentInfo.schedule;
+            
+            console.log('📊 معلومات الأقساط المحملة:', userData.financial.installmentInfo);
+        } else {
+            userData.financial.installmentInfo = null;
+        }
+        
+        // ملخص الخصومات
+        if (financial.discountsSummary) {
+            userData.financial.totalDiscounts = financial.discountsSummary.totalDiscountsAmount || 0;
+        }
+    }
+    
+    // سجل الحجوزات
+    if (firebaseUserData.bookingHistory && firebaseUserData.bookingHistory.length > 0) {
+        const lastBooking = firebaseUserData.bookingHistory[0];
+        
+        if (lastBooking.pricing) {
+            userData.financial.pricing = {
+                basePrice: lastBooking.pricing.basePriceText || '0 ج.م',
+                basePriceNumber: lastBooking.pricing.basePrice || 0,
+                finalPrice: lastBooking.pricing.finalPriceText || '0 ج.م',
+                finalPriceNumber: lastBooking.pricing.finalPrice || 0
+            };
+            
+            userData.financial.discounts = lastBooking.pricing.discounts || [];
+            userData.financial.activeOffer = lastBooking.pricing.activeOffer || null;
+            userData.financial.coupon = lastBooking.pricing.coupon || null;
+        }
+        
+        // معلومات الدفع من آخر حجز
+        if (lastBooking.payment) {
+            userData.financial.paymentConfirmed = lastBooking.payment.confirmed || false;
+            userData.financial.paymentMethod = lastBooking.payment.method || null;
+            userData.financial.paymentReference = lastBooking.payment.reference || null;
+        }
+    }
+    
+    // الدورات المسجلة
+    if (firebaseUserData.enrollments && firebaseUserData.enrollments.length > 0) {
+        userData.enrollments = firebaseUserData.enrollments;
+        selectedCourses = [...firebaseUserData.enrollments];
+    }
+    
+    // البيانات الوصفية
+    if (firebaseUserData.metadata) {
+        userData.metadata.dataCompleteness = firebaseUserData.metadata.dataCompleteness || {};
+    }
+    
+    // الإحصائيات
+    if (firebaseUserData.statistics) {
+        userData.statistics = firebaseUserData.statistics;
+    }
+    
+    console.log('✅ تم تحميل جميع البيانات بنجاح من Firebase');
+    console.log('📊 البيانات النهائية:', userData);
+    
+    // تحديث جميع التبويبات
+    displayBasicData();
+    displayPersonalData();
+    displayExpectationsData();
+    displayCompleteFinancialData();
+    
+    // عرض رسالة نجاح
+    Swal.fire({
+        icon: 'success',
+        title: 'تم تحميل البيانات!',
+        text: `تم تحميل بيانات: ${userData.basic.name}`,
+        timer: 2000,
+        showConfirmButton: false
+    });
+}
 
 // تحويل بيانات individualStudents إلى userData
 // تحويل بيانات individualStudents إلى userData بشكل كامل مع تقسيم الاسم الذكي
@@ -2888,166 +3035,47 @@ async function loadCoursesAndPaths() {
 
 // ==================== تحميل بيانات المستخدم للتعديل ====================
 async function loadUserDataFromDB(userId) {
+    console.log('🔄 جاري البحث عن المستخدم:', userId);
+    
     try {
-        console.log('🔄 جاري تحميل بيانات المستخدم:', userId);
-        
-        // جلب البيانات من المستخدمين
+        // أولاً: البحث في users collection مباشرة
         const userDoc = await db.collection('users').doc(userId).get();
         
-        if (!userDoc.exists) {
-            console.log('❌ المستخدم غير موجود في users');
-            showError('المستخدم غير موجود');
-            setTimeout(() => {
-                window.location.href = 'dashboard.html';
-            }, 2000);
+        if (userDoc.exists) {
+            console.log('✅ تم العثور على المستخدم في users collection');
+            const userData = userDoc.data();
+            
+            // نقل البيانات من users إلى نموذج الصفحة
+            loadUserDataFromFirebase(userData);
             return;
         }
         
-        const data = userDoc.data();
-        console.log('✅ تم جلب البيانات بالبنية الجديدة:', data);
+        // ثانياً: البحث في individualStudents
+        console.log('🔍 البحث في individualStudents...');
+        const studentsSnapshot = await db.collection('individualStudents').get();
         
-        // ====== ملء البيانات الأساسية من personalInfo ======
-        if (data.personalInfo) {
-            // تقسيم الاسم الكامل إلى أول وأخير
-            const fullName = data.personalInfo.name || '';
-            const nameParts = fullName.trim().split(' ');
+        for (const doc of studentsSnapshot.docs) {
+            const studentData = doc.data();
             
-            userData.basic.firstName = nameParts[0] || '';
-            userData.basic.lastName = nameParts.slice(1).join(' ') || '';
-            userData.basic.name = fullName;
-            userData.basic.email = data.personalInfo.email || '';
-            userData.basic.phone = data.personalInfo.phone || data.personalInfo.whatsapp || '';
-            userData.basic.whatsapp = data.personalInfo.whatsapp || data.personalInfo.phone || '';
-            
-            // البيانات الشخصية الإضافية
-            userData.personal.title = data.personalInfo.title || '';
-            userData.personal.age = data.personalInfo.age || null;
-            userData.personal.gender = data.personalInfo.gender || '';
-            userData.personal.country = data.personalInfo.country || '';
-            userData.personal.city = data.personalInfo.city || '';
-            userData.personal.job = data.personalInfo.job || '';
-            userData.personal.source = data.personalInfo.source || '';
-        }
-        
-        // ====== كلمة المرور من auth ======
-        if (data.auth && data.auth.tempPassword) {
-            userData.basic.password = atob(data.auth.tempPassword);
-        }
-        
-        // ====== الحالة من accountStatus ======
-        if (data.accountStatus) {
-            userData.basic.status = data.accountStatus.status || 'active';
-            userData.metadata.customerLevel = data.accountStatus.level || 'STANDARD';
-        }
-        
-        // ====== التفضيلات والتوقعات من preferences ======
-        if (data.preferences) {
-            userData.expectations.expectations = data.preferences.expectations || '';
-            userData.expectations.experience = data.preferences.experience || '';
-            userData.expectations.applicationPlan = data.preferences.applicationPlan || '';
-            userData.expectations.notes = data.preferences.notes || '';
-            
-            // طرق الدفع المفضلة
-            userData.financial.paymentMethods = data.preferences.paymentMethods || [];
-        }
-        
-        // ====== الدورات من enrollments ======
-        if (data.enrollments && data.enrollments.length > 0) {
-            userData.enrollments = data.enrollments;
-            selectedCourses = data.enrollments;
-        }
-        
-        // ====== المعلومات المالية من financial ======
-        if (data.financial) {
-            userData.financial.totalPaid = data.financial.totalPaid || 0;
-            userData.financial.totalDue = data.financial.totalDue || 0;
-            userData.financial.totalSavings = data.financial.totalSavings || 0;
-            userData.financial.totalGrants = data.financial.totalGrants || 0;
-            userData.metadata.loyaltyPoints = data.financial.loyaltyPoints || 0;
-        }
-        
-        // ====== سجل الحجوزات من bookingHistory ======
-        if (data.bookingHistory && data.bookingHistory.length > 0) {
-            // احفظ أحدث حجز للعرض
-            const latestBooking = data.bookingHistory[data.bookingHistory.length - 1];
-            
-            if (latestBooking) {
-                // معلومات التسعير من آخر حجز
-                if (latestBooking.pricing) {
-                    userData.financial.pricing = {
-                        basePrice: latestBooking.pricing.basePrice + ' ج.م',
-                        basePriceNumber: latestBooking.pricing.basePrice || 0,
-                        finalPrice: latestBooking.pricing.finalPrice + ' ج.م',
-                        finalPriceNumber: latestBooking.pricing.finalPrice || 0
-                    };
-                    userData.financial.discounts = latestBooking.pricing.discounts || [];
-                    userData.financial.activeOffer = latestBooking.pricing.activeOffer || null;
-                    userData.financial.coupon = latestBooking.pricing.coupon || null;
-                }
+            if (studentData.userId === userId || 
+                studentData.userEmail === userId || 
+                doc.id === userId) {
                 
-                // معلومات الدفع من آخر حجز
-                if (latestBooking.payment) {
-                    userData.financial.paymentConfirmed = latestBooking.payment.confirmed || false;
-                    userData.financial.paymentMethod = latestBooking.payment.method || null;
-                    userData.financial.paymentReference = latestBooking.payment.reference || null;
-                    userData.financial.paymentConfirmedAt = latestBooking.payment.confirmedAt || null;
-                }
-                
-                // معلومات الحجز الأصلي
-                userData.metadata.originalBookingId = latestBooking.bookingId || null;
-                userData.financial.bookingDate = latestBooking.bookingDate || null;
+                console.log('✅ تم العثور على الطالب في individualStudents');
+                mapIndividualStudentToUserData(studentData);
+                return;
             }
         }
         
-        // ====== الإحصائيات من statistics ======
-        if (data.statistics) {
-            userData.metadata.coursesEnrolled = data.statistics.coursesEnrolled || 0;
-            userData.metadata.coursesCompleted = data.statistics.coursesCompleted || 0;
-            userData.metadata.totalSpent = data.statistics.totalSpent || 0;
-        }
-        
-        // ====== البيانات الفنية من metadata ======
-        if (data.metadata) {
-            userData.metadata.dataCompleteness = data.metadata.dataCompleteness || { percentage: 0, isComplete: false };
-        }
-        
-        // ====== التواريخ من timestamps ======
-        if (data.timestamps) {
-            userData.metadata.createdAt = data.timestamps.createdAt || '';
-            userData.metadata.updatedAt = data.timestamps.updatedAt || '';
-        }
-        
-        // ====== الصور والأفاتار ======
-        if (data.personalInfo && data.personalInfo.avatar) {
-            userData.basic.avatar = data.personalInfo.avatar;
-        }
-        
-        // ====== تاريخ الميلاد (قد يكون في مكان منفصل) ======
-        userData.personal.birthDate = data.personalInfo?.birthDate || '';
-        
-        // ====== الدور والصلاحيات (افتراضي طالب) ======
-        userData.role.type = 'student';
-        userData.role.permissions = [];
-        
-        console.log('✅ تم تحويل البيانات للبنية القديمة للعرض:', userData);
-        
-        // ملء النموذج بالبيانات
-        fillFormWithData();
-        
-        // إظهار زر تخصيص الدورات في وضع التعديل
-        showAssignCourseButton();
-        
-        // تحديث رسالة الترحيب
-        updateWelcomeMessage();
-        
-        // حساب اكتمال البيانات
-        calculateDataCompleteness();
+        console.log('⚠️ لم يتم العثور على المستخدم في أي مكان');
+        alert('لم يتم العثور على المستخدم');
         
     } catch (error) {
         console.error('❌ خطأ في تحميل البيانات:', error);
-        showError('خطأ في تحميل بيانات المستخدم');
+        alert('حدث خطأ في تحميل البيانات');
     }
 }
+
 
 // دالة ملء النموذج بالبيانات
 // دالة ملء النموذج بالبيانات
@@ -4866,80 +4894,6 @@ function mergeBookingHistory(oldHistory, newHistory) {
     return merged;
 }
 // ==================== تحميل بيانات المستخدم للتعديل ====================
-async function loadUserData(userId) {
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        
-        if (!userDoc.exists) {
-            showError('المستخدم غير موجود');
-            setTimeout(() => {
-                window.location.href = 'https://mahmoudfouad25.github.io/fouad-perspective/admin/dashboard.html';
-            }, 2000);
-            return;
-        }
-        
-        const data = userDoc.data();
-        
-        // ملء البيانات الأساسية
-        document.getElementById('firstName').value = data.firstName || '';
-        document.getElementById('lastName').value = data.lastName || '';
-        document.getElementById('email').value = data.email || '';
-        document.getElementById('userIdPreview').value = userId;
-        
-        // الهاتف
-        const phone = data.phone || data.whatsapp || '';
-        const phoneMatch = phone.match(/^(\+\d{1,4})?(\d+)$/);
-        if (phoneMatch) {
-            document.getElementById('countryCode').value = phoneMatch[1] || '+20';
-            document.getElementById('phone').value = phoneMatch[2] || '';
-        }
-        
-        // الحالة
-        if (data.status) {
-            document.querySelector(`input[name="status"][value="${data.status}"]`).checked = true;
-        }
-        
-        // الصورة
-        if (data.avatar) {
-            document.getElementById('avatarImg').src = data.avatar;
-            document.getElementById('avatarImg').style.display = 'block';
-            document.querySelector('.avatar-preview i').style.display = 'none';
-            userData.basic.avatar = data.avatar;
-        }
-        
-        // الدور والصلاحيات
-        if (data.role) {
-            selectRole(data.role);
-        }
-        
-        // الدورات
-        if (data.enrollments && data.enrollments.length > 0) {
-            selectedCourses = data.enrollments;
-            updateSelectedCoursesList();
-        }
-        
-        // البيانات المالية
-        if (data.financial) {
-            userData.financial = data.financial;
-            updateFinancialSummary();
-        }
-        
-        // البيانات المتقدمة
-        document.getElementById('birthDate').value = data.birthDate || '';
-        document.getElementById('gender').value = data.gender || '';
-        document.getElementById('notes').value = data.notes || '';
-        
-        // إخفاء قسم إنشاء المعرف
-        document.getElementById('userIdSection').style.display = 'none';
-        
-        // تعطيل تغيير البريد
-        document.getElementById('email').setAttribute('readonly', true);
-        
-    } catch (error) {
-        console.error('خطأ في تحميل البيانات:', error);
-        showError('خطأ في تحميل بيانات المستخدم');
-    }
-}
 
 // ==================== تسجيل الأنشطة ====================
 async function logActivity(type, details) {
@@ -5248,116 +5202,183 @@ const installmentInfo = userData.financial?.installmentInfo || null;
 
     // ============ قسم جدول الأقساط إن وجد ============
 html += `
-    ${hasInstallments && installmentInfo ? `
+  // ========== عرض جدول الأقساط إن وجد ==========
+    ${userData.financial?.installmentInfo?.isActive ? `
         <div style="background: linear-gradient(135deg, #FFF7ED, #FEF3C7); 
-                    border: 3px solid #F59E0B; border-radius: 15px; 
-                    padding: 25px; margin: 30px 0;">
+                    border: 3px solid #F59E0B; border-radius: 20px; 
+                    padding: 30px; margin: 40px 0; position: relative;
+                    box-shadow: 0 10px 30px rgba(245, 158, 11, 0.2);">
             
-            <h3 style="color: #92400E; margin-bottom: 20px; font-size: 1.5rem;">
+            <!-- شارة مميزة -->
+            <div style="position: absolute; top: -15px; right: 30px; 
+                        background: linear-gradient(135deg, #F59E0B, #D97706);
+                        color: white; padding: 8px 25px; border-radius: 25px;
+                        font-weight: bold; box-shadow: 0 5px 15px rgba(245, 158, 11, 0.3);">
+                <i class="fas fa-coins"></i> نظام الأقساط
+            </div>
+            
+            <h3 style="color: #92400E; margin-bottom: 25px; font-size: 1.6rem;">
                 <i class="fas fa-calendar-alt"></i> جدول الأقساط التفصيلي
             </h3>
             
-            <!-- ملخص سريع -->
+            <!-- الملخص العلوي -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-                        gap: 20px; margin-bottom: 25px;">
-                <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
-                    <div style="color: #065F46; font-size: 0.9rem;">المدفوع</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #10B981;">
-                        ${installmentInfo.paidAmount.toLocaleString('ar-EG')} ج.م
+                        gap: 20px; margin-bottom: 30px;">
+                
+                <div style="background: white; padding: 25px; border-radius: 15px; 
+                            text-align: center; border: 2px solid #10B981;">
+                    <i class="fas fa-check-circle" style="color: #10B981; font-size: 2rem; margin-bottom: 10px;"></i>
+                    <div style="color: #065F46; font-size: 0.9rem; margin-bottom: 5px;">المدفوع</div>
+                    <div style="font-size: 2.2rem; font-weight: bold; color: #10B981;">
+                        ${(userData.financial.installmentInfo.paidAmount || 0).toLocaleString('ar-EG')}
                     </div>
-                    <div style="color: #10B981; font-size: 0.85rem;">
-                        ${installmentInfo.paidInstallments} من ${installmentInfo.totalInstallments} أقساط
-                    </div>
-                </div>
-                <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
-                    <div style="color: #92400E; font-size: 0.9rem;">المتبقي</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #F59E0B;">
-                        ${installmentInfo.remainingAmount.toLocaleString('ar-EG')} ج.م
-                    </div>
-                    <div style="color: #F59E0B; font-size: 0.85rem;">
-                        ${installmentInfo.totalInstallments - installmentInfo.paidInstallments} أقساط متبقية
+                    <div style="color: #10B981; font-size: 0.9rem; margin-top: 5px;">
+                        ${userData.financial.installmentInfo.paidInstallments} من ${userData.financial.installmentInfo.totalInstallments} أقساط
                     </div>
                 </div>
-                <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
-                    <div style="color: #1E40AF; font-size: 0.9rem;">الإجمالي</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #3B82F6;">
-                        ${installmentInfo.totalAmount.toLocaleString('ar-EG')} ج.م
+                
+                <div style="background: white; padding: 25px; border-radius: 15px; 
+                            text-align: center; border: 2px solid #F59E0B;">
+                    <i class="fas fa-hourglass-half" style="color: #F59E0B; font-size: 2rem; margin-bottom: 10px;"></i>
+                    <div style="color: #92400E; font-size: 0.9rem; margin-bottom: 5px;">المتبقي</div>
+                    <div style="font-size: 2.2rem; font-weight: bold; color: #F59E0B;">
+                        ${(userData.financial.installmentInfo.remainingAmount || 0).toLocaleString('ar-EG')}
                     </div>
-                    <div style="color: #3B82F6; font-size: 0.85rem;">
-                        ${installmentInfo.totalInstallments} أقساط كلية
+                    <div style="color: #F59E0B; font-size: 0.9rem; margin-top: 5px;">
+                        ${userData.financial.installmentInfo.totalInstallments - userData.financial.installmentInfo.paidInstallments} أقساط
+                    </div>
+                </div>
+                
+                <div style="background: white; padding: 25px; border-radius: 15px; 
+                            text-align: center; border: 2px solid #3B82F6;">
+                    <i class="fas fa-wallet" style="color: #3B82F6; font-size: 2rem; margin-bottom: 10px;"></i>
+                    <div style="color: #1E40AF; font-size: 0.9rem; margin-bottom: 5px;">الإجمالي</div>
+                    <div style="font-size: 2.2rem; font-weight: bold; color: #3B82F6;">
+                        ${(userData.financial.installmentInfo.totalAmount || 0).toLocaleString('ar-EG')}
+                    </div>
+                    <div style="color: #3B82F6; font-size: 0.9rem; margin-top: 5px;">
+                        ج.م مصري
                     </div>
                 </div>
             </div>
             
-            <!-- جدول الأقساط التفصيلي -->
-            ${installmentInfo.schedule && installmentInfo.schedule.length > 0 ? `
-                <div style="background: white; padding: 20px; border-radius: 10px;">
+            <!-- جدول الأقساط -->
+            ${userData.financial.installmentInfo.schedule && userData.financial.installmentInfo.schedule.length > 0 ? `
+                <div style="background: white; padding: 25px; border-radius: 15px;">
                     <h4 style="color: #92400E; margin-bottom: 20px;">
                         <i class="fas fa-list"></i> تفاصيل كل قسط
                     </h4>
-                    <div style="display: grid; gap: 12px;">
-                        ${installmentInfo.schedule.map((inst, idx) => `
+                    
+                    <div style="display: grid; gap: 15px;">
+                        ${userData.financial.installmentInfo.schedule.map((inst, idx) => `
                             <div style="display: flex; justify-content: space-between; align-items: center;
-                                        padding: 15px; background: ${inst.status === 'paid' ? '#DCFCE7' : '#F9FAFB'}; 
-                                        border-radius: 10px; border-right: 4px solid ${inst.status === 'paid' ? '#10B981' : '#E5E7EB'};">
-                                <div style="display: flex; align-items: center; gap: 15px;">
-                                    ${inst.status === 'paid' ? 
-                                        '<i class="fas fa-check-circle" style="color: #10B981; font-size: 1.3rem;"></i>' : 
-                                        '<i class="far fa-clock" style="color: #F59E0B; font-size: 1.3rem;"></i>'}
+                                        padding: 20px; background: ${inst.status === 'paid' ? 
+                                        'linear-gradient(135deg, #DCFCE7, #F0FDF4)' : 
+                                        'linear-gradient(135deg, #F9FAFB, #FFFFFF)'}; 
+                                        border-radius: 12px; 
+                                        border-right: 5px solid ${inst.status === 'paid' ? '#10B981' : '#E5E7EB'};
+                                        transition: all 0.3s ease;
+                                        cursor: pointer;"
+                                 onmouseover="this.style.transform='translateX(-5px)'"
+                                 onmouseout="this.style.transform='translateX(0)'">
+                                
+                                <div style="display: flex; align-items: center; gap: 20px;">
+                                    <div style="width: 50px; height: 50px; border-radius: 50%;
+                                                background: ${inst.status === 'paid' ? '#10B981' : '#F59E0B'};
+                                                color: white; display: flex; align-items: center;
+                                                justify-content: center; font-weight: bold;">
+                                        ${inst.status === 'paid' ? 
+                                            '<i class="fas fa-check"></i>' : 
+                                            `${idx}`}
+                                    </div>
+                                    
                                     <div>
-                                        <strong style="font-size: 1.1rem;">
-                                            ${idx === 0 ? 'الدفعة الأولى' : `القسط ${inst.installmentNumber}`}
-                                        </strong>
-                                        <div style="color: #6B7280; font-size: 0.9rem;">
+                                        <div style="font-weight: bold; font-size: 1.2rem; color: #1F2937;">
+                                            ${idx === 0 ? 'الدفعة الأولى' : `القسط رقم ${inst.installmentNumber}`}
+                                        </div>
+                                        <div style="color: #6B7280; font-size: 0.95rem; margin-top: 5px;">
+                                            <i class="far fa-calendar"></i>
                                             ${new Date(inst.dueDate).toLocaleDateString('ar-EG', {
+                                                weekday: 'long',
                                                 year: 'numeric',
                                                 month: 'long',
                                                 day: 'numeric'
                                             })}
                                         </div>
+                                        ${inst.paymentMethod ? `
+                                            <div style="color: #9CA3AF; font-size: 0.85rem; margin-top: 3px;">
+                                                <i class="fas fa-credit-card"></i> ${inst.paymentMethod}
+                                                ${inst.reference ? ` - ${inst.reference}` : ''}
+                                            </div>
+                                        ` : ''}
                                     </div>
                                 </div>
+                                
                                 <div style="text-align: left;">
-                                    <div style="font-weight: bold; font-size: 1.2rem; 
+                                    <div style="font-weight: bold; font-size: 1.5rem; 
                                                 color: ${inst.status === 'paid' ? '#10B981' : '#1F2937'};">
-                                        ${inst.amount.toLocaleString('ar-EG')} ج.م
+                                        ${inst.amount.toLocaleString('ar-EG')} 
+                                        <span style="font-size: 0.9rem;">ج.م</span>
                                     </div>
-                                    ${inst.status === 'paid' ? 
-                                        `<span style="color: #10B981; font-size: 0.85rem;">
-                                            <i class="fas fa-check"></i> تم الدفع
-                                        </span>` : 
-                                        `<span style="color: #F59E0B; font-size: 0.85rem;">
-                                            <i class="fas fa-hourglass-half"></i> في الانتظار
-                                        </span>`}
-                                    ${inst.paymentMethod ? `
-                                        <div style="color: #6B7280; font-size: 0.8rem; margin-top: 5px;">
-                                            ${inst.paymentMethod}
-                                        </div>
-                                    ` : ''}
+                                    <div style="margin-top: 5px;">
+                                        ${inst.status === 'paid' ? 
+                                            `<span style="background: #10B981; color: white; 
+                                                         padding: 5px 15px; border-radius: 20px; 
+                                                         font-size: 0.85rem; font-weight: bold;">
+                                                <i class="fas fa-check-circle"></i> تم الدفع
+                                            </span>` : 
+                                            `<span style="background: #F59E0B; color: white; 
+                                                         padding: 5px 15px; border-radius: 20px; 
+                                                         font-size: 0.85rem; font-weight: bold;">
+                                                <i class="fas fa-clock"></i> في الانتظار
+                                            </span>`}
+                                    </div>
                                 </div>
                             </div>
                         `).join('')}
                     </div>
                     
                     <!-- القسط القادم -->
-                    ${installmentInfo.nextDueDate ? `
-                        <div style="background: #FEF3C7; padding: 20px; border-radius: 10px; 
-                                    margin-top: 20px; text-align: center;">
-                            <i class="fas fa-bell" style="color: #F59E0B; font-size: 2rem;"></i>
-                            <div style="color: #92400E; font-weight: bold; margin-top: 10px; font-size: 1.2rem;">
+                    ${userData.financial.installmentInfo.nextDueDate ? `
+                        <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                                    padding: 25px; border-radius: 15px; margin-top: 25px; 
+                                    text-align: center; border: 2px dashed #F59E0B;">
+                            <i class="fas fa-bell" style="color: #F59E0B; font-size: 2.5rem; 
+                                                         animation: pulse 2s infinite;"></i>
+                            <div style="color: #92400E; font-weight: bold; margin-top: 15px; 
+                                        font-size: 1.3rem;">
                                 موعد القسط القادم
                             </div>
-                            <div style="color: #78350F; font-size: 1.5rem; margin-top: 10px;">
-                                ${new Date(installmentInfo.nextDueDate).toLocaleDateString('ar-EG', {
+                            <div style="color: #78350F; font-size: 1.8rem; margin-top: 10px; 
+                                        font-weight: bold;">
+                                ${new Date(userData.financial.installmentInfo.nextDueDate).toLocaleDateString('ar-EG', {
+                                    weekday: 'long',
                                     year: 'numeric',
                                     month: 'long',
                                     day: 'numeric'
                                 })}
                             </div>
+                            <div style="margin-top: 15px;">
+                                <button onclick="sendInstallmentReminder()" 
+                                        style="background: linear-gradient(135deg, #F59E0B, #D97706);
+                                               color: white; border: none; padding: 12px 30px;
+                                               border-radius: 25px; font-weight: bold; cursor: pointer;
+                                               transition: all 0.3s;">
+                                    <i class="fab fa-whatsapp"></i> إرسال تذكير للعميل
+                                </button>
+                            </div>
                         </div>
                     ` : ''}
                 </div>
-            ` : ''}
+            ` : '<div style="color: #9CA3AF; text-align: center;">لا توجد جداول أقساط</div>'}
+            
+            <!-- إضافة CSS للرسوم المتحركة -->
+            <style>
+                @keyframes pulse {
+                    0%, 100% { transform: scale(1); }
+                    50% { transform: scale(1.1); }
+                }
+            </style>
         </div>
     ` : ''}
 `;
@@ -5665,6 +5686,42 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
+    // دالة إرسال تذكير بالقسط القادم
+function sendInstallmentReminder() {
+    if (!userData.financial?.installmentInfo?.nextDueDate) {
+        Swal.fire('تنبيه', 'لا يوجد قسط قادم', 'info');
+        return;
+    }
+    
+    const nextDue = userData.financial.installmentInfo.schedule.find(inst => inst.status === 'pending');
+    if (!nextDue) {
+        Swal.fire('تنبيه', 'لا توجد أقساط معلقة', 'info');
+        return;
+    }
+    
+    const message = `
+مرحباً ${userData.basic.name} 👋
+
+تذكير بموعد القسط القادم:
+📅 التاريخ: ${new Date(nextDue.dueDate).toLocaleDateString('ar-EG')}
+💰 المبلغ: ${nextDue.amount.toLocaleString('ar-EG')} ج.م
+📊 القسط رقم: ${nextDue.installmentNumber}
+
+المتبقي من إجمالي المبلغ: ${userData.financial.installmentInfo.remainingAmount.toLocaleString('ar-EG')} ج.م
+
+شكراً لثقتك بنا 🙏
+    `.trim();
+    
+    const whatsapp = userData.basic.whatsapp || userData.basic.phone;
+    if (whatsapp) {
+        const whatsappUrl = `https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+        window.open(whatsappUrl, '_blank');
+    } else {
+        Swal.fire('تنبيه', 'لا يوجد رقم واتساب', 'warning');
+    }
+}
+
+window.sendInstallmentReminder = sendInstallmentReminder;
 // تحديث الواجهة عند تغيير الحقول
 
 
