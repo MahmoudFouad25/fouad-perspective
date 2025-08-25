@@ -4985,6 +4985,463 @@ function printCustomerCard(bookingId) {
 }
 
 
+        // أضف هذه الدوال الجديدة قبل دالة transferToSpecialized
+
+// دالة التحقق من وجود المستخدم
+// دالة جديدة للتحقق من وجود المستخدم
+async function checkExistingUser(booking) {
+    try {
+        console.log('🔍 البحث عن مستخدم موجود...');
+        
+        // استخراج البيانات الأساسية حسب نوع الحجز
+        let searchEmail = '';
+        let searchWhatsapp = '';
+        let searchName = '';
+        
+        const type = booking.bookingType || booking.type;
+        
+        if (type === 'individual' && booking.customer) {
+            searchEmail = booking.customer.email || '';
+            searchWhatsapp = booking.customer.whatsapp || '';
+            searchName = booking.customer.name || '';
+        } else if (type === 'group' && booking.groupInfo?.coordinator) {
+            searchEmail = booking.groupInfo.coordinator.email || '';
+            searchWhatsapp = booking.groupInfo.coordinator.whatsapp || '';
+            searchName = booking.groupInfo.coordinator.name || '';
+        } else if (type === 'gift_specific' && booking.giftInfo?.gifter) {
+            searchEmail = booking.giftInfo.gifter.email || '';
+            searchWhatsapp = booking.giftInfo.gifter.whatsapp || '';
+            searchName = booking.giftInfo.gifter.name || '';
+        } else if (type === 'gift_anonymous' && booking.giftInfo?.donor) {
+            searchEmail = booking.giftInfo.donor.email || '';
+            searchWhatsapp = booking.giftInfo.donor.whatsapp || '';
+            searchName = booking.giftInfo.donor.name || '';
+        } else if (type === 'voucher_donation' && booking.donor) {
+            searchEmail = booking.donor.email || '';
+            searchWhatsapp = booking.donor.phone || '';
+            searchName = booking.donor.name || '';
+        } else if (type === 'grant_request') {
+            const applicant = booking.grantRequest?.applicant || booking.applicant;
+            searchEmail = applicant?.email || '';
+            searchWhatsapp = applicant?.whatsapp || '';
+            searchName = applicant?.name || '';
+        }
+        
+        // البحث بالإيميل أولاً
+        if (searchEmail) {
+            const emailQuery = await db.collection('users')
+                .where('personalInfo.email', '==', searchEmail)
+                .limit(1)
+                .get();
+            
+            if (!emailQuery.empty) {
+                const userDoc = emailQuery.docs[0];
+                console.log('✅ وُجد مستخدم بالإيميل:', userDoc.id);
+                return {
+                    exists: true,
+                    userId: userDoc.id,
+                    userData: userDoc.data()
+                };
+            }
+        }
+        
+        // البحث بالواتساب إذا لم نجد بالإيميل
+        if (searchWhatsapp) {
+            const whatsappQuery = await db.collection('users')
+                .where('personalInfo.whatsapp', '==', searchWhatsapp)
+                .limit(1)
+                .get();
+            
+            if (!whatsappQuery.empty) {
+                const userDoc = whatsappQuery.docs[0];
+                console.log('✅ وُجد مستخدم بالواتساب:', userDoc.id);
+                return {
+                    exists: true,
+                    userId: userDoc.id,
+                    userData: userDoc.data()
+                };
+            }
+        }
+        
+        console.log('❌ لم يُعثر على مستخدم موجود');
+        return {
+            exists: false,
+            userId: null,
+            userData: null
+        };
+        
+    } catch (error) {
+        console.error('خطأ في البحث عن المستخدم:', error);
+        return {
+            exists: false,
+            userId: null,
+            userData: null
+        };
+    }
+}
+
+// دالة معالجة التحويل
+async function processTransferWithUser(booking, targetCollection, targetPage) {
+    try {
+        // إظهار شاشة التحميل
+        Swal.fire({
+            title: 'جاري النقل...',
+            html: 'يرجى الانتظار، جاري معالجة البيانات...',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        const userCheck = window.tempUserCheckResult;
+        let userId = userCheck?.userId;
+        let isNewUser = !userCheck?.exists;
+        
+        // إنشاء أو تحديث المستخدم
+        if (isNewUser) {
+            console.log('🆕 إنشاء حساب جديد...');
+            userId = await createUserFromBooking(booking);
+        } else {
+            console.log('📝 تحديث الحساب الموجود...');
+            await updateExistingUser(userId, booking);
+        }
+        
+        // إنشاء بيانات الطالب في المجموعة المخصصة
+        const studentData = prepareStudentData(booking, userId, isNewUser);
+        
+        // حفظ في المجموعة المستهدفة
+        await db.collection(targetCollection).doc(booking.id).set(studentData);
+        
+        // تحديث الحجز الأصلي
+        await db.collection('tempBookings').doc(booking.id).update({
+            status: 'transferred',
+            transferredAt: new Date().toISOString(),
+            transferredTo: targetCollection,
+            userId: userId,
+            accountCreated: isNewUser,
+            accountStatus: isNewUser ? 'new' : 'existing'
+        });
+        
+        // رسالة النجاح
+        await Swal.fire({
+            icon: 'success',
+            title: 'تم التحويل بنجاح!',
+            html: `
+                <div style="text-align: center;">
+                    <p style="font-size: 1.1rem; color: #065F46; margin-bottom: 15px;">
+                        ✅ تم نقل كل البيانات بنجاح
+                    </p>
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin: 20px 0;">
+                        <p style="margin: 5px 0; color: #047857;">
+                            <strong>معرف الحجز:</strong> ${booking.id.slice(-8).toUpperCase()}<br>
+                            <strong>معرف المستخدم:</strong> ${userId}<br>
+                            <strong>حالة الحساب:</strong> ${isNewUser ? '🆕 جديد' : '✅ موجود'}<br>
+                            <strong>الحالة:</strong> جاهز للمعالجة
+                        </p>
+                    </div>
+                    <div style="margin-top: 25px; display: flex; gap: 15px; justify-content: center;">
+                        <button onclick="window.location.href='${targetPage}?id=${booking.id}&userId=${userId}'" 
+                                style="background: linear-gradient(135deg, #10B981, #059669); 
+                                       color: white; border: none; 
+                                       padding: 12px 25px; border-radius: 10px; 
+                                       cursor: pointer; font-weight: bold;">
+                            <i class="fas fa-arrow-right"></i> الذهاب للصفحة المخصصة
+                        </button>
+                        <button onclick="location.reload()" 
+                                style="background: #6B7280; color: white; 
+                                       border: none; padding: 12px 25px; 
+                                       border-radius: 10px; cursor: pointer;">
+                            <i class="fas fa-redo"></i> البقاء هنا
+                        </button>
+                    </div>
+                </div>
+            `,
+            showConfirmButton: false,
+            allowOutsideClick: false
+        });
+        
+        // تنظيف المتغير المؤقت
+        delete window.tempUserCheckResult;
+        
+    } catch (error) {
+        console.error('خطأ في معالجة التحويل:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ!',
+            text: 'حدث خطأ في عملية التحويل. حاول مرة أخرى.',
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+// دالة إنشاء مستخدم من الحجز
+// دالة إنشاء مستخدم جديد من بيانات الحجز
+async function createUserFromBooking(booking) {
+    const type = booking.bookingType || booking.type;
+    let personalInfo = {};
+    let preferences = {};
+    
+    // استخراج البيانات حسب نوع الحجز
+    if (type === 'individual' && booking.customer) {
+        personalInfo = {
+            name: booking.customer.name || '',
+            email: booking.customer.email || '',
+            whatsapp: booking.customer.whatsapp || '',
+            phone: booking.customer.phone || booking.customer.whatsapp || '',
+            age: booking.customer.age || null,
+            gender: booking.customer.gender || 'other',
+            country: booking.customer.country || '',
+            city: booking.customer.city || '',
+            job: booking.customer.job || '',
+            source: booking.customer.source || '',
+            title: booking.customer.title || ''
+        };
+        preferences = {
+            expectations: booking.customer.expectations || '',
+            experience: booking.customer.experience || 'مبتدئ',
+            applicationPlan: booking.customer.applicationPlan || '',
+            notes: booking.customer.notes || '',
+            paymentMethods: booking.customer.paymentMethods || []
+        };
+    } else if (type === 'group' && booking.groupInfo?.coordinator) {
+        personalInfo = {
+            name: booking.groupInfo.coordinator.name || '',
+            email: booking.groupInfo.coordinator.email || '',
+            whatsapp: booking.groupInfo.coordinator.whatsapp || '',
+            phone: booking.groupInfo.coordinator.phone || booking.groupInfo.coordinator.whatsapp || '',
+            age: booking.groupInfo.coordinator.age || null,
+            gender: booking.groupInfo.coordinator.gender || 'other',
+            country: booking.groupInfo.coordinator.country || '',
+            city: booking.groupInfo.coordinator.city || '',
+            job: booking.groupInfo.coordinator.job || '',
+            source: booking.groupInfo.coordinator.source || '',
+            title: booking.groupInfo.coordinator.title || ''
+        };
+        preferences = {
+            expectations: booking.groupInfo.coordinator.expectations || '',
+            experience: booking.groupInfo.coordinator.experience || 'مبتدئ',
+            applicationPlan: booking.groupInfo.coordinator.applicationPlan || '',
+            notes: booking.groupInfo.coordinator.notes || '',
+            paymentMethods: booking.groupInfo.paymentMethods || []
+        };
+    } else if (type === 'gift_specific' && booking.giftInfo?.gifter) {
+        personalInfo = {
+            name: booking.giftInfo.gifter.name || '',
+            email: booking.giftInfo.gifter.email || '',
+            whatsapp: booking.giftInfo.gifter.whatsapp || '',
+            phone: booking.giftInfo.gifter.phone || booking.giftInfo.gifter.whatsapp || '',
+            age: null,
+            gender: 'other',
+            country: booking.giftInfo.gifter.country || '',
+            city: booking.giftInfo.gifter.city || '',
+            job: '',
+            source: '',
+            title: ''
+        };
+        preferences = {
+            expectations: '',
+            experience: 'مبتدئ',
+            applicationPlan: '',
+            notes: '',
+            paymentMethods: booking.giftInfo.paymentMethods || []
+        };
+    } else if (type === 'gift_anonymous' && booking.giftInfo?.donor) {
+        personalInfo = {
+            name: booking.giftInfo.donor.name || 'محسن كريم',
+            email: booking.giftInfo.donor.email || '',
+            whatsapp: booking.giftInfo.donor.whatsapp || '',
+            phone: booking.giftInfo.donor.phone || booking.giftInfo.donor.whatsapp || '',
+            age: null,
+            gender: 'other',
+            country: booking.giftInfo.donor.country || '',
+            city: booking.giftInfo.donor.city || '',
+            job: '',
+            source: '',
+            title: ''
+        };
+        preferences = {
+            expectations: '',
+            experience: 'مبتدئ',
+            applicationPlan: '',
+            notes: '',
+            paymentMethods: booking.giftInfo.paymentMethods || []
+        };
+    } else if (type === 'voucher_donation' && booking.donor) {
+        personalInfo = {
+            name: booking.donor.name || 'متبرع كريم',
+            email: booking.donor.email || '',
+            whatsapp: booking.donor.phone || '',
+            phone: booking.donor.phone || '',
+            age: null,
+            gender: 'other',
+            country: booking.donor.country || '',
+            city: booking.donor.city || '',
+            job: '',
+            source: '',
+            title: ''
+        };
+        preferences = {
+            expectations: '',
+            experience: 'مبتدئ',
+            applicationPlan: '',
+            notes: '',
+            paymentMethods: booking.paymentMethods || []
+        };
+    } else if (type === 'grant_request') {
+        const applicant = booking.grantRequest?.applicant || booking.applicant || {};
+        personalInfo = {
+            name: applicant.name || '',
+            email: applicant.email || '',
+            whatsapp: applicant.whatsapp || '',
+            phone: applicant.phone || applicant.whatsapp || '',
+            age: applicant.age || null,
+            gender: applicant.gender || 'other',
+            country: applicant.country || '',
+            city: applicant.city || '',
+            job: applicant.job || '',
+            source: applicant.source || '',
+            title: applicant.title || ''
+        };
+        preferences = {
+            expectations: booking.grantRequest?.motivation?.whyJoin || '',
+            experience: booking.grantRequest?.financial?.experience || 'مبتدئ',
+            applicationPlan: booking.grantRequest?.motivation?.howBenefit || '',
+            notes: booking.grantRequest?.motivation?.challenges || '',
+            paymentMethods: []
+        };
+    }
+    
+    // إنشاء slug فريد
+    const nameSlug = personalInfo.name ? 
+        personalInfo.name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') : 'user';
+    const timestamp = Date.now();
+    const userId = `${nameSlug}-${timestamp}`;
+    
+    // بناء كائن المستخدم الجديد
+    const newUser = {
+        id: userId,
+        personalInfo: personalInfo,
+        auth: {
+            tempPassword: btoa(Math.random().toString(36).substr(2, 9)),
+            lastLogin: null,
+            loginCount: 0,
+            createdAt: new Date().toISOString(),
+            createdBy: 'admin',
+            createdFrom: 'managebookings-transfer'
+        },
+        preferences: preferences,
+        accountStatus: {
+            status: 'active',
+            level: 'STANDARD',
+            verified: false,
+            suspended: false,
+            suspendReason: null
+        },
+        enrollments: [],
+        financial: {
+            totalPaid: 0,
+            totalDue: 0,
+            totalSavings: booking.totalSavings || 0,
+            loyaltyPoints: 0,
+            preferredPaymentMethods: preferences.paymentMethods,
+            paymentHistory: [],
+            wallet: {
+                balance: 0,
+                transactions: [],
+                lastUpdated: new Date().toISOString()
+            },
+            discountsSummary: {
+                totalDiscountsAmount: booking.totalSavings || 0,
+                timeDiscounts: 0,
+                couponDiscounts: 0,
+                cashDiscounts: 0,
+                groupDiscounts: 0
+            },
+            installmentInfo: null
+        },
+        bookingHistory: [],
+        statistics: {
+            coursesEnrolled: 0,
+            coursesCompleted: 0,
+            totalSpent: 0,
+            averageProgress: 0,
+            lastActivityDate: new Date().toISOString()
+        },
+        metadata: {
+            dataCompleteness: {
+                percentage: 0,
+                isComplete: false,
+                hasName: !!personalInfo.name,
+                hasWhatsapp: !!personalInfo.whatsapp,
+                hasEmail: !!personalInfo.email,
+                hasPaymentMethod: preferences.paymentMethods.length > 0,
+                hasPricing: false,
+                hasDiscounts: false
+            },
+            originalStudentDocId: booking.id,
+            ipAddress: 'system',
+            userAgent: 'admin-transfer',
+            platform: 'web'
+        },
+        timestamps: {
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastModifiedBy: 'admin'
+        }
+    };
+    
+    // حفظ في Firebase
+    await db.collection('users').doc(userId).set(newUser);
+    
+    return userId;
+}
+
+// دالة تحديث المستخدم الموجود
+async function updateExistingUser(userId, booking) {
+    // إضافة الحجز الجديد لسجل الحجوزات
+    const bookingRecord = {
+        bookingId: booking.id,
+        bookingDate: booking.timestamp || new Date().toISOString(),
+        courseName: booking.courseName || 'غير محدد',
+        courseId: booking.courseId || null,
+        transferredAt: new Date().toISOString(),
+        pricing: booking.pricing || {},
+        payment: booking.payment || {},
+        journey: booking.journey || {}
+    };
+    
+    await db.collection('users').doc(userId).update({
+        bookingHistory: firebase.firestore.FieldValue.arrayUnion(bookingRecord),
+        'timestamps.updatedAt': new Date().toISOString(),
+        'timestamps.lastModifiedBy': 'admin'
+    });
+}
+
+// دالة تجهيز بيانات الطالب للحفظ
+function prepareStudentData(booking, userId, isNewUser) {
+    return {
+        ...booking,
+        userId: userId,
+        accountCreated: true,
+        accountCreatedAt: new Date().toISOString(),
+        accountStatus: 'active',
+        isNewUser: isNewUser,
+        transferInfo: {
+            transferredAt: new Date().toISOString(),
+            transferredFrom: 'tempBookings',
+            transferredBy: 'admin',
+            originalBookingId: booking.id
+        },
+        paymentInfo: {
+            status: booking.status,
+            paymentConfirmed: booking.paymentConfirmed || false,
+            paymentMethod: booking.paymentMethod || null,
+            paymentReference: booking.paymentReference || null,
+            paymentDetails: booking.paymentDetails || null,
+            paidAt: booking.paidAt || null
+        }
+    };
+}
+
         
        //دالة التحويل الذكية
         //دالة التحويل الذكية - النسخة المطورة لنقل كل البيانات
@@ -5012,48 +5469,71 @@ function transferToSpecialized(bookingId, type) {
     }
     
     Swal.fire({
-        title: 'تحويل للإدارة المتخصصة',
-        html: `
-            <div style="text-align: right;">
-                <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+    title: 'تحويل للإدارة المتخصصة',
+    html: `
+        <div style="text-align: right;">
+            <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                <h4 style="color: #065F46; margin-bottom: 10px;">
+                    <i class="fas fa-search"></i> جاري الفحص...
+                </h4>
+                <p style="color: #047857;">سيتم التحقق من وجود حساب مسبق للعميل</p>
+            </div>
+            
+            <div id="checkingStatus" style="text-align: center; padding: 20px;">
+                <div class="loading-spinner" style="margin: 0 auto;"></div>
+                <p style="color: #6B7280;">جاري البحث في قاعدة البيانات...</p>
+            </div>
+        </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'تحويل الآن',
+    cancelButtonText: 'إلغاء',
+    confirmButtonColor: '#10B981',
+    allowOutsideClick: false,
+    didOpen: async () => {
+        // البحث عن المستخدم
+        const userCheck = await checkExistingUser(booking);
+        
+        const statusDiv = document.getElementById('checkingStatus');
+        if (userCheck.exists) {
+            statusDiv.innerHTML = `
+                <div style="background: #DCFCE7; padding: 15px; border-radius: 10px; text-align: right;">
                     <h4 style="color: #065F46; margin-bottom: 10px;">
-                        <i class="fas fa-info-circle"></i> سيتم الآن:
+                        <i class="fas fa-check-circle"></i> تم العثور على حساب موجود!
                     </h4>
-                    <ul style="text-align: right; color: #047857;">
-                        <li>نقل كل البيانات بالكامل للقسم المختص</li>
-                        <li>حفظ كل التفاصيل بدون أي فقدان</li>
-                        <li>إنشاء ملف متابعة جديد</li>
-                        <li>تحديث حالة الحجز</li>
-                        ${type === 'individual' ? '<li>تجهيز إنشاء حساب فردي</li>' : ''}
-                        ${type === 'group' ? '<li>تجهيز إدارة المجموعة</li>' : ''}
-                        ${type.includes('gift') || type.includes('voucher') ? '<li>تجهيز تقارير المنح</li>' : ''}
-                    </ul>
-                </div>
-                
-                <div style="background: #FEF3C7; padding: 10px; border-radius: 8px;">
-                    <p style="color: #92400E; margin: 0;">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        بعد التحويل، ستتم إدارة هذا الطلب من الصفحة المختصة
+                    <p style="color: #047857;">
+                        <strong>معرف المستخدم:</strong> ${userCheck.userId}<br>
+                        <strong>الاسم:</strong> ${userCheck.userData.personalInfo?.name || 'غير محدد'}<br>
+                        <strong>عدد الدورات المسجلة:</strong> ${userCheck.userData.enrollments?.length || 0}
+                    </p>
+                    <p style="color: #059669; margin-top: 10px;">
+                        ✅ سيتم استخدام الحساب الموجود وإضافة الدورة الجديدة إليه
                     </p>
                 </div>
-            </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'تحويل الآن',
-        cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#10B981'
-    }).then(async (result) => {
-        if (result.isConfirmed) {
-            try {
-                // إظهار شاشة التحميل
-                Swal.fire({
-                    title: 'جاري النقل...',
-                    html: 'يرجى الانتظار، جاري نقل كل البيانات بالكامل...',
-                    allowOutsideClick: false,
-                    didOpen: () => {
-                        Swal.showLoading();
-                    }
-                });
+            `;
+        } else {
+            statusDiv.innerHTML = `
+                <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: right;">
+                    <h4 style="color: #92400E; margin-bottom: 10px;">
+                        <i class="fas fa-user-plus"></i> مستخدم جديد
+                    </h4>
+                    <p style="color: #78350F;">
+                        لم يتم العثور على حساب مسبق<br>
+                        سيتم إنشاء حساب جديد للعميل تلقائياً
+                    </p>
+                </div>
+            `;
+        }
+        
+        // حفظ النتيجة
+        window.tempUserCheckResult = userCheck;
+    }
+}).then(async (result) => {
+    if (result.isConfirmed) {
+        // استدعاء الدالة الجديدة بدلاً من الكود القديم
+        await processTransferWithUser(booking, targetCollection, targetPage);
+    }
+});
                 
                 // إنشاء نسخة كاملة من البيانات مع إضافة معلومات التحويل
                 const completeData = {
