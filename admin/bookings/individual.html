@@ -568,6 +568,16 @@
     0%, 100% { box-shadow: 0 0 5px rgba(37, 211, 102, 0.5); }
     50% { box-shadow: 0 0 20px rgba(37, 211, 102, 0.8); }
 }
+
+        .btn-gold {
+    background: linear-gradient(135deg, #F59E0B, #D97706);
+    color: white;
+}
+
+.btn-referral {
+    background: linear-gradient(135deg, #06B6D4, #0891B2);
+    color: white;
+}
     </style>
 </head>
 <body>
@@ -1924,7 +1934,29 @@ function createStudentCard(student) {
             ` : ''}
         </button>
     ` : ''}
+
+    ${hasAccount ? `
+    <button class="btn btn-gold" onclick="viewLoyaltyDashboard('${studentId}')">
+        <i class="fas fa-star"></i> نقاط الولاء
+        ${userData?.loyaltyPoints?.balance > 0 ? `
+            <span style="background: #F59E0B; color: white; padding: 2px 6px; 
+                         border-radius: 10px; font-size: 0.8rem; margin-right: 5px;">
+                ${userData.loyaltyPoints.balance}
+            </span>
+        ` : ''}
+    </button>
     
+    <button class="btn btn-referral" onclick="manageReferralProgram('${studentId}')">
+        <i class="fas fa-users"></i> الإحالات
+        ${userData?.referralProgram?.usageCount > 0 ? `
+            <span style="background: #3B82F6; color: white; padding: 2px 6px; 
+                         border-radius: 10px; font-size: 0.8rem; margin-right: 5px;">
+                ${userData.referralProgram.usageCount}
+            </span>
+        ` : ''}
+    </button>
+` : ''}
+
     ${customer.whatsapp ? `
         <button class="btn btn-whatsapp" onclick="sendPaymentReminder('${studentId}')">
             <i class="fab fa-whatsapp"></i> تذكير بالدفع
@@ -4796,6 +4828,668 @@ window.deductWalletBalance = async (userId) => {
     // سيتم تنفيذها في الخطوة القادمة
     Swal.fire('قريباً', 'هذه الميزة قيد التطوير', 'info');
 };     
+
+// ==================== 🌟 نظام نقاط الولاء والإحالات ====================
+
+// دالة عرض لوحة نقاط الولاء
+async function viewLoyaltyDashboard(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+        return;
+    }
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    const loyalty = userData.loyaltyPoints || {
+        balance: 0,
+        tier: 'BRONZE',
+        history: [],
+        redemptions: []
+    };
+    
+    // حساب التقدم للمستوى التالي
+    const tierThresholds = {
+        BRONZE: { min: 0, max: 999, next: 'SILVER', color: '#CD7F32' },
+        SILVER: { min: 1000, max: 2999, next: 'GOLD', color: '#C0C0C0' },
+        GOLD: { min: 3000, max: 4999, next: 'PLATINUM', color: '#FFD700' },
+        PLATINUM: { min: 5000, max: null, next: null, color: '#E5E4E2' }
+    };
+    
+    const currentTier = tierThresholds[loyalty.tier] || tierThresholds.BRONZE;
+    const progressPercentage = currentTier.next ? 
+        Math.min(100, ((loyalty.balance - currentTier.min) / (currentTier.max - currentTier.min + 1)) * 100) : 100;
+    
+    await Swal.fire({
+        title: '⭐ نظام نقاط الولاء',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- بطاقة المستوى الحالي -->
+                <div style="background: linear-gradient(135deg, ${currentTier.color}, ${currentTier.color}DD); 
+                            color: white; padding: 30px; border-radius: 20px; margin-bottom: 25px;
+                            box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                    <div style="text-align: center;">
+                        <div style="font-size: 3rem; margin-bottom: 10px;">
+                            ${loyalty.tier === 'PLATINUM' ? '👑' : 
+                              loyalty.tier === 'GOLD' ? '🏆' :
+                              loyalty.tier === 'SILVER' ? '🥈' : '🥉'}
+                        </div>
+                        <h2 style="margin: 0; font-size: 1.8rem;">${loyalty.tier}</h2>
+                        <div style="font-size: 2.5rem; font-weight: bold; margin: 15px 0;">
+                            ${loyalty.balance.toLocaleString('ar-EG')} نقطة
+                        </div>
+                        
+                        ${currentTier.next ? `
+                            <div style="margin-top: 20px;">
+                                <div style="font-size: 0.9rem; opacity: 0.9; margin-bottom: 10px;">
+                                    التقدم نحو ${currentTier.next}
+                                </div>
+                                <div style="background: rgba(255,255,255,0.3); height: 20px; 
+                                            border-radius: 10px; overflow: hidden;">
+                                    <div style="background: rgba(255,255,255,0.9); height: 100%; 
+                                                width: ${progressPercentage}%; transition: width 0.5s;"></div>
+                                </div>
+                                <div style="font-size: 0.85rem; margin-top: 5px; opacity: 0.8;">
+                                    ${currentTier.max - loyalty.balance + 1} نقطة للمستوى التالي
+                                </div>
+                            </div>
+                        ` : `
+                            <div style="margin-top: 20px; font-size: 1.1rem;">
+                                🌟 أعلى مستوى - مميزات حصرية
+                            </div>
+                        `}
+                    </div>
+                </div>
+                
+                <!-- المميزات والفوائد -->
+                <div style="background: white; border: 2px solid #E5E7EB; 
+                            padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-gift"></i> مميزات المستوى ${loyalty.tier}
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                        ${getTierBenefits(loyalty.tier).map(benefit => `
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <i class="fas fa-check-circle" style="color: #10B981;"></i>
+                                <span>${benefit}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <!-- إجراءات النقاط -->
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <button onclick="addLoyaltyPoints('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 12px; cursor: pointer; font-weight: bold;">
+                        <i class="fas fa-plus-circle"></i> إضافة نقاط
+                    </button>
+                    <button onclick="redeemPoints('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 12px; cursor: pointer; font-weight: bold;">
+                        <i class="fas fa-exchange-alt"></i> استبدال النقاط
+                    </button>
+                </div>
+                
+                <!-- سجل النقاط -->
+                <div style="background: #F9FAFB; padding: 20px; border-radius: 15px;">
+                    <h5 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-history"></i> آخر حركات النقاط
+                    </h5>
+                    ${loyalty.history && loyalty.history.length > 0 ? 
+                        loyalty.history.slice(-10).reverse().map(entry => `
+                            <div style="background: white; padding: 12px; border-radius: 10px; 
+                                        margin-bottom: 10px; border-right: 3px solid 
+                                        ${entry.type === 'earned' ? '#10B981' : '#F59E0B'};">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-weight: bold; color: #1F2937;">
+                                            ${entry.type === 'earned' ? 
+                                                '<i class="fas fa-arrow-down" style="color: #10B981;"></i> +' : 
+                                                '<i class="fas fa-arrow-up" style="color: #F59E0B;"></i> -'}
+                                            ${entry.amount} نقطة
+                                        </div>
+                                        <div style="color: #6B7280; font-size: 0.85rem; margin-top: 5px;">
+                                            ${entry.description || 'بدون وصف'}
+                                        </div>
+                                    </div>
+                                    <div style="text-align: left;">
+                                        <div style="color: #6B7280; font-size: 0.8rem;">
+                                            ${new Date(entry.date).toLocaleDateString('ar-EG')}
+                                        </div>
+                                        <div style="color: #9CA3AF; font-size: 0.75rem;">
+                                            الرصيد: ${entry.balanceAfter}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('') : 
+                        '<div style="text-align: center; color: #9CA3AF; padding: 20px;">لا توجد حركات مسجلة</div>'
+                    }
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دالة الحصول على مميزات المستوى
+function getTierBenefits(tier) {
+    const benefits = {
+        BRONZE: [
+            'كسب نقطة لكل 100 ج.م',
+            'خصم 5% على الدورات',
+            'أولوية الدعم الفني',
+            'شهادة عضوية برونزية'
+        ],
+        SILVER: [
+            'كسب 1.5 نقطة لكل 100 ج.م',
+            'خصم 10% على الدورات',
+            'دورة مجانية كل 6 أشهر',
+            'أولوية التسجيل في الدورات',
+            'شهادة عضوية فضية',
+            'دعم فني مخصص'
+        ],
+        GOLD: [
+            'كسب 2 نقطة لكل 100 ج.م',
+            'خصم 15% على الدورات',
+            'دورتان مجانيتان كل 6 أشهر',
+            'وصول حصري للمحتوى المميز',
+            'شهادة عضوية ذهبية',
+            'مدير حساب شخصي'
+        ],
+        PLATINUM: [
+            'كسب 3 نقطة لكل 100 ج.م',
+            'خصم 20% على كل الدورات',
+            'دورات غير محدودة',
+            'محتوى حصري VIP',
+            'شهادة عضوية بلاتينية',
+            'خدمة كونسيرج تعليمي',
+            'دعوات لفعاليات حصرية',
+            'استشارات شخصية مجانية'
+        ]
+    };
+    
+    return benefits[tier] || benefits.BRONZE;
+}
+
+// دالة إضافة نقاط الولاء
+async function addLoyaltyPoints(userId) {
+    const { value: pointsData } = await Swal.fire({
+        title: '➕ إضافة نقاط ولاء',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-star"></i> عدد النقاط
+                    </label>
+                    <input type="number" id="points" class="swal2-input" 
+                           placeholder="عدد النقاط المضافة"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-tag"></i> السبب
+                    </label>
+                    <select id="source" class="swal2-input" style="width: 100%;">
+                        <option value="course_purchase">شراء دورة</option>
+                        <option value="referral">إحالة عميل</option>
+                        <option value="achievement">إنجاز خاص</option>
+                        <option value="bonus">مكافأة</option>
+                        <option value="event">مشاركة في فعالية</option>
+                        <option value="review">تقييم إيجابي</option>
+                        <option value="manual">إضافة يدوية</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-comment"></i> وصف
+                    </label>
+                    <input type="text" id="description" class="swal2-input" 
+                           placeholder="وصف سبب الإضافة..."
+                           style="width: 100%;">
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إضافة النقاط',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const points = parseInt(document.getElementById('points').value);
+            if (!points || points <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            return {
+                points: points,
+                source: document.getElementById('source').value,
+                description: document.getElementById('description').value
+            };
+        }
+    });
+    
+    if (!pointsData) return;
+    
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        const currentBalance = userData.loyaltyPoints?.balance || 0;
+        const newBalance = currentBalance + pointsData.points;
+        
+        // تحديد المستوى الجديد
+        let newTier = 'BRONZE';
+        if (newBalance >= 5000) newTier = 'PLATINUM';
+        else if (newBalance >= 3000) newTier = 'GOLD';
+        else if (newBalance >= 1000) newTier = 'SILVER';
+        
+        const history = userData.loyaltyPoints?.history || [];
+        history.push({
+            id: `points-${Date.now()}`,
+            type: 'earned',
+            amount: pointsData.points,
+            source: pointsData.source,
+            description: pointsData.description,
+            date: new Date().toISOString(),
+            balanceAfter: newBalance
+        });
+        
+        await db.collection('users').doc(userId).update({
+            'loyaltyPoints.balance': newBalance,
+            'loyaltyPoints.tier': newTier,
+            'loyaltyPoints.history': history,
+            'loyaltyPoints.tierProgress': {
+                current: newTier,
+                next: newTier === 'PLATINUM' ? null : 
+                      newTier === 'GOLD' ? 'PLATINUM' :
+                      newTier === 'SILVER' ? 'GOLD' : 'SILVER',
+                pointsToNext: newTier === 'PLATINUM' ? 0 :
+                             newTier === 'GOLD' ? 5000 - newBalance :
+                             newTier === 'SILVER' ? 3000 - newBalance :
+                             1000 - newBalance
+            },
+            'timestamps.updatedAt': new Date().toISOString()
+        });
+        
+        // تحقق من ترقية المستوى
+        const oldTier = userData.loyaltyPoints?.tier || 'BRONZE';
+        if (newTier !== oldTier) {
+            await Swal.fire({
+                icon: 'success',
+                title: '🎉 مبروك! ترقية المستوى',
+                html: `
+                    <div style="text-align: center;">
+                        <div style="font-size: 3rem; margin: 20px 0;">
+                            ${newTier === 'PLATINUM' ? '👑' : 
+                              newTier === 'GOLD' ? '🏆' :
+                              newTier === 'SILVER' ? '🥈' : '🥉'}
+                        </div>
+                        <h3>تمت الترقية إلى ${newTier}</h3>
+                        <p>الرصيد الجديد: ${newBalance.toLocaleString('ar-EG')} نقطة</p>
+                    </div>
+                `,
+                confirmButtonColor: '#10B981'
+            });
+        } else {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم إضافة النقاط',
+                text: `الرصيد الجديد: ${newBalance.toLocaleString('ar-EG')} نقطة`,
+                confirmButtonColor: '#10B981'
+            });
+        }
+        
+        await loadStudents();
+        
+    } catch (error) {
+        console.error('خطأ في إضافة النقاط:', error);
+        Swal.fire('خطأ', 'حدث خطأ في إضافة النقاط', 'error');
+    }
+}
+
+// دالة استبدال النقاط
+async function redeemPoints(userId) {
+    const userDoc = await db.collection('users').doc(userId).get();
+    const userData = userDoc.data();
+    const currentPoints = userData.loyaltyPoints?.balance || 0;
+    
+    if (currentPoints < 100) {
+        Swal.fire('تنبيه', 'رصيد النقاط غير كافي للاستبدال (الحد الأدنى 100 نقطة)', 'warning');
+        return;
+    }
+    
+    const { value: redemptionData } = await Swal.fire({
+        title: '🎁 استبدال نقاط الولاء',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                            color: white; padding: 15px; border-radius: 12px; 
+                            margin-bottom: 20px; text-align: center;">
+                    <div style="font-size: 0.9rem;">رصيدك الحالي</div>
+                    <div style="font-size: 1.8rem; font-weight: bold;">
+                        ${currentPoints.toLocaleString('ar-EG')} نقطة
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-gift"></i> نوع الاستبدال
+                    </label>
+                    <select id="redeemType" class="swal2-input" style="width: 100%;" 
+                            onchange="updateRedemptionValue()">
+                        <option value="discount" data-rate="10">خصم على دورة (10 نقاط = 1 ج.م)</option>
+                        <option value="wallet" data-rate="5">رصيد محفظة (5 نقاط = 1 ج.م)</option>
+                        <option value="free_course" data-rate="5000">دورة مجانية (5000 نقطة)</option>
+                        <option value="certificate" data-rate="1000">شهادة إضافية (1000 نقطة)</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-coins"></i> عدد النقاط للاستبدال
+                    </label>
+                    <input type="number" id="pointsToRedeem" class="swal2-input" 
+                           placeholder="عدد النقاط" max="${currentPoints}"
+                           style="width: 100%;" onkeyup="calculateRedemptionValue()">
+                </div>
+                
+                <div id="redemptionValue" style="background: #F0FDF4; 
+                            padding: 15px; border-radius: 10px; text-align: center;">
+                    <div style="color: #065F46; font-size: 0.9rem;">القيمة المعادلة</div>
+                    <div id="valueDisplay" style="font-weight: bold; font-size: 1.3rem; color: #10B981;">
+                        0 ج.م
+                    </div>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الاستبدال',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#F59E0B',
+        didOpen: () => {
+            // إضافة الدوال للحساب
+            window.updateRedemptionValue = () => {
+                const select = document.getElementById('redeemType');
+                const pointsInput = document.getElementById('pointsToRedeem');
+                const selectedOption = select.options[select.selectedIndex];
+                const rate = parseFloat(selectedOption.dataset.rate);
+                
+                if (selectedOption.value === 'free_course' || selectedOption.value === 'certificate') {
+                    pointsInput.value = rate;
+                    pointsInput.readOnly = true;
+                } else {
+                    pointsInput.readOnly = false;
+                }
+                calculateRedemptionValue();
+            };
+            
+            window.calculateRedemptionValue = () => {
+                const select = document.getElementById('redeemType');
+                const pointsInput = document.getElementById('pointsToRedeem');
+                const valueDisplay = document.getElementById('valueDisplay');
+                const selectedOption = select.options[select.selectedIndex];
+                const rate = parseFloat(selectedOption.dataset.rate);
+                const points = parseInt(pointsInput.value) || 0;
+                
+                if (selectedOption.value === 'free_course') {
+                    valueDisplay.textContent = 'دورة مجانية كاملة';
+                } else if (selectedOption.value === 'certificate') {
+                    valueDisplay.textContent = 'شهادة إضافية';
+                } else {
+                    const value = Math.floor(points / rate);
+                    valueDisplay.textContent = `${value} ج.م`;
+                }
+            };
+        },
+        preConfirm: () => {
+            const points = parseInt(document.getElementById('pointsToRedeem').value);
+            const type = document.getElementById('redeemType').value;
+            
+            if (!points || points <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            if (points > currentPoints) {
+                Swal.showValidationMessage('النقاط المطلوبة أكبر من رصيدك');
+                return false;
+            }
+            
+            return {
+                points: points,
+                type: type,
+                value: document.getElementById('valueDisplay').textContent
+            };
+        }
+    });
+    
+    if (!redemptionData) return;
+    
+    try {
+        const newBalance = currentPoints - redemptionData.points;
+        
+        // إضافة سجل الاستبدال
+        const history = userData.loyaltyPoints?.history || [];
+        history.push({
+            id: `redeem-${Date.now()}`,
+            type: 'redeemed',
+            amount: redemptionData.points,
+            source: 'redemption',
+            description: `استبدال: ${redemptionData.value}`,
+            date: new Date().toISOString(),
+            balanceAfter: newBalance
+        });
+        
+        const redemptions = userData.loyaltyPoints?.redemptions || [];
+        redemptions.push({
+            id: `redemption-${Date.now()}`,
+            points: redemptionData.points,
+            type: redemptionData.type,
+            value: redemptionData.value,
+            date: new Date().toISOString(),
+            status: 'pending_approval'
+        });
+        
+        // تحديث المستوى إذا لزم
+        let newTier = 'BRONZE';
+        if (newBalance >= 5000) newTier = 'PLATINUM';
+        else if (newBalance >= 3000) newTier = 'GOLD';
+        else if (newBalance >= 1000) newTier = 'SILVER';
+        
+        await db.collection('users').doc(userId).update({
+            'loyaltyPoints.balance': newBalance,
+            'loyaltyPoints.tier': newTier,
+            'loyaltyPoints.history': history,
+            'loyaltyPoints.redemptions': redemptions,
+            'timestamps.updatedAt': new Date().toISOString()
+        });
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الاستبدال بنجاح',
+            html: `
+                <div style="text-align: center;">
+                    <p>تم استبدال ${redemptionData.points} نقطة</p>
+                    <p><strong>${redemptionData.value}</strong></p>
+                    <p style="color: #6B7280; font-size: 0.9rem;">
+                        الرصيد المتبقي: ${newBalance.toLocaleString('ar-EG')} نقطة
+                    </p>
+                </div>
+            `,
+            confirmButtonColor: '#F59E0B'
+        });
+        
+        await loadStudents();
+        
+    } catch (error) {
+        console.error('خطأ في استبدال النقاط:', error);
+        Swal.fire('خطأ', 'حدث خطأ في استبدال النقاط', 'error');
+    }
+}
+
+// دالة إدارة برنامج الإحالات
+async function manageReferralProgram(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) return;
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    const referral = userData.referralProgram || {
+        myCode: userData.referralProgram?.myCode || generateReferralCode(student.customer?.name),
+        status: 'inactive',
+        usageCount: 0,
+        earnings: { cashRewards: 0, pointsEarned: 0, freeCoursesEarned: 0 },
+        referredUsers: []
+    };
+    
+    await Swal.fire({
+        title: '🤝 برنامج الإحالات',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- كود الإحالة -->
+                <div style="background: linear-gradient(135deg, #3B82F6, #2563EB); 
+                            color: white; padding: 30px; border-radius: 20px; 
+                            margin-bottom: 25px; text-align: center;">
+                    <div style="font-size: 0.9rem; opacity: 0.9; margin-bottom: 10px;">
+                        كود الإحالة الخاص بك
+                    </div>
+                    <div style="font-size: 2.5rem; font-weight: bold; letter-spacing: 3px; 
+                                background: white; color: #3B82F6; padding: 15px; 
+                                border-radius: 15px; margin: 15px 0;">
+                        ${referral.myCode}
+                    </div>
+                    <button onclick="copyReferralCode('${referral.myCode}')" 
+                            style="background: rgba(255,255,255,0.2); color: white; 
+                                   border: 2px solid white; padding: 10px 25px; 
+                                   border-radius: 25px; cursor: pointer; font-weight: bold;">
+                        <i class="fas fa-copy"></i> نسخ الكود
+                    </button>
+                </div>
+                
+                <!-- إحصائيات الإحالات -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: white; border: 2px solid #E5E7EB; 
+                                padding: 15px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1F2937;">
+                            ${referral.usageCount}
+                        </div>
+                        <div style="color: #6B7280; font-size: 0.85rem;">إحالات ناجحة</div>
+                    </div>
+                    <div style="background: #DCFCE7; padding: 15px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #10B981;">
+                            ${referral.earnings.cashRewards} ج.م
+                        </div>
+                        <div style="color: #065F46; font-size: 0.85rem;">مكافآت نقدية</div>
+                    </div>
+                    <div style="background: #FEF3C7; padding: 15px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #F59E0B;">
+                            ${referral.earnings.pointsEarned}
+                        </div>
+                        <div style="color: #92400E; font-size: 0.85rem;">نقاط مكتسبة</div>
+                    </div>
+                    <div style="background: #EDE9FE; padding: 15px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #9333EA;">
+                            ${referral.earnings.freeCoursesEarned}
+                        </div>
+                        <div style="color: #6B21A8; font-size: 0.85rem;">دورات مجانية</div>
+                    </div>
+                </div>
+                
+                <!-- الأشخاص المحالون -->
+                <div style="background: white; border: 1px solid #E5E7EB; 
+                            padding: 20px; border-radius: 15px;">
+                    <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-users"></i> الأشخاص الذين أحلتهم
+                    </h4>
+                    ${referral.referredUsers && referral.referredUsers.length > 0 ? 
+                        referral.referredUsers.map(user => `
+                            <div style="border-bottom: 1px solid #E5E7EB; padding: 12px 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-weight: bold; color: #1F2937;">
+                                            ${user.name}
+                                        </div>
+                                        <div style="color: #6B7280; font-size: 0.85rem;">
+                                            انضم في: ${new Date(user.enrolledAt).toLocaleDateString('ar-EG')}
+                                        </div>
+                                    </div>
+                                    <div style="text-align: left;">
+                                        <span style="background: #DCFCE7; color: #065F46; 
+                                                     padding: 5px 12px; border-radius: 15px; 
+                                                     font-size: 0.85rem; font-weight: bold;">
+                                            ${user.reward.type === 'cash' ? 
+                                                `${user.reward.amount} ج.م` : 
+                                                `${user.reward.amount} نقطة`}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('') : 
+                        '<div style="text-align: center; color: #9CA3AF; padding: 30px;">لا توجد إحالات بعد</div>'
+                    }
+                </div>
+                
+                <!-- كيفية الاستخدام -->
+                <div style="background: #F0F9FF; padding: 20px; border-radius: 15px; margin-top: 20px;">
+                    <h5 style="color: #0369A1; margin: 0 0 10px 0;">
+                        <i class="fas fa-info-circle"></i> كيف يعمل برنامج الإحالات؟
+                    </h5>
+                    <ol style="margin: 0; padding-right: 20px; color: #1E40AF;">
+                        <li>شارك كود الإحالة الخاص بك مع أصدقائك</li>
+                        <li>عندما يسجل صديقك ويستخدم الكود، يحصل على خصم 10%</li>
+                        <li>تحصل أنت على 100 نقطة ولاء + 5% من قيمة الدورة كرصيد</li>
+                        <li>كل 5 إحالات ناجحة = دورة مجانية!</li>
+                    </ol>
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دالة نسخ كود الإحالة
+function copyReferralCode(code) {
+    navigator.clipboard.writeText(code).then(() => {
+        Swal.fire({
+            icon: 'success',
+            title: 'تم النسخ',
+            text: 'تم نسخ كود الإحالة بنجاح',
+            timer: 1500,
+            showConfirmButton: false
+        });
+    });
+}
+
+// دالة توليد كود إحالة
+function generateReferralCode(name) {
+    const cleanName = (name || 'USER')
+        .toUpperCase()
+        .replace(/[^A-Z]/g, '')
+        .slice(0, 4);
+    const year = new Date().getFullYear();
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `${cleanName}${year}${random}`;
+}
+
+// ربط الدوال بـ window
+window.viewLoyaltyDashboard = viewLoyaltyDashboard;
+window.addLoyaltyPoints = addLoyaltyPoints;
+window.redeemPoints = redeemPoints;
+window.manageReferralProgram = manageReferralProgram;
+window.copyReferralCode = copyReferralCode;
+window.generateReferralCode = generateReferralCode;
+        
     </script>
 </body>
 </html>
