@@ -2081,8 +2081,7 @@ window.sendMessage = sendMessage;
         // عرض التفاصيل الكاملة
         // عرض التفاصيل الكاملة المطورة
 // عرض التفاصيل الكاملة المطورة بالكامل
-// نظام عرض التفاصيل الكاملة الذكي - لوحة تحكم شاملة للعميل
-async function viewFullDetails(studentId) {
+function viewFullDetails(studentId) {
     const student = allStudents.find(s => s.id === studentId);
     
     if (!student) {
@@ -2090,1041 +2089,440 @@ async function viewFullDetails(studentId) {
         return;
     }
     
-    // جلب كل البيانات المتاحة
-    let userData = null;
-    let enrollments = [];
-    let allBookings = [];
+    const customer = student.customer || {};
+    const pricing = student.pricing || {};
+    const discounts = student.discounts || [];
+    const payment = student.payment || {};
+    const progress = student.progress || {};
+    const completeness = student.dataCompleteness?.percentage || 0;
+    const paymentInfo = student.paymentInfo || {};
     
-    // جلب بيانات المستخدم إن وجدت
-    if (student.userId) {
-        try {
-            const userDoc = await db.collection('users').doc(student.userId).get();
-            if (userDoc.exists) {
-                userData = userDoc.data();
-                enrollments = userData.enrollments || [];
-            }
-        } catch (error) {
-            console.error('خطأ في جلب بيانات المستخدم:', error);
-        }
+    // تحديد مستوى الطالب
+    let studentLevel = 'عادي';
+    let levelColor = '#6B7280';
+    let levelIcon = 'fa-user';
+    
+    if (student.totalSavings > 2000) {
+        studentLevel = 'VIP ذهبي';
+        levelColor = '#FFD700';
+        levelIcon = 'fa-crown';
+    } else if (student.totalSavings > 1000) {
+        studentLevel = 'VIP';
+        levelColor = '#9333EA';
+        levelIcon = 'fa-gem';
+    } else if (completeness > 80) {
+        studentLevel = 'متميز';
+        levelColor = '#10B981';
+        levelIcon = 'fa-star';
     }
     
-    // جلب كل الحجوزات السابقة للعميل (بنفس رقم الواتساب أو البريد)
-    try {
-        const bookingsQuery = await db.collection('individualStudents')
-            .where('customer.whatsapp', '==', student.customer?.whatsapp)
-            .get();
-        
-        bookingsQuery.forEach(doc => {
-            const data = doc.data();
-            allBookings.push({
-                id: doc.id,
-                ...data,
-                bookingDate: data.transferredAt || data.createdAt || new Date().toISOString()
-            });
-        });
-        
-        // ترتيب الحجوزات من الأحدث للأقدم
-        allBookings.sort((a, b) => new Date(b.bookingDate) - new Date(a.bookingDate));
-    } catch (error) {
-        console.error('خطأ في جلب الحجوزات:', error);
-    }
-    
-    // حساب الإحصائيات الشاملة
-    const stats = calculateCustomerStats(student, userData, allBookings);
-    
-    // تحديد مستوى العميل
-    const customerLevel = determineCustomerLevel(stats);
-    
-    // بناء واجهة العرض
     Swal.fire({
-        title: '🎯 مركز معلومات العميل الشامل',
+        title: '📋 التفاصيل الكاملة للطالب',
         html: `
-            <div style="text-align: right; direction: rtl; max-height: 85vh; overflow-y: auto;">
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto; padding: 20px;">
                 
-                <!-- رأس البطاقة الاحترافي -->
-                <div style="background: linear-gradient(135deg, ${customerLevel.color}, ${customerLevel.darkColor}); 
-                            padding: 30px; border-radius: 20px; margin-bottom: 25px; 
-                            color: white; box-shadow: 0 15px 35px rgba(0,0,0,0.3);">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div style="display: flex; gap: 25px;">
-                            <!-- صورة العميل أو أيقونة -->
-                            <div style="width: 100px; height: 100px; background: rgba(255,255,255,0.15); 
+                <!-- رأس البطاقة المطور -->
+                <div style="background: linear-gradient(135deg, ${levelColor}, ${levelColor}DD); 
+                            padding: 25px; border-radius: 20px; margin-bottom: 25px; 
+                            color: white; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 20px;">
+                            <div style="width: 80px; height: 80px; background: rgba(255,255,255,0.2); 
                                         border-radius: 50%; display: flex; align-items: center; 
-                                        justify-content: center; font-size: 3rem; 
-                                        border: 3px solid rgba(255,255,255,0.3);">
-                                <i class="fas ${customerLevel.icon}"></i>
+                                        justify-content: center; font-size: 2rem;">
+                                <i class="fas ${levelIcon}"></i>
                             </div>
-                            
-                            <!-- معلومات العميل الأساسية -->
                             <div>
-                                <h2 style="margin: 0; font-size: 2rem; font-weight: bold;">
-                                    ${student.customer?.name || 'عميل غير محدد'}
-                                </h2>
-                                <div style="margin: 10px 0; opacity: 0.95;">
-                                    ${student.customer?.title ? `<span>${student.customer.title}</span> • ` : ''}
-                                    ${student.customer?.age ? `<span>${student.customer.age} سنة</span> • ` : ''}
-                                    ${student.customer?.job || ''}
-                                </div>
-                                <div style="display: flex; gap: 10px; margin-top: 15px;">
-                                    <span style="background: rgba(255,255,255,0.25); padding: 5px 15px; 
+                                <h2 style="margin: 0; font-size: 1.8rem;">${customer.name || 'غير محدد'}</h2>
+                                <p style="margin: 5px 0; opacity: 0.9;">
+                                    ${customer.title ? `${customer.title} • ` : ''}
+                                    ${customer.age ? `${customer.age} سنة • ` : ''}
+                                    ${customer.job || ''}
+                                </p>
+                                <div style="margin-top: 10px;">
+                                    <span style="background: rgba(255,255,255,0.3); padding: 5px 15px; 
                                                  border-radius: 20px; font-size: 0.9rem;">
-                                        <i class="fas fa-crown"></i> ${customerLevel.name}
+                                        ${studentLevel}
                                     </span>
-                                    <span style="background: rgba(255,255,255,0.25); padding: 5px 15px; 
-                                                 border-radius: 20px; font-size: 0.9rem;">
-                                        <i class="fas fa-user-check"></i> 
-                                        عميل منذ ${calculateCustomerAge(allBookings[allBookings.length - 1]?.bookingDate)}
-                                    </span>
-                                    ${userData?.accountStatus?.verified ? `
-                                        <span style="background: rgba(255,255,255,0.25); padding: 5px 15px; 
-                                                     border-radius: 20px; font-size: 0.9rem;">
-                                            <i class="fas fa-shield-alt"></i> موثق
+                                    ${student.accountCreated ? `
+                                        <span style="background: rgba(255,255,255,0.3); padding: 5px 15px; 
+                                                     border-radius: 20px; font-size: 0.9rem; margin-right: 10px;">
+                                            <i class="fas fa-check-circle"></i> حساب مفعل
                                         </span>
                                     ` : ''}
                                 </div>
                             </div>
                         </div>
-                        
-                        <!-- بطاقة الإحصائيات السريعة -->
-                        <div style="background: rgba(255,255,255,0.1); padding: 20px; 
-                                    border-radius: 15px; min-width: 250px;">
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
-                                <div style="text-align: center;">
-                                    <div style="font-size: 1.8rem; font-weight: bold;">
-                                        ${stats.totalCourses}
-                                    </div>
-                                    <div style="font-size: 0.8rem; opacity: 0.8;">دورات</div>
-                                </div>
-                                <div style="text-align: center;">
-                                    <div style="font-size: 1.8rem; font-weight: bold;">
-                                        ${stats.totalPaid.toLocaleString('ar-EG')}
-                                    </div>
-                                    <div style="font-size: 0.8rem; opacity: 0.8;">ج.م مدفوع</div>
-                                </div>
-                                <div style="text-align: center;">
-                                    <div style="font-size: 1.8rem; font-weight: bold;">
-                                        ${stats.totalSaved.toLocaleString('ar-EG')}
-                                    </div>
-                                    <div style="font-size: 0.8rem; opacity: 0.8;">ج.م وفر</div>
-                                </div>
-                                <div style="text-align: center;">
-                                    <div style="font-size: 1.8rem; font-weight: bold;">
-                                        ${stats.loyaltyPoints}
-                                    </div>
-                                    <div style="font-size: 0.8rem; opacity: 0.8;">نقاط</div>
-                                </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 0.9rem; opacity: 0.8;">اكتمال البيانات</div>
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${completeness}%
+                            </div>
+                            <div style="width: 80px; height: 8px; background: rgba(255,255,255,0.3); 
+                                        border-radius: 4px; overflow: hidden; margin-top: 10px;">
+                                <div style="width: ${completeness}%; height: 100%; 
+                                            background: white; transition: width 0.5s;"></div>
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- نظام التبويبات المتطور -->
-                <div style="background: white; border-radius: 15px; padding: 20px; 
-                            box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
-                    
-                    <!-- شريط التبويبات -->
-                    <div style="display: flex; gap: 5px; border-bottom: 2px solid #E5E7EB; 
-                                padding-bottom: 0; margin-bottom: 20px; overflow-x: auto;">
+                <!-- تبويبات التفاصيل -->
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #E5E7EB; 
+                            padding-bottom: 10px;">
+                    <button onclick="showDetailTab('personal')" class="detail-tab active" 
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   font-weight: bold; color: #3B82F6; border-bottom: 3px solid #3B82F6;">
+                        <i class="fas fa-user"></i> الشخصية
+                    </button>
+                    <button onclick="showDetailTab('financial')" class="detail-tab"
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   color: #6B7280;">
+                        <i class="fas fa-dollar-sign"></i> المالية
+                    </button>
+                    <button onclick="showDetailTab('course')" class="detail-tab"
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   color: #6B7280;">
+                        <i class="fas fa-book"></i> الدورة
+                    </button>
+                    <button onclick="showDetailTab('system')" class="detail-tab"
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   color: #6B7280;">
+                        <i class="fas fa-cog"></i> النظام
+                    </button>
+                </div>
+                
+                <!-- محتوى التبويبات -->
+                <div id="detail-content">
+                    <!-- التبويب الشخصي -->
+                    <div id="personal-tab" class="tab-content">
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                            <div style="background: white; border: 1px solid #E5E7EB; 
+                                        padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                    <i class="fas fa-id-card"></i> البيانات الأساسية
+                                </h4>
+                                <div style="display: grid; gap: 10px;">
+                                    <div><strong>الاسم:</strong> ${customer.name || 'غير محدد'}</div>
+                                    <div><strong>العنوان:</strong> ${customer.title || 'غير محدد'}</div>
+                                    <div><strong>العمر:</strong> ${customer.age || 'غير محدد'} سنة</div>
+                                    <div><strong>النوع:</strong> ${customer.gender || 'غير محدد'}</div>
+                                    <div><strong>الوظيفة:</strong> ${customer.job || 'غير محدد'}</div>
+                                </div>
+                            </div>
+                            
+                            <div style="background: white; border: 1px solid #E5E7EB; 
+                                        padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                    <i class="fas fa-phone"></i> معلومات الاتصال
+                                </h4>
+                                <div style="display: grid; gap: 10px;">
+                                    <div><strong>الواتساب:</strong> ${customer.whatsapp || 'غير محدد'}</div>
+                                    <div><strong>البريد:</strong> ${customer.email || 'غير محدد'}</div>
+                                    <div><strong>الدولة:</strong> ${customer.country || 'غير محدد'}</div>
+                                    <div><strong>المدينة:</strong> ${customer.city || 'غير محدد'}</div>
+                                    <div><strong>المصدر:</strong> ${customer.source || 'غير محدد'}</div>
+                                </div>
+                            </div>
+                        </div>
                         
-                        <!-- تبويب نظرة عامة -->
-                        <button onclick="showCustomerTab('overview')" 
-                                class="customer-tab-btn active"
-                                style="background: none; border: none; padding: 12px 20px; 
-                                       cursor: pointer; font-weight: bold; color: #3B82F6; 
-                                       border-bottom: 3px solid #3B82F6; white-space: nowrap;">
-                            <i class="fas fa-chart-pie"></i> نظرة عامة
-                        </button>
-                        
-                        <!-- تبويب البيانات الشخصية -->
-                        <button onclick="showCustomerTab('personal')" 
-                                class="customer-tab-btn"
-                                style="background: none; border: none; padding: 12px 20px; 
-                                       cursor: pointer; color: #6B7280; white-space: nowrap;">
-                            <i class="fas fa-user"></i> البيانات الشخصية
-                        </button>
-                        
-                        <!-- تبويبات الدورات -->
-                        ${allBookings.map((booking, index) => `
-                            <button onclick="showCustomerTab('course-${booking.id}')" 
-                                    class="customer-tab-btn"
-                                    style="background: none; border: none; padding: 12px 20px; 
-                                           cursor: pointer; color: #6B7280; white-space: nowrap;">
-                                <i class="fas fa-graduation-cap"></i> 
-                                ${booking.courseName || 'دورة ' + (index + 1)}
-                                ${booking.id === student.id ? 
-                                    '<span style="background: #10B981; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 5px;">حالية</span>' : 
-                                    ''}
-                            </button>
-                        `).join('')}
-                        
-                        <!-- تبويب التاريخ المالي -->
-                        <button onclick="showCustomerTab('financial')" 
-                                class="customer-tab-btn"
-                                style="background: none; border: none; padding: 12px 20px; 
-                                       cursor: pointer; color: #6B7280; white-space: nowrap;">
-                            <i class="fas fa-dollar-sign"></i> التاريخ المالي
-                        </button>
-                        
-                        <!-- تبويب النشاطات -->
-                        <button onclick="showCustomerTab('activities')" 
-                                class="customer-tab-btn"
-                                style="background: none; border: none; padding: 12px 20px; 
-                                       cursor: pointer; color: #6B7280; white-space: nowrap;">
-                            <i class="fas fa-history"></i> السجل الزمني
-                        </button>
-                    </div>
-                    
-                    <!-- محتوى التبويبات -->
-                    <div id="customer-tab-content">
-                        <!-- محتوى تبويب نظرة عامة (الافتراضي) -->
-                        ${generateOverviewTab(student, userData, stats, allBookings)}
+                        ${customer.expectations || customer.applicationPlan ? `
+                            <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; 
+                                        margin-top: 20px;">
+                                <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                    <i class="fas fa-lightbulb"></i> التوقعات والخطط
+                                </h4>
+                                ${customer.expectations ? `
+                                    <div style="margin-bottom: 15px;">
+                                        <strong>التوقعات:</strong>
+                                        <p style="margin: 5px 0; color: #4B5563;">
+                                            ${customer.expectations}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${customer.applicationPlan ? `
+                                    <div>
+                                        <strong>خطة التطبيق:</strong>
+                                        <p style="margin: 5px 0; color: #4B5563;">
+                                            ${customer.applicationPlan}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
                 
-                <!-- شريط الإجراءات السفلي -->
-                <div style="display: flex; gap: 15px; margin-top: 25px; padding: 20px; 
-                            background: #F9FAFB; border-radius: 15px;">
-                    <button onclick="exportCustomerReport('${studentId}')" 
-                            style="background: linear-gradient(135deg, #3B82F6, #2563EB); 
-                                   color: white; border: none; padding: 12px 24px; 
-                                   border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        <i class="fas fa-file-pdf"></i> تصدير تقرير PDF
-                    </button>
-                    <button onclick="printCustomerProfile('${studentId}')" 
-                            style="background: linear-gradient(135deg, #6B7280, #4B5563); 
-                                   color: white; border: none; padding: 12px 24px; 
-                                   border-radius: 8px; cursor: pointer; font-weight: bold;">
+                <!-- أزرار الإجراءات -->
+                <div style="display: flex; gap: 15px; margin-top: 25px; padding-top: 20px; 
+                            border-top: 2px solid #E5E7EB;">
+                    <button onclick="window.print()" 
+                            style="background: #6B7280; color: white; border: none; 
+                                   padding: 12px 24px; border-radius: 8px; cursor: pointer;">
                         <i class="fas fa-print"></i> طباعة
                     </button>
-                    ${student.customer?.whatsapp ? `
+                    <button onclick="exportStudentData('${studentId}')" 
+                            style="background: #3B82F6; color: white; border: none; 
+                                   padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-download"></i> تصدير
+                    </button>
+                    ${customer.whatsapp ? `
                         <button onclick="smartMessaging('${studentId}')" 
-                                style="background: linear-gradient(135deg, #25D366, #128C7E); 
-                                       color: white; border: none; padding: 12px 24px; 
-                                       border-radius: 8px; cursor: pointer; font-weight: bold;">
-                            <i class="fab fa-whatsapp"></i> مراسلة شاملة
+                                style="background: #25D366; color: white; border: none; 
+                                       padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                            <i class="fab fa-whatsapp"></i> مراسلة
                         </button>
                     ` : ''}
-                    <button onclick="addCustomerNote('${studentId}')" 
-                            style="background: linear-gradient(135deg, #F59E0B, #D97706); 
-                                   color: white; border: none; padding: 12px 24px; 
-                                   border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        <i class="fas fa-sticky-note"></i> إضافة ملاحظة
-                    </button>
                 </div>
             </div>
         `,
-        width: '95%',
+        width: '1000px',
         showCloseButton: true,
         showConfirmButton: false,
         didOpen: () => {
-            // تعريف دوال التبويبات
-            window.showCustomerTab = (tabId) => {
+            window.showDetailTab = (tab) => {
                 // إخفاء كل التبويبات
-                const allBtns = document.querySelectorAll('.customer-tab-btn');
-                allBtns.forEach(btn => {
-                    btn.classList.remove('active');
-                    btn.style.color = '#6B7280';
-                    btn.style.borderBottom = 'none';
+                const tabs = ['personal', 'financial', 'course', 'system'];
+                tabs.forEach(t => {
+                    const tabBtn = document.querySelector(`.detail-tab:nth-child(${tabs.indexOf(t) + 1})`);
+                    if (tabBtn) {
+                        tabBtn.style.color = '#6B7280';
+                        tabBtn.style.borderBottom = 'none';
+                    }
                 });
                 
-                // تفعيل التبويب المحدد
-                event.target.classList.add('active');
-                event.target.style.color = '#3B82F6';
-                event.target.style.borderBottom = '3px solid #3B82F6';
-                
-                // تحديث المحتوى
-                const contentDiv = document.getElementById('customer-tab-content');
-                
-                if (tabId === 'overview') {
-                    contentDiv.innerHTML = generateOverviewTab(student, userData, stats, allBookings);
-                } else if (tabId === 'personal') {
-                    contentDiv.innerHTML = generatePersonalTab(student, userData);
-                } else if (tabId.startsWith('course-')) {
-                    const courseId = tabId.replace('course-', '');
-                    const courseData = allBookings.find(b => b.id === courseId);
-                    contentDiv.innerHTML = generateCourseTab(courseData, userData);
-                } else if (tabId === 'financial') {
-                    contentDiv.innerHTML = generateFinancialTab(student, userData, allBookings);
-                } else if (tabId === 'activities') {
-                    contentDiv.innerHTML = generateActivitiesTab(student, userData, allBookings);
+                // إظهار التبويب المحدد
+                const activeBtn = document.querySelector(`.detail-tab:nth-child(${tabs.indexOf(tab) + 1})`);
+                if (activeBtn) {
+                    activeBtn.style.color = '#3B82F6';
+                    activeBtn.style.borderBottom = '3px solid #3B82F6';
                 }
+                
+                // تحديث المحتوى حسب التبويب
+                let content = '';
+                
+                switch(tab) {
+                    case 'financial':
+                        content = `
+                            <div style="display: grid; gap: 20px;">
+                                <!-- الأسعار والخصومات -->
+                                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                                            padding: 20px; border-radius: 12px;">
+                                    <h4 style="color: #92400E; margin: 0 0 15px 0;">
+                                        <i class="fas fa-tags"></i> التسعير والخصومات
+                                    </h4>
+                                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); 
+                                                gap: 15px;">
+                                        <div style="background: white; padding: 15px; border-radius: 8px; 
+                                                    text-align: center;">
+                                            <div style="color: #6B7280;">السعر الأصلي</div>
+                                            <div style="font-size: 1.3rem; font-weight: bold; 
+                                                        text-decoration: line-through; color: #9CA3AF;">
+                                                ${pricing.basePrice || '0 ج.م'}
+                                            </div>
+                                        </div>
+                                        <div style="background: #DCFCE7; padding: 15px; border-radius: 8px; 
+                                                    text-align: center;">
+                                            <div style="color: #065F46;">السعر النهائي</div>
+                                            <div style="font-size: 1.5rem; font-weight: bold; color: #10B981;">
+                                                ${pricing.finalPrice || '0 ج.م'}
+                                            </div>
+                                        </div>
+                                        <div style="background: #FEE2E2; padding: 15px; border-radius: 8px; 
+                                                    text-align: center;">
+                                            <div style="color: #991B1B;">التوفير</div>
+                                            <div style="font-size: 1.3rem; font-weight: bold; color: #DC2626;">
+                                                ${student.totalSavingsText || '0 ج.م'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- حالة الدفع -->
+                                <div style="background: white; border: 2px solid #E5E7EB; 
+                                            padding: 20px; border-radius: 12px;">
+                                    <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                        <i class="fas fa-credit-card"></i> حالة الدفع
+                                    </h4>
+                                    ${paymentInfo.isInstallment ? `
+                                        <!-- نظام الأقساط -->
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); 
+                                                    gap: 15px;">
+                                            <div>
+                                                <strong>نوع الدفع:</strong> أقساط
+                                            </div>
+                                            <div>
+                                                <strong>عدد الأقساط:</strong> ${paymentInfo.totalInstallments}
+                                            </div>
+                                            <div>
+                                                <strong>المدفوع:</strong> 
+                                                <span style="color: #10B981; font-weight: bold;">
+                                                    ${(paymentInfo.paidAmount || 0).toLocaleString('ar-EG')} ج.م
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <strong>المتبقي:</strong> 
+                                                <span style="color: #F59E0B; font-weight: bold;">
+                                                    ${(paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <strong>الأقساط المدفوعة:</strong> ${paymentInfo.paidInstallments || 0}
+                                            </div>
+                                            <div>
+                                                <strong>القسط القادم:</strong> 
+                                                ${paymentInfo.nextDueDate ? 
+                                                    new Date(paymentInfo.nextDueDate).toLocaleDateString('ar-EG') : 
+                                                    'غير محدد'}
+                                            </div>
+                                        </div>
+                                    ` : `
+                                        <!-- دفع كامل -->
+                                        <div style="text-align: center; padding: 30px;">
+                                            ${student.paymentConfirmed ? `
+                                                <i class="fas fa-check-circle" 
+                                                   style="color: #10B981; font-size: 3rem;"></i>
+                                                <p style="color: #065F46; font-size: 1.2rem; 
+                                                          font-weight: bold; margin: 15px 0;">
+                                                    الدفع مؤكد بالكامل
+                                                </p>
+                                            ` : `
+                                                <i class="fas fa-clock" 
+                                                   style="color: #F59E0B; font-size: 3rem;"></i>
+                                                <p style="color: #92400E; font-size: 1.2rem; 
+                                                          font-weight: bold; margin: 15px 0;">
+                                                    بانتظار تأكيد الدفع
+                                                </p>
+                                            `}
+                                        </div>
+                                    `}
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'course':
+                        content = `
+                            <div style="background: white; padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
+                                    <i class="fas fa-graduation-cap"></i> معلومات الدورة
+                                </h4>
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                                    <div>
+                                        <strong>اسم الدورة:</strong> ${student.courseName || 'غير محدد'}
+                                    </div>
+                                    <div>
+                                        <strong>المستوى:</strong> ${customer.experience || 'مبتدئ'}
+                                    </div>
+                                    ${student.activeOffer ? `
+                                        <div>
+                                            <strong>العرض النشط:</strong> 
+                                            <span style="background: #F59E0B; color: white; 
+                                                         padding: 3px 10px; border-radius: 15px;">
+                                                ${student.activeOffer.name}
+                                            </span>
+                                        </div>
+                                    ` : ''}
+                                    ${student.coupon ? `
+                                        <div>
+                                            <strong>الكوبون:</strong> ${student.coupon.code}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                
+                                ${discounts.length > 0 ? `
+                                    <div style="margin-top: 20px;">
+                                        <strong>الخصومات المطبقة:</strong>
+                                        <div style="display: grid; gap: 10px; margin-top: 10px;">
+                                            ${discounts.map(d => `
+                                                <div style="display: flex; justify-content: space-between; 
+                                                            padding: 10px; background: #F9FAFB; 
+                                                            border-radius: 8px;">
+                                                    <span>${d.label}</span>
+                                                    <strong style="color: #DC2626;">${d.value}</strong>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'system':
+                        content = `
+                            <div style="background: #F9FAFB; padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #4B5563; margin: 0 0 20px 0;">
+                                    <i class="fas fa-database"></i> معلومات النظام
+                                </h4>
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                                    <div>
+                                        <strong>معرف الحجز:</strong> 
+                                        <code style="background: white; padding: 3px 8px; 
+                                                     border-radius: 4px;">
+                                            ${student.originalBookingId || student.id}
+                                        </code>
+                                    </div>
+                                    <div>
+                                        <strong>معرف المستخدم:</strong> 
+                                        <code style="background: white; padding: 3px 8px; 
+                                                     border-radius: 4px;">
+                                            ${student.userId || 'لم ينشأ بعد'}
+                                        </code>
+                                    </div>
+                                    <div>
+                                        <strong>تاريخ التحويل:</strong> 
+                                        ${new Date(student.transferredAt).toLocaleString('ar-EG')}
+                                    </div>
+                                    <div>
+                                        <strong>حالة الحساب:</strong> 
+                                        ${student.accountCreated ? 
+                                            '<span style="color: #10B981;">✓ منشأ</span>' : 
+                                            '<span style="color: #F59E0B;">بانتظار الإنشاء</span>'}
+                                    </div>
+                                </div>
+                                
+                                <!-- شريط التقدم -->
+                                <div style="margin-top: 20px;">
+                                    <strong>التقدم العام:</strong>
+                                    <div style="display: grid; gap: 10px; margin-top: 10px;">
+                                        <div>
+                                            <div style="display: flex; justify-content: space-between; 
+                                                        margin-bottom: 5px;">
+                                                <span>إنشاء الحساب</span>
+                                                <span>${progress.accountSetup || 0}%</span>
+                                            </div>
+                                            <div style="height: 8px; background: #E5E7EB; 
+                                                        border-radius: 4px; overflow: hidden;">
+                                                <div style="height: 100%; width: ${progress.accountSetup || 0}%; 
+                                                            background: #3B82F6;"></div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div style="display: flex; justify-content: space-between; 
+                                                        margin-bottom: 5px;">
+                                                <span>تخصيص الدورة</span>
+                                                <span>${progress.courseAssignment || 0}%</span>
+                                            </div>
+                                            <div style="height: 8px; background: #E5E7EB; 
+                                                        border-radius: 4px; overflow: hidden;">
+                                                <div style="height: 100%; width: ${progress.courseAssignment || 0}%; 
+                                                            background: #8B5CF6;"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                }
+                
+                document.getElementById('detail-content').innerHTML = content;
             };
         }
     });
 }
 
-// دوال مساعدة لتوليد محتوى التبويبات
-
-function generateOverviewTab(student, userData, stats, allBookings) {
-    return `
-        <div style="display: grid; gap: 20px;">
-            <!-- بطاقات الإحصائيات -->
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
-                <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
-                            padding: 20px; border-radius: 12px; text-align: center;">
-                    <i class="fas fa-book" style="font-size: 2rem; color: #3B82F6; margin-bottom: 10px;"></i>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #1E40AF;">
-                        ${stats.totalCourses}
-                    </div>
-                    <div style="color: #64748B; font-size: 0.9rem;">إجمالي الدورات</div>
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
-                            padding: 20px; border-radius: 12px; text-align: center;">
-                    <i class="fas fa-check-circle" style="font-size: 2rem; color: #10B981; margin-bottom: 10px;"></i>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #166534;">
-                        ${stats.completedCourses}
-                    </div>
-                    <div style="color: #64748B; font-size: 0.9rem;">دورات مكتملة</div>
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
-                            padding: 20px; border-radius: 12px; text-align: center;">
-                    <i class="fas fa-clock" style="font-size: 2rem; color: #F59E0B; margin-bottom: 10px;"></i>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #92400E;">
-                        ${stats.activeCourses}
-                    </div>
-                    <div style="color: #64748B; font-size: 0.9rem;">دورات نشطة</div>
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #FCE7F3, #FBCFE8); 
-                            padding: 20px; border-radius: 12px; text-align: center;">
-                    <i class="fas fa-award" style="font-size: 2rem; color: #EC4899; margin-bottom: 10px;"></i>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #9F1239;">
-                        ${stats.certificates || 0}
-                    </div>
-                    <div style="color: #64748B; font-size: 0.9rem;">شهادات</div>
-                </div>
-            </div>
-            
-            <!-- الرسم البياني للدورات -->
-            <div style="background: white; border: 1px solid #E5E7EB; padding: 20px; border-radius: 12px;">
-                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
-                    <i class="fas fa-chart-line"></i> تطور مسيرة العميل
-                </h4>
-                <div style="position: relative; height: 200px; background: #F9FAFB; 
-                            border-radius: 8px; padding: 20px;">
-                    ${generateCustomerJourney(allBookings)}
-                </div>
-            </div>
-            
-            <!-- أحدث النشاطات -->
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
-                <div style="background: white; border: 1px solid #E5E7EB; 
-                            padding: 20px; border-radius: 12px;">
-                    <h4 style="color: #1F2937; margin: 0 0 15px 0;">
-                        <i class="fas fa-bell"></i> آخر النشاطات
-                    </h4>
-                    ${generateRecentActivities(student, userData, allBookings)}
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
-                            padding: 20px; border-radius: 12px;">
-                    <h4 style="color: #0369A1; margin: 0 0 15px 0;">
-                        <i class="fas fa-medal"></i> الإنجازات
-                    </h4>
-                    ${generateAchievements(stats)}
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-function generatePersonalTab(student, userData) {
-    const customer = student.customer || {};
-    return `
-        <div style="display: grid; gap: 20px;">
-            <!-- المعلومات الأساسية -->
-            <div style="background: white; border: 1px solid #E5E7EB; 
-                        padding: 25px; border-radius: 12px;">
-                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
-                    <i class="fas fa-id-card"></i> المعلومات الأساسية
-                </h4>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">الاسم الكامل</label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.name || 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">العنوان/اللقب</label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.title || 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">العمر</label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.age ? customer.age + ' سنة' : 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">النوع</label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.gender === 'male' ? 'ذكر' : 
-                              customer.gender === 'female' ? 'أنثى' : 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">الوظيفة</label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.job || 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">المستوى التعليمي</label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.education || 'غير محدد'}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- معلومات الاتصال -->
-            <div style="background: white; border: 1px solid #E5E7EB; 
-                        padding: 25px; border-radius: 12px;">
-                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
-                    <i class="fas fa-address-book"></i> معلومات الاتصال
-                </h4>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">
-                            <i class="fab fa-whatsapp" style="color: #25D366;"></i> واتساب
-                        </label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.whatsapp || 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">
-                            <i class="fas fa-envelope" style="color: #3B82F6;"></i> البريد الإلكتروني
-                        </label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.email || userData?.personalInfo?.email || 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">
-                            <i class="fas fa-globe" style="color: #10B981;"></i> الدولة
-                        </label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.country || 'غير محدد'}
-                        </div>
-                    </div>
-                    <div>
-                        <label style="color: #6B7280; font-size: 0.9rem;">
-                            <i class="fas fa-city" style="color: #F59E0B;"></i> المدينة
-                        </label>
-                        <div style="font-weight: bold; color: #1F2937; font-size: 1.1rem;">
-                            ${customer.city || 'غير محدد'}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- التوقعات والأهداف -->
-            ${customer.expectations || customer.applicationPlan || customer.goals ? `
-                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
-                            padding: 25px; border-radius: 12px;">
-                    <h4 style="color: #92400E; margin: 0 0 20px 0;">
-                        <i class="fas fa-bullseye"></i> الأهداف والتوقعات
-                    </h4>
-                    ${customer.expectations ? `
-                        <div style="margin-bottom: 20px;">
-                            <label style="color: #92400E; font-size: 0.9rem; font-weight: bold;">
-                                التوقعات من الدورات
-                            </label>
-                            <div style="background: white; padding: 15px; border-radius: 8px; 
-                                        margin-top: 10px; color: #1F2937;">
-                                ${customer.expectations}
-                            </div>
-                        </div>
-                    ` : ''}
-                    ${customer.applicationPlan ? `
-                        <div style="margin-bottom: 20px;">
-                            <label style="color: #92400E; font-size: 0.9rem; font-weight: bold;">
-                                خطة التطبيق
-                            </label>
-                            <div style="background: white; padding: 15px; border-radius: 8px; 
-                                        margin-top: 10px; color: #1F2937;">
-                                ${customer.applicationPlan}
-                            </div>
-                        </div>
-                    ` : ''}
-                    ${customer.goals ? `
-                        <div>
-                            <label style="color: #92400E; font-size: 0.9rem; font-weight: bold;">
-                                الأهداف الشخصية
-                            </label>
-                            <div style="background: white; padding: 15px; border-radius: 8px; 
-                                        margin-top: 10px; color: #1F2937;">
-                                ${customer.goals}
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-function generateCourseTab(courseData, userData) {
-    if (!courseData) return '<div>لا توجد بيانات للدورة</div>';
-    
-    const pricing = courseData.pricing || {};
-    const payment = courseData.paymentInfo || courseData.payment || {};
-    const discounts = courseData.discounts || [];
-    
-    return `
-        <div style="display: grid; gap: 20px;">
-            <!-- معلومات الدورة الأساسية -->
-            <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
-                        padding: 25px; border-radius: 15px;">
-                <div style="display: flex; justify-content: space-between; align-items: start;">
-                    <div>
-                        <h3 style="color: #1E40AF; margin: 0;">
-                            ${courseData.courseName || 'دورة غير محددة'}
-                        </h3>
-                        <p style="color: #64748B; margin: 10px 0;">
-                            تاريخ الحجز: ${new Date(courseData.bookingDate).toLocaleDateString('ar-EG')}
-                        </p>
-                    </div>
-                    <div style="text-align: left;">
-                        ${courseData.status === 'active' ? 
-                            '<span style="background: #10B981; color: white; padding: 8px 16px; border-radius: 20px;">نشطة</span>' :
-                          courseData.status === 'completed' ?
-                            '<span style="background: #3B82F6; color: white; padding: 8px 16px; border-radius: 20px;">مكتملة</span>' :
-                            '<span style="background: #6B7280; color: white; padding: 8px 16px; border-radius: 20px;">معلقة</span>'
-                        }
-                    </div>
-                </div>
-            </div>
-            
-            <!-- تفاصيل التسعير -->
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                <div style="background: white; border: 2px solid #E5E7EB; 
-                            padding: 20px; border-radius: 12px; text-align: center;">
-                    <div style="color: #6B7280; font-size: 0.9rem;">السعر الأصلي</div>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #9CA3AF; 
-                                text-decoration: line-through; margin-top: 10px;">
-                        ${pricing.basePrice || '0 ج.م'}
-                    </div>
-                </div>
-                
-                <div style="background: #DCFCE7; padding: 20px; border-radius: 12px; text-align: center;">
-                    <div style="color: #065F46; font-size: 0.9rem;">السعر النهائي</div>
-                    <div style="font-size: 1.8rem; font-weight: bold; color: #10B981; margin-top: 10px;">
-                        ${pricing.finalPrice || '0 ج.م'}
-                    </div>
-                </div>
-                
-                <div style="background: #FEE2E2; padding: 20px; border-radius: 12px; text-align: center;">
-                    <div style="color: #991B1B; font-size: 0.9rem;">التوفير</div>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #DC2626; margin-top: 10px;">
-                        ${courseData.totalSavingsText || '0 ج.م'}
-                    </div>
-                </div>
-            </div>
-            
-            <!-- الخصومات المطبقة -->
-            ${discounts.length > 0 ? `
-                <div style="background: white; border: 1px solid #E5E7EB; 
-                            padding: 20px; border-radius: 12px;">
-                    <h4 style="color: #1F2937; margin: 0 0 15px 0;">
-                        <i class="fas fa-tags"></i> الخصومات والعروض المطبقة
-                    </h4>
-                    <div style="display: grid; gap: 10px;">
-                        ${discounts.map(discount => `
-                            <div style="display: flex; justify-content: space-between; 
-                                        padding: 12px; background: #F9FAFB; border-radius: 8px;
-                                        border-right: 3px solid #10B981;">
-                                <div>
-                                    <i class="fas fa-check-circle" style="color: #10B981; margin-left: 10px;"></i>
-                                    <strong>${discount.label}</strong>
-                                    ${discount.description ? 
-                                        `<span style="color: #6B7280; font-size: 0.9rem; margin-right: 10px;">
-                                            ${discount.description}
-                                        </span>` : ''}
-                                </div>
-                                <strong style="color: #DC2626;">${discount.value}</strong>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            ` : ''}
-            
-            <!-- حالة الدفع -->
-            <div style="background: white; border: 2px solid ${payment.fullyPaid ? '#10B981' : '#F59E0B'}; 
-                        padding: 25px; border-radius: 12px;">
-                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
-                    <i class="fas fa-credit-card"></i> حالة الدفع والأقساط
-                </h4>
-                
-                ${payment.isInstallment ? `
-                    <!-- نظام الأقساط -->
-                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-                        <div>
-                            <label style="color: #6B7280; font-size: 0.9rem;">نوع الدفع</label>
-                            <div style="font-weight: bold; color: #1F2937;">نظام أقساط</div>
-                        </div>
-                        <div>
-                            <label style="color: #6B7280; font-size: 0.9rem;">عدد الأقساط</label>
-                            <div style="font-weight: bold; color: #1F2937;">
-                                ${payment.totalInstallments || 0} قسط
-                            </div>
-                        </div>
-                        <div>
-                            <label style="color: #6B7280; font-size: 0.9rem;">المدفوع</label>
-                            <div style="font-weight: bold; color: #10B981;">
-                                ${(payment.paidAmount || 0).toLocaleString('ar-EG')} ج.م
-                            </div>
-                        </div>
-                        <div>
-                            <label style="color: #6B7280; font-size: 0.9rem;">المتبقي</label>
-                            <div style="font-weight: bold; color: #F59E0B;">
-                                ${(payment.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- شريط التقدم -->
-                    <div style="margin-top: 20px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                            <span>التقدم في السداد</span>
-                            <span>${payment.paidInstallments || 0} من ${payment.totalInstallments || 0}</span>
-                        </div>
-                        <div style="height: 20px; background: #E5E7EB; border-radius: 10px; overflow: hidden;">
-                            <div style="height: 100%; width: ${((payment.paidInstallments || 0) / (payment.totalInstallments || 1)) * 100}%; 
-                                        background: linear-gradient(90deg, #10B981, #059669);"></div>
-                        </div>
-                    </div>
-                ` : `
-                    <!-- دفع كامل -->
-                    <div style="text-align: center; padding: 30px;">
-                        ${courseData.paymentConfirmed || payment.fullyPaid ? `
-                            <i class="fas fa-check-circle" style="color: #10B981; font-size: 4rem;"></i>
-                            <p style="color: #065F46; font-size: 1.3rem; font-weight: bold; margin: 20px 0;">
-                                الدورة مدفوعة بالكامل
-                            </p>
-                            <p style="color: #6B7280;">
-                                تم الدفع بتاريخ: ${payment.paidAt ? 
-                                    new Date(payment.paidAt).toLocaleDateString('ar-EG') : 
-                                    'غير محدد'}
-                            </p>
-                        ` : `
-                            <i class="fas fa-clock" style="color: #F59E0B; font-size: 4rem;"></i>
-                            <p style="color: #92400E; font-size: 1.3rem; font-weight: bold; margin: 20px 0;">
-                                بانتظار تأكيد الدفع
-                            </p>
-                            <p style="color: #6B7280;">
-                                المبلغ المطلوب: ${pricing.finalPrice || '0 ج.م'}
-                            </p>
-                        `}
-                    </div>
-                `}
-            </div>
-            
-            <!-- ملاحظات الدورة -->
-            ${courseData.notes || courseData.customer?.expectations ? `
-                <div style="background: #F9FAFB; padding: 20px; border-radius: 12px;">
-                    <h4 style="color: #4B5563; margin: 0 0 15px 0;">
-                        <i class="fas fa-sticky-note"></i> ملاحظات وتوقعات
-                    </h4>
-                    <div style="color: #1F2937; line-height: 1.8;">
-                        ${courseData.notes || courseData.customer?.expectations || 'لا توجد ملاحظات'}
-                    </div>
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-function generateFinancialTab(student, userData, allBookings) {
-    const financialData = userData?.financial || {};
-    const paymentHistory = financialData.paymentHistory || [];
-    
-    // حساب الإحصائيات المالية
-    const totalOriginal = allBookings.reduce((sum, b) => 
-        sum + (b.pricing?.basePriceNumber || parseInt(b.pricing?.basePrice) || 0), 0);
-    const totalFinal = allBookings.reduce((sum, b) => 
-        sum + (b.pricing?.finalPriceNumber || parseInt(b.pricing?.finalPrice) || 0), 0);
-    const totalPaid = financialData.totalPaid || 0;
-    const totalDue = totalFinal - totalPaid;
-    
-    return `
-        <div style="display: grid; gap: 20px;">
-            <!-- الإحصائيات المالية الشاملة -->
-            <div style="background: linear-gradient(135deg, #1E293B, #334155); 
-                        color: white; padding: 30px; border-radius: 15px;">
-                <h3 style="margin: 0 0 20px 0;">الملخص المالي الشامل</h3>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
-                    <div style="text-align: center;">
-                        <div style="font-size: 0.9rem; opacity: 0.8;">الأسعار الأصلية</div>
-                        <div style="font-size: 1.8rem; font-weight: bold; text-decoration: line-through; 
-                                    opacity: 0.7; margin-top: 10px;">
-                            ${totalOriginal.toLocaleString('ar-EG')} ج.م
-                        </div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 0.9rem; opacity: 0.8;">الأسعار النهائية</div>
-                        <div style="font-size: 1.8rem; font-weight: bold; margin-top: 10px;">
-                            ${totalFinal.toLocaleString('ar-EG')} ج.م
-                        </div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 0.9rem; opacity: 0.8;">إجمالي المدفوع</div>
-                        <div style="font-size: 1.8rem; font-weight: bold; color: #10B981; margin-top: 10px;">
-                            ${totalPaid.toLocaleString('ar-EG')} ج.م
-                        </div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 0.9rem; opacity: 0.8;">المتبقي</div>
-                        <div style="font-size: 1.8rem; font-weight: bold; 
-                                    color: ${totalDue > 0 ? '#F59E0B' : '#10B981'}; margin-top: 10px;">
-                            ${totalDue.toLocaleString('ar-EG')} ج.م
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- سجل المدفوعات التفصيلي -->
-            <div style="background: white; border: 1px solid #E5E7EB; 
-                        padding: 25px; border-radius: 12px;">
-                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
-                    <i class="fas fa-receipt"></i> سجل المدفوعات الكامل
-                </h4>
-                
-                ${paymentHistory.length > 0 ? `
-                    <div style="display: grid; gap: 15px;">
-                        ${paymentHistory.map(payment => `
-                            <div style="border-right: 3px solid ${
-                                payment.type === 'refund' ? '#EF4444' :
-                                payment.type === 'installment' ? '#3B82F6' : '#10B981'
-                            }; padding: 15px; background: #F9FAFB; border-radius: 8px;">
-                                <div style="display: flex; justify-content: space-between; align-items: start;">
-                                    <div>
-                                        <div style="font-weight: bold; color: #1F2937; font-size: 1.2rem;">
-                                            ${payment.amount.toLocaleString('ar-EG')} ج.م
-                                        </div>
-                                        <div style="color: #6B7280; margin: 5px 0;">
-                                            ${payment.description || 'دفعة'}
-                                        </div>
-                                        <div style="display: flex; gap: 15px; margin-top: 10px;">
-                                            <span style="color: #9CA3AF; font-size: 0.85rem;">
-                                                <i class="fas fa-calendar"></i> 
-                                                ${new Date(payment.date).toLocaleDateString('ar-EG')}
-                                            </span>
-                                            <span style="color: #9CA3AF; font-size: 0.85rem;">
-                                                <i class="fas fa-credit-card"></i> 
-                                                ${payment.method || 'غير محدد'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <span style="background: ${
-                                            payment.type === 'refund' ? '#FEE2E2' :
-                                            payment.type === 'installment' ? '#DBEAFE' : '#DCFCE7'
-                                        }; color: ${
-                                            payment.type === 'refund' ? '#991B1B' :
-                                            payment.type === 'installment' ? '#1E40AF' : '#166534'
-                                        }; padding: 5px 12px; border-radius: 15px; font-size: 0.85rem;">
-                                            ${payment.type === 'refund' ? 'استرداد' :
-                                              payment.type === 'installment' ? 'قسط' : 'دفعة'}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                ` : `
-                    <div style="text-align: center; color: #9CA3AF; padding: 40px;">
-                        لا توجد مدفوعات مسجلة بعد
-                    </div>
-                `}
-            </div>
-            
-            <!-- المحفظة الإلكترونية -->
-            ${financialData.wallet ? `
-                <div style="background: linear-gradient(135deg, #9333EA, #7C3AED); 
-                            color: white; padding: 25px; border-radius: 15px;">
-                    <h4 style="margin: 0 0 20px 0;">
-                        <i class="fas fa-wallet"></i> المحفظة الإلكترونية
-                    </h4>
-                    <div style="text-align: center;">
-                        <div style="font-size: 0.9rem; opacity: 0.9;">الرصيد الحالي</div>
-                        <div style="font-size: 2.5rem; font-weight: bold; margin: 10px 0;">
-                            ${(financialData.wallet.balance || 0).toLocaleString('ar-EG')} ج.م
-                        </div>
-                    </div>
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-function generateActivitiesTab(student, userData, allBookings) {
-    // جمع كل الأنشطة من مختلف المصادر
-    const activities = [];
-    
-    // إضافة أنشطة الحجوزات
-    allBookings.forEach(booking => {
-        activities.push({
-            type: 'booking',
-            date: booking.bookingDate,
-            title: `حجز دورة ${booking.courseName || 'غير محددة'}`,
-            icon: 'fa-book',
-            color: '#3B82F6'
-        });
-        
-        if (booking.paymentConfirmed) {
-            activities.push({
-                type: 'payment',
-                date: booking.paymentConfirmedAt || booking.paidAt,
-                title: `تأكيد دفع ${booking.pricing?.finalPrice || ''}`,
-                icon: 'fa-check-circle',
-                color: '#10B981'
-            });
-        }
-    });
-    
-    // إضافة أنشطة من بيانات المستخدم
-    if (userData) {
-        if (userData.createdAt) {
-            activities.push({
-                type: 'account',
-                date: userData.createdAt,
-                title: 'إنشاء الحساب',
-                icon: 'fa-user-plus',
-                color: '#9333EA'
-            });
-        }
-        
-        // إضافة أنشطة المدفوعات
-        const paymentHistory = userData.financial?.paymentHistory || [];
-        paymentHistory.forEach(payment => {
-            activities.push({
-                type: 'payment',
-                date: payment.date,
-                title: `${payment.type === 'refund' ? 'استرداد' : 'دفعة'} ${payment.amount} ج.م`,
-                icon: payment.type === 'refund' ? 'fa-undo' : 'fa-dollar-sign',
-                color: payment.type === 'refund' ? '#EF4444' : '#10B981'
-            });
-        });
-    }
-    
-    // ترتيب الأنشطة حسب التاريخ (الأحدث أولاً)
-    activities.sort((a, b) => new Date(b.date) - new Date(a.date));
-    
-    return `
-        <div style="background: white; padding: 25px;">
-            <h4 style="color: #1F2937; margin: 0 0 25px 0;">
-                <i class="fas fa-stream"></i> السجل الزمني الكامل
-            </h4>
-            
-            <div style="position: relative;">
-                <!-- الخط الزمني -->
-                <div style="position: absolute; right: 20px; top: 0; bottom: 0; 
-                            width: 2px; background: #E5E7EB;"></div>
-                
-                <!-- الأنشطة -->
-                <div style="display: grid; gap: 25px;">
-                    ${activities.map((activity, index) => `
-                        <div style="display: flex; gap: 20px; position: relative;">
-                            <!-- النقطة على الخط الزمني -->
-                            <div style="position: absolute; right: 14px; width: 14px; height: 14px; 
-                                        background: ${activity.color}; border: 3px solid white; 
-                                        border-radius: 50%; z-index: 1;"></div>
-                            
-                            <!-- المحتوى -->
-                            <div style="margin-right: 50px; flex: 1;">
-                                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px;
-                                            border-right: 3px solid ${activity.color};">
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <div style="display: flex; align-items: center; gap: 10px;">
-                                            <i class="fas ${activity.icon}" 
-                                               style="color: ${activity.color}; font-size: 1.2rem;"></i>
-                                            <strong style="color: #1F2937;">${activity.title}</strong>
-                                        </div>
-                                        <span style="color: #6B7280; font-size: 0.85rem;">
-                                            ${formatActivityDate(activity.date)}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                
-                ${activities.length === 0 ? `
-                    <div style="text-align: center; color: #9CA3AF; padding: 40px;">
-                        لا توجد أنشطة مسجلة
-                    </div>
-                ` : ''}
-            </div>
-        </div>
-    `;
-}
-
-// دوال مساعدة إضافية
-
-function calculateCustomerStats(student, userData, allBookings) {
-    return {
-        totalCourses: allBookings.length,
-        completedCourses: allBookings.filter(b => b.status === 'completed').length,
-        activeCourses: allBookings.filter(b => b.status === 'active').length,
-        totalPaid: userData?.financial?.totalPaid || student.paymentInfo?.paidAmount || 0,
-        totalSaved: allBookings.reduce((sum, b) => sum + (b.totalSavings || 0), 0),
-        loyaltyPoints: userData?.loyaltyPoints?.balance || 0,
-        certificates: userData?.certificates?.length || 0
-    };
-}
-
-function determineCustomerLevel(stats) {
-    if (stats.totalCourses >= 5 || stats.totalPaid >= 10000) {
-        return {
-            name: 'VIP بلاتيني',
-            color: '#E5E4E2',
-            darkColor: '#9CA3AF',
-            icon: 'fa-crown'
-        };
-    } else if (stats.totalCourses >= 3 || stats.totalPaid >= 5000) {
-        return {
-            name: 'VIP ذهبي',
-            color: '#FFD700',
-            darkColor: '#F59E0B',
-            icon: 'fa-gem'
-        };
-    } else if (stats.totalCourses >= 2 || stats.totalPaid >= 2000) {
-        return {
-            name: 'متميز',
-            color: '#C0C0C0',
-            darkColor: '#6B7280',
-            icon: 'fa-star'
-        };
-    } else {
-        return {
-            name: 'عميل جديد',
-            color: '#3B82F6',
-            darkColor: '#2563EB',
-            icon: 'fa-user'
-        };
-    }
-}
-
-function calculateCustomerAge(firstBookingDate) {
-    if (!firstBookingDate) return 'اليوم';
-    
-    const days = Math.floor((new Date() - new Date(firstBookingDate)) / (1000 * 60 * 60 * 24));
-    
-    if (days === 0) return 'اليوم';
-    if (days === 1) return 'يوم واحد';
-    if (days === 2) return 'يومين';
-    if (days <= 10) return `${days} أيام`;
-    if (days <= 30) return `${Math.floor(days / 7)} أسابيع`;
-    if (days <= 365) return `${Math.floor(days / 30)} شهور`;
-    return `${Math.floor(days / 365)} سنوات`;
-}
-
-function generateCustomerJourney(bookings) {
-    // رسم بياني بسيط للرحلة
-    return `
-        <div style="display: flex; justify-content: space-between; align-items: center; height: 100%;">
-            ${bookings.slice(0, 5).map((booking, index) => `
-                <div style="text-align: center;">
-                    <div style="width: 60px; height: 60px; background: ${
-                        booking.status === 'active' ? '#3B82F6' :
-                        booking.status === 'completed' ? '#10B981' : '#6B7280'
-                    }; border-radius: 50%; display: flex; align-items: center; 
-                                justify-content: center; color: white; margin: 0 auto 10px;">
-                        <i class="fas fa-graduation-cap"></i>
-                    </div>
-                    <div style="font-size: 0.8rem; color: #4B5563;">
-                        ${booking.courseName?.substring(0, 10) || 'دورة ' + (index + 1)}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
-function generateRecentActivities(student, userData, bookings) {
-    const activities = [];
-    
-    // آخر حجز
-    if (bookings[0]) {
-        activities.push(`
-            <div style="display: flex; gap: 15px; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
-                <i class="fas fa-book" style="color: #3B82F6; margin-top: 3px;"></i>
-                <div>
-                    <div style="font-weight: bold;">حجز دورة ${bookings[0].courseName}</div>
-                    <div style="color: #6B7280; font-size: 0.85rem;">
-                        ${new Date(bookings[0].bookingDate).toLocaleDateString('ar-EG')}
-                    </div>
-                </div>
-            </div>
-        `);
-    }
-    
-    // آخر دفعة
-    const lastPayment = userData?.financial?.paymentHistory?.slice(-1)[0];
-    if (lastPayment) {
-        activities.push(`
-            <div style="display: flex; gap: 15px; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
-                <i class="fas fa-dollar-sign" style="color: #10B981; margin-top: 3px;"></i>
-                <div>
-                    <div style="font-weight: bold;">دفعة ${lastPayment.amount} ج.م</div>
-                    <div style="color: #6B7280; font-size: 0.85rem;">
-                        ${new Date(lastPayment.date).toLocaleDateString('ar-EG')}
-                    </div>
-                </div>
-            </div>
-        `);
-    }
-    
-    return activities.join('') || '<div style="color: #9CA3AF;">لا توجد أنشطة حديثة</div>';
-}
-
-function generateAchievements(stats) {
-    const achievements = [];
-    
-    if (stats.totalCourses >= 1) {
-        achievements.push(`
-            <div style="text-align: center; padding: 10px;">
-                <i class="fas fa-medal" style="color: #F59E0B; font-size: 2rem;"></i>
-                <div style="font-size: 0.85rem; margin-top: 5px;">طالب مجتهد</div>
-            </div>
-        `);
-    }
-    
-    if (stats.totalPaid >= 5000) {
-        achievements.push(`
-            <div style="text-align: center; padding: 10px;">
-                <i class="fas fa-trophy" style="color: #FFD700; font-size: 2rem;"></i>
-                <div style="font-size: 0.85rem; margin-top: 5px;">عميل مميز</div>
-            </div>
-        `);
-    }
-    
-    return achievements.join('') || '<div style="color: #9CA3AF; text-align: center;">لا توجد إنجازات بعد</div>';
-}
-
-function formatActivityDate(date) {
-    if (!date) return 'غير محدد';
-    
-    const activityDate = new Date(date);
-    const now = new Date();
-    const diffInHours = (now - activityDate) / (1000 * 60 * 60);
-    
-    if (diffInHours < 1) return 'منذ دقائق';
-    if (diffInHours < 24) return `منذ ${Math.floor(diffInHours)} ساعة`;
-    if (diffInHours < 48) return 'أمس';
-    if (diffInHours < 168) return `منذ ${Math.floor(diffInHours / 24)} أيام`;
-    
-    return activityDate.toLocaleDateString('ar-EG');
-}
-
-// ربط الدالة
 window.viewFullDetails = viewFullDetails;
         // توليد كلمة مرور
         function generatePassword() {
