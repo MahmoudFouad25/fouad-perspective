@@ -429,6 +429,26 @@
             background: linear-gradient(135deg, #EF4444, #DC2626);
             color: white;
         }
+
+        .btn-info {
+    background: linear-gradient(135deg, #06B6D4, #0891B2);
+    color: white;
+}
+
+.btn-secondary {
+    background: linear-gradient(135deg, #6B7280, #4B5563);
+    color: white;
+}
+
+.btn-purple {
+    background: linear-gradient(135deg, #9333EA, #7C3AED);
+    color: white;
+}
+
+.btn-whatsapp {
+    background: linear-gradient(135deg, #25D366, #128C7E);
+    color: white;
+}
         
         /* نافذة منبثقة لطالب جديد */
         .new-student-alert {
@@ -1858,32 +1878,59 @@ function createStudentCard(student) {
             </div>
             
             <div class="action-buttons">
-                ${!hasAccount ? `
-                    <button class="btn btn-primary" onclick="createAccount('${studentId}')">
-                        <i class="fas fa-user-plus"></i> إنشاء حساب
-                    </button>
-                ` : `
-                    <button class="btn btn-success" onclick="assignCourseToStudent('${studentId}')">
-                        <i class="fas fa-graduation-cap"></i> تخصيص دورة
-                    </button>
-                `}
-                
-                <button class="btn btn-primary" onclick="viewFullDetails('${studentId}')">
-                    <i class="fas fa-info-circle"></i> التفاصيل الكاملة
-                </button>
-                
-                ${hasAccount ? `
-                    <button class="btn btn-warning" onclick="viewUserFullStructure('${studentId}')">
-                        <i class="fas fa-database"></i> البنية الكاملة
-                    </button>
-                ` : ''}
-                
-                ${customer.whatsapp ? `
-                    <button class="btn btn-success" onclick="sendMessage('${studentId}')">
-                        <i class="fab fa-whatsapp"></i> رسالة
-                    </button>
-                ` : ''}
-            </div>
+    ${!hasAccount ? `
+        <!-- أزرار الطالب بدون حساب -->
+        <button class="btn btn-primary" onclick="createAccount('${studentId}')">
+            <i class="fas fa-user-plus"></i> إنشاء حساب متكامل
+        </button>
+    ` : `
+        <!-- أزرار الطالب مع حساب -->
+        <button class="btn btn-success" onclick="assignCourseToStudent('${studentId}')">
+            <i class="fas fa-graduation-cap"></i> تخصيص دورة
+        </button>
+        
+        ${student.paymentInfo?.isInstallment && student.paymentInfo?.remainingAmount > 0 ? `
+            <button class="btn btn-warning" onclick="manageInstallments('${studentId}')">
+                <i class="fas fa-coins"></i> إدارة الأقساط
+                <span style="background: #DC2626; color: white; padding: 2px 6px; 
+                             border-radius: 10px; font-size: 0.8rem; margin-right: 5px;">
+                    ${student.paymentInfo.totalInstallments - student.paymentInfo.paidInstallments}
+                </span>
+            </button>
+        ` : ''}
+        
+        <button class="btn btn-primary" onclick="managePayments('${studentId}')">
+            <i class="fas fa-credit-card"></i> إدارة المدفوعات
+        </button>
+        
+        <button class="btn btn-info" onclick="viewFinancialReport('${studentId}')">
+            <i class="fas fa-chart-line"></i> التقرير المالي
+        </button>
+    `}
+    
+    <!-- أزرار عامة -->
+    <button class="btn btn-secondary" onclick="viewFullDetails('${studentId}')">
+        <i class="fas fa-info-circle"></i> كل التفاصيل
+    </button>
+    
+    ${hasAccount ? `
+        <button class="btn btn-purple" onclick="manageWallet('${studentId}')">
+            <i class="fas fa-wallet"></i> المحفظة
+            ${student.walletBalance > 0 ? `
+                <span style="background: #10B981; color: white; padding: 2px 6px; 
+                             border-radius: 10px; font-size: 0.8rem; margin-right: 5px;">
+                    ${student.walletBalance}
+                </span>
+            ` : ''}
+        </button>
+    ` : ''}
+    
+    ${customer.whatsapp ? `
+        <button class="btn btn-whatsapp" onclick="sendPaymentReminder('${studentId}')">
+            <i class="fab fa-whatsapp"></i> تذكير بالدفع
+        </button>
+    ` : ''}
+</div>
         </div>
     `;
 }
@@ -3856,6 +3903,901 @@ window.resendWelcome = resendWelcome;
 window.generateStrongPassword = generateStrongPassword;
 window.generateUniqueSlug = generateUniqueSlug;
 
+   // ==================== 💰 نظام إدارة المدفوعات والأقساط ====================
+
+// دالة إدارة الأقساط
+async function manageInstallments(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+        return;
+    }
+    
+    // جلب بيانات المستخدم
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    if (!userDoc.exists) {
+        Swal.fire('خطأ', 'لم يتم العثور على حساب المستخدم', 'error');
+        return;
+    }
+    
+    const userData = userDoc.data();
+    const enrollments = userData.enrollments || [];
+    
+    // جمع كل الأقساط من كل الدورات
+    let allInstallments = [];
+    enrollments.forEach(enrollment => {
+        if (enrollment.payment?.installments?.schedule) {
+            enrollment.payment.installments.schedule.forEach(inst => {
+                allInstallments.push({
+                    ...inst,
+                    courseName: enrollment.title,
+                    enrollmentId: enrollment.id
+                });
+            });
+        }
+    });
+    
+    // فرز الأقساط حسب التاريخ
+    allInstallments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    
+    // عرض واجهة إدارة الأقساط
+    const { value: action } = await Swal.fire({
+        title: '💰 إدارة الأقساط',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- معلومات الطالب -->
+                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h4 style="color: #0369A1; margin: 0;">
+                        <i class="fas fa-user"></i> ${student.customer?.name}
+                    </h4>
+                </div>
+                
+                <!-- إحصائيات الأقساط -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+                    <div style="background: white; padding: 10px; border-radius: 8px; text-align: center; 
+                                border: 2px solid #E5E7EB;">
+                        <div style="color: #6B7280; font-size: 0.8rem;">إجمالي</div>
+                        <div style="font-weight: bold; color: #1F2937;">
+                            ${allInstallments.length} قسط
+                        </div>
+                    </div>
+                    <div style="background: #DCFCE7; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="color: #065F46; font-size: 0.8rem;">مدفوع</div>
+                        <div style="font-weight: bold; color: #10B981;">
+                            ${allInstallments.filter(i => i.status === 'paid').length} قسط
+                        </div>
+                    </div>
+                    <div style="background: #FEF3C7; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="color: #92400E; font-size: 0.8rem;">قادم</div>
+                        <div style="font-weight: bold; color: #F59E0B;">
+                            ${allInstallments.filter(i => i.status === 'pending').length} قسط
+                        </div>
+                    </div>
+                    <div style="background: #FEE2E2; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="color: #991B1B; font-size: 0.8rem;">متأخر</div>
+                        <div style="font-weight: bold; color: #DC2626;">
+                            ${allInstallments.filter(i => i.status === 'pending' && new Date(i.dueDate) < new Date()).length} قسط
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- قائمة الأقساط -->
+                <div style="background: white; border-radius: 12px; padding: 15px;">
+                    <h5 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-list"></i> جدول الأقساط التفصيلي
+                    </h5>
+                    
+                    ${allInstallments.length > 0 ? allInstallments.map((inst, idx) => {
+                        const isLate = inst.status === 'pending' && new Date(inst.dueDate) < new Date();
+                        const daysLate = isLate ? Math.floor((new Date() - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24)) : 0;
+                        
+                        return `
+                        <div style="border: 2px solid ${inst.status === 'paid' ? '#10B981' : isLate ? '#EF4444' : '#F59E0B'}; 
+                                    border-radius: 10px; padding: 15px; margin-bottom: 15px;
+                                    background: ${inst.status === 'paid' ? '#F0FDF4' : isLate ? '#FEF3F3' : '#FFFBEB'};">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <h6 style="margin: 0; color: #1F2937;">
+                                        القسط ${inst.installmentNumber} - ${inst.courseName}
+                                    </h6>
+                                    <p style="margin: 5px 0; color: #6B7280; font-size: 0.9rem;">
+                                        <i class="fas fa-calendar"></i> 
+                                        استحقاق: ${new Date(inst.dueDate).toLocaleDateString('ar-EG')}
+                                        ${isLate ? `<span style="color: #DC2626; font-weight: bold;"> (متأخر ${daysLate} يوم)</span>` : ''}
+                                    </p>
+                                    ${inst.status === 'paid' ? `
+                                        <p style="margin: 5px 0; color: #10B981; font-size: 0.85rem;">
+                                            <i class="fas fa-check-circle"></i> 
+                                            تم الدفع في: ${new Date(inst.paidDate).toLocaleDateString('ar-EG')}
+                                        </p>
+                                    ` : ''}
+                                </div>
+                                <div style="text-align: left;">
+                                    <div style="font-size: 1.2rem; font-weight: bold; 
+                                                color: ${inst.status === 'paid' ? '#10B981' : '#1F2937'};">
+                                        ${inst.amount.toLocaleString('ar-EG')} ج.م
+                                    </div>
+                                    ${inst.status === 'pending' ? `
+                                        <button onclick="recordInstallmentPayment('${student.userId}', '${inst.enrollmentId}', ${inst.installmentNumber})" 
+                                                style="background: #10B981; color: white; border: none; 
+                                                       padding: 8px 15px; border-radius: 8px; cursor: pointer;
+                                                       margin-top: 10px; font-weight: bold;">
+                                            <i class="fas fa-check"></i> تسجيل دفع
+                                        </button>
+                                    ` : `
+                                        <span style="background: #10B981; color: white; padding: 4px 10px; 
+                                                     border-radius: 15px; font-size: 0.85rem;">
+                                            <i class="fas fa-check-double"></i> مدفوع
+                                        </span>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                        `;
+                    }).join('') : '<p style="text-align: center; color: #6B7280;">لا توجد أقساط مسجلة</p>'}
+                </div>
+            </div>
+        `,
+        width: '900px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دالة تسجيل دفع قسط
+async function recordInstallmentPayment(userId, enrollmentId, installmentNumber) {
+    const { value: paymentData } = await Swal.fire({
+        title: '💳 تسجيل دفع القسط',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-calendar"></i> تاريخ الدفع
+                    </label>
+                    <input type="date" id="paymentDate" class="swal2-input" 
+                           value="${new Date().toISOString().split('T')[0]}"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-credit-card"></i> طريقة الدفع
+                    </label>
+                    <select id="paymentMethod" class="swal2-input" style="width: 100%;">
+                        <option value="cash">نقدي</option>
+                        <option value="vodafone">فودافون كاش</option>
+                        <option value="instapay">انستاباي</option>
+                        <option value="bank">تحويل بنكي</option>
+                        <option value="card">بطاقة ائتمان</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-hashtag"></i> رقم المرجع (اختياري)
+                    </label>
+                    <input type="text" id="reference" class="swal2-input" 
+                           placeholder="رقم العملية أو المرجع"
+                           style="width: 100%;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-sticky-note"></i> ملاحظات (اختياري)
+                    </label>
+                    <textarea id="notes" class="swal2-textarea" 
+                              placeholder="أي ملاحظات إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الدفع',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            return {
+                paymentDate: document.getElementById('paymentDate').value,
+                paymentMethod: document.getElementById('paymentMethod').value,
+                reference: document.getElementById('reference').value,
+                notes: document.getElementById('notes').value
+            };
+        }
+    });
+    
+    if (!paymentData) return;
+    
+    try {
+        // جلب بيانات المستخدم
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        
+        // تحديث القسط في الـ enrollment
+        const enrollments = userData.enrollments || [];
+        const enrollmentIndex = enrollments.findIndex(e => e.id === enrollmentId);
+        
+        if (enrollmentIndex !== -1) {
+            const installmentIndex = enrollments[enrollmentIndex].payment.installments.schedule
+                .findIndex(i => i.installmentNumber === installmentNumber);
+            
+            if (installmentIndex !== -1) {
+                // تحديث حالة القسط
+                enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex] = {
+                    ...enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex],
+                    status: 'paid',
+                    paidDate: paymentData.paymentDate,
+                    paidAmount: enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex].amount,
+                    paymentMethod: paymentData.paymentMethod,
+                    reference: paymentData.reference,
+                    notes: paymentData.notes
+                };
+                
+                // تحديث المدفوع والمتبقي
+                const paidAmount = enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex].amount;
+                enrollments[enrollmentIndex].payment.paidAmount += paidAmount;
+                enrollments[enrollmentIndex].payment.remainingAmount -= paidAmount;
+                enrollments[enrollmentIndex].payment.installments.paidInstallments++;
+                
+                // التحقق من اكتمال الدفع
+                if (enrollments[enrollmentIndex].payment.remainingAmount <= 0) {
+                    enrollments[enrollmentIndex].payment.status = 'paid';
+                    enrollments[enrollmentIndex].payment.fullyPaidDate = new Date().toISOString();
+                }
+                
+                // إضافة سجل في payment history
+                const paymentHistory = userData.financial.paymentHistory || [];
+                paymentHistory.push({
+                    id: `payment-${Date.now()}`,
+                    type: 'installment',
+                    amount: paidAmount,
+                    date: paymentData.paymentDate,
+                    method: paymentData.paymentMethod,
+                    reference: paymentData.reference,
+                    relatedEntity: 'enrollment',
+                    relatedEntityId: enrollmentId,
+                    description: `دفع القسط ${installmentNumber} - ${enrollments[enrollmentIndex].title}`,
+                    notes: paymentData.notes
+                });
+                
+                // حساب الإجماليات الجديدة
+                const financialTotals = EnrollmentManager.calculateFinancialTotals(enrollments);
+                
+                // تحديث Firebase
+                await db.collection('users').doc(userId).update({
+                    enrollments: enrollments,
+                    'financial.totalPaid': financialTotals.totalPaid,
+                    'financial.totalDue': financialTotals.totalDue,
+                    'financial.paymentHistory': paymentHistory,
+                    'timestamps.updatedAt': new Date().toISOString()
+                });
+                
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم تسجيل الدفع بنجاح',
+                    text: `تم تسجيل دفع القسط ${installmentNumber} بقيمة ${paidAmount.toLocaleString('ar-EG')} ج.م`,
+                    confirmButtonColor: '#10B981'
+                });
+                
+                // إعادة تحميل البيانات
+                await loadStudents();
+            }
+        }
+    } catch (error) {
+        console.error('خطأ في تسجيل الدفع:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تسجيل الدفع', 'error');
+    }
+}
+
+// دالة إدارة المدفوعات العامة
+async function managePayments(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+        return;
+    }
+    
+    const { value: action } = await Swal.fire({
+        title: '💳 إدارة المدفوعات',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                            padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="color: #0369A1; margin: 0;">
+                        <i class="fas fa-user"></i> ${student.customer?.name}
+                    </h4>
+                </div>
+                
+                <div style="display: grid; gap: 15px;">
+                    <button onclick="addGeneralPayment('${studentId}')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 20px; 
+                                   border-radius: 12px; cursor: pointer; font-size: 1.1rem;
+                                   display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <i class="fas fa-plus-circle" style="font-size: 1.5rem;"></i>
+                        <div>
+                            <div style="font-weight: bold;">تسجيل دفعة جديدة</div>
+                            <div style="font-size: 0.85rem; opacity: 0.9;">إضافة مبلغ مدفوع للحساب</div>
+                        </div>
+                    </button>
+                    
+                    <button onclick="viewPaymentHistory('${studentId}')" 
+                            style="background: linear-gradient(135deg, #3B82F6, #2563EB); 
+                                   color: white; border: none; padding: 20px; 
+                                   border-radius: 12px; cursor: pointer; font-size: 1.1rem;
+                                   display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <i class="fas fa-history" style="font-size: 1.5rem;"></i>
+                        <div>
+                            <div style="font-weight: bold;">سجل المدفوعات</div>
+                            <div style="font-size: 0.85rem; opacity: 0.9;">عرض كل المدفوعات السابقة</div>
+                        </div>
+                    </button>
+                    
+                    <button onclick="processRefund('${studentId}')" 
+                            style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                                   color: white; border: none; padding: 20px; 
+                                   border-radius: 12px; cursor: pointer; font-size: 1.1rem;
+                                   display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <i class="fas fa-undo" style="font-size: 1.5rem;"></i>
+                        <div>
+                            <div style="font-weight: bold;">معالجة استرداد</div>
+                            <div style="font-size: 0.85rem; opacity: 0.9;">استرداد مبلغ أو إلغاء دورة</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        `,
+        width: '600px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دالة إضافة دفعة عامة
+async function addGeneralPayment(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) return;
+    
+    // جلب الدورات النشطة
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    const activeEnrollments = userData.enrollments?.filter(e => e.status.current === 'active') || [];
+    
+    const { value: paymentData } = await Swal.fire({
+        title: '💵 تسجيل دفعة جديدة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-money-bill"></i> المبلغ المدفوع
+                    </label>
+                    <input type="number" id="amount" class="swal2-input" 
+                           placeholder="المبلغ بالجنيه المصري"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-book"></i> الدورة المرتبطة
+                    </label>
+                    <select id="enrollmentId" class="swal2-input" style="width: 100%;">
+                        <option value="">دفعة عامة (غير مرتبطة بدورة)</option>
+                        ${activeEnrollments.map(e => `
+                            <option value="${e.id}">${e.title}</option>
+                        `).join('')}
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-credit-card"></i> طريقة الدفع
+                    </label>
+                    <select id="paymentMethod" class="swal2-input" style="width: 100%;">
+                        <option value="cash">نقدي</option>
+                        <option value="vodafone">فودافون كاش</option>
+                        <option value="instapay">انستاباي</option>
+                        <option value="bank">تحويل بنكي</option>
+                        <option value="card">بطاقة ائتمان</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-calendar"></i> تاريخ الدفع
+                    </label>
+                    <input type="date" id="paymentDate" class="swal2-input" 
+                           value="${new Date().toISOString().split('T')[0]}"
+                           style="width: 100%;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-sticky-note"></i> ملاحظات
+                    </label>
+                    <textarea id="notes" class="swal2-textarea" 
+                              placeholder="وصف الدفعة أو أي ملاحظات..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تسجيل الدفعة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال مبلغ صحيح');
+                return false;
+            }
+            
+            return {
+                amount: amount,
+                enrollmentId: document.getElementById('enrollmentId').value,
+                paymentMethod: document.getElementById('paymentMethod').value,
+                paymentDate: document.getElementById('paymentDate').value,
+                notes: document.getElementById('notes').value
+            };
+        }
+    });
+    
+    if (!paymentData) return;
+    
+    try {
+        // إضافة الدفعة لسجل المدفوعات
+        const paymentHistory = userData.financial.paymentHistory || [];
+        paymentHistory.push({
+            id: `payment-${Date.now()}`,
+            type: 'general',
+            amount: paymentData.amount,
+            date: paymentData.paymentDate,
+            method: paymentData.paymentMethod,
+            relatedEntity: paymentData.enrollmentId ? 'enrollment' : 'account',
+            relatedEntityId: paymentData.enrollmentId || null,
+            description: paymentData.notes || 'دفعة عامة',
+            recordedAt: new Date().toISOString(),
+            recordedBy: 'admin'
+        });
+        
+        // تحديث الإجماليات
+        const updatedTotalPaid = (userData.financial.totalPaid || 0) + paymentData.amount;
+        
+        // تحديث Firebase
+        await db.collection('users').doc(student.userId).update({
+            'financial.totalPaid': updatedTotalPaid,
+            'financial.paymentHistory': paymentHistory,
+            'timestamps.updatedAt': new Date().toISOString()
+        });
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم تسجيل الدفعة',
+            text: `تم إضافة ${paymentData.amount.toLocaleString('ar-EG')} ج.م للحساب`,
+            confirmButtonColor: '#10B981'
+        });
+        
+        await loadStudents();
+        
+    } catch (error) {
+        console.error('خطأ في تسجيل الدفعة:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تسجيل الدفعة', 'error');
+    }
+}
+
+// دالة إدارة المحفظة
+async function manageWallet(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) return;
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    const wallet = userData.financial?.wallet || { balance: 0, transactions: [] };
+    
+    const { value: action } = await Swal.fire({
+        title: '👛 إدارة المحفظة الإلكترونية',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- الرصيد الحالي -->
+                <div style="background: linear-gradient(135deg, #9333EA, #7C3AED); 
+                            color: white; padding: 30px; border-radius: 15px; 
+                            margin-bottom: 20px; text-align: center;">
+                    <div style="font-size: 0.9rem; opacity: 0.9;">الرصيد الحالي</div>
+                    <div style="font-size: 2.5rem; font-weight: bold; margin: 10px 0;">
+                        ${wallet.balance.toLocaleString('ar-EG')} ج.م
+                    </div>
+                    <div style="font-size: 0.85rem; opacity: 0.8;">
+                        آخر تحديث: ${wallet.lastUpdated ? new Date(wallet.lastUpdated).toLocaleDateString('ar-EG') : 'غير محدد'}
+                    </div>
+                </div>
+                
+                <!-- الإجراءات -->
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <button onclick="addWalletCredit('${student.userId}')" 
+                            style="background: #10B981; color: white; border: none; 
+                                   padding: 15px; border-radius: 10px; cursor: pointer;">
+                        <i class="fas fa-plus"></i> إضافة رصيد
+                    </button>
+                    <button onclick="deductWalletBalance('${student.userId}')" 
+                            style="background: #EF4444; color: white; border: none; 
+                                   padding: 15px; border-radius: 10px; cursor: pointer;">
+                        <i class="fas fa-minus"></i> خصم رصيد
+                    </button>
+                </div>
+                
+                <!-- سجل المعاملات -->
+                <div style="background: white; border: 1px solid #E5E7EB; 
+                            padding: 15px; border-radius: 12px;">
+                    <h5 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-history"></i> سجل المعاملات
+                    </h5>
+                    
+                    ${wallet.transactions && wallet.transactions.length > 0 ? 
+                        wallet.transactions.slice(-10).reverse().map(txn => `
+                            <div style="border-bottom: 1px solid #E5E7EB; padding: 10px 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-weight: bold; color: #1F2937;">
+                                            ${txn.type === 'credit' ? 
+                                                '<i class="fas fa-arrow-down" style="color: #10B981;"></i> إضافة' : 
+                                                '<i class="fas fa-arrow-up" style="color: #EF4444;"></i> خصم'}
+                                            ${txn.amount} ج.م
+                                        </div>
+                                        <div style="color: #6B7280; font-size: 0.85rem; margin-top: 5px;">
+                                            ${txn.description || 'بدون وصف'}
+                                        </div>
+                                    </div>
+                                    <div style="text-align: left;">
+                                        <div style="color: #6B7280; font-size: 0.8rem;">
+                                            ${new Date(txn.date).toLocaleDateString('ar-EG')}
+                                        </div>
+                                        <div style="color: #9CA3AF; font-size: 0.75rem;">
+                                            الرصيد: ${txn.balanceAfter} ج.م
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('') : 
+                        '<p style="text-align: center; color: #9CA3AF;">لا توجد معاملات سابقة</p>'
+                    }
+                </div>
+            </div>
+        `,
+        width: '700px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دالة إضافة رصيد للمحفظة
+async function addWalletCredit(userId) {
+    const { value: creditData } = await Swal.fire({
+        title: '➕ إضافة رصيد للمحفظة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-money-bill"></i> المبلغ
+                    </label>
+                    <input type="number" id="amount" class="swal2-input" 
+                           placeholder="المبلغ بالجنيه المصري"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-tag"></i> السبب
+                    </label>
+                    <select id="reason" class="swal2-input" style="width: 100%;">
+                        <option value="overpayment">دفعة زائدة</option>
+                        <option value="refund">استرداد</option>
+                        <option value="gift">هدية</option>
+                        <option value="referral">مكافأة إحالة</option>
+                        <option value="compensation">تعويض</option>
+                        <option value="other">آخر</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-comment"></i> وصف
+                    </label>
+                    <input type="text" id="description" class="swal2-input" 
+                           placeholder="وصف الإضافة..."
+                           style="width: 100%;">
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إضافة الرصيد',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال مبلغ صحيح');
+                return false;
+            }
+            
+            return {
+                amount: amount,
+                reason: document.getElementById('reason').value,
+                description: document.getElementById('description').value
+            };
+        }
+    });
+    
+    if (!creditData) return;
+    
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        const currentBalance = userData.financial?.wallet?.balance || 0;
+        const newBalance = currentBalance + creditData.amount;
+        
+        const transactions = userData.financial?.wallet?.transactions || [];
+        transactions.push({
+            id: `txn-${Date.now()}`,
+            type: 'credit',
+            amount: creditData.amount,
+            reason: creditData.reason,
+            description: creditData.description,
+            date: new Date().toISOString(),
+            balanceAfter: newBalance
+        });
+        
+        await db.collection('users').doc(userId).update({
+            'financial.wallet.balance': newBalance,
+            'financial.wallet.transactions': transactions,
+            'financial.wallet.lastUpdated': new Date().toISOString()
+        });
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم إضافة الرصيد',
+            text: `الرصيد الجديد: ${newBalance.toLocaleString('ar-EG')} ج.م`,
+            confirmButtonColor: '#10B981'
+        });
+        
+        await loadStudents();
+        
+    } catch (error) {
+        console.error('خطأ في إضافة الرصيد:', error);
+        Swal.fire('خطأ', 'حدث خطأ في إضافة الرصيد', 'error');
+    }
+}
+
+// دالة إرسال تذكير بالدفع
+async function sendPaymentReminder(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.customer?.whatsapp) return;
+    
+    let message = `
+مرحباً ${student.customer.name} 👋
+
+تذكير بالمبالغ المستحقة:
+`;
+    
+    if (student.paymentInfo?.isInstallment && student.paymentInfo?.remainingAmount > 0) {
+        message += `
+💰 المتبقي: ${student.paymentInfo.remainingAmount.toLocaleString('ar-EG')} ج.م
+📅 الأقساط المتبقية: ${student.paymentInfo.totalInstallments - student.paymentInfo.paidInstallments} قسط
+`;
+        
+        if (student.paymentInfo.nextDueDate) {
+            message += `⏰ القسط القادم: ${new Date(student.paymentInfo.nextDueDate).toLocaleDateString('ar-EG')}
+`;
+        }
+    } else if (!student.paymentConfirmed) {
+        message += `
+💰 المبلغ المطلوب: ${student.pricing?.finalPrice || '0 ج.م'}
+`;
+    }
+    
+    message += `
+للدفع يمكنك التواصل معنا أو استخدام إحدى طرق الدفع المتاحة.
+
+شكراً لك 🙏
+فريق منظور الفؤاد
+`;
+    
+    const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+    
+    Swal.fire({
+        icon: 'success',
+        title: 'تم إرسال التذكير',
+        text: 'تم فتح WhatsApp لإرسال رسالة التذكير',
+        confirmButtonColor: '#25D366'
+    });
+}
+
+// دالة عرض التقرير المالي
+async function viewFinancialReport(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) return;
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    
+    const financial = userData.financial || {};
+    const enrollments = userData.enrollments || [];
+    const paymentHistory = financial.paymentHistory || [];
+    
+    // حساب الإحصائيات
+    const stats = {
+        totalCourses: enrollments.length,
+        activeCourses: enrollments.filter(e => e.status.current === 'active').length,
+        totalOriginalPrice: enrollments.reduce((sum, e) => sum + (e.pricing?.originalPrice || 0), 0),
+        totalFinalPrice: enrollments.reduce((sum, e) => sum + (e.pricing?.finalPrice || 0), 0),
+        totalPaid: financial.totalPaid || 0,
+        totalDue: financial.totalDue || 0,
+        totalSavings: financial.totalSavings || 0,
+        walletBalance: financial.wallet?.balance || 0,
+        loyaltyPoints: userData.loyaltyPoints?.balance || 0
+    };
+    
+    Swal.fire({
+        title: '📊 التقرير المالي الشامل',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- معلومات الطالب -->
+                <div style="background: linear-gradient(135deg, #1E293B, #334155); 
+                            color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h3 style="margin: 0;">${student.customer?.name}</h3>
+                    <p style="margin: 5px 0; opacity: 0.9;">
+                        ${userData.id} | ${userData.accountStatus?.level}
+                    </p>
+                </div>
+                
+                <!-- الإحصائيات المالية -->
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: white; border: 2px solid #E5E7EB; 
+                                padding: 15px; border-radius: 10px;">
+                        <div style="color: #6B7280; font-size: 0.85rem;">إجمالي الأسعار الأصلية</div>
+                        <div style="font-weight: bold; font-size: 1.3rem; color: #6B7280; text-decoration: line-through;">
+                            ${stats.totalOriginalPrice.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                    
+                    <div style="background: #FEF3C7; padding: 15px; border-radius: 10px;">
+                        <div style="color: #92400E; font-size: 0.85rem;">إجمالي الأسعار النهائية</div>
+                        <div style="font-weight: bold; font-size: 1.3rem; color: #F59E0B;">
+                            ${stats.totalFinalPrice.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                    
+                    <div style="background: #DCFCE7; padding: 15px; border-radius: 10px;">
+                        <div style="color: #065F46; font-size: 0.85rem;">إجمالي المدفوع</div>
+                        <div style="font-weight: bold; font-size: 1.3rem; color: #10B981;">
+                            ${stats.totalPaid.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                    
+                    <div style="background: #FEE2E2; padding: 15px; border-radius: 10px;">
+                        <div style="color: #991B1B; font-size: 0.85rem;">إجمالي المستحق</div>
+                        <div style="font-weight: bold; font-size: 1.3rem; color: #DC2626;">
+                            ${stats.totalDue.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- التوفير والمكافآت -->
+                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                            padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="color: #92400E; margin: 0 0 15px 0;">
+                        <i class="fas fa-piggy-bank"></i> التوفير والمكافآت
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                        <div style="background: white; padding: 12px; border-radius: 8px; text-align: center;">
+                            <div style="color: #DC2626; font-weight: bold; font-size: 1.2rem;">
+                                ${stats.totalSavings.toLocaleString('ar-EG')} ج.م
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.8rem;">إجمالي التوفير</div>
+                        </div>
+                        <div style="background: white; padding: 12px; border-radius: 8px; text-align: center;">
+                            <div style="color: #9333EA; font-weight: bold; font-size: 1.2rem;">
+                                ${stats.walletBalance.toLocaleString('ar-EG')} ج.م
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.8rem;">رصيد المحفظة</div>
+                        </div>
+                        <div style="background: white; padding: 12px; border-radius: 8px; text-align: center;">
+                            <div style="color: #F59E0B; font-weight: bold; font-size: 1.2rem;">
+                                ${stats.loyaltyPoints} نقطة
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.8rem;">نقاط الولاء</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- الدورات المسجلة -->
+                <div style="background: white; border: 1px solid #E5E7EB; 
+                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h5 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-graduation-cap"></i> الدورات المسجلة (${stats.totalCourses})
+                    </h5>
+                    ${enrollments.map(e => `
+                        <div style="border-bottom: 1px solid #E5E7EB; padding: 10px 0;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <div>
+                                    <strong>${e.title}</strong>
+                                    <span style="background: ${e.status.current === 'active' ? '#DCFCE7' : '#F3F4F6'}; 
+                                                 color: ${e.status.current === 'active' ? '#166534' : '#6B7280'}; 
+                                                 padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; 
+                                                 margin-right: 10px;">
+                                        ${e.status.current === 'active' ? 'نشطة' : 'منتهية'}
+                                    </span>
+                                </div>
+                                <div style="text-align: left;">
+                                    <div style="color: #10B981;">
+                                        ${e.payment.paidAmount.toLocaleString('ar-EG')} ج.م
+                                    </div>
+                                    ${e.payment.remainingAmount > 0 ? `
+                                        <div style="color: #F59E0B; font-size: 0.85rem;">
+                                            متبقي: ${e.payment.remainingAmount.toLocaleString('ar-EG')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <!-- آخر المدفوعات -->
+                <div style="background: white; border: 1px solid #E5E7EB; 
+                            padding: 15px; border-radius: 12px;">
+                    <h5 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-receipt"></i> آخر المدفوعات
+                    </h5>
+                    ${paymentHistory.slice(-5).reverse().map(p => `
+                        <div style="border-bottom: 1px solid #E5E7EB; padding: 8px 0;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <div>
+                                    <span style="color: #10B981; font-weight: bold;">
+                                        ${p.amount.toLocaleString('ar-EG')} ج.م
+                                    </span>
+                                    <span style="color: #6B7280; font-size: 0.85rem; margin-right: 10px;">
+                                        ${p.description || 'دفعة'}
+                                    </span>
+                                </div>
+                                <div style="color: #9CA3AF; font-size: 0.8rem;">
+                                    ${new Date(p.date).toLocaleDateString('ar-EG')}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('') || '<p style="text-align: center; color: #9CA3AF;">لا توجد مدفوعات مسجلة</p>'}
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// ربط الدوال بـ window
+window.manageInstallments = manageInstallments;
+window.recordInstallmentPayment = recordInstallmentPayment;
+window.managePayments = managePayments;
+window.addGeneralPayment = addGeneralPayment;
+window.manageWallet = manageWallet;
+window.addWalletCredit = addWalletCredit;
+window.sendPaymentReminder = sendPaymentReminder;
+window.viewFinancialReport = viewFinancialReport;
+window.viewPaymentHistory = async (studentId) => {
+    // سيتم تنفيذها في الخطوة القادمة
+    Swal.fire('قريباً', 'هذه الميزة قيد التطوير', 'info');
+};
+window.processRefund = async (studentId) => {
+    // سيتم تنفيذها في الخطوة القادمة
+    Swal.fire('قريباً', 'هذه الميزة قيد التطوير', 'info');
+};
+window.deductWalletBalance = async (userId) => {
+    // سيتم تنفيذها في الخطوة القادمة
+    Swal.fire('قريباً', 'هذه الميزة قيد التطوير', 'info');
+};     
     </script>
 </body>
 </html>
