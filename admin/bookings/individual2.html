@@ -578,6 +578,10 @@
     background: linear-gradient(135deg, #06B6D4, #0891B2);
     color: white;
 }
+        .btn-custom {
+    background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+    color: white;
+}
     </style>
 </head>
 <body>
@@ -1929,7 +1933,11 @@ function createStudentCard(student) {
         <button class="btn btn-success" onclick="assignCourseToStudent('${studentId}')">
             <i class="fas fa-graduation-cap"></i> تخصيص دورة
         </button>
-        
+
+        <button class="btn btn-custom" onclick="assignCustomCourse('${studentId}')">
+    <i class="fas fa-magic"></i> دورة إضافية
+</button>
+
         ${student.paymentInfo?.isInstallment && student.paymentInfo?.remainingAmount > 0 ? `
             <button class="btn btn-warning" onclick="manageInstallments('${studentId}')">
                 <i class="fas fa-coins"></i> إدارة الأقساط
@@ -6277,7 +6285,288 @@ ${userData.loyaltyPoints.tier === 'GOLD' ? '• خصم 15% على كل الدو�
 
 // استبدل زر المراسلة القديم
 window.smartMessaging = smartMessaging;
+        // دالة تخصيص دورة إضافية مخصصة
+async function assignCustomCourse(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) {
+        Swal.fire('خطأ', 'يجب إنشاء حساب أولاً', 'error');
+        return;
+    }
+    
+    // جلب بيانات المستخدم
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    
+    const { value: customData } = await Swal.fire({
+        title: '🎨 إضافة دورة مخصصة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                
+                <!-- معلومات الطالب -->
+                <div style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); 
+                            color: white; padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h4 style="margin: 0;">${student.customer?.name}</h4>
+                    <p style="margin: 5px 0; opacity: 0.9;">
+                        لديه ${userData.enrollments?.length || 0} دورة مسجلة
+                    </p>
+                </div>
+                
+                <!-- بيانات الدورة -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-book"></i> اسم الدورة
+                    </label>
+                    <input type="text" id="courseName" class="swal2-input" 
+                           placeholder="مثال: دورة متقدمة في الإنياجرام"
+                           style="width: 100%;">
+                </div>
+                
+                <!-- التسعير -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                            <i class="fas fa-tag"></i> السعر الأصلي
+                        </label>
+                        <input type="number" id="originalPrice" class="swal2-input" 
+                               placeholder="5000" onchange="calculateCustomPrice()"
+                               style="width: 100%;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                            <i class="fas fa-percentage"></i> نسبة الخصم %
+                        </label>
+                        <input type="number" id="discountPercent" class="swal2-input" 
+                               placeholder="20" min="0" max="100" 
+                               onchange="calculateCustomPrice()"
+                               style="width: 100%;">
+                    </div>
+                </div>
+                
+                <!-- السعر النهائي -->
+                <div style="background: #DCFCE7; padding: 15px; border-radius: 10px; 
+                            margin-bottom: 15px; text-align: center;">
+                    <div style="color: #065F46;">السعر النهائي</div>
+                    <div id="finalPriceDisplay" style="font-size: 1.5rem; font-weight: bold; 
+                                                       color: #10B981;">
+                        0 ج.م
+                    </div>
+                </div>
+                
+                <!-- طريقة الدفع -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-credit-card"></i> طريقة الدفع
+                    </label>
+                    <select id="paymentType" class="swal2-input" 
+                            onchange="toggleCustomInstallments()" style="width: 100%;">
+                        <option value="full">دفع كامل</option>
+                        <option value="installment">أقساط</option>
+                    </select>
+                </div>
+                
+                <!-- تفاصيل الأقساط -->
+                <div id="installmentDetails" style="display: none;">
+                    <div style="background: #F3F4F6; padding: 15px; border-radius: 10px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    عدد الأقساط
+                                </label>
+                                <select id="installmentCount" class="swal2-input" 
+                                        onchange="calculateCustomInstallments()" 
+                                        style="width: 100%;">
+                                    <option value="2">قسطين</option>
+                                    <option value="3">3 أقساط</option>
+                                    <option value="4">4 أقساط</option>
+                                    <option value="6">6 أقساط</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    قيمة القسط
+                                </label>
+                                <input type="text" id="installmentAmount" readonly 
+                                       style="width: 100%; padding: 8px; border: 1px solid #E5E7EB; 
+                                              border-radius: 5px; background: white;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- المدة -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-calendar"></i> مدة الوصول
+                    </label>
+                    <select id="accessDuration" class="swal2-input" style="width: 100%;">
+                        <option value="3">3 أشهر</option>
+                        <option value="6" selected>6 أشهر</option>
+                        <option value="12">سنة</option>
+                        <option value="unlimited">غير محدود</option>
+                    </select>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تخصيص الدورة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#8B5CF6',
+        width: '600px',
+        didOpen: () => {
+            // دوال الحساب
+            window.calculateCustomPrice = () => {
+                const original = parseFloat(document.getElementById('originalPrice').value) || 0;
+                const discount = parseFloat(document.getElementById('discountPercent').value) || 0;
+                const final = original - (original * discount / 100);
+                document.getElementById('finalPriceDisplay').textContent = 
+                    final.toLocaleString('ar-EG') + ' ج.م';
+                calculateCustomInstallments();
+            };
+            
+            window.toggleCustomInstallments = () => {
+                const type = document.getElementById('paymentType').value;
+                document.getElementById('installmentDetails').style.display = 
+                    type === 'installment' ? 'block' : 'none';
+                if (type === 'installment') calculateCustomInstallments();
+            };
+            
+            window.calculateCustomInstallments = () => {
+                const original = parseFloat(document.getElementById('originalPrice').value) || 0;
+                const discount = parseFloat(document.getElementById('discountPercent').value) || 0;
+                const final = original - (original * discount / 100);
+                const count = parseInt(document.getElementById('installmentCount').value) || 3;
+                const amount = Math.ceil(final / count);
+                document.getElementById('installmentAmount').value = 
+                    amount.toLocaleString('ar-EG') + ' ج.م';
+            };
+        },
+        preConfirm: () => {
+            const courseName = document.getElementById('courseName').value.trim();
+            const originalPrice = parseFloat(document.getElementById('originalPrice').value);
+            
+            if (!courseName) {
+                Swal.showValidationMessage('يجب إدخال اسم الدورة');
+                return false;
+            }
+            
+            if (!originalPrice || originalPrice <= 0) {
+                Swal.showValidationMessage('يجب إدخال السعر');
+                return false;
+            }
+            
+            const discountPercent = parseFloat(document.getElementById('discountPercent').value) || 0;
+            const finalPrice = originalPrice - (originalPrice * discountPercent / 100);
+            
+            return {
+                courseName,
+                originalPrice,
+                discountPercent,
+                finalPrice,
+                paymentType: document.getElementById('paymentType').value,
+                installmentCount: document.getElementById('paymentType').value === 'installment' ? 
+                    parseInt(document.getElementById('installmentCount').value) : null,
+                accessDuration: document.getElementById('accessDuration').value
+            };
+        }
+    });
+    
+    if (!customData) return;
+    
+    try {
+        // إنشاء enrollment جديد
+        const newEnrollment = {
+            id: `custom-${Date.now()}`,
+            title: customData.courseName,
+            type: 'custom',
+            
+            pricing: {
+                originalPrice: customData.originalPrice,
+                finalPrice: customData.finalPrice,
+                discountPercentage: customData.discountPercent,
+                savings: customData.originalPrice - customData.finalPrice
+            },
+            
+            payment: {
+                type: customData.paymentType,
+                status: 'pending',
+                totalAmount: customData.finalPrice,
+                paidAmount: 0,
+                remainingAmount: customData.finalPrice,
+                installments: customData.paymentType === 'installment' ? {
+                    isActive: true,
+                    totalInstallments: customData.installmentCount,
+                    paidInstallments: 0,
+                    schedule: []
+                } : null
+            },
+            
+            dates: {
+                enrolledAt: new Date().toISOString(),
+                startDate: new Date().toISOString(),
+                endDate: customData.accessDuration === 'unlimited' ? 
+                    new Date('2099-12-31').toISOString() : 
+                    new Date(Date.now() + (parseInt(customData.accessDuration) * 30 * 24 * 60 * 60 * 1000)).toISOString()
+            },
+            
+            status: {
+                current: 'active',
+                isActive: true
+            },
+            
+            metadata: {
+                source: 'custom_assignment',
+                assignedBy: 'admin',
+                assignedAt: new Date().toISOString()
+            }
+        };
         
+        // إنشاء جدول الأقساط إذا لزم
+        if (customData.paymentType === 'installment') {
+            const installmentAmount = Math.ceil(customData.finalPrice / customData.installmentCount);
+            for (let i = 0; i < customData.installmentCount; i++) {
+                const dueDate = new Date();
+                dueDate.setMonth(dueDate.getMonth() + i);
+                
+                newEnrollment.payment.installments.schedule.push({
+                    installmentNumber: i + 1,
+                    amount: installmentAmount,
+                    dueDate: dueDate.toISOString(),
+                    status: 'pending'
+                });
+            }
+        }
+        
+        // إضافة للمستخدم
+        const enrollments = userData.enrollments || [];
+        enrollments.push(newEnrollment);
+        
+        await db.collection('users').doc(student.userId).update({
+            enrollments: enrollments,
+            'timestamps.updatedAt': new Date().toISOString()
+        });
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم تخصيص الدورة بنجاح',
+            html: `
+                <div style="text-align: right;">
+                    <p><strong>الدورة:</strong> ${customData.courseName}</p>
+                    <p><strong>السعر:</strong> ${customData.finalPrice.toLocaleString('ar-EG')} ج.م</p>
+                    <p><strong>المدة:</strong> ${customData.accessDuration === 'unlimited' ? 'غير محدود' : customData.accessDuration + ' شهر'}</p>
+                </div>
+            `,
+            confirmButtonColor: '#10B981'
+        });
+        
+        await loadStudents();
+        
+    } catch (error) {
+        console.error('خطأ في تخصيص الدورة:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تخصيص الدورة', 'error');
+    }
+}
+
+window.assignCustomCourse = assignCustomCourse;
     </script>
 </body>
 </html>
