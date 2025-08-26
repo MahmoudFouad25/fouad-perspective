@@ -1749,11 +1749,9 @@ function createStudentCard(student) {
                 </div>
                 
                 <div class="student-status">
-                    <span class="status-badge ${accountStatus}">
-                        ${accountStatus === 'active' ? 'نشط' : 
-                          accountStatus === 'pending' ? 'قيد التفعيل' : 
-                          'غير نشط'}
-                    </span>
+                    <span class="status-badge ${hasAccount ? 'active' : 'pending'}">
+    ${hasAccount ? 'نشط' : 'بانتظار إنشاء الحساب'}
+</span>
                     ${hasAccount ? `
                         <span style="color: #10B981; font-size: 0.85rem;">
                             <i class="fas fa-check-circle"></i> حساب مُنشأ
@@ -1946,9 +1944,9 @@ function createStudentCard(student) {
 ` : ''}
 
     ${customer.whatsapp ? `
-        <button class="btn btn-whatsapp" onclick="sendPaymentReminder('${studentId}')">
-            <i class="fab fa-whatsapp"></i> تذكير بالدفع
-        </button>
+        <button class="btn btn-whatsapp" onclick="smartMessaging('${studentId}')">
+    <i class="fab fa-whatsapp"></i> مركز المراسلة
+</button>
     ` : ''}
 </div>
         </div>
@@ -5477,6 +5475,225 @@ window.redeemPoints = redeemPoints;
 window.manageReferralProgram = manageReferralProgram;
 window.copyReferralCode = copyReferralCode;
 window.generateReferralCode = generateReferralCode;
+
+        // ==================== 📱 نظام المراسلة المتطور ====================
+
+async function smartMessaging(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.customer?.whatsapp) {
+        Swal.fire('تنبيه', 'لا يوجد رقم واتساب لهذا الطالب', 'warning');
+        return;
+    }
+    
+    // جلب بيانات المستخدم إن وجدت
+    let userData = null;
+    if (student.userId) {
+        try {
+            const userDoc = await db.collection('users').doc(student.userId).get();
+            if (userDoc.exists) userData = userDoc.data();
+        } catch (error) {
+            console.error('خطأ في جلب بيانات المستخدم:', error);
+        }
+    }
+    
+    // قوالب الرسائل
+    const messageTemplates = {
+        welcome: {
+            title: '🎉 رسالة ترحيب',
+            icon: 'fa-hand-peace',
+            color: '#10B981',
+            template: `مرحباً ${student.customer.name} 👋
+
+نرحب بك في منظور الفؤاد! 🌟
+
+${student.courseName ? `✅ تم تسجيلك في: ${student.courseName}` : ''}
+${student.pricing?.finalPrice ? `💰 المبلغ: ${student.pricing.finalPrice}` : ''}
+
+للدعم والمساعدة:
+📱 واتساب: 01234567890
+📧 البريد: support@fouad-perspective.com
+
+نتمنى لك رحلة تعليمية ممتعة! 🚀`
+        },
+        
+        credentials: {
+            title: '🔐 بيانات الدخول',
+            icon: 'fa-key',
+            color: '#3B82F6',
+            template: userData ? `📚 بيانات دخولك لمنظور الفؤاد
+
+👤 الاسم: ${student.customer.name}
+📧 البريد: ${userData.personalInfo?.email || 'غير محدد'}
+🔑 كلمة المرور: ${userData.auth?.tempPassword ? atob(userData.auth.tempPassword) : '[اطلبها من الدعم]'}
+🆔 المعرف: ${userData.id || student.userId}
+
+🔗 رابط الدخول:
+https://fouad-perspective.web.app/login
+
+احتفظ بهذه البيانات في مكان آمن 🔐` : 'لم يتم إنشاء حساب بعد'
+        },
+        
+        paymentReminder: {
+            title: '💰 تذكير بالدفع',
+            icon: 'fa-bell',
+            color: '#F59E0B',
+            template: `تذكير بالمبالغ المستحقة 🔔
+
+السيد/ة ${student.customer.name}
+
+${student.paymentInfo?.isInstallment ? 
+`📊 تفاصيل الأقساط:
+- المتبقي: ${(student.paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
+- عدد الأقساط المتبقية: ${(student.paymentInfo.totalInstallments - student.paymentInfo.paidInstallments)} قسط
+${student.paymentInfo.nextDueDate ? `• القسط القادم: ${new Date(student.paymentInfo.nextDueDate).toLocaleDateString('ar-EG')}` : ''}` :
+`💳 المبلغ المطلوب: ${student.pricing?.finalPrice || '0 ج.م'}`}
+
+طرق الدفع المتاحة:
+✅ فودافون كاش: 01234567890
+✅ انستاباي: name@instapay
+✅ تحويل بنكي: حساب رقم 123456
+
+شكراً لتعاونك 🙏`
+        },
+        
+        courseDetails: {
+            title: '📚 تفاصيل الدورة',
+            icon: 'fa-graduation-cap',
+            color: '#9333EA',
+            template: `تفاصيل دورتك التعليمية 📚
+
+${student.customer.name} عزيزي/عزيزتي
+
+📘 الدورة: ${student.courseName || 'غير محدد'}
+💵 السعر: ${student.pricing?.finalPrice || '0 ج.م'}
+${student.totalSavings > 0 ? `🎁 وفرت: ${student.totalSavingsText}` : ''}
+${userData?.enrollments?.[0]?.dates?.startDate ? 
+`📅 تبدأ: ${new Date(userData.enrollments[0].dates.startDate).toLocaleDateString('ar-EG')}
+📅 تنتهي: ${new Date(userData.enrollments[0].dates.endDate).toLocaleDateString('ar-EG')}` : ''}
+
+للدخول للمنصة:
+https://fouad-perspective.web.app
+
+بالتوفيق! 🌟`
+        },
+        
+        installmentSchedule: {
+            title: '📅 جدول الأقساط',
+            icon: 'fa-calendar-alt',
+            color: '#06B6D4',
+            template: student.paymentInfo?.isInstallment ? 
+`جدول أقساط ${student.customer.name} 📅
+
+💰 إجمالي المبلغ: ${(student.paymentInfo.totalAmount || 0).toLocaleString('ar-EG')} ج.م
+✅ المدفوع: ${(student.paymentInfo.paidAmount || 0).toLocaleString('ar-EG')} ج.م
+⏳ المتبقي: ${(student.paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
+
+📊 الأقساط:
+${student.paymentInfo.installmentSchedule?.map((inst, idx) => 
+`${inst.status === 'paid' ? '✅' : '⏰'} القسط ${idx + 1}: ${inst.amount} ج.م - ${new Date(inst.dueDate).toLocaleDateString('ar-EG')} ${inst.status === 'paid' ? '(مدفوع)' : ''}`
+).join('\n') || 'لا توجد تفاصيل'}
+
+للاستفسار: 01234567890 📱` : 'لا يوجد نظام أقساط'
+        },
+        
+        achievement: {
+            title: '🏆 إنجاز',
+            icon: 'fa-trophy',
+            color: '#FFD700',
+            template: `تهانينا ${student.customer.name}! 🎊
+
+${userData?.loyaltyPoints?.tier ? 
+`🏅 وصلت لمستوى ${userData.loyaltyPoints.tier}
+⭐ رصيدك: ${userData.loyaltyPoints.balance} نقطة
+
+مميزاتك الجديدة:
+${userData.loyaltyPoints.tier === 'GOLD' ? '• خصم 15% على كل الدورات\n• دورتان مجانيتان كل 6 أشهر' :
+  userData.loyaltyPoints.tier === 'SILVER' ? '• خصم 10% على الدورات\n• دورة مجانية كل 6 أشهر' :
+  '• خصم 5% على الدورات'}` : 
+'مبروك انضمامك لعائلة منظور الفؤاد! 🌟'}
+
+استمر في التميز! 💪`
+        },
+        
+        custom: {
+            title: '✏️ رسالة مخصصة',
+            icon: 'fa-edit',
+            color: '#6B7280',
+            template: ''
+        }
+    };
+    
+    // عرض واجهة اختيار الرسالة
+    const { value: selectedType } = await Swal.fire({
+        title: '📱 مركز المراسلة الذكي',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h4 style="color: #0369A1; margin: 0;">
+                        <i class="fas fa-user"></i> ${student.customer.name}
+                    </h4>
+                    <p style="margin: 5px 0; color: #64748B;">
+                        <i class="fab fa-whatsapp"></i> ${student.customer.whatsapp}
+                    </p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                    ${Object.entries(messageTemplates).map(([key, template]) => `
+                        <button onclick="selectMessageTemplate('${key}')" 
+                                style="background: white; border: 2px solid ${template.color}; 
+                                       padding: 20px; border-radius: 12px; cursor: pointer;
+                                       transition: all 0.3s; text-align: center;"
+                                onmouseover="this.style.background='${template.color}'; this.style.color='white';"
+                                onmouseout="this.style.background='white'; this.style.color='inherit';">
+                            <i class="fas ${template.icon}" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                            <div style="font-weight: bold;">${template.title}</div>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `,
+        width: '700px',
+        showCloseButton: true,
+        showConfirmButton: false,
+        didOpen: () => {
+            window.selectMessageTemplate = async (type) => {
+                Swal.close();
+                
+                // عرض محرر الرسالة
+                const { value: finalMessage } = await Swal.fire({
+                    title: messageTemplates[type].title,
+                    input: 'textarea',
+                    inputValue: messageTemplates[type].template,
+                    inputAttributes: {
+                        style: 'height: 300px; text-align: right; direction: rtl; font-size: 1rem;'
+                    },
+                    showCancelButton: true,
+                    confirmButtonText: '📤 إرسال',
+                    cancelButtonText: 'إلغاء',
+                    confirmButtonColor: '#25D366',
+                    width: '600px'
+                });
+                
+                if (finalMessage) {
+                    const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(finalMessage)}`;
+                    window.open(whatsappUrl, '_blank');
+                    
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'تم فتح WhatsApp',
+                        text: 'الرسالة جاهزة للإرسال',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                }
+            };
+        }
+    });
+}
+
+// استبدل زر المراسلة القديم
+window.smartMessaging = smartMessaging;
         
     </script>
 </body>
