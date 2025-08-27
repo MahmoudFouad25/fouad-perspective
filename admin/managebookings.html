@@ -1217,16 +1217,23 @@ ${type === 'grant_request' ? `
                             </button>`;
                     }
                     else if (status === 'confirmed') {
-                        buttons = `
-                            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white; font-weight: bold;" 
-                                    onclick="markAsPaid('${booking.id}')">
-                                <i class="fas fa-money-bill-wave"></i> تسجيل الدفع
-                            </button>
-                            <button class="btn" style="background: #6B7280; color: white;" 
-                                    onclick="sendReminder('${booking.id}')">
-                                <i class="fas fa-bell"></i> تذكير بالدفع
-                            </button>`;
-                    } 
+    // التحقق من نوع الحجز
+    const isGrant = type === 'grant_request';
+    
+    buttons = `
+        <button class="btn" style="background: linear-gradient(135deg, ${isGrant ? '#10B981, #059669' : '#F59E0B, #D97706'}); 
+                                  color: white; font-weight: bold;" 
+                onclick="markAsPaid('${booking.id}')">
+            <i class="fas ${isGrant ? 'fa-check-circle' : 'fa-money-bill-wave'}"></i> 
+            ${isGrant ? 'تأكيد المنحة' : 'تسجيل الدفع'}
+        </button>
+        ${!isGrant ? `
+            <button class="btn" style="background: #6B7280; color: white;" 
+                    onclick="sendReminder('${booking.id}')">
+                <i class="fas fa-bell"></i> تذكير بالدفع
+            </button>
+        ` : ''}`;
+}
                     else if (status === 'paid') {
                         // الحالة المهمة - مدفوع لكن لم يحول بعد
                         const transferIcon = type === 'individual' ? 'fa-user-graduate' : 
@@ -4073,6 +4080,72 @@ async function markAsPaid(bookingId) {
     }
     
     const booking = { id: bookingDoc.id, ...bookingDoc.data() };
+    // التحقق من نوع الحجز - هل هو طلب منحة؟
+const isGrantRequest = booking.bookingType === 'grant_request' || booking.type === 'grant_request';
+
+// إذا كان طلب منحة، تحويل مباشر بدون نافذة دفع
+if (isGrantRequest) {
+    try {
+        await db.collection('tempBookings').doc(bookingId).update({
+            status: 'paid',
+            paidAt: new Date().toISOString(),
+            paymentMethod: 'grant', // منحة
+            paymentReference: 'GRANT-' + new Date().getTime(),
+            paymentConfirmed: true,
+            paymentConfirmedAt: new Date().toISOString(),
+            paymentConfirmedBy: 'admin',
+            paymentDetails: {
+                type: 'grant',
+                grantType: booking.grantDetails?.supportType || 'unknown',
+                totalAmount: 0, // منحة = لا يوجد دفع
+                paidAmount: 0,
+                remainingAmount: 0,
+                fullyPaid: true,
+                isGrant: true
+            }
+        });
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم تسجيل المنحة!',
+            html: `
+                <div style="text-align: center;">
+                    <p style="color: #065F46; font-size: 1.1rem; margin-bottom: 15px;">
+                        تم تسجيل طلب المنحة كمدفوع
+                    </p>
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px;">
+                        <p style="margin: 5px 0;">
+                            <strong>نوع الدعم:</strong> 
+                            ${booking.grantDetails?.supportType === 'full' ? 'منحة كاملة' :
+                              booking.grantDetails?.supportType === 'partial' ? 'منحة جزئية' :
+                              booking.grantDetails?.supportType === 'installment' ? 'تقسيط ميسر' : 'غير محدد'}
+                        </p>
+                        <p style="margin: 10px 0; color: #10B981;">
+                            <i class="fas fa-graduation-cap"></i> 
+                            جاهز للتحويل للحسابات الفردية
+                        </p>
+                    </div>
+                </div>
+            `,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#10B981'
+        });
+        
+        loadBookings();
+        return; // إنهاء الدالة هنا للمنح
+    } catch (error) {
+        console.error('خطأ في تسجيل المنحة:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ!',
+            text: 'حدث خطأ في تسجيل المنحة',
+            confirmButtonColor: '#EF4444'
+        });
+        return;
+    }
+}
+
+// باقي الكود للحجوزات العادية يستمر كما هو...
     const isInstallment = booking.payment?.code === 'installment' || 
                          booking.payment?.method?.includes('قسط') ||
                          booking.payment?.installmentDetails;
