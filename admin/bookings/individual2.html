@@ -1418,7 +1418,104 @@ enrollmentFormData: {
 };
         
 
-
+// مساعد حساب المنح
+const GrantCalculator = {
+    calculateGrantPayment: function(student) {
+        if (!student.isGrantRequest) {
+            return {
+                totalAmount: student.pricing?.finalPriceNumber || 0,
+                paidAmount: student.paymentInfo?.paidAmount || 0,
+                remainingAmount: student.paymentInfo?.remainingAmount || 0,
+                installments: student.paymentInfo?.totalInstallments || 0,
+                monthlyAmount: 0,
+                isGrant: false
+            };
+        }
+        
+        const grantType = student.grantDetails?.supportType;
+        const originalPrice = student.pricing?.finalPriceNumber || 0;
+        
+        let result = {
+            isGrant: true,
+            grantType: grantType,
+            originalPrice: originalPrice,
+            grantAmount: 0,
+            totalAmount: 0,
+            paidAmount: 0,
+            remainingAmount: 0,
+            installments: 0,
+            monthlyAmount: 0
+        };
+        
+        switch(grantType) {
+            case 'full':
+                result.grantAmount = originalPrice;
+                result.totalAmount = 0;
+                result.paidAmount = 0;
+                result.remainingAmount = 0;
+                break;
+                
+            case 'partial':
+                result.grantAmount = student.paymentInfo?.grantAmount || 0;
+                result.totalAmount = student.grantDetails?.supportDetails?.affordableAmount || 
+                                   student.paymentInfo?.totalAmount || 
+                                   (originalPrice - result.grantAmount);
+                
+                if (student.grantDetails?.supportDetails?.installmentRequested) {
+                    result.installments = student.grantDetails.supportDetails.installmentMonths || 3;
+                    result.monthlyAmount = Math.ceil(result.totalAmount / result.installments);
+                    result.paidAmount = student.paymentInfo?.paidAmount || result.monthlyAmount;
+                    result.remainingAmount = result.totalAmount - result.paidAmount;
+                } else {
+                    result.paidAmount = student.paymentInfo?.paidAmount || 0;
+                    result.remainingAmount = result.totalAmount - result.paidAmount;
+                }
+                break;
+                
+            case 'installment':
+                result.totalAmount = originalPrice;
+                result.installments = student.grantDetails?.supportDetails?.months || 
+                                    student.paymentInfo?.totalInstallments || 6;
+                result.monthlyAmount = Math.ceil(result.totalAmount / result.installments);
+                result.paidAmount = student.paymentInfo?.paidAmount || result.monthlyAmount;
+                result.remainingAmount = result.totalAmount - result.paidAmount;
+                break;
+        }
+        
+        return result;
+    },
+    
+    getGrantStatusBadge: function(student) {
+        if (!student.isGrantRequest) return '';
+        
+        const grantType = student.grantDetails?.supportType;
+        const grantCalc = this.calculateGrantPayment(student);
+        
+        let badge = '';
+        let color = '';
+        let icon = '';
+        
+        switch(grantType) {
+            case 'full':
+                badge = 'منحة كاملة 100%';
+                color = '#10B981';
+                icon = 'fa-gift';
+                break;
+            case 'partial':
+                badge = `منحة جزئية ${student.paymentInfo?.grantPercentage || 0}%`;
+                color = '#F59E0B';
+                icon = 'fa-percentage';
+                break;
+            case 'installment':
+                badge = `تقسيط ميسر (${grantCalc.installments} أشهر)`;
+                color = '#3B82F6';
+                icon = 'fa-coins';
+                break;
+        }
+        
+        return { badge, color, icon };
+    }
+};
 
 
 
@@ -3705,51 +3802,109 @@ async function createAccount(studentId) {
         newUser.auth.tempPassword = btoa(formData.password);
         newUser.accountStatus.level = formData.level;
         
-        // إضافة معلومات المنحة إن وجدت - جديد
-        if (student.isGrantRequest) {
-            newUser.metadata.isGrantRecipient = true;
-            newUser.metadata.grantType = student.grantDetails?.supportType;
-            newUser.metadata.grantDetails = student.grantDetails;
-            
-            // تحديث المعلومات المالية للمنح
-            if (student.paymentInfo?.grantAmount) {
-                newUser.financial.totalSavings = (newUser.financial.totalSavings || 0) + student.paymentInfo.grantAmount;
-                newUser.financial.grantReceived = student.paymentInfo.grantAmount;
-                newUser.financial.grantPercentage = student.paymentInfo.grantPercentage;
-            }
-            
-            // للمنح الكاملة - تسجيل أنه معفى
-            if (student.grantDetails?.supportType === 'full') {
-                newUser.financial.totalPaid = 0;
-                newUser.financial.totalDue = 0;
-                newUser.financial.isFullyExempt = true;
-            }
-            
-            // إضافة نقاط ولاء إضافية لمتلقي المنح
-            if (student.grantDetails?.supportType === 'full') {
-                newUser.loyaltyPoints.balance = 500; // نقاط تشجيعية
-                newUser.loyaltyPoints.history.push({
-                    id: `points-grant-${Date.now()}`,
-                    type: 'earned',
-                    amount: 500,
-                    source: 'grant_recipient',
-                    description: 'نقاط تشجيعية لمتلقي المنحة الكاملة',
-                    date: new Date().toISOString(),
-                    balanceAfter: 500
-                });
-            } else if (student.grantDetails?.supportType === 'partial') {
-                newUser.loyaltyPoints.balance = 300;
-                newUser.loyaltyPoints.history.push({
-                    id: `points-grant-${Date.now()}`,
-                    type: 'earned',
-                    amount: 300,
-                    source: 'grant_recipient',
-                    description: 'نقاط تشجيعية لمتلقي المنحة الجزئية',
-                    date: new Date().toISOString(),
-                    balanceAfter: 300
-                });
-            }
+        // إضافة معلومات المنحة إن وجدت - محسن
+if (student.isGrantRequest) {
+    newUser.metadata.isGrantRecipient = true;
+    newUser.metadata.grantType = student.grantDetails?.supportType;
+    newUser.metadata.grantDetails = student.grantDetails;
+    
+    // تحديث المعلومات المالية للمنح
+    const grantType = student.grantDetails?.supportType;
+    
+    if (grantType === 'full') {
+        // منحة كاملة
+        newUser.financial.totalPaid = 0;
+        newUser.financial.totalDue = 0;
+        newUser.financial.isFullyExempt = true;
+        newUser.financial.grantReceived = student.pricing?.finalPriceNumber || 0;
+        newUser.financial.grantPercentage = 100;
+    } else if (grantType === 'partial') {
+        // منحة جزئية
+        const originalPrice = student.pricing?.finalPriceNumber || 0;
+        const grantAmount = student.paymentInfo?.grantAmount || 0;
+        const finalAmount = student.paymentInfo?.totalAmount || (originalPrice - grantAmount);
+        
+        newUser.financial.grantReceived = grantAmount;
+        newUser.financial.grantPercentage = student.paymentInfo?.grantPercentage || 0;
+        newUser.financial.totalDue = finalAmount;
+        
+        if (student.grantDetails?.supportDetails?.installmentRequested) {
+            // منحة جزئية مع تقسيط
+            const monthlyAmount = student.grantDetails.supportDetails.monthlyAmount || 
+                                 Math.ceil(finalAmount / (student.grantDetails.supportDetails.installmentMonths || 3));
+            newUser.financial.totalPaid = student.paymentInfo?.paidAmount || monthlyAmount;
+        } else {
+            // منحة جزئية بدون تقسيط
+            newUser.financial.totalPaid = student.paymentInfo?.paidAmount || 0;
         }
+    } else if (grantType === 'installment') {
+        // تقسيط ميسر
+        const totalAmount = student.pricing?.finalPriceNumber || student.paymentInfo?.totalAmount || 0;
+        const months = student.grantDetails?.supportDetails?.months || 6;
+        const monthlyAmount = Math.ceil(totalAmount / months);
+        
+        newUser.financial.totalPaid = student.paymentInfo?.paidAmount || monthlyAmount;
+        newUser.financial.totalDue = totalAmount - newUser.financial.totalPaid;
+        newUser.financial.grantReceived = 0; // لا توجد منحة مالية، فقط تسهيل في السداد
+    }
+    
+    newUser.financial.totalSavings = (newUser.financial.totalSavings || 0) + (student.paymentInfo?.grantAmount || 0);
+    
+    // إضافة نقاط ولاء تشجيعية للمنح
+    if (grantType === 'full') {
+        newUser.loyaltyPoints.balance = 500;
+        newUser.loyaltyPoints.history.push({
+            id: `points-grant-${Date.now()}`,
+            type: 'earned',
+            amount: 500,
+            source: 'grant_recipient',
+            description: 'نقاط تشجيعية لمتلقي المنحة الكاملة',
+            date: new Date().toISOString(),
+            balanceAfter: 500
+        });
+    } else if (grantType === 'partial') {
+        newUser.loyaltyPoints.balance = 300;
+        newUser.loyaltyPoints.history.push({
+            id: `points-grant-${Date.now()}`,
+            type: 'earned',
+            amount: 300,
+            source: 'grant_recipient',
+            description: 'نقاط تشجيعية لمتلقي المنحة الجزئية',
+            date: new Date().toISOString(),
+            balanceAfter: 300
+        });
+    } else if (grantType === 'installment') {
+        newUser.loyaltyPoints.balance = 200;
+        newUser.loyaltyPoints.history.push({
+            id: `points-grant-${Date.now()}`,
+            type: 'earned',
+            amount: 200,
+            source: 'grant_recipient',
+            description: 'نقاط تشجيعية للتقسيط الميسر',
+            date: new Date().toISOString(),
+            balanceAfter: 200
+        });
+    }
+    
+    // إضافة معلومات المنحة في bookingHistory
+    newUser.bookingHistory.push({
+        id: `grant-${Date.now()}`,
+        type: 'grant_request',
+        courseId: student.courseId || null,
+        courseName: student.courseName || 'غير محدد',
+        bookedAt: student.bookingDate || new Date().toISOString(),
+        source: 'admin-grant',
+        status: 'confirmed',
+        grantInfo: {
+            type: grantType,
+            originalPrice: student.pricing?.finalPriceNumber || 0,
+            grantAmount: student.paymentInfo?.grantAmount || 0,
+            finalAmount: student.paymentInfo?.totalAmount || 0,
+            reason: student.grantDetails?.whyNeedGrant || '',
+            challenges: student.grantDetails?.challenges || ''
+        }
+    });
+}
         
         // إضافة البيانات المالية الأولية إذا كان هناك دفع مؤكد
         if (student.paymentConfirmed && !student.isGrantRequest) {
@@ -4713,145 +4868,173 @@ window.resendWelcome = resendWelcome;
    // ==================== 💰 نظام إدارة المدفوعات والأقساط ====================
 
 // دالة إدارة الأقساط
+// دالة إدارة الأقساط (للحجوزات العادية والمنح)
 async function manageInstallments(studentId) {
     const student = allStudents.find(s => s.id === studentId);
-    if (!student || !student.userId) {
-        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+    if (!student || !student.userId) return;
+    
+    // التحقق من نوع الحجز
+    const isGrant = student.isGrantRequest === true;
+    const grantType = student.grantDetails?.supportType;
+    
+    // إذا كانت منحة كاملة، لا توجد أقساط
+    if (isGrant && grantType === 'full') {
+        Swal.fire('معلومات', 'هذه منحة كاملة - لا توجد مدفوعات مطلوبة', 'info');
         return;
     }
     
-    // جلب بيانات المستخدم
+    // إذا كانت منحة، استخدم دالة إدارة مدفوعات المنح
+    if (isGrant) {
+        return manageGrantPayments(studentId);
+    }
+    
+    // باقي الكود للحجوزات العادية
     const userDoc = await db.collection('users').doc(student.userId).get();
-    if (!userDoc.exists) {
-        Swal.fire('خطأ', 'لم يتم العثور على حساب المستخدم', 'error');
+    const userData = userDoc.data();
+    const activeEnrollments = userData.enrollments?.filter(e => 
+        e.payment?.installments?.isActive && 
+        e.payment?.remainingAmount > 0
+    ) || [];
+    
+    if (activeEnrollments.length === 0) {
+        Swal.fire('تنبيه', 'لا توجد أقساط نشطة لهذا الطالب', 'warning');
         return;
     }
     
-    const userData = userDoc.data();
-    const enrollments = userData.enrollments || [];
+    // اختيار الدورة
+    let selectedEnrollment = activeEnrollments[0];
+    if (activeEnrollments.length > 1) {
+        const { value: enrollmentId } = await Swal.fire({
+            title: 'اختر الدورة',
+            input: 'select',
+            inputOptions: activeEnrollments.reduce((options, e) => {
+                options[e.id] = `${e.title} - متبقي ${e.payment.remainingAmount} ج.م`;
+                return options;
+            }, {}),
+            inputPlaceholder: 'اختر الدورة',
+            showCancelButton: true
+        });
+        
+        if (!enrollmentId) return;
+        selectedEnrollment = activeEnrollments.find(e => e.id === enrollmentId);
+    }
     
-    // جمع كل الأقساط من كل الدورات
-    let allInstallments = [];
-    enrollments.forEach(enrollment => {
-        if (enrollment.payment?.installments?.schedule) {
-            enrollment.payment.installments.schedule.forEach(inst => {
-                allInstallments.push({
-                    ...inst,
-                    courseName: enrollment.title,
-                    enrollmentId: enrollment.id
-                });
-            });
-        }
-    });
-    
-    // فرز الأقساط حسب التاريخ
-    allInstallments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-    
-    // عرض واجهة إدارة الأقساط
-    const { value: action } = await Swal.fire({
+    await Swal.fire({
         title: '💰 إدارة الأقساط',
         html: `
             <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
                 
-                <!-- معلومات الطالب -->
-                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
-                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
-                    <h4 style="color: #0369A1; margin: 0;">
-                        <i class="fas fa-user"></i> ${student.customer?.name}
-                    </h4>
+                <!-- معلومات الدورة -->
+                <div style="background: linear-gradient(135deg, #3B82F6, #2563EB); 
+                            color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="margin: 0;">${selectedEnrollment.title}</h4>
+                    <p style="margin: 10px 0;">
+                        إجمالي: ${selectedEnrollment.payment.totalAmount.toLocaleString('ar-EG')} ج.م
+                    </p>
                 </div>
                 
                 <!-- إحصائيات الأقساط -->
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
-                    <div style="background: white; padding: 10px; border-radius: 8px; text-align: center; 
-                                border: 2px solid #E5E7EB;">
-                        <div style="color: #6B7280; font-size: 0.8rem;">إجمالي</div>
-                        <div style="font-weight: bold; color: #1F2937;">
-                            ${allInstallments.length} قسط
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #DCFCE7; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #10B981;">
+                            ${selectedEnrollment.payment.paidAmount.toLocaleString('ar-EG')}
                         </div>
+                        <div style="color: #065F46; font-size: 0.85rem;">المدفوع</div>
                     </div>
-                    <div style="background: #DCFCE7; padding: 10px; border-radius: 8px; text-align: center;">
-                        <div style="color: #065F46; font-size: 0.8rem;">مدفوع</div>
-                        <div style="font-weight: bold; color: #10B981;">
-                            ${allInstallments.filter(i => i.status === 'paid').length} قسط
+                    
+                    <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #F59E0B;">
+                            ${selectedEnrollment.payment.remainingAmount.toLocaleString('ar-EG')}
                         </div>
+                        <div style="color: #92400E; font-size: 0.85rem;">المتبقي</div>
                     </div>
-                    <div style="background: #FEF3C7; padding: 10px; border-radius: 8px; text-align: center;">
-                        <div style="color: #92400E; font-size: 0.8rem;">قادم</div>
-                        <div style="font-weight: bold; color: #F59E0B;">
-                            ${allInstallments.filter(i => i.status === 'pending').length} قسط
+                    
+                    <div style="background: #E0E7FF; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #4F46E5;">
+                            ${selectedEnrollment.payment.installments.paidInstallments}/${selectedEnrollment.payment.installments.totalInstallments}
                         </div>
-                    </div>
-                    <div style="background: #FEE2E2; padding: 10px; border-radius: 8px; text-align: center;">
-                        <div style="color: #991B1B; font-size: 0.8rem;">متأخر</div>
-                        <div style="font-weight: bold; color: #DC2626;">
-                            ${allInstallments.filter(i => i.status === 'pending' && new Date(i.dueDate) < new Date()).length} قسط
-                        </div>
+                        <div style="color: #4338CA; font-size: 0.85rem;">الأقساط</div>
                     </div>
                 </div>
                 
-                <!-- قائمة الأقساط -->
-                <div style="background: white; border-radius: 12px; padding: 15px;">
+                <!-- جدول الأقساط -->
+                <div style="background: white; border: 1px solid #E5E7EB; 
+                            padding: 15px; border-radius: 12px;">
                     <h5 style="color: #1F2937; margin: 0 0 15px 0;">
-                        <i class="fas fa-list"></i> جدول الأقساط التفصيلي
+                        <i class="fas fa-calendar-alt"></i> جدول السداد
                     </h5>
-                    
-                    ${allInstallments.length > 0 ? allInstallments.map((inst, idx) => {
-                        const isLate = inst.status === 'pending' && new Date(inst.dueDate) < new Date();
-                        const daysLate = isLate ? Math.floor((new Date() - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24)) : 0;
-                        
-                        return `
-                        <div style="border: 2px solid ${inst.status === 'paid' ? '#10B981' : isLate ? '#EF4444' : '#F59E0B'}; 
-                                    border-radius: 10px; padding: 15px; margin-bottom: 15px;
-                                    background: ${inst.status === 'paid' ? '#F0FDF4' : isLate ? '#FEF3F3' : '#FFFBEB'};">
-                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                    ${selectedEnrollment.payment.installments.schedule.map((inst, idx) => `
+                        <div style="background: ${inst.status === 'paid' ? '#DCFCE7' : '#F9FAFB'}; 
+                                    padding: 12px; border-radius: 8px; margin-bottom: 10px;
+                                    border-right: 3px solid ${inst.status === 'paid' ? '#10B981' : '#E5E7EB'};">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
-                                    <h6 style="margin: 0; color: #1F2937;">
-                                        القسط ${inst.installmentNumber} - ${inst.courseName}
-                                    </h6>
-                                    <p style="margin: 5px 0; color: #6B7280; font-size: 0.9rem;">
-                                        <i class="fas fa-calendar"></i> 
+                                    <strong>القسط ${inst.installmentNumber}</strong>
+                                    <div style="color: #6B7280; font-size: 0.85rem; margin-top: 5px;">
                                         استحقاق: ${new Date(inst.dueDate).toLocaleDateString('ar-EG')}
-                                        ${isLate ? `<span style="color: #DC2626; font-weight: bold;"> (متأخر ${daysLate} يوم)</span>` : ''}
-                                    </p>
-                                    ${inst.status === 'paid' ? `
-                                        <p style="margin: 5px 0; color: #10B981; font-size: 0.85rem;">
-                                            <i class="fas fa-check-circle"></i> 
-                                            تم الدفع في: ${new Date(inst.paidDate).toLocaleDateString('ar-EG')}
-                                        </p>
-                                    ` : ''}
+                                    </div>
                                 </div>
                                 <div style="text-align: left;">
-                                    <div style="font-size: 1.2rem; font-weight: bold; 
-                                                color: ${inst.status === 'paid' ? '#10B981' : '#1F2937'};">
+                                    <div style="font-weight: bold; color: #1F2937;">
                                         ${inst.amount.toLocaleString('ar-EG')} ج.م
                                     </div>
-                                    ${inst.status === 'pending' ? `
-                                        <button onclick="recordInstallmentPayment('${student.userId}', '${inst.enrollmentId}', ${inst.installmentNumber})" 
-                                                style="background: #10B981; color: white; border: none; 
-                                                       padding: 8px 15px; border-radius: 8px; cursor: pointer;
-                                                       margin-top: 10px; font-weight: bold;">
-                                            <i class="fas fa-check"></i> تسجيل دفع
-                                        </button>
-                                    ` : `
-                                        <span style="background: #10B981; color: white; padding: 4px 10px; 
-                                                     border-radius: 15px; font-size: 0.85rem;">
-                                            <i class="fas fa-check-double"></i> مدفوع
-                                        </span>
-                                    `}
+                                    <div style="color: ${inst.status === 'paid' ? '#10B981' : '#F59E0B'}; 
+                                                font-size: 0.85rem;">
+                                        ${inst.status === 'paid' ? 'مدفوع ✓' : 'بانتظار الدفع'}
+                                    </div>
                                 </div>
+                                ${inst.status === 'pending' ? `
+                                    <button onclick="recordInstallmentPayment('${student.userId}', '${selectedEnrollment.id}', ${inst.installmentNumber})" 
+                                            style="background: #10B981; color: white; border: none; 
+                                                   padding: 8px 15px; border-radius: 6px; cursor: pointer;">
+                                        تسجيل دفع
+                                    </button>
+                                ` : ''}
                             </div>
                         </div>
-                        `;
-                    }).join('') : '<p style="text-align: center; color: #6B7280;">لا توجد أقساط مسجلة</p>'}
+                    `).join('')}
                 </div>
             </div>
         `,
-        width: '900px',
+        width: '700px',
         showCloseButton: true,
         showConfirmButton: false
     });
 }
+
+window.manageInstallments = manageInstallments;
+
+        // دالة الحصول على ملخص المنحة
+function getGrantSummary(student) {
+    if (!student.isGrantRequest) return null;
+    
+    const grantType = student.grantDetails?.supportType;
+    const grantCalc = GrantCalculator.calculateGrantPayment(student);
+    
+    return {
+        type: grantType,
+        typeName: grantType === 'full' ? 'منحة كاملة' : 
+                  grantType === 'partial' ? 'منحة جزئية' : 
+                  'تقسيط ميسر',
+        originalPrice: grantCalc.originalPrice,
+        grantAmount: grantCalc.grantAmount,
+        finalAmount: grantCalc.totalAmount,
+        paidAmount: grantCalc.paidAmount,
+        remainingAmount: grantCalc.remainingAmount,
+        installments: grantCalc.installments,
+        monthlyAmount: grantCalc.monthlyAmount,
+        percentage: student.paymentInfo?.grantPercentage || 
+                   (grantCalc.grantAmount > 0 ? Math.round((grantCalc.grantAmount / grantCalc.originalPrice) * 100) : 0),
+        status: grantCalc.remainingAmount === 0 ? 'مكتمل' : 
+                grantCalc.paidAmount > 0 ? 'جزئي' : 
+                'بانتظار',
+        employmentStatus: translateEmploymentStatus(student.grantDetails?.financial?.employmentStatus),
+        hasIncome: translateIncomeStatus(student.grantDetails?.financial?.hasIncome),
+        dependents: student.grantDetails?.financial?.dependents || 0
+    };
+}
+
+window.getGrantSummary = getGrantSummary;
 
 // دالة تسجيل دفع قسط
 async function recordInstallmentPayment(userId, enrollmentId, installmentNumber) {
@@ -4996,6 +5179,196 @@ async function recordInstallmentPayment(userId, enrollmentId, installmentNumber)
         Swal.fire('خطأ', 'حدث خطأ في تسجيل الدفع', 'error');
     }
 }
+
+        // دالة تسجيل دفعة منحة
+async function recordGrantPayment(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId || !student.isGrantRequest) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات المنحة', 'error');
+        return;
+    }
+    
+    const grantType = student.grantDetails?.supportType;
+    if (grantType === 'full') {
+        Swal.fire('معلومات', 'هذه منحة كاملة - لا توجد مدفوعات مطلوبة', 'info');
+        return;
+    }
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    const grantEnrollments = userData.enrollments?.filter(e => e.isGrantEnrollment) || [];
+    
+    if (grantEnrollments.length === 0) {
+        Swal.fire('تنبيه', 'يجب تخصيص الدورة أولاً', 'warning');
+        return;
+    }
+    
+    const latestGrant = grantEnrollments[grantEnrollments.length - 1];
+    
+    const { value: paymentData } = await Swal.fire({
+        title: '💳 تسجيل دفعة للمنحة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                
+                <!-- معلومات المنحة -->
+                <div style="background: linear-gradient(135deg, #FFD700, #FFA500); 
+                            color: white; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                    <h4 style="margin: 0; color: white;">
+                        ${student.customer?.name}
+                    </h4>
+                    <p style="margin: 10px 0;">
+                        نوع المنحة: <strong>${
+                            grantType === 'partial' ? 'منحة جزئية' : 'تقسيط ميسر'
+                        }</strong>
+                    </p>
+                    <p style="margin: 5px 0;">
+                        المتبقي: <strong>${latestGrant.payment.remainingAmount.toLocaleString('ar-EG')} ج.م</strong>
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-money-bill"></i> المبلغ المدفوع
+                    </label>
+                    <input type="number" id="amount" class="swal2-input" 
+                           placeholder="المبلغ بالجنيه المصري"
+                           value="${Math.ceil(latestGrant.payment.totalAmount / (latestGrant.payment.installments?.totalInstallments || 1))}"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-credit-card"></i> طريقة الدفع
+                    </label>
+                    <select id="paymentMethod" class="swal2-input" style="width: 100%;">
+                        <option value="cash">نقدي</option>
+                        <option value="vodafone">فودافون كاش</option>
+                        <option value="instapay">انستاباي</option>
+                        <option value="bank">تحويل بنكي</option>
+                        <option value="card">بطاقة ائتمان</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-calendar"></i> تاريخ الدفع
+                    </label>
+                    <input type="date" id="paymentDate" class="swal2-input" 
+                           value="${new Date().toISOString().split('T')[0]}"
+                           style="width: 100%;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-hashtag"></i> رقم المرجع (اختياري)
+                    </label>
+                    <input type="text" id="reference" class="swal2-input" 
+                           placeholder="رقم العملية أو المرجع"
+                           style="width: 100%;">
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تسجيل الدفعة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال مبلغ صحيح');
+                return false;
+            }
+            if (amount > latestGrant.payment.remainingAmount) {
+                Swal.showValidationMessage(`المبلغ أكبر من المتبقي (${latestGrant.payment.remainingAmount.toLocaleString('ar-EG')} ج.م)`);
+                return false;
+            }
+            
+            return {
+                amount: amount,
+                paymentMethod: document.getElementById('paymentMethod').value,
+                paymentDate: document.getElementById('paymentDate').value,
+                reference: document.getElementById('reference').value
+            };
+        }
+    });
+    
+    if (!paymentData) return;
+    
+    try {
+        // تحديث enrollment
+        const enrollments = userData.enrollments;
+        const enrollmentIndex = enrollments.findIndex(e => e.id === latestGrant.id);
+        
+        if (enrollmentIndex !== -1) {
+            enrollments[enrollmentIndex].payment.paidAmount += paymentData.amount;
+            enrollments[enrollmentIndex].payment.remainingAmount -= paymentData.amount;
+            
+            // تحديث حالة الدفع
+            if (enrollments[enrollmentIndex].payment.remainingAmount <= 0) {
+                enrollments[enrollmentIndex].payment.status = 'paid';
+                enrollments[enrollmentIndex].payment.fullyPaidDate = new Date().toISOString();
+            } else {
+                enrollments[enrollmentIndex].payment.status = 'partial';
+            }
+            
+            // إضافة سجل الدفعة
+            const paymentHistory = userData.financial.paymentHistory || [];
+            paymentHistory.push({
+                id: `payment-grant-${Date.now()}`,
+                type: 'grant_payment',
+                amount: paymentData.amount,
+                date: paymentData.paymentDate,
+                method: paymentData.paymentMethod,
+                reference: paymentData.reference,
+                relatedEntity: 'grant_enrollment',
+                relatedEntityId: latestGrant.id,
+                description: `دفعة منحة - ${student.courseName}`,
+                grantType: grantType,
+                recordedAt: new Date().toISOString(),
+                recordedBy: 'admin'
+            });
+            
+            // تحديث الإجماليات المالية
+            const financialTotals = EnrollmentManager.calculateFinancialTotals(enrollments);
+            
+            // تحديث Firebase
+            await db.collection('users').doc(student.userId).update({
+                enrollments: enrollments,
+                'financial.totalPaid': financialTotals.totalPaid,
+                'financial.totalDue': financialTotals.totalDue,
+                'financial.paymentHistory': paymentHistory,
+                'timestamps.updatedAt': new Date().toISOString()
+            });
+            
+            // تحديث individualStudents
+            await db.collection('individualStudents').doc(studentId).update({
+                'paymentInfo.paidAmount': (student.paymentInfo?.paidAmount || 0) + paymentData.amount,
+                'paymentInfo.remainingAmount': Math.max(0, (student.paymentInfo?.remainingAmount || 0) - paymentData.amount),
+                'timestamps.lastPaymentAt': new Date().toISOString()
+            });
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'تم تسجيل الدفعة بنجاح',
+                html: `
+                    <div style="text-align: center;">
+                        <p>تم إضافة <strong>${paymentData.amount.toLocaleString('ar-EG')} ج.م</strong></p>
+                        <p>المتبقي: <strong>${enrollments[enrollmentIndex].payment.remainingAmount.toLocaleString('ar-EG')} ج.م</strong></p>
+                    </div>
+                `,
+                confirmButtonColor: '#10B981'
+            });
+            
+            await loadStudents();
+        }
+        
+    } catch (error) {
+        console.error('خطأ في تسجيل الدفعة:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تسجيل الدفعة', 'error');
+    }
+}
+
+window.recordGrantPayment = recordGrantPayment;
 
 // دالة إدارة المدفوعات العامة
 async function managePayments(studentId) {
