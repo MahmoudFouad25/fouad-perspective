@@ -4894,95 +4894,151 @@ console.log('Final Price:', finalPrice);
                 return true;
             }
         }).then(async (result) => {
-            if (result.isConfirmed) {
-                // جمع طرق الدفع
-                const selectedPayments = [];
-                document.querySelectorAll('input[name="paymentMethod"]:checked').forEach(checkbox => {
-                    selectedPayments.push(checkbox.value);
-                });
-                
-                // الحصول على نوع الدعم المختار
-                const supportType = document.querySelector('input[name="supportType"]:checked').value;
-                
-                // جمع تفاصيل الدعم حسب النوع
-                let supportDetails = {};
-                
-                if (supportType === 'installment') {
-                    supportDetails = {
-                        months: selectedInstallmentMonths,
-                        monthlyAmount: Math.ceil(finalPrice / selectedInstallmentMonths)
-                    };
-                } else if (supportType === 'partial') {
-                    const affordableAmount = Math.round(finalPrice * (selectedPercentage / 100));
-                    supportDetails = {
-                        percentage: selectedPercentage,
-                        affordableAmount: affordableAmount,
-                        installmentRequested: document.getElementById('installPartial')?.checked || false
-                    };
-                    
-                    if (supportDetails.installmentRequested) {
-                        supportDetails.installmentMonths = selectedPartialMonths;
-                        supportDetails.monthlyAmount = Math.ceil(affordableAmount / selectedPartialMonths);
-                    }
-                }
-                
-                // جمع كل البيانات
-                const grantData = {
-                    // بيانات العميل
-                    customer: {
-                        name: document.getElementById('customerName').value.trim(),
-                        whatsapp: document.getElementById('customerWhatsapp').value.trim(),
-                        title: document.getElementById('customerTitle').value.trim() || '',
-                        age: document.getElementById('customerAge').value || '',
-                        country: document.getElementById('customerCountry').value.trim() || '',
-                        city: document.getElementById('customerCity').value.trim() || '',
-                        email: document.getElementById('customerEmail').value.trim() || '',
-                        job: document.getElementById('customerJob').value.trim() || '',
-                        source: document.getElementById('customerSource').value.trim() || '',
-                        expectations: document.getElementById('customerExpectations').value.trim() || '',
-                        experience: document.getElementById('customerExperience').value.trim() || '',
-                        applicationPlan: document.getElementById('customerApplication').value.trim() || '',
-                        notes: document.getElementById('customerNotes').value.trim() || '',
-                        paymentMethods: selectedPayments
-                    },
-                    
-                    // بيانات المنحة
-                    grantDetails: {
-                        whyNeedGrant: document.getElementById('whyNeedGrant').value.trim(),
-                        challenges: document.getElementById('challenges').value.trim(),
-                        communityContribution: document.getElementById('communityContribution').value.trim() || '',
-                        
-                        financial: {
-                            employmentStatus: document.getElementById('employmentStatus').value,
-                            hasIncome: document.getElementById('hasIncome').value || '',
-                            dependents: document.getElementById('dependents').value || ''
-                        },
-                        
-                        supportType: supportType,
-                        supportDetails: supportDetails,
-                        
-                        commitments: {
-                            fullAttendance: document.getElementById('commitment1').checked,
-                            activeParticipation: document.getElementById('commitment2').checked,
-                            truthfulInfo: document.getElementById('commitment3').checked,
-                            volunteerWork: document.getElementById('volunteerCommitment')?.checked || false
-                        }
-                    },
-                    
-                    // معلومات عامة
-                    courseName: courseName,
-                    coursePrice: basePrice,
-                    currentPrice: finalPrice,
-                    pricing: currentData.pricing || {},
-                    status: 'pending_review',
-                    bookingType: 'grant_request',
-                    bookingDate: new Date().toISOString()
-                };
-                
-                // حفظ في Firebase
-                await saveToFirebaseDirectly(grantData, null);
-            }
+    if (result.isConfirmed) {
+        // جمع طرق الدفع
+        const selectedPayments = [];
+        document.querySelectorAll('input[name="paymentMethod"]:checked').forEach(checkbox => {
+            selectedPayments.push(checkbox.value);
         });
+        
+        // الحصول على نوع الدعم المختار
+        const supportType = document.querySelector('input[name="supportType"]:checked').value;
+        
+        // حساب التوفير حسب نوع المنحة
+        let totalSavings = 0;
+        let totalSavingsText = '';
+        let supportDetails = {};
+        
+        if (supportType === 'full') {
+            // منحة كاملة = توفير 100%
+            totalSavings = finalPrice;
+            totalSavingsText = `وفرت ${finalPrice.toLocaleString('ar-EG')} جنيه (100%)`;
+            supportDetails = {
+                type: 'full',
+                discount: 100,
+                finalAmount: 0
+            };
+            
+        } else if (supportType === 'partial') {
+            // منحة جزئية = الفرق بين السعر الأصلي والمبلغ المحدد
+            const affordableAmount = Math.round(finalPrice * (selectedPercentage / 100));
+            totalSavings = finalPrice - affordableAmount;
+            const savingsPercentage = Math.round((totalSavings / finalPrice) * 100);
+            totalSavingsText = `وفرت ${totalSavings.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
+            
+            supportDetails = {
+                type: 'partial',
+                percentage: selectedPercentage,
+                affordableAmount: affordableAmount,
+                installmentRequested: document.getElementById('installPartial')?.checked || false
+            };
+            
+            if (supportDetails.installmentRequested) {
+                supportDetails.installmentMonths = selectedPartialMonths;
+                supportDetails.monthlyAmount = Math.ceil(affordableAmount / selectedPartialMonths);
+            }
+            
+        } else if (supportType === 'installment') {
+            // تقسيط ميسر = نفس التوفير العادي للتقسيط
+            // نحسب التوفير من الفرق بين السعر الأساسي والسعر الحالي
+            totalSavings = basePrice - finalPrice;
+            if (totalSavings > 0) {
+                const savingsPercentage = Math.round((totalSavings / basePrice) * 100);
+                totalSavingsText = `وفرت ${totalSavings.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
+            } else {
+                totalSavingsText = 'بدون خصومات إضافية';
+            }
+            
+            supportDetails = {
+                type: 'installment',
+                months: selectedInstallmentMonths,
+                monthlyAmount: Math.ceil(finalPrice / selectedInstallmentMonths)
+            };
+        }
+        
+        // جمع كل البيانات بنفس structure الحجز الفردي
+        const grantData = {
+            // معلومات الدورة - نفس الحجز الفردي
+            courseName: courseName,
+            coursePrice: basePrice,
+            salePrice: finalPrice,
+            bookingType: 'grant_request',
+            bookingDate: new Date().toISOString(),
+            status: 'pending_review',
+            
+            // بيانات العميل - نفس structure الحجز الفردي تماماً
+            customer: {
+                name: document.getElementById('customerName').value.trim(),
+                whatsapp: document.getElementById('customerWhatsapp').value.trim(),
+                title: document.getElementById('customerTitle').value.trim() || '',
+                age: document.getElementById('customerAge').value || '',
+                country: document.getElementById('customerCountry').value.trim() || '',
+                city: document.getElementById('customerCity').value.trim() || '',
+                email: document.getElementById('customerEmail').value.trim() || '',
+                job: document.getElementById('customerJob').value.trim() || '',
+                source: document.getElementById('customerSource').value.trim() || '',
+                expectations: document.getElementById('customerExpectations').value.trim() || '',
+                experience: document.getElementById('customerExperience').value.trim() || '',
+                applicationPlan: document.getElementById('customerApplication').value.trim() || '',
+                notes: document.getElementById('customerNotes').value.trim() || '',
+                paymentMethods: selectedPayments
+            },
+            
+            // معلومات الأسعار - نفس الحجز الفردي
+            pricing: {
+                basePriceNumber: basePrice,
+                finalPriceNumber: supportType === 'full' ? 0 : 
+                                 supportType === 'partial' ? Math.round(finalPrice * (selectedPercentage / 100)) :
+                                 finalPrice,
+                finalPrice: supportType === 'full' ? '0 جنيه' : 
+                           supportType === 'partial' ? `${Math.round(finalPrice * (selectedPercentage / 100)).toLocaleString('ar-EG')} جنيه` :
+                           `${finalPrice.toLocaleString('ar-EG')} جنيه`,
+                ...currentData.pricing // نسخ باقي معلومات الأسعار
+            },
+            
+            // التوفير
+            totalSavings: totalSavings,
+            totalSavingsText: totalSavingsText,
+            
+            // الخصومات والعروض النشطة - نفس الحجز الفردي
+            discounts: currentData.discounts || [],
+            activeOffer: currentData.activeOffer || null,
+            
+            // الكوبون - دائماً صفر في المنح
+            coupon: {
+                code: '',
+                amount: 0,
+                applied: false
+            },
+            
+            // بيانات المنحة الإضافية
+            grantDetails: {
+                reason: document.getElementById('whyNeedGrant').value.trim(),
+                challenges: document.getElementById('challenges').value.trim(),
+                communityContribution: document.getElementById('communityContribution').value.trim() || '',
+                
+                financial: {
+                    employmentStatus: document.getElementById('employmentStatus').value,
+                    hasIncome: document.getElementById('hasIncome').value || '',
+                    dependents: document.getElementById('dependents').value || ''
+                },
+                
+                supportType: supportType,
+                supportDetails: supportDetails,
+                
+                commitments: {
+                    fullAttendance: document.getElementById('commitment1').checked,
+                    activeParticipation: document.getElementById('commitment2').checked,
+                    truthfulInfo: document.getElementById('commitment3').checked,
+                    volunteerWork: document.getElementById('volunteerCommitment')?.checked || false
+                }
+            }
+        };
+        
+        // حفظ في Firebase
+        await saveToFirebaseDirectly(grantData, null);
+    }
+});
     };
 }
 
