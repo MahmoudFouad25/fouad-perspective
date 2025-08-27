@@ -3305,6 +3305,20 @@ async function createAccount(studentId) {
             html: `
                 <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
                     
+                    <!-- إشارة للمنحة إن وجدت -->
+                    ${student.isGrantRequest ? `
+                    <div style="background: linear-gradient(135deg, #FFD700, #FFA500); 
+                                color: white; padding: 15px; border-radius: 15px; margin-bottom: 20px; text-align: center;">
+                        <h4 style="margin: 0;">
+                            <i class="fas fa-hand-holding-heart"></i> طالب منحة - ${
+                                student.grantDetails?.supportType === 'full' ? 'منحة كاملة 100%' :
+                                student.grantDetails?.supportType === 'partial' ? `منحة جزئية ${student.paymentInfo?.grantPercentage || ''}%` :
+                                'تقسيط ميسر'
+                            }
+                        </h4>
+                    </div>
+                    ` : ''}
+                    
                     <!-- معلومات الطالب -->
                     <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
                                 padding: 20px; border-radius: 15px; margin-bottom: 20px;">
@@ -3332,15 +3346,23 @@ async function createAccount(studentId) {
                                 <div style="font-weight: bold;">${student.courseName}</div>
                             </div>
                             <div>
-                                <div style="font-size: 0.9rem; color: #6B7280;">السعر النهائي</div>
+                                <div style="font-size: 0.9rem; color: #6B7280;">
+                                    ${student.isGrantRequest && student.grantDetails?.supportType === 'full' ? 'القيمة الأصلية' : 'السعر النهائي'}
+                                </div>
                                 <div style="font-weight: bold; color: #10B981;">
-                                    ${student.pricing?.finalPrice || '0 ج.م'}
+                                    ${student.isGrantRequest && student.grantDetails?.supportType === 'full' ? 
+                                        'مجاناً' : 
+                                        (student.paymentInfo?.totalAmount?.toLocaleString('ar-EG') + ' ج.م' || student.pricing?.finalPrice || '0 ج.م')}
                                 </div>
                             </div>
                             <div>
-                                <div style="font-size: 0.9rem; color: #6B7280;">التوفير</div>
+                                <div style="font-size: 0.9rem; color: #6B7280;">
+                                    ${student.isGrantRequest ? 'قيمة المنحة' : 'التوفير'}
+                                </div>
                                 <div style="font-weight: bold; color: #DC2626;">
-                                    ${student.totalSavingsText || '0 ج.م'}
+                                    ${student.isGrantRequest && student.paymentInfo?.grantAmount ? 
+                                        student.paymentInfo.grantAmount.toLocaleString('ar-EG') + ' ج.م' :
+                                        student.totalSavingsText || '0 ج.م'}
                                 </div>
                             </div>
                         </div>
@@ -3431,9 +3453,9 @@ async function createAccount(studentId) {
                                 </label>
                                 <select id="accountLevel" class="swal2-input" style="width: 100%;">
                                     <option value="STANDARD">STANDARD - عادي</option>
-                                    <option value="PREMIUM" ${student.totalSavings > 500 ? 'selected' : ''}>PREMIUM - متميز</option>
+                                    <option value="PREMIUM" ${student.totalSavings > 500 || student.isGrantRequest ? 'selected' : ''}>PREMIUM - متميز</option>
                                     <option value="SILVER" ${student.totalSavings > 1000 ? 'selected' : ''}>SILVER - فضي</option>
-                                    <option value="GOLD" ${student.totalSavings > 2000 ? 'selected' : ''}>GOLD - ذهبي</option>
+                                    <option value="GOLD" ${student.totalSavings > 2000 || (student.isGrantRequest && student.grantDetails?.supportType === 'full') ? 'selected' : ''}>GOLD - ذهبي</option>
                                     <option value="PLATINUM" ${student.totalSavings > 5000 ? 'selected' : ''}>PLATINUM - بلاتيني</option>
                                 </select>
                             </div>
@@ -3501,6 +3523,7 @@ async function createAccount(studentId) {
                 <div style="text-align: center;">
                     <div class="loading-spinner" style="margin: 20px auto;"></div>
                     <p>يتم الآن إنشاء حساب العميل بالبنية المتكاملة الجديدة...</p>
+                    ${student.isGrantRequest ? '<p style="color: #F59E0B;">مع إضافة معلومات المنحة...</p>' : ''}
                 </div>
             `,
             allowOutsideClick: false,
@@ -3531,8 +3554,54 @@ async function createAccount(studentId) {
         newUser.auth.tempPassword = btoa(formData.password);
         newUser.accountStatus.level = formData.level;
         
+        // إضافة معلومات المنحة إن وجدت - جديد
+        if (student.isGrantRequest) {
+            newUser.metadata.isGrantRecipient = true;
+            newUser.metadata.grantType = student.grantDetails?.supportType;
+            newUser.metadata.grantDetails = student.grantDetails;
+            
+            // تحديث المعلومات المالية للمنح
+            if (student.paymentInfo?.grantAmount) {
+                newUser.financial.totalSavings = (newUser.financial.totalSavings || 0) + student.paymentInfo.grantAmount;
+                newUser.financial.grantReceived = student.paymentInfo.grantAmount;
+                newUser.financial.grantPercentage = student.paymentInfo.grantPercentage;
+            }
+            
+            // للمنح الكاملة - تسجيل أنه معفى
+            if (student.grantDetails?.supportType === 'full') {
+                newUser.financial.totalPaid = 0;
+                newUser.financial.totalDue = 0;
+                newUser.financial.isFullyExempt = true;
+            }
+            
+            // إضافة نقاط ولاء إضافية لمتلقي المنح
+            if (student.grantDetails?.supportType === 'full') {
+                newUser.loyaltyPoints.balance = 500; // نقاط تشجيعية
+                newUser.loyaltyPoints.history.push({
+                    id: `points-grant-${Date.now()}`,
+                    type: 'earned',
+                    amount: 500,
+                    source: 'grant_recipient',
+                    description: 'نقاط تشجيعية لمتلقي المنحة الكاملة',
+                    date: new Date().toISOString(),
+                    balanceAfter: 500
+                });
+            } else if (student.grantDetails?.supportType === 'partial') {
+                newUser.loyaltyPoints.balance = 300;
+                newUser.loyaltyPoints.history.push({
+                    id: `points-grant-${Date.now()}`,
+                    type: 'earned',
+                    amount: 300,
+                    source: 'grant_recipient',
+                    description: 'نقاط تشجيعية لمتلقي المنحة الجزئية',
+                    date: new Date().toISOString(),
+                    balanceAfter: 300
+                });
+            }
+        }
+        
         // إضافة البيانات المالية الأولية إذا كان هناك دفع مؤكد
-        if (student.paymentConfirmed) {
+        if (student.paymentConfirmed && !student.isGrantRequest) {
             newUser.financial.totalPaid = student.pricing?.finalPriceNumber || 0;
             newUser.financial.totalSavings = student.totalSavings || 0;
         }
@@ -3552,7 +3621,8 @@ async function createAccount(studentId) {
                 courseAssignment: 0,
                 firstPayment: student.paymentConfirmed ? 100 : 0,
                 welcomeMessage: 0,
-                totalProgress: 25
+                grantProcessing: student.isGrantRequest ? 100 : 0, // معالجة المنحة
+                totalProgress: student.isGrantRequest ? 40 : 25
             }
         });
         
@@ -3571,7 +3641,11 @@ async function createAccount(studentId) {
 🎉 *مرحباً ${student.customer.name}*
 
 تم إنشاء حسابك في منظور الفؤاد بنجاح!
-
+${student.isGrantRequest ? `\n🎁 *حالة المنحة:* ${
+    student.grantDetails?.supportType === 'full' ? 'منحة كاملة - معفى من الرسوم' :
+    student.grantDetails?.supportType === 'partial' ? `منحة جزئية ${student.paymentInfo?.grantPercentage}%` :
+    'تقسيط ميسر'
+}\n` : ''}
 📧 *البريد:* ${formData.email}
 🔑 *كلمة المرور:* ${formData.password}
 🆔 *المعرف:* ${formData.slug}
@@ -3601,6 +3675,13 @@ https://fouad-perspective.web.app/login
                         <p><strong>🆔 المعرف:</strong> ${formData.slug}</p>
                         <p><strong>📧 البريد:</strong> ${formData.email}</p>
                         <p><strong>⭐ المستوى:</strong> ${formData.level}</p>
+                        ${student.isGrantRequest ? `
+                            <p><strong>🎁 حالة المنحة:</strong> ${
+                                student.grantDetails?.supportType === 'full' ? 'منحة كاملة' :
+                                student.grantDetails?.supportType === 'partial' ? 'منحة جزئية' :
+                                'تقسيط ميسر'
+                            }</p>
+                        ` : ''}
                     </div>
                     ${formData.assignCourseNow && student.courseName ? `
                         <div style="margin-top: 15px; padding: 15px; background: #FEF3C7; border-radius: 10px;">
