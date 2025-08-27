@@ -4080,72 +4080,172 @@ async function markAsPaid(bookingId) {
     }
     
     const booking = { id: bookingDoc.id, ...bookingDoc.data() };
-    // التحقق من نوع الحجز - هل هو طلب منحة؟
+   // التحقق من طلب المنحة ونوعها
 const isGrantRequest = booking.bookingType === 'grant_request' || booking.type === 'grant_request';
 
-// إذا كان طلب منحة، تحويل مباشر بدون نافذة دفع
 if (isGrantRequest) {
-    try {
-        await db.collection('tempBookings').doc(bookingId).update({
-            status: 'paid',
-            paidAt: new Date().toISOString(),
-            paymentMethod: 'grant', // منحة
-            paymentReference: 'GRANT-' + new Date().getTime(),
-            paymentConfirmed: true,
-            paymentConfirmedAt: new Date().toISOString(),
-            paymentConfirmedBy: 'admin',
-            paymentDetails: {
-                type: 'grant',
-                grantType: booking.grantDetails?.supportType || 'unknown',
-                totalAmount: 0, // منحة = لا يوجد دفع
-                paidAmount: 0,
-                remainingAmount: 0,
-                fullyPaid: true,
-                isGrant: true
-            }
-        });
-        
-        Swal.fire({
-            icon: 'success',
-            title: 'تم تسجيل المنحة!',
-            html: `
-                <div style="text-align: center;">
-                    <p style="color: #065F46; font-size: 1.1rem; margin-bottom: 15px;">
-                        تم تسجيل طلب المنحة كمدفوع
-                    </p>
-                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px;">
-                        <p style="margin: 5px 0;">
-                            <strong>نوع الدعم:</strong> 
-                            ${booking.grantDetails?.supportType === 'full' ? 'منحة كاملة' :
-                              booking.grantDetails?.supportType === 'partial' ? 'منحة جزئية' :
-                              booking.grantDetails?.supportType === 'installment' ? 'تقسيط ميسر' : 'غير محدد'}
-                        </p>
-                        <p style="margin: 10px 0; color: #10B981;">
-                            <i class="fas fa-graduation-cap"></i> 
-                            جاهز للتحويل للحسابات الفردية
-                        </p>
+    const grantDetails = booking.grantDetails || {};
+    const supportType = grantDetails.supportType;
+    const supportDetails = grantDetails.supportDetails || {};
+    
+    // استخراج السعر الأساسي
+    const basePrice = booking.pricing?.finalPriceNumber || 
+                     parseInt(booking.pricing?.finalPrice?.replace(/[^\d]/g, '')) || 0;
+    
+    console.log('🎓 معالجة طلب منحة:', {
+        type: supportType,
+        details: supportDetails,
+        basePrice: basePrice
+    });
+    
+    // حالة المنحة الكاملة - معفى تماماً
+    if (supportType === 'full') {
+        try {
+            await db.collection('tempBookings').doc(bookingId).update({
+                status: 'paid',
+                paidAt: new Date().toISOString(),
+                paymentMethod: 'grant_full',
+                paymentReference: 'GRANT-FULL-' + new Date().getTime(),
+                paymentConfirmed: true,
+                paymentConfirmedAt: new Date().toISOString(),
+                paymentConfirmedBy: 'admin',
+                paymentDetails: {
+                    type: 'grant_full',
+                    totalAmount: basePrice,
+                    paidAmount: 0,
+                    remainingAmount: 0,
+                    grantAmount: basePrice, // قيمة المنحة
+                    fullyPaid: true,
+                    isGrant: true,
+                    grantType: 'full'
+                }
+            });
+            
+            Swal.fire({
+                icon: 'success',
+                title: '✅ تم تأكيد المنحة الكاملة!',
+                html: `
+                    <div style="text-align: center;">
+                        <div style="background: #F0FDF4; padding: 20px; border-radius: 10px;">
+                            <p style="margin: 10px 0; color: #065F46; font-size: 1.2rem;">
+                                <i class="fas fa-gift"></i> منحة كاملة 100%
+                            </p>
+                            <p style="margin: 5px 0;">
+                                <strong>القيمة الأصلية:</strong> ${basePrice.toLocaleString('ar-EG')} جنيه
+                            </p>
+                            <p style="margin: 5px 0; color: #10B981;">
+                                <strong>المطلوب دفعه:</strong> 0 جنيه (معفى بالكامل)
+                            </p>
+                        </div>
                     </div>
-                </div>
-            `,
-            confirmButtonText: 'حسناً',
-            confirmButtonColor: '#10B981'
-        });
+                `,
+                confirmButtonText: 'حسناً',
+                confirmButtonColor: '#10B981'
+            });
+            
+            loadBookings();
+            return;
+        } catch (error) {
+            console.error('خطأ في تسجيل المنحة الكاملة:', error);
+            Swal.fire('خطأ!', 'حدث خطأ في تسجيل المنحة', 'error');
+            return;
+        }
+    }
+    
+    // حالة المنحة الجزئية
+    else if (supportType === 'partial') {
+        const percentage = supportDetails.percentage || 50;
+        const affordableAmount = supportDetails.affordableAmount || Math.round(basePrice * (percentage / 100));
+        const isInstallmentRequested = supportDetails.installmentRequested || false;
         
-        loadBookings();
-        return; // إنهاء الدالة هنا للمنح
-    } catch (error) {
-        console.error('خطأ في تسجيل المنحة:', error);
-        Swal.fire({
-            icon: 'error',
-            title: 'خطأ!',
-            text: 'حدث خطأ في تسجيل المنحة',
-            confirmButtonColor: '#EF4444'
-        });
-        return;
+        // إذا كانت المنحة الجزئية مع تقسيط
+        if (isInstallmentRequested) {
+            const installmentMonths = supportDetails.installmentMonths || 3;
+            const monthlyAmount = supportDetails.monthlyAmount || Math.ceil(affordableAmount / installmentMonths);
+            
+            // نفس منطق التقسيط العادي لكن على المبلغ المخفض
+            isInstallment = true;
+            // سيتعامل معها الكود العادي للتقسيط في الأسفل
+            
+        } else {
+            // منحة جزئية بدون تقسيط - دفعة واحدة مخفضة
+            try {
+                await db.collection('tempBookings').doc(bookingId).update({
+                    status: 'paid', 
+                    paidAt: new Date().toISOString(),
+                    paymentMethod: 'grant_partial',
+                    paymentReference: 'GRANT-PARTIAL-' + new Date().getTime(),
+                    paymentConfirmed: true,
+                    paymentConfirmedAt: new Date().toISOString(),
+                    paymentConfirmedBy: 'admin',
+                    paymentDetails: {
+                        type: 'grant_partial',
+                        totalAmount: affordableAmount, // المبلغ بعد الخصم
+                        originalAmount: basePrice,
+                        paidAmount: affordableAmount,
+                        remainingAmount: 0,
+                        grantAmount: basePrice - affordableAmount, // قيمة المنحة
+                        grantPercentage: 100 - percentage,
+                        fullyPaid: true,
+                        isGrant: true,
+                        grantType: 'partial'
+                    }
+                });
+                
+                Swal.fire({
+                    icon: 'success',
+                    title: '✅ تم تأكيد المنحة الجزئية!',
+                    html: `
+                        <div style="text-align: center;">
+                            <div style="background: #F0FDF4; padding: 20px; border-radius: 10px;">
+                                <p style="margin: 10px 0; color: #065F46; font-size: 1.2rem;">
+                                    <i class="fas fa-percentage"></i> منحة جزئية ${100 - percentage}%
+                                </p>
+                                <p style="margin: 5px 0;">
+                                    <strong>السعر الأصلي:</strong> ${basePrice.toLocaleString('ar-EG')} جنيه
+                                </p>
+                                <p style="margin: 5px 0; color: #F59E0B;">
+                                    <strong>قيمة المنحة:</strong> ${(basePrice - affordableAmount).toLocaleString('ar-EG')} جنيه
+                                </p>
+                                <p style="margin: 5px 0; color: #10B981; font-size: 1.2rem;">
+                                    <strong>المطلوب دفعه:</strong> ${affordableAmount.toLocaleString('ar-EG')} جنيه
+                                </p>
+                            </div>
+                        </div>
+                    `,
+                    confirmButtonText: 'حسناً',
+                    confirmButtonColor: '#10B981'
+                });
+                
+                loadBookings();
+                return;
+            } catch (error) {
+                console.error('خطأ في تسجيل المنحة الجزئية:', error);
+                Swal.fire('خطأ!', 'حدث خطأ في تسجيل المنحة', 'error');
+                return;
+            }
+        }
+    }
+    
+    // حالة التقسيط الميسر - يستمر للكود العادي مع تعديل عدد الأقساط
+    else if (supportType === 'installment') {
+        // سيتعامل معها الكود العادي للتقسيط
+        isInstallment = true;
+        // لكن بعدد أقساط محدد مسبقاً
+        const predefinedMonths = supportDetails.months || 6;
+        totalAmount = basePrice; // السعر الكامل لكن بأقساط أكثر
+        
+        // تعديل نافذة التقسيط لتظهر الخيارات الصحيحة
+        // سيتم معالجتها في الكود العادي بالأسفل
     }
 }
 
-// باقي الكود للحجوزات العادية يستمر كما هو...
+// تعديل تعريف المتغير isInstallment ليشمل المنح
+const isInstallment = booking.payment?.code === 'installment' || 
+                     booking.payment?.method?.includes('قسط') ||
+                     booking.payment?.installmentDetails ||
+                     (isGrantRequest && (booking.grantDetails?.supportType === 'installment' || 
+                                        booking.grantDetails?.supportDetails?.installmentRequested));
     const isInstallment = booking.payment?.code === 'installment' || 
                          booking.payment?.method?.includes('قسط') ||
                          booking.payment?.installmentDetails;
@@ -4159,7 +4259,11 @@ if (isGrantRequest) {
     console.log('📊 بيانات التسعير:', booking.pricing);
     
     const result = await Swal.fire({
-        title: isInstallment ? '📋 تسجيل الدفعة الأولى' : '✅ تأكيد الدفع الكامل',
+        title: isGrantRequest && grantDetails?.supportType === 'partial' && !grantDetails?.supportDetails?.installmentRequested ? 
+       '💚 تأكيد المنحة الجزئية' :
+       isGrantRequest && (grantDetails?.supportType === 'installment' || grantDetails?.supportDetails?.installmentRequested) ?
+       '📋 تسجيل دفعة المنحة الأولى' :
+       isInstallment ? '📋 تسجيل الدفعة الأولى' : '✅ تأكيد الدفع الكامل',
         html: `
             <div style="text-align: right;">
                 <!-- معلومات الدورة والسعر -->
