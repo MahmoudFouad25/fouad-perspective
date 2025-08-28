@@ -3328,8 +3328,7 @@ async function createAccount(studentId) {
         // إرسال رسالة الترحيب
 await sendWelcomeMessage(student);
 
-// أضف نقاط التسجيل تلقائياً
-await addPoints(userId, 50, 'تسجيل جديد');
+
 
 console.log('✅ تم إنشاء الحساب بنجاح');
         // تحديث البيانات المحلية
@@ -3365,7 +3364,9 @@ https://fouad-perspective.web.app/login
             const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
             setTimeout(() => window.open(whatsappUrl, '_blank'), 1500);
         }
-        
+
+        // إضافة نقاط إنشاء الحساب
+        await addUnifiedPoints(formData.slug, 50, 'إنشاء حساب', 'نقاط إنشاء حساب جديد');
         // رسالة النجاح
         const successResult = await Swal.fire({
             icon: 'success',
@@ -3906,11 +3907,16 @@ if (formData.newExpectations || formData.newApplicationPlan) {
             'progress.totalProgress': Math.min(100, (student.progress?.totalProgress || 0) + 25)
         });
 
-        // أضف نقاط تخصيص الدورة
-await addPoints(student.userId, 100, 'تخصيص دورة');
+      
 
 Swal.fire('نجح!', 'تم تخصيص الدورة بنجاح', 'success');
 await loadStudents();
+
+        // إضافة نقاط بناء على قيمة الدورة
+        const coursePoints = Math.floor(newEnrollment.pricing.finalPrice / 100);
+        if (coursePoints > 0) {
+            await addUnifiedPoints(student.userId, coursePoints, 'تخصيص دورة', `نقاط تخصيص دورة ${student.courseName}`);
+        }
         
         // رسالة النجاح المفصلة
         await Swal.fire({
@@ -3951,7 +3957,7 @@ await loadStudents();
             `,
             confirmButtonColor: '#10B981'
         });
-        
+       
         // تحديث العرض
         await loadStudents();
         
@@ -4622,6 +4628,12 @@ async function assignCustomCourse(studentId) {
             enrollments: enrollments,
             'timestamps.updatedAt': new Date().toISOString()
         });
+
+        // إضافة نقاط الدورة المخصصة
+        const customCoursePoints = Math.floor(customData.finalPrice / 100);
+        if (customCoursePoints > 0) {
+            await addUnifiedPoints(student.userId, customCoursePoints, 'دورة مخصصة', `نقاط دورة ${customData.courseName}`);
+        }
         
         Swal.fire({
             icon: 'success',
@@ -4711,7 +4723,36 @@ async function manageJourneySystem(studentId) {
 }
 
 // دالة واحدة موحدة لإضافة النقاط
-async function addUnifiedPoints(userId) {
+// دالة واحدة موحدة لإضافة النقاط
+async function addUnifiedPoints(userId, points = null, reason = null, description = null) {
+    // إذا تم تمرير البيانات مباشرة
+    if (points && reason) {
+        try {
+            const userDoc = await db.collection('users').doc(userId).get();
+            const currentTotal = userDoc.data()?.pointsSystem?.totalPoints || 0;
+            const newTotal = currentTotal + points;
+            
+            await db.collection('users').doc(userId).update({
+                'pointsSystem.totalPoints': newTotal,
+                'pointsSystem.lastUpdated': new Date().toISOString(),
+                'pointsSystem.history': firebase.firestore.FieldValue.arrayUnion({
+                    amount: points,
+                    reason: reason,
+                    description: description || reason,
+                    date: new Date().toISOString(),
+                    addedBy: 'system'
+                })
+            });
+            
+            console.log(`تم إضافة ${points} نقطة للمستخدم ${userId}`);
+            return true;
+        } catch (error) {
+            console.error('خطأ في إضافة النقاط:', error);
+            return false;
+        }
+    }
+    
+    // إذا لم يتم تمرير بيانات، اعرض النافذة
     const { value: formData } = await Swal.fire({
         title: '➕ إضافة نقاط',
         html: `
@@ -4739,51 +4780,31 @@ async function addUnifiedPoints(userId) {
         showCancelButton: true,
         cancelButtonText: 'إلغاء',
         preConfirm: () => {
-            const points = document.getElementById('points').value;
-            const reason = document.getElementById('reason').value;
+            const pts = document.getElementById('points').value;
+            const rsn = document.getElementById('reason').value;
             
-            if (!points || points <= 0) {
+            if (!pts || pts <= 0) {
                 Swal.showValidationMessage('من فضلك أدخل عدد نقاط صحيح');
                 return false;
             }
             
-            return { points: parseInt(points), reason };
+            return { points: parseInt(pts), reason: rsn };
         }
     });
     
     if (!formData) return;
     
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        const currentTotal = userDoc.data()?.pointsSystem?.totalPoints || 0;
-        const newTotal = currentTotal + formData.points;
-        
-        // تحديث في قاعدة البيانات
-        await db.collection('users').doc(userId).update({
-            'pointsSystem.totalPoints': newTotal,
-            'pointsSystem.lastUpdated': new Date().toISOString(),
-            'pointsSystem.history': firebase.firestore.FieldValue.arrayUnion({
-                amount: formData.points,
-                reason: formData.reason,
-                date: new Date().toISOString(),
-                addedBy: 'admin'
-            })
-        });
-        
-        await Swal.fire({
-            icon: 'success',
-            title: 'تم بنجاح!',
-            text: `تم إضافة ${formData.points} نقطة`,
-            confirmButtonColor: '#10B981'
-        });
-        
-        // إعادة تحميل البيانات
-        await loadStudents();
-        
-    } catch (error) {
-        console.error('خطأ:', error);
-        Swal.fire('خطأ', 'حدث خطأ في إضافة النقاط', 'error');
-    }
+    // استدعاء الدالة نفسها مع البيانات
+    await addUnifiedPoints(userId, formData.points, formData.reason);
+    
+    await Swal.fire({
+        icon: 'success',
+        title: 'تم بنجاح!',
+        text: `تم إضافة ${formData.points} نقطة`,
+        confirmButtonColor: '#10B981'
+    });
+    
+    await loadStudents();
 }
 
 // إضافة الدوال للـ window
