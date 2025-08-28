@@ -4904,15 +4904,20 @@ console.log('Final Price:', finalPrice);
         // الحصول على نوع الدعم المختار
         const supportType = document.querySelector('input[name="supportType"]:checked').value;
         
-        // حساب التوفير حسب نوع المنحة
+        // متغيرات أساسية
+        let finalPriceNumber = 0;
         let totalSavings = 0;
         let totalSavingsText = '';
         let supportDetails = {};
+        let paymentInfo = null;
         
+        // حساب حسب نوع المنحة
         if (supportType === 'full') {
-            // منحة كاملة = توفير 100%
-            totalSavings = finalPrice;
-            totalSavingsText = `وفرت ${finalPrice.toLocaleString('ar-EG')} جنيه (100%)`;
+            // منحة كاملة
+            finalPriceNumber = 0;
+            totalSavings = basePrice; // وفر السعر الأصلي كله
+            totalSavingsText = `وفرت ${basePrice.toLocaleString('ar-EG')} جنيه (100%)`;
+            
             supportDetails = {
                 type: 'full',
                 discount: 100,
@@ -4920,28 +4925,40 @@ console.log('Final Price:', finalPrice);
             };
             
         } else if (supportType === 'partial') {
-            // منحة جزئية = الفرق بين السعر الأصلي والمبلغ المحدد
+            // منحة جزئية
             const affordableAmount = Math.round(finalPrice * (selectedPercentage / 100));
-            totalSavings = finalPrice - affordableAmount;
-            const savingsPercentage = Math.round((totalSavings / finalPrice) * 100);
+            finalPriceNumber = affordableAmount;
+            totalSavings = basePrice - affordableAmount; // الفرق بين السعر الأصلي والمبلغ المحدد
+            const savingsPercentage = Math.round((totalSavings / basePrice) * 100);
             totalSavingsText = `وفرت ${totalSavings.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
+            
+            const isInstallment = document.getElementById('installPartial')?.checked || false;
             
             supportDetails = {
                 type: 'partial',
                 percentage: selectedPercentage,
                 affordableAmount: affordableAmount,
-                installmentRequested: document.getElementById('installPartial')?.checked || false
+                installmentRequested: isInstallment
             };
             
-            if (supportDetails.installmentRequested) {
+            if (isInstallment) {
+                // حالة تقسيط المنحة الجزئية
                 supportDetails.installmentMonths = selectedPartialMonths;
                 supportDetails.monthlyAmount = Math.ceil(affordableAmount / selectedPartialMonths);
+                
+                paymentInfo = {
+                    code: `plan_support_partial_${selectedPercentage}`,
+                    method: `partial_${selectedPercentage}%`,
+                    installmentDetails: `${selectedPartialMonths} قسط × ${supportDetails.monthlyAmount.toLocaleString('ar-EG')} جنيه شهرياً`,
+                    installmentHTML: `<strong>${selectedPartialMonths} قسط</strong> × <strong>${supportDetails.monthlyAmount.toLocaleString('ar-EG')} جنيه</strong> شهرياً`
+                };
             }
             
         } else if (supportType === 'installment') {
-            // تقسيط ميسر = نفس التوفير العادي للتقسيط
-            // نحسب التوفير من الفرق بين السعر الأساسي والسعر الحالي
-            totalSavings = basePrice - finalPrice;
+            // تقسيط ميسر
+            finalPriceNumber = finalPrice; // نفس سعر العرض العادي
+            totalSavings = basePrice - finalPrice; // الفرق بين السعر الأصلي والسعر بعد العروض
+            
             if (totalSavings > 0) {
                 const savingsPercentage = Math.round((totalSavings / basePrice) * 100);
                 totalSavingsText = `وفرت ${totalSavings.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
@@ -4949,16 +4966,30 @@ console.log('Final Price:', finalPrice);
                 totalSavingsText = 'بدون خصومات إضافية';
             }
             
+            const monthlyAmount = Math.ceil(finalPrice / selectedInstallmentMonths);
+            
             supportDetails = {
                 type: 'installment',
                 months: selectedInstallmentMonths,
-                monthlyAmount: Math.ceil(finalPrice / selectedInstallmentMonths)
+                monthlyAmount: monthlyAmount
+            };
+            
+            paymentInfo = {
+                code: `plan_support_installment_${selectedInstallmentMonths}`,
+                method: 'installment',
+                installmentDetails: `${selectedInstallmentMonths} قسط × ${monthlyAmount.toLocaleString('ar-EG')} جنيه شهرياً`,
+                installmentHTML: `<strong>${selectedInstallmentMonths} قسط</strong> × <strong>${monthlyAmount.toLocaleString('ar-EG')} جنيه</strong> شهرياً`
             };
         }
         
-        // جمع كل البيانات بنفس structure الحجز الفردي
+        // جمع الخصومات (بدون خصم الدفع الكامل)
+        const filteredDiscounts = currentData.discounts ? 
+            currentData.discounts.filter(d => d.type !== 'full_payment' && d.type !== 'fullPayment') : 
+            [];
+        
+        // بناء البيانات النهائية
         const grantData = {
-            // معلومات الدورة - نفس الحجز الفردي
+            // معلومات الدورة الأساسية
             courseName: courseName,
             coursePrice: basePrice,
             salePrice: finalPrice,
@@ -4966,7 +4997,7 @@ console.log('Final Price:', finalPrice);
             bookingDate: new Date().toISOString(),
             status: 'pending_review',
             
-            // بيانات العميل - نفس structure الحجز الفردي تماماً
+            // بيانات العميل - نفس structure الحجز الفردي
             customer: {
                 name: document.getElementById('customerName').value.trim(),
                 whatsapp: document.getElementById('customerWhatsapp').value.trim(),
@@ -4984,24 +5015,22 @@ console.log('Final Price:', finalPrice);
                 paymentMethods: selectedPayments
             },
             
-            // معلومات الأسعار - نفس الحجز الفردي
+            // معلومات الأسعار
             pricing: {
                 basePriceNumber: basePrice,
-                finalPriceNumber: supportType === 'full' ? 0 : 
-                                 supportType === 'partial' ? Math.round(finalPrice * (selectedPercentage / 100)) :
-                                 finalPrice,
-                finalPrice: supportType === 'full' ? '0 جنيه' : 
-                           supportType === 'partial' ? `${Math.round(finalPrice * (selectedPercentage / 100)).toLocaleString('ar-EG')} جنيه` :
-                           `${finalPrice.toLocaleString('ar-EG')} جنيه`,
-                ...currentData.pricing // نسخ باقي معلومات الأسعار
+                basePrice: `${basePrice.toLocaleString('ar-EG')} جنيه`,
+                finalPriceNumber: finalPriceNumber,
+                finalPrice: `${finalPriceNumber.toLocaleString('ar-EG')} جنيه`,
+                priceAfterTimedOffers: finalPrice, // السعر بعد العروض الزمنية
+                ...currentData.pricing
             },
             
             // التوفير
             totalSavings: totalSavings,
             totalSavingsText: totalSavingsText,
             
-            // الخصومات والعروض النشطة - نفس الحجز الفردي
-            discounts: currentData.discounts || [],
+            // الخصومات (بدون خصم الدفع الكامل)
+            discounts: filteredDiscounts,
             activeOffer: currentData.activeOffer || null,
             
             // الكوبون - دائماً صفر في المنح
@@ -5034,6 +5063,18 @@ console.log('Final Price:', finalPrice);
                 }
             }
         };
+        
+        // إضافة payment فقط في حالات التقسيط
+        if (paymentInfo) {
+            grantData.payment = paymentInfo;
+        }
+        
+        // إضافة معلومات إضافية من البيانات الأصلية
+        if (currentData.requirements) {
+            grantData.requirements = currentData.requirements;
+        }
+        
+        console.log('بيانات المنحة النهائية:', grantData);
         
         // حفظ في Firebase
         await saveToFirebaseDirectly(grantData, null);
