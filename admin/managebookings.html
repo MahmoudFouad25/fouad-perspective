@@ -1283,7 +1283,14 @@ function createIndividualContent(booking) {
     const journey = booking.journey || {};
     const activeOffer = booking.activeOffer || null;
     const coupon = booking.coupon || {};
-    
+
+    /* 
+ * 🎯 نظام حساب اكتمال البيانات:
+ * - كل معلومة يملأها العميل = نقطة
+ * - المعلومات الأساسية: الاسم، الواتساب، الإيميل = 3 نقاط لكل واحدة
+ * - المعلومات الإضافية: الوظيفة، العمر، البلد = نقطة واحدة
+ * - النسبة المئوية = (النقاط المحصلة / إجمالي النقاط الممكنة) × 100
+ */
     // حساب مستوى العميل المحدث
     let customerLevel = 'جديد';
     let levelColor = '#3B82F6';
@@ -1292,11 +1299,39 @@ function createIndividualContent(booking) {
     
     // تحديد المستوى بناءً على البيانات المتوفرة
     const completedFields = [
-        customer.name, customer.whatsapp, customer.email,
-        customer.job, customer.expectations, customer.experience,
-        customer.applicationPlan, customer.title, customer.age,
-        customer.country, customer.city, customer.source
-    ].filter(field => field && field.toString().trim() !== '').length;
+       // حساب النقاط بنظام أوضح
+let points = 0;
+let maxPoints = 0;
+
+// المعلومات الأساسية (3 نقاط لكل واحدة)
+if (customer.name) points += 3;
+maxPoints += 3;
+
+if (customer.whatsapp) points += 3;
+maxPoints += 3;
+
+if (customer.email) points += 2;
+maxPoints += 2;
+
+// المعلومات الثانوية (نقطة واحدة لكل واحدة)
+const secondaryFields = [
+    customer.job, customer.age, customer.country, customer.city,
+    customer.expectations, customer.experience, customer.applicationPlan,
+    customer.title, customer.source, customer.notes
+];
+
+secondaryFields.forEach(field => {
+    if (field && field.toString().trim() !== '') points += 1;
+    maxPoints += 1;
+});
+
+// طرق الدفع (نقطتين إذا حدد طريقة)
+if (customer.paymentMethods?.length > 0) points += 2;
+maxPoints += 2;
+
+const completeness = Math.round((points / maxPoints) * 100);
+const completedFields = Math.round(points / 3); // للتوافق مع الكود القديم
+    
     
     if (completedFields >= 10) {
         customerLevel = 'VIP ذهبي';
@@ -3855,14 +3890,24 @@ ${booking.paymentDetails?.type === 'installment' && booking.paymentDetails?.inst
         }
         
         // دالة إظهار/إخفاء التفاصيل
-        function toggleDetails(bookingId) {
+       // متغير لحفظ حالة النافذة المفتوحة
+let currentOpenDetails = null;
+let detailsTimer = null;
+
+function toggleDetails(bookingId) {
     const detailsDiv = document.getElementById(`details-${bookingId}`);
     const card = document.getElementById(`booking-${bookingId}`);
     const btn = card.querySelector('.btn-toggle-details');
     
+    // إلغاء أي مؤقت سابق
+    if (detailsTimer) {
+        clearTimeout(detailsTimer);
+        detailsTimer = null;
+    }
+    
     if (detailsDiv && btn) {
         if (detailsDiv.style.display === 'none') {
-            // أغلق كل التفاصيل المفتوحة الأخرى أولاً
+            // أغلق كل التفاصيل المفتوحة الأخرى
             document.querySelectorAll('.full-details').forEach(div => {
                 if (div.id !== `details-${bookingId}`) {
                     div.style.display = 'none';
@@ -3880,15 +3925,41 @@ ${booking.paymentDetails?.type === 'installment' && booking.paymentDetails?.inst
             detailsDiv.style.animation = 'slideDown 0.5s ease';
             btn.innerHTML = '<i class="fas fa-eye-slash"></i>';
             btn.classList.add('btn-active');
+            btn.style.background = '#EF4444';
+            
+            currentOpenDetails = bookingId;
+            
+            // إضافة زر تثبيت
+            if (!detailsDiv.querySelector('.pin-button')) {
+                const pinBtn = document.createElement('button');
+                pinBtn.className = 'pin-button';
+                pinBtn.style.cssText = 'position: absolute; top: 10px; left: 10px; background: #3B82F6; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;';
+                pinBtn.innerHTML = '<i class="fas fa-thumbtack"></i> تثبيت';
+                pinBtn.onclick = () => {
+                    pinBtn.classList.toggle('pinned');
+                    if (pinBtn.classList.contains('pinned')) {
+                        pinBtn.style.background = '#10B981';
+                        pinBtn.innerHTML = '<i class="fas fa-thumbtack"></i> مثبت';
+                        if (detailsTimer) clearTimeout(detailsTimer);
+                    } else {
+                        pinBtn.style.background = '#3B82F6';
+                        pinBtn.innerHTML = '<i class="fas fa-thumbtack"></i> تثبيت';
+                    }
+                };
+                detailsDiv.style.position = 'relative';
+                detailsDiv.appendChild(pinBtn);
+            }
+            
         } else {
             // أغلق التفاصيل
             detailsDiv.style.display = 'none';
             btn.innerHTML = '<i class="fas fa-eye"></i>';
             btn.classList.remove('btn-active');
+            btn.style.background = '';
+            currentOpenDetails = null;
         }
     }
-}
-        
+}  
      
         // دالة إرسال واتساب - محسنة
 
@@ -4140,18 +4211,13 @@ const installmentInfo = booking.payment?.installmentDetails ||
                         <label style="font-weight: bold; color: #78350F; margin-bottom: 10px; display: block;">
                             عدد الأقساط المتبقية: <span style="color: red;">*</span>
                         </label>
-                        <select id="remainingInstallments" class="swal2-input" 
-                                style="width: 90%; padding: 12px; border: 2px solid #FCD34D; 
-                                       border-radius: 8px; margin-bottom: 15px;"
-                                onchange="calculateInstallments()">
-                            <option value="">اختر عدد الأقساط</option>
-                            <option value="1">قسط واحد</option>
-                            <option value="2">قسطين</option>
-                            <option value="3">3 أقساط</option>
-                            <option value="4">4 أقساط</option>
-                            <option value="5">5 أقساط</option>
-                            <option value="6">6 أقساط</option>
-                        </select>
+                       <input type="number" id="remainingInstallments" class="swal2-input"
+       placeholder="عدد الأقساط (1-18 شهر)"
+       min="1" max="18"
+       style="width: 90%; padding: 12px; border: 2px solid #FCD34D; 
+              border-radius: 8px; margin-bottom: 15px;"
+       onchange="calculateInstallments()"
+       oninput="if(this.value > 18) this.value = 18; if(this.value < 1) this.value = 1;">
                         
                         <!-- عرض تفاصيل الأقساط -->
                         <div id="installmentPreview" style="display: none; background: white; 
@@ -4211,6 +4277,28 @@ const installmentInfo = booking.payment?.installmentDetails ||
         width: '700px',
         didOpen: () => {
             // إضافة دالة حساب الأقساط للنافذة
+            // تعيين القيمة الافتراضية للأقساط من بيانات العميل
+const defaultInstallments = (() => {
+    // محاولة استخراج عدد الأقساط من النص
+    const installmentText = booking.payment?.installmentDetails || 
+                           booking.payment?.installmentHTML || '';
+    const match = installmentText.match(/(\d+)\s*(شهر|قسط|دفعة)/);
+    if (match) return parseInt(match[1]);
+    
+    // البحث عن رقم في النص
+    const numbers = installmentText.match(/\d+/);
+    if (numbers) return parseInt(numbers[0]);
+    
+    return 3; // القيمة الافتراضية
+})();
+
+document.getElementById('remainingInstallments').value = defaultInstallments;
+
+// عرض رسالة بعدد الأقساط المختارة
+const installmentNote = document.createElement('div');
+installmentNote.style.cssText = 'background: #E0F7FA; padding: 10px; border-radius: 8px; margin-top: -10px; margin-bottom: 15px; color: #006064;';
+installmentNote.innerHTML = `<i class="fas fa-info-circle"></i> عدد الأقساط المختارة من العميل: <strong>${defaultInstallments} شهر</strong>`;
+document.getElementById('remainingInstallments').parentElement.appendChild(installmentNote);
             window.calculateInstallments = function() {
                 const firstPayment = parseFloat(document.getElementById('firstPaymentAmount')?.value) || 0;
                 const numInstallments = parseInt(document.getElementById('remainingInstallments')?.value) || 0;
