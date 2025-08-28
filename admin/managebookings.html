@@ -569,6 +569,19 @@
                     آخر تحديث: <span id="lastUpdate">--</span>
                 </span>
             </div>
+            <div style="margin-left: 20px;">
+    <button onclick="showPendingPayments()" 
+            style="background: #F59E0B; color: white; border: none; 
+                   padding: 8px 16px; border-radius: 8px; cursor: pointer; 
+                   margin-left: 10px;">
+        <i class="fas fa-clock"></i> المدفوعات المعلقة
+    </button>
+    <button onclick="showTodayFollowups()" 
+            style="background: #3B82F6; color: white; border: none; 
+                   padding: 8px 16px; border-radius: 8px; cursor: pointer;">
+        <i class="fas fa-bell"></i> متابعات اليوم
+    </button>
+</div>
             <div class="export-buttons">
                 <button class="btn-export" onclick="exportToExcel()">
                     <i class="fas fa-file-excel"></i> تصدير Excel
@@ -1156,7 +1169,7 @@ function createBookingCard(booking) {
                         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                             <div>
                                 <span style="color: #6B7280; font-size: 0.85rem;">
-                                    #${booking.bookingId || booking.id.slice(-8).toUpperCase()}
+                                    #${booking.id ? booking.id.slice(-8).toUpperCase() : 'غير محدد'}
                                 </span>
                                 <span style="margin: 0 10px; color: #E5E7EB;">|</span>
                                 <span style="color: #6B7280; font-size: 0.85rem;">
@@ -1200,6 +1213,11 @@ function createBookingCard(booking) {
                         <button class="btn btn-info btn-toggle-details" style="padding: 8px 12px;" onclick="toggleDetails('${booking.id}')">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <button class="btn" style="padding: 8px 12px; background: #F59E0B;" 
+        onclick="addNote('${booking.id}')"
+        title="إضافة ملاحظة">
+    <i class="fas fa-sticky-note"></i>
+</button>
                     </div>
                 </div>
             </div>
@@ -1298,6 +1316,27 @@ function createBookingCard(booking) {
             </div>
         </div>
     `;
+    // إضافة مؤشرات بصرية للأولوية
+if (booking.adminNotes?.some(note => note.isImportant)) {
+    html = html.replace('booking-card"', 'booking-card" style="border-right: 5px solid #DC2626;"');
+}
+
+// إضافة شارة للعملاء المميزين (أكثر من حجز)
+const customerBookings = allBookings.filter(b => 
+    b.customer?.whatsapp === booking.customer?.whatsapp
+).length;
+
+if (customerBookings > 1) {
+    html = html.replace('<!-- شارة الحالة -->', `
+        <!-- شارة العميل المميز -->
+        <span style="position: absolute; top: 20px; right: 150px; 
+                     background: linear-gradient(135deg, #FFD700, #FFA500); 
+                     color: white; padding: 3px 10px; border-radius: 20px; 
+                     font-size: 0.8rem; font-weight: bold;">
+            <i class="fas fa-star"></i> عميل متكرر (${customerBookings} حجوزات)
+        </span>
+        <!-- شارة الحالة -->`);
+}
     
     return html;
 }
@@ -4200,7 +4239,7 @@ function sendWhatsApp(bookingId) {
     // إنشاء رسالة الواتساب
     const message = `مرحباً ${customerName || 'عميلنا العزيز'}،
 نشكرك على حجزك في ${booking.courseName || 'الدورة التدريبية'}.
-رقم الحجز: #${booking.bookingId || booking.id.slice(-8).toUpperCase()}
+رقم الحجز: #${booking.id ? booking.id.slice(-8).toUpperCase() : 'غير محدد'}
 نوع الحجز: ${getTypeText(type)}
 السعر النهائي: ${booking.pricing?.finalPrice || '0'}
 لإتمام الحجز، يرجى الدفع عبر إحدى الطرق التالية:
@@ -5281,7 +5320,7 @@ async function sendReminder(bookingId) {
 
 تذكير بدفع رسوم دورة: ${courseName}
 
-📌 رقم الحجز: #${booking.bookingId || booking.id.slice(-8).toUpperCase()}
+📌 رقم الحجز: #${booking.id ? booking.id.slice(-8).toUpperCase() : 'غير محدد'}
 💰 المبلغ المستحق: ${finalPrice}
 
 يرجى الدفع في أقرب وقت لتأكيد حجزكم.
@@ -5352,7 +5391,10 @@ async function addNote(bookingId) {
         
         notesHTML += `</div>`;
     }
-    
+
+    // إخفاء النافذة العائمة مؤقتاً
+const floatingWindow = document.getElementById('floating-details-window');
+if (floatingWindow) floatingWindow.style.display = 'none';
     const { value: noteData } = await Swal.fire({
         title: 'إدارة الملاحظات',
         html: `
@@ -5419,6 +5461,10 @@ async function addNote(bookingId) {
             });
             
             loadBookings();
+            // إعادة إظهار النافذة العائمة
+if (floatingWindow && currentOpenDetails) {
+    floatingWindow.style.display = 'block';
+}
         } catch (error) {
             console.error('خطأ في حفظ الملاحظة:', error);
             Swal.fire('خطأ', 'حدث خطأ في حفظ الملاحظة', 'error');
@@ -5671,6 +5717,7 @@ paymentInfo: {
                         transferredFrom: 'tempBookings',
                         transferredBy: 'admin',
                         originalBookingId: bookingId,
+                        displayBookingId: booking.id.slice(-8).toUpperCase(),
                         originalDocumentId: booking.id
                     },
                     
@@ -5879,6 +5926,55 @@ function getStatusText(status) {
         'completed': 'مكتمل'
     };
     return statuses[status] || status;
+}
+        // عرض المدفوعات المعلقة
+function showPendingPayments() {
+    const pending = allBookings.filter(b => 
+        b.status === 'confirmed' || 
+        (b.status === 'paid' && !b.paymentConfirmed)
+    );
+    
+    let html = '<div style="max-height: 400px; overflow-y: auto;">';
+    pending.forEach(booking => {
+        const name = booking.customer?.name || 'غير محدد';
+        const phone = booking.customer?.whatsapp || '';
+        const amount = booking.pricing?.finalPrice || '0';
+        
+        html += `
+            <div style="padding: 10px; border-bottom: 1px solid #E5E7EB;">
+                <strong>${name}</strong> - ${amount}<br>
+                <small>${phone}</small>
+                <button onclick="sendReminder('${booking.id}')" 
+                        style="float: left; background: #10B981; color: white; 
+                               border: none; padding: 3px 8px; border-radius: 5px;">
+                    تذكير
+                </button>
+            </div>`;
+    });
+    html += '</div>';
+    
+    Swal.fire({
+        title: `المدفوعات المعلقة (${pending.length})`,
+        html: html,
+        width: '600px',
+        confirmButtonText: 'إغلاق'
+    });
+}
+
+// عرض متابعات اليوم
+function showTodayFollowups() {
+    const today = new Date().toDateString();
+    const todayBookings = allBookings.filter(b => {
+        const bookingDate = new Date(b.timestamp || b.bookingDate);
+        return bookingDate.toDateString() === today;
+    });
+    
+    Swal.fire({
+        title: `متابعات اليوم (${todayBookings.length})`,
+        text: `لديك ${todayBookings.length} حجوزات تحتاج متابعة اليوم`,
+        icon: 'info',
+        confirmButtonText: 'حسناً'
+    });
 }
        
        // تحديث تلقائي للوقت
