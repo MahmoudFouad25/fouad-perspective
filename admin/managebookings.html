@@ -1045,7 +1045,7 @@ function createBookingCard(booking) {
 
             <!-- مؤشر الدفع المؤكد -->
             ${booking.paymentConfirmed === true ? `
-                <div style="position: absolute; top: 60px; right: 20px; 
+                <div style="position: absolute; top: 60px; right: 220px; 
                             background: linear-gradient(135deg, #10B981, #059669); 
                             color: white; padding: 5px 12px; border-radius: 20px; 
                             font-weight: bold; font-size: 0.85rem; 
@@ -1066,7 +1066,7 @@ function createBookingCard(booking) {
 
             <!-- مؤشر الأقساط -->
             ${booking.paymentDetails?.type === 'installment' && booking.paymentDetails?.remainingAmount > 0 ? `
-                <div style="position: absolute; top: 100px; right: 20px; 
+                <div style="position: absolute; top: 100px; right: 220px; 
                             background: linear-gradient(135deg, #F59E0B, #D97706); 
                             color: white; padding: 5px 12px; border-radius: 20px; 
                             font-weight: bold; font-size: 0.85rem;
@@ -4069,8 +4069,13 @@ async function markAsPaid(bookingId) {
     
     const booking = { id: bookingDoc.id, ...bookingDoc.data() };
     const isInstallment = booking.payment?.code === 'installment' || 
-                         booking.payment?.method?.includes('قسط') ||
-                         booking.payment?.installmentDetails;
+                     booking.payment?.method?.includes('قسط') ||
+                     booking.payment?.installmentDetails;
+
+// استخراج تفاصيل الأقساط إن وجدت
+const installmentInfo = booking.payment?.installmentDetails || 
+                        booking.payment?.installmentHTML || 
+                        'غير محدد';
     
     // استخراج السعر الصحيح هنا في البداية
     const totalAmount = booking.pricing?.finalPriceNumber || 
@@ -4115,7 +4120,15 @@ async function markAsPaid(bookingId) {
                         <h4 style="color: #92400E; margin-bottom: 15px;">
                             <i class="fas fa-calendar-alt"></i> خطة الأقساط
                         </h4>
-                        
+                        <!-- عرض خطة الأقساط المختارة -->
+<div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #F59E0B;">
+    <div style="color: #92400E; font-weight: bold; margin-bottom: 10px;">
+        <i class="fas fa-info-circle"></i> خطة الأقساط المختارة من قبل العميل:
+    </div>
+    <div style="color: #78350F; font-size: 1.1rem; padding: 10px; background: #FFFBF0; border-radius: 8px;">
+        ${installmentInfo}
+    </div>
+</div>
                         <label style="font-weight: bold; color: #78350F; margin-bottom: 10px; display: block;">
                             مبلغ الدفعة الأولى: <span style="color: red;">*</span>
                         </label>
@@ -4165,6 +4178,8 @@ async function markAsPaid(bookingId) {
                     <option value="bank">تحويل بنكي</option>
                     <option value="card">بطاقة بنكية</option>
                     <option value="cash">كاش (نقدي)</option>
+                    <option value="western_union">ويسترن يونيون</option>
+<option value="other">أخرى</option>
                 </select>
                 
                 <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
@@ -5028,6 +5043,71 @@ function shareVoucherStory(bookingId) {
 }
 
         // دوال إضافية للحجز الفردي
+        // دالة إرسال تذكير بالدفع
+async function sendReminder(bookingId) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    
+    let phoneNumber = '';
+    let customerName = '';
+    let courseName = booking.courseName || 'الدورة التدريبية';
+    let finalPrice = booking.pricing?.finalPrice || '0';
+    
+    // استخراج البيانات
+    if (booking.customer) {
+        phoneNumber = booking.customer.whatsapp;
+        customerName = booking.customer.name;
+    }
+    
+    if (!phoneNumber) {
+        Swal.fire('تنبيه', 'لا يوجد رقم واتساب للتواصل', 'warning');
+        return;
+    }
+    
+    // تنظيف رقم الهاتف
+    phoneNumber = phoneNumber.replace(/[^0-9+]/g, '');
+    if (phoneNumber.startsWith('0')) {
+        phoneNumber = '2' + phoneNumber;
+    }
+    
+    // رسالة التذكير
+    const message = `مرحباً ${customerName || 'عميلنا العزيز'} 👋
+
+تذكير بدفع رسوم دورة: ${courseName}
+
+📌 رقم الحجز: #${booking.bookingId || booking.id.slice(-8).toUpperCase()}
+💰 المبلغ المستحق: ${finalPrice}
+
+يرجى الدفع في أقرب وقت لتأكيد حجزكم.
+
+طرق الدفع المتاحة:
+- فودافون كاش: 01234567890
+- انستاباي: username
+- تحويل بنكي: 1234567890
+
+شكراً لثقتكم بنا 🌟`;
+    
+    const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+    
+    // تسجيل التذكير
+    try {
+        await db.collection('tempBookings').doc(bookingId).update({
+            lastReminder: new Date().toISOString(),
+            reminderCount: (booking.reminderCount || 0) + 1
+        });
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم إرسال التذكير',
+            text: 'تم فتح واتساب لإرسال رسالة التذكير',
+            confirmButtonColor: '#10B981'
+        });
+    } catch (error) {
+        console.error('خطأ في تسجيل التذكير:', error);
+    }
+}
+        
 function addNote(bookingId) {
     Swal.fire({
         title: 'إضافة ملاحظة',
