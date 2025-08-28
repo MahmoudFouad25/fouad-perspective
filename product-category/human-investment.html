@@ -4162,6 +4162,20 @@ if (grantBtn) {
     grantBtn.onclick = async function() {
         // جمع البيانات الحالية من الحاسبة
     const currentData = collectCompleteData();
+
+// تنظيف البيانات من خصم الدفع الكامل
+if (currentData.discounts && Array.isArray(currentData.discounts)) {
+    currentData.discounts = currentData.discounts.filter(d => 
+        d.type !== 'cash' && d.type !== 'full_payment' && d.type !== 'fullPayment'
+    );
+}
+
+// تصحيح الأسعار إذا كان واقف على دفع كامل
+if (currentData.pricing && currentData.pricing.finalPriceNumber < finalPrice) {
+    currentData.pricing.finalPriceNumber = finalPrice;
+    currentData.pricing.finalPrice = `${finalPrice.toLocaleString('ar-EG')} ج.م`;
+}
+        
 const courseName = currentData.courseName || getCurrentCourseName();
 
 // جيب البيانات من الصفحة مباشرة
@@ -4901,8 +4915,14 @@ console.log('Final Price:', finalPrice);
             selectedPayments.push(checkbox.value);
         });
         
-        // الحصول على نوع الدعم المختار
+        // الحصول على نوع الدعم المختار  
         const supportType = document.querySelector('input[name="supportType"]:checked').value;
+        
+        // تنظيف الخصومات من الدفع الكامل
+        const cleanDiscounts = currentData.discounts ? 
+            currentData.discounts.filter(d => 
+                d.type !== 'cash' && d.type !== 'full_payment' && d.type !== 'fullPayment'
+            ) : [];
         
         // متغيرات أساسية
         let finalPriceNumber = 0;
@@ -4911,12 +4931,16 @@ console.log('Final Price:', finalPrice);
         let supportDetails = {};
         let paymentInfo = null;
         
+        // السعر الأساسي الصحيح
+        const originalBasePrice = courseData.price || basePrice;
+        
         // حساب حسب نوع المنحة
         if (supportType === 'full') {
             // منحة كاملة
             finalPriceNumber = 0;
-            totalSavings = basePrice; // وفر السعر الأصلي كله
-            totalSavingsText = `وفرت ${basePrice.toLocaleString('ar-EG')} جنيه (100%)`;
+            totalSavings = originalBasePrice;
+            const savingsPercentage = 100;
+            totalSavingsText = `وفرت ${originalBasePrice.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
             
             supportDetails = {
                 type: 'full',
@@ -4925,11 +4949,11 @@ console.log('Final Price:', finalPrice);
             };
             
         } else if (supportType === 'partial') {
-            // منحة جزئية
+            // منحة جزئية - نحسب من السعر بعد العروض فقط (بدون خصم دفع كامل)
             const affordableAmount = Math.round(finalPrice * (selectedPercentage / 100));
             finalPriceNumber = affordableAmount;
-            totalSavings = basePrice - affordableAmount; // الفرق بين السعر الأصلي والمبلغ المحدد
-            const savingsPercentage = Math.round((totalSavings / basePrice) * 100);
+            totalSavings = originalBasePrice - affordableAmount;
+            const savingsPercentage = Math.round((totalSavings / originalBasePrice) * 100);
             totalSavingsText = `وفرت ${totalSavings.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
             
             const isInstallment = document.getElementById('installPartial')?.checked || false;
@@ -4942,7 +4966,6 @@ console.log('Final Price:', finalPrice);
             };
             
             if (isInstallment) {
-                // حالة تقسيط المنحة الجزئية
                 supportDetails.installmentMonths = selectedPartialMonths;
                 supportDetails.monthlyAmount = Math.ceil(affordableAmount / selectedPartialMonths);
                 
@@ -4955,12 +4978,12 @@ console.log('Final Price:', finalPrice);
             }
             
         } else if (supportType === 'installment') {
-            // تقسيط ميسر
-            finalPriceNumber = finalPrice; // نفس سعر العرض العادي
-            totalSavings = basePrice - finalPrice; // الفرق بين السعر الأصلي والسعر بعد العروض
+            // تقسيط ميسر - نفس السعر بعد العروض
+            finalPriceNumber = finalPrice;
+            totalSavings = originalBasePrice - finalPrice;
             
             if (totalSavings > 0) {
-                const savingsPercentage = Math.round((totalSavings / basePrice) * 100);
+                const savingsPercentage = Math.round((totalSavings / originalBasePrice) * 100);
                 totalSavingsText = `وفرت ${totalSavings.toLocaleString('ar-EG')} جنيه (${savingsPercentage}%)`;
             } else {
                 totalSavingsText = 'بدون خصومات إضافية';
@@ -4982,22 +5005,19 @@ console.log('Final Price:', finalPrice);
             };
         }
         
-        // جمع الخصومات (بدون خصم الدفع الكامل)
-        const filteredDiscounts = currentData.discounts ? 
-            currentData.discounts.filter(d => d.type !== 'full_payment' && d.type !== 'fullPayment') : 
-            [];
-        
         // بناء البيانات النهائية
         const grantData = {
-            // معلومات الدورة الأساسية
+            // معلومات الدورة
             courseName: courseName,
-            coursePrice: basePrice,
-            salePrice: finalPrice,
+            coursePrice: originalBasePrice,
+            salePrice: finalPrice, // السعر بعد العروض بدون خصم دفع كامل
             bookingType: 'grant_request',
             bookingDate: new Date().toISOString(),
-            status: 'pending_review',
+            bookingId: `BK_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            status: 'pending',
+            timestamp: new Date().toISOString(),
             
-            // بيانات العميل - نفس structure الحجز الفردي
+            // بيانات العميل
             customer: {
                 name: document.getElementById('customerName').value.trim(),
                 whatsapp: document.getElementById('customerWhatsapp').value.trim(),
@@ -5015,32 +5035,32 @@ console.log('Final Price:', finalPrice);
                 paymentMethods: selectedPayments
             },
             
-            // معلومات الأسعار
+            // معلومات الأسعار الصحيحة
             pricing: {
-                basePriceNumber: basePrice,
-                basePrice: `${basePrice.toLocaleString('ar-EG')} جنيه`,
+                basePriceNumber: originalBasePrice,
+                basePrice: `${originalBasePrice.toLocaleString('ar-EG')} ج.م`,
                 finalPriceNumber: finalPriceNumber,
-                finalPrice: `${finalPriceNumber.toLocaleString('ar-EG')} جنيه`,
-                priceAfterTimedOffers: finalPrice, // السعر بعد العروض الزمنية
-                ...currentData.pricing
+                finalPrice: `${finalPriceNumber.toLocaleString('ar-EG')} ج.م`,
+                priceAfterTimedOffers: finalPrice,
+                salePrice: finalPrice
             },
             
-            // التوفير
+            // التوفير الصحيح
             totalSavings: totalSavings,
             totalSavingsText: totalSavingsText,
             
-            // الخصومات (بدون خصم الدفع الكامل)
-            discounts: filteredDiscounts,
+            // الخصومات بدون خصم الدفع الكامل
+            discounts: cleanDiscounts,
             activeOffer: currentData.activeOffer || null,
             
-            // الكوبون - دائماً صفر في المنح
+            // الكوبون
             coupon: {
                 code: '',
                 amount: 0,
                 applied: false
             },
             
-            // بيانات المنحة الإضافية
+            // بيانات المنحة
             grantDetails: {
                 reason: document.getElementById('whyNeedGrant').value.trim(),
                 challenges: document.getElementById('challenges').value.trim(),
@@ -5064,17 +5084,10 @@ console.log('Final Price:', finalPrice);
             }
         };
         
-        // إضافة payment فقط في حالات التقسيط
+        // إضافة payment في حالات التقسيط فقط
         if (paymentInfo) {
             grantData.payment = paymentInfo;
         }
-        
-        // إضافة معلومات إضافية من البيانات الأصلية
-        if (currentData.requirements) {
-            grantData.requirements = currentData.requirements;
-        }
-        
-        console.log('بيانات المنحة النهائية:', grantData);
         
         // حفظ في Firebase
         await saveToFirebaseDirectly(grantData, null);
