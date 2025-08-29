@@ -4732,6 +4732,146 @@ async function sendWelcomeMessage(student) {
 // إضافة الدوال للـ window
 window.manageJourneySystem = manageJourneySystem;
 window.addUnifiedPoints = addUnifiedPoints;
+        // دالة إدارة الأقساط
+async function manageInstallments(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+        return;
+    }
+    
+    // جلب بيانات المستخدم
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    if (!userDoc.exists) {
+        Swal.fire('خطأ', 'لم يتم العثور على حساب المستخدم', 'error');
+        return;
+    }
+    
+    const userData = userDoc.data();
+    const enrollments = userData.enrollments || [];
+    
+    // جمع كل الأقساط من كل الدورات
+    let allInstallments = [];
+    enrollments.forEach(enrollment => {
+        if (enrollment.payment?.installments?.schedule) {
+            enrollment.payment.installments.schedule.forEach(inst => {
+                allInstallments.push({
+                    ...inst,
+                    courseName: enrollment.title,
+                    enrollmentId: enrollment.id
+                });
+            });
+        }
+    });
+    
+    // فرز الأقساط حسب التاريخ
+    allInstallments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    
+    // عرض واجهة إدارة الأقساط
+    const { value: action } = await Swal.fire({
+        title: '💰 إدارة الأقساط',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- معلومات الطالب -->
+                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h4 style="color: #0369A1; margin: 0;">
+                        <i class="fas fa-user"></i> ${student.customer?.name}
+                    </h4>
+                </div>
+                
+                <!-- إحصائيات الأقساط -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+                    <div style="background: white; padding: 10px; border-radius: 8px; text-align: center; 
+                                border: 2px solid #E5E7EB;">
+                        <div style="color: #6B7280; font-size: 0.8rem;">إجمالي</div>
+                        <div style="font-weight: bold; color: #1F2937;">
+                            ${allInstallments.length} قسط
+                        </div>
+                    </div>
+                    <div style="background: #DCFCE7; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="color: #065F46; font-size: 0.8rem;">مدفوع</div>
+                        <div style="font-weight: bold; color: #10B981;">
+                            ${allInstallments.filter(i => i.status === 'paid').length} قسط
+                        </div>
+                    </div>
+                    <div style="background: #FEF3C7; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="color: #92400E; font-size: 0.8rem;">قادم</div>
+                        <div style="font-weight: bold; color: #F59E0B;">
+                            ${allInstallments.filter(i => i.status === 'pending').length} قسط
+                        </div>
+                    </div>
+                    <div style="background: #FEE2E2; padding: 10px; border-radius: 8px; text-align: center;">
+                        <div style="color: #991B1B; font-size: 0.8rem;">متأخر</div>
+                        <div style="font-weight: bold; color: #DC2626;">
+                            ${allInstallments.filter(i => i.status === 'pending' && new Date(i.dueDate) < new Date()).length} قسط
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- قائمة الأقساط -->
+                <div style="background: white; border-radius: 12px; padding: 15px;">
+                    <h5 style="color: #1F2937; margin: 0 0 15px 0;">
+                        <i class="fas fa-list"></i> جدول الأقساط التفصيلي
+                    </h5>
+                    
+                    ${allInstallments.length > 0 ? allInstallments.map((inst, idx) => {
+                        const isLate = inst.status === 'pending' && new Date(inst.dueDate) < new Date();
+                        const daysLate = isLate ? Math.floor((new Date() - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24)) : 0;
+                        
+                        return `
+                        <div style="border: 2px solid ${inst.status === 'paid' ? '#10B981' : isLate ? '#EF4444' : '#F59E0B'}; 
+                                    border-radius: 10px; padding: 15px; margin-bottom: 15px;
+                                    background: ${inst.status === 'paid' ? '#F0FDF4' : isLate ? '#FEF3F3' : '#FFFBEB'};">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <h6 style="margin: 0; color: #1F2937;">
+                                        القسط ${inst.installmentNumber} - ${inst.courseName}
+                                    </h6>
+                                    <p style="margin: 5px 0; color: #6B7280; font-size: 0.9rem;">
+                                        <i class="fas fa-calendar"></i> 
+                                        استحقاق: ${new Date(inst.dueDate).toLocaleDateString('ar-EG')}
+                                        ${isLate ? `<span style="color: #DC2626; font-weight: bold;"> (متأخر ${daysLate} يوم)</span>` : ''}
+                                    </p>
+                                    ${inst.status === 'paid' ? `
+                                        <p style="margin: 5px 0; color: #10B981; font-size: 0.85rem;">
+                                            <i class="fas fa-check-circle"></i> 
+                                            تم الدفع في: ${new Date(inst.paidDate).toLocaleDateString('ar-EG')}
+                                        </p>
+                                    ` : ''}
+                                </div>
+                                <div style="text-align: left;">
+                                    <div style="font-size: 1.2rem; font-weight: bold; 
+                                                color: ${inst.status === 'paid' ? '#10B981' : '#1F2937'};">
+                                        ${inst.amount.toLocaleString('ar-EG')} ج.م
+                                    </div>
+                                    ${inst.status === 'pending' ? `
+                                        <button onclick="recordInstallmentPayment('${student.userId}', '${inst.enrollmentId}', ${inst.installmentNumber})" 
+                                                style="background: #10B981; color: white; border: none; 
+                                                       padding: 8px 15px; border-radius: 8px; cursor: pointer;
+                                                       margin-top: 10px; font-weight: bold;">
+                                            <i class="fas fa-check"></i> تسجيل دفع
+                                        </button>
+                                    ` : `
+                                        <span style="background: #10B981; color: white; padding: 4px 10px; 
+                                                     border-radius: 15px; font-size: 0.85rem;">
+                                            <i class="fas fa-check-double"></i> مدفوع
+                                        </span>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                        `;
+                    }).join('') : '<p style="text-align: center; color: #6B7280;">لا توجد أقساط مسجلة</p>'}
+                </div>
+            </div>
+        `,
+        width: '900px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
     </script>
 </body>
 </html>
