@@ -5531,7 +5531,7 @@ window.addJourneyPoints = addJourneyPoints;
 async function deletePointsEntry(userId, timestamp) {
     const result = await Swal.fire({
         title: 'تأكيد الحذف',
-        text: 'هل تريد حذف هذه المعاملة من السجل؟ سيتم تعديل الرصيد تلقائياً',
+        text: 'هل تريد حذف هذه المعاملة من سجل الرحلة؟ سيتم تعديل الرصيد تلقائياً',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'نعم، احذف',
@@ -5545,20 +5545,41 @@ async function deletePointsEntry(userId, timestamp) {
             const userDoc = await userRef.get();
             const userData = userDoc.data();
             
-            const history = userData.unifiedPoints?.history || [];
+            // جلب سجل نقاط الرحلة
+            const history = userData.journeyPoints?.history || [];
             const entryToDelete = history.find(e => e.timestamp === timestamp);
             
             if (entryToDelete) {
                 // حذف المعاملة من السجل
                 const newHistory = history.filter(e => e.timestamp !== timestamp);
                 // تعديل الرصيد
-                const newBalance = (userData.unifiedPoints?.balance || 0) - entryToDelete.amount;
+                const newBalance = (userData.journeyPoints?.balance || 0) - entryToDelete.amount;
                 
                 await userRef.update({
-                    'unifiedPoints.balance': newBalance,
-                    'unifiedPoints.history': newHistory,
-                    'unifiedPoints.lastUpdated': new Date().toISOString()
+                    'journeyPoints.balance': newBalance,
+                    'journeyPoints.history': newHistory,
+                    'journeyPoints.lastUpdated': new Date().toISOString()
                 });
+                
+                // إذا كانت المعاملة من النظامين، احذف من المحفظة أيضاً
+                if (entryToDelete.reason.includes('(النظامين)')) {
+                    const walletHistory = userData.walletPoints?.history || [];
+                    const walletEntry = walletHistory.find(e => 
+                        e.timestamp === timestamp || 
+                        (Math.abs(new Date(e.timestamp) - new Date(timestamp)) < 1000)
+                    );
+                    
+                    if (walletEntry) {
+                        const newWalletHistory = walletHistory.filter(e => e.timestamp !== walletEntry.timestamp);
+                        const newWalletBalance = (userData.walletPoints?.balance || 0) - walletEntry.amount;
+                        
+                        await userRef.update({
+                            'walletPoints.balance': newWalletBalance,
+                            'walletPoints.history': newWalletHistory,
+                            'walletPoints.lastUpdated': new Date().toISOString()
+                        });
+                    }
+                }
                 
                 Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
                 setTimeout(() => location.reload(), 1500);
@@ -5569,7 +5590,6 @@ async function deletePointsEntry(userId, timestamp) {
         }
     }
 }
-
         
 // دالة واحدة موحدة لإضافة النقاط
 // نظام نقاط الارتواء الموحد
@@ -5587,13 +5607,18 @@ async function addDualPoints(userId, amount, reason, description) {
         const currentJourneyBalance = userData.journeyPoints?.balance || 0;
         const currentWalletBalance = userData.walletPoints?.balance || 0;
         
-        // تحديد التسمية الصحيحة
-        const reasonLabel = reason.includes('(') ? reason : reason + ' (النظامين)';
+        // تحديد التسمية الصحيحة بناءً على السبب
+        let reasonLabel = reason;
+        if (!reason.includes('(')) {
+            reasonLabel = reason + ' (النظامين)';
+        }
         
         const updates = {
             // تحديث نقاط الارتواء
             'journeyPoints.balance': currentJourneyBalance + amount,
-            'journeyPoints.lifetime': (userData.journeyPoints?.lifetime || 0) + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
             'journeyPoints.lastUpdated': new Date().toISOString(),
             'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
                 amount: amount,
@@ -5605,7 +5630,9 @@ async function addDualPoints(userId, amount, reason, description) {
             
             // تحديث نقاط المحفظة
             'walletPoints.balance': currentWalletBalance + amount,
-            'walletPoints.lifetime': (userData.walletPoints?.lifetime || 0) + amount,
+            'walletPoints.lifetime': amount > 0 ? 
+                (userData.walletPoints?.lifetime || 0) + amount : 
+                userData.walletPoints?.lifetime || 0,
             'walletPoints.lastUpdated': new Date().toISOString(),
             'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
                 amount: amount,
