@@ -1596,6 +1596,9 @@ paymentReference: data.paymentReference || data.paymentInfo?.paymentReference ||
         
         updateStatistics();
         filterByTab(currentFilter);
+        // بعد: filterByTab(currentFilter);
+// أضف:
+await loadStudentPoints();
         checkForNewTransfer();
         populateCourseFilter();
         
@@ -1604,6 +1607,24 @@ paymentReference: data.paymentReference || data.paymentInfo?.paymentReference ||
         
     } catch (error) {
         console.error('❌ خطأ في التحميل:', error);
+    }
+    
+}
+
+        async function loadStudentPoints() {
+    for (const student of allStudents) {
+        if (student.userId) {
+            try {
+                const userDoc = await db.collection('users').doc(student.userId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    student.journeyPoints = userData.journeyPoints?.balance || 0;
+                    student.walletPoints = userData.walletPoints?.balance || 0;
+                }
+            } catch (error) {
+                console.log('خطأ في جلب النقاط:', error);
+            }
+        }
     }
 }
 
@@ -1787,25 +1808,23 @@ function createStudentCard(student) {
     const isNew = typeof isNewStudent === 'function' ? isNewStudent(student) : false;
     const completeness = student.dataCompleteness?.percentage || 0;
     const totalSavings = student.totalSavings || 0;
-    // حساب الإجماليات الصحيحة بناءً على المنطق الجديد
+    
+    // حساب الإجماليات الصحيحة
     const totalPaidActual = student.paymentInfo?.isInstallment ? 
-    (student.paymentInfo?.paidAmount || 0) : 
-    (student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0);
+        (student.paymentInfo?.paidAmount || 0) : 
+        (student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0);
     const totalDueActual = student.paymentInfo?.isInstallment ? 
-      
         (student.paymentInfo?.remainingAmount || 0) : 
         (!student.paymentConfirmed ? (student.pricing?.finalPriceNumber || 0) : 0);
 
-
-    // تحديد مستوى الطالب بناءً على نظام الرحلة الجديد
-    const totalPoints = student.userData?.pointsSystem?.totalPoints || 0;
-    const currentStage = 1; // ثابت حالياً
+    // تحديد مستوى الطالب
+    const currentStage = 1;
     const stageInfo = FouadJourneySystem.stages[currentStage];
     
     let studentLevel = stageInfo.title;
     let levelColor = stageInfo.color;
     let levelIcon = stageInfo.icon;
-    // المرحلة ثابتة حالياً - سيتم تطوير نظام الترقية لاحقاً
+    
     // الحصول على الأحرف الأولى
     const initials = customer.name.split(' ')
         .map(n => n[0])
@@ -1813,36 +1832,34 @@ function createStudentCard(student) {
         .substring(0, 2)
         .toUpperCase();
     
-
-// عرض النقاط المجمعة في البطاقة
-let pointsDisplay = '';
-if (student.userId) {
-    // النقاط ستُحمل لاحقاً من قاعدة البيانات
-    setTimeout(async () => {
-        try {
-            const userDoc = await db.collection('users').doc(student.userId).get();
-            if (userDoc.exists) {
-                const points = userDoc.data().unifiedPoints?.balance || 0;
-                const element = document.querySelector(`[data-student-id="${studentId}"] .unified-points`);
-                if (element) {
-                    element.textContent = `${points} نقطة`;
-                }
-            }
-        } catch (error) {
-            console.log('خطأ في جلب النقاط');
-        }
-    }, 100);
-}
     // جلب النقاط إذا كان له حساب
-if (student.userId) {
-    db.collection('users').doc(student.userId).get().then(doc => {
-        if (doc.exists) {
-            const points = doc.data().unifiedPoints?.balance || 0;
-            const element = document.getElementById(`points-${studentId}`);
-            if (element) element.textContent = points;
-        }
-    });
-}
+    if (student.userId) {
+        setTimeout(async () => {
+            try {
+                const userDoc = await db.collection('users').doc(student.userId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    
+                    // نقاط الرحلة
+                    const journeyPoints = userData.journeyPoints?.balance || 0;
+                    const journeyElement = document.querySelector(`[data-student-id="${studentId}"] .journey-points`);
+                    if (journeyElement) {
+                        journeyElement.textContent = `${journeyPoints} نقطة`;
+                    }
+                    
+                    // نقاط المحفظة  
+                    const walletPoints = userData.walletPoints?.balance || 0;
+                    const walletElement = document.querySelector(`[data-student-id="${studentId}"] .wallet-points`);
+                    if (walletElement) {
+                        walletElement.textContent = `${walletPoints} نقطة`;
+                    }
+                }
+            } catch (error) {
+                console.log('خطأ في جلب النقاط:', error);
+            }
+        }, 100);
+    }
+
     // HTML البطاقة
     return `
         <div class="student-card ${isNew ? 'new' : ''} ${hasAccount ? '' : 'new-account'}" 
@@ -1871,7 +1888,7 @@ if (student.userId) {
                         </span>
                     ` : ''}
                     
-                    <!-- مؤشرات حالة الدفع الجديدة -->
+                    <!-- مؤشرات حالة الدفع -->
                     ${student.paymentInfo?.isInstallment && student.paymentInfo?.remainingAmount > 0 ? `
                         <span style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white; 
                                      padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; 
@@ -1889,20 +1906,22 @@ if (student.userId) {
                                      padding: 5px 15px; border-radius: 20px; font-size: 0.85rem;">
                             <i class="fas fa-chart-pie"></i> ${student.paymentInfo.paidInstallments}/${student.paymentInfo.totalInstallments} أقساط
                         </span>
-                    ` : student.paymentInfo?.status === 'paid' && !student.paymentConfirmed ? `
-                        <span style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white; 
-                                     padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; 
-                                     animation: pulse 2s infinite;">
-                            <i class="fas fa-exclamation-triangle"></i> بانتظار تأكيد الدفع
-                        </span>
                     ` : ''}
                 </div>
-              <div style="text-align: center; margin-left: 15px;">
-    <div style="font-size: 0.8rem; color: #6B7280;">نقاط الارتواء</div>
-    <div class="unified-points" style="font-weight: bold; color: #10B981;">
-        جاري التحميل...
-    </div>
-</div>
+                
+                <div style="display: flex; gap: 15px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 0.8rem; color: #6B7280;">نقاط الارتواء</div>
+                        <div class="journey-points" style="font-weight: bold; color: #10B981;">
+                            جاري التحميل...
+                        </div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 0.8rem; color: #6B7280;">نقاط المحفظة</div>
+                        <div class="wallet-points" style="font-weight: bold; color: #F59E0B;">
+                            جاري التحميل...
+                        </div>
+                    </div>
                     <div style="text-align: center;">
                         <div style="font-size: 0.8rem; color: #6B7280;">اكتمال البيانات</div>
                         <div style="font-weight: bold; color: ${completeness > 70 ? '#10B981' : completeness > 40 ? '#F59E0B' : '#EF4444'};">
@@ -1911,6 +1930,7 @@ if (student.userId) {
                     </div>
                 </div>
             </div>
+
             
             <div class="student-header">
                 <div class="student-basic">
@@ -3397,11 +3417,11 @@ https://fouad-perspective.web.app/login
         }
 
         // إضافة نقاط إنشاء الحساب
-       await addUnifiedPoints(
+      await addDualPoints(
     formData.slug, 
     50, 
-    'انضمام للرحلة',
-    'نقاط ارتواء - إنشاء حساب جديد'
+    'إنشاء حساب جديد',
+    'نقاط ترحيبية عند الانضمام'
 );
         // إرسال رسالة الترحيب
 await sendWelcomeMessage(student);
@@ -3858,10 +3878,9 @@ if (formData.newExpectations || formData.newApplicationPlan) {
         // حساب الإجماليات المالية الجديدة
         const financialTotals = EnrollmentManager.calculateFinancialTotals(updatedEnrollments);
         
-     // معالجة استبدال النقاط بخصم
+     // استبدل السطور 2564-2595 بـ:
 let discountApplied = 0;
 if (formData.usePoints && formData.pointsToUse > 0) {
-    // حساب قيمة الخصم
     const discountRates = {
         100: 50,
         200: 100,
@@ -3872,13 +3891,13 @@ if (formData.usePoints && formData.pointsToUse > 0) {
     discountApplied = discountRates[formData.pointsToUse] || 0;
     
     if (discountApplied > 0) {
-        // خصم النقاط من الرصيد
-        await addUnifiedPoints(
-            student.userId,
-            -formData.pointsToUse,
-            'استبدال نقاط',
-            `خصم ${discountApplied} ج.م على ${student.courseName}`
-        );
+        // خصم من نقاط المحفظة فقط
+      await useWalletPoints(
+    student.userId,
+    formData.pointsToUse,
+    'استبدال نقاط',
+    `خصم ${discountApplied} ج.م على ${student.courseName}`
+);
         
         // تحديث السعر في enrollment
         const enrollmentIndex = updatedEnrollments.length - 1;
@@ -3894,7 +3913,33 @@ if (formData.usePoints && formData.pointsToUse > 0) {
         }
     }
 }
-        
+
+// استبدل السطور 2641-2661 بـ:
+let actualPaidAmount = 0;
+if (student.paymentInfo?.isInstallment) {
+    actualPaidAmount = student.paymentInfo.paidAmount || 0;
+} else if (student.paymentConfirmed) {
+    actualPaidAmount = newEnrollment.pricing.finalPrice - discountApplied; // خصم الخصومات
+}
+
+const coursePoints = Math.floor(actualPaidAmount / 10); // كل 10 جنيه = نقطة
+if (coursePoints > 0) {
+    let paymentDescription = '';
+    if (student.paymentInfo?.isInstallment) {
+        const installmentNumber = student.paymentInfo.paidInstallments || 1;
+        paymentDescription = `القسط ${installmentNumber} = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
+    } else {
+        paymentDescription = `دفعة كاملة = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
+    }
+    
+    // إضافة للنظامين معاً
+    await addDualPoints(
+        student.userId, 
+        coursePoints, 
+        `تخصيص دورة - ${student.courseName}`,
+        paymentDescription
+    );
+}
      
         
         // إضافة سجل في booking history
@@ -3945,35 +3990,7 @@ if (formData.usePoints && formData.pointsToUse > 0) {
 Swal.fire('نجح!', 'تم تخصيص الدورة بنجاح', 'success');
 await loadStudents();
 
-        // إضافة نقاط بناء على قيمة الدورة
-        // إضافة نقاط بناء على المبلغ المدفوع فعلياً
-let actualPaidAmount = 0;
-if (student.paymentInfo?.isInstallment) {
-    // للأقساط: نحسب المبلغ المدفوع فعلياً
-    actualPaidAmount = student.paymentInfo.paidAmount || 0;
-} else if (student.paymentConfirmed) {
-    // للدفع الكامل المؤكد
-    actualPaidAmount = newEnrollment.pricing.finalPrice;
-}
-
-const coursePoints = Math.floor(actualPaidAmount / 100);
-        if (coursePoints > 0) {
-    let paymentDescription = '';
-    if (student.paymentInfo?.isInstallment) {
-        const installmentNumber = student.paymentInfo.paidInstallments || 1;
-        paymentDescription = `القسط ${installmentNumber} = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
-    } else {
-        paymentDescription = `دفعة كاملة = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
-    }
-    
-    await addUnifiedPoints(
-        student.userId, 
-        coursePoints, 
-        `تخصيص دورة - ${student.courseName}`,
-        `نقاط ارتواء - ${paymentDescription}`
-    );
-}
-        
+               
         // رسالة النجاح المفصلة
         await Swal.fire({
             icon: 'success',
@@ -4835,20 +4852,49 @@ async function manageJourneySystem(studentId) {
         // نظام إدارة المحفظة
 async function manageWalletSystem(studentId) {
     const student = allStudents.find(s => s.id === studentId);
-    if (!student || !student.userId) return;
+    if (!student || !student.userId) {
+        Swal.fire('تنبيه', 'يجب إنشاء حساب أولاً', 'warning');
+        return;
+    }
     
     const userDoc = await db.collection('users').doc(student.userId).get();
+    if (!userDoc.exists) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات المستخدم', 'error');
+        return;
+    }
+    
     const userData = userDoc.data();
     
-    const walletData = userData.walletPoints || {
-        balance: 0,
-        used: 0,
-        lifetime: 0,
-        history: []
-    };
+    // التحقق من وجود نظام المحفظة
+    if (!userData.walletPoints) {
+        // إنشاء نظام المحفظة إذا لم يكن موجوداً
+        await db.collection('users').doc(student.userId).update({
+            walletPoints: {
+                balance: 0,
+                used: 0,
+                lifetime: 0,
+                history: [],
+                lastUpdated: new Date().toISOString(),
+                conversionRate: 0.1,
+                minRedemption: 100
+            }
+        });
+        userData.walletPoints = {
+            balance: 0,
+            used: 0,
+            lifetime: 0,
+            history: []
+        };
+    }
     
+    const walletData = userData.walletPoints;
     const conversionRate = walletData.conversionRate || 0.1;
     const cashValue = Math.floor(walletData.balance * conversionRate);
+    
+    // ترتيب السجل
+    const sortedHistory = [...(walletData.history || [])].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
     
     await Swal.fire({
         title: '💰 محفظة النقاط',
@@ -4874,11 +4920,27 @@ async function manageWalletSystem(studentId) {
                         </div>
                         <div>
                             <div style="font-size: 2.5rem; font-weight: bold;">
-                                ${walletData.used}
+                                ${walletData.used || 0}
                             </div>
                             <div style="opacity: 0.9;">نقطة مستخدمة</div>
                         </div>
                     </div>
+                </div>
+                
+                <!-- أزرار الإدارة -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button onclick="showAddWalletPointsDialog('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-plus-circle"></i> إضافة نقاط
+                    </button>
+                    <button onclick="showDeductWalletPointsDialog('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #EF4444, #DC2626); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-minus-circle"></i> خصم نقاط
+                    </button>
                 </div>
                 
                 <!-- جدول التحويل -->
@@ -4907,49 +4969,327 @@ async function manageWalletSystem(studentId) {
                     </div>
                 </div>
                 
-                <!-- السجل -->
+                <!-- السجل التفصيلي -->
                 <div style="background: white; border: 2px solid #E5E7EB; 
                             border-radius: 15px; padding: 20px;">
                     <h4 style="color: #1F2937; margin: 0 0 20px 0;">
-                        <i class="fas fa-history"></i> آخر المعاملات
+                        <i class="fas fa-history"></i> سجل المعاملات (${sortedHistory.length} معاملة)
                     </h4>
-                    ${walletData.history && walletData.history.length > 0 ? 
-                        walletData.history.slice(-10).reverse().map(entry => `
-                            <div style="border-bottom: 1px solid #E5E7EB; padding: 15px 0;">
-                                <div style="display: flex; justify-content: space-between;">
-                                    <div>
-                                        <span style="background: ${entry.amount > 0 ? '#10B981' : '#EF4444'}; 
-                                                     color: white; padding: 2px 8px; border-radius: 12px; 
-                                                     font-size: 0.85rem; font-weight: bold;">
-                                            ${entry.amount > 0 ? '+' : ''}${entry.amount}
-                                        </span>
-                                        <span style="margin-right: 10px; font-weight: bold;">
-                                            ${entry.reason}
-                                        </span>
-                                    </div>
-                                    <div style="color: #6B7280; font-size: 0.85rem;">
-                                        ${new Date(entry.timestamp).toLocaleDateString('ar-EG')}
+                    
+                    ${sortedHistory.length > 0 ? `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${sortedHistory.map((entry, index) => `
+                                <div style="border-bottom: 1px solid #E5E7EB; padding: 15px 0; 
+                                            ${index === sortedHistory.length - 1 ? 'border-bottom: none;' : ''}">
+                                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                                        <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                                <span style="background: ${entry.amount > 0 ? '#10B981' : '#EF4444'}; 
+                                                             color: white; padding: 2px 8px; border-radius: 12px; 
+                                                             font-size: 0.85rem; font-weight: bold;">
+                                                    ${entry.amount > 0 ? '+' : ''}${entry.amount}
+                                                </span>
+                                                <span style="font-weight: bold; color: #1F2937;">
+                                                    ${entry.reason}
+                                                </span>
+                                            </div>
+                                            <div style="color: #6B7280; font-size: 0.9rem; margin: 5px 0;">
+                                                ${entry.description}
+                                            </div>
+                                            <div style="color: #9CA3AF; font-size: 0.85rem;">
+                                                <i class="fas fa-clock"></i> 
+                                                ${new Date(entry.timestamp).toLocaleString('ar-EG')}
+                                            </div>
+                                        </div>
+                                        <button onclick="deleteWalletEntry('${student.userId}', '${entry.timestamp}')" 
+                                                style="background: #FEE2E2; color: #991B1B; border: none; 
+                                                       padding: 5px 10px; border-radius: 5px; cursor: pointer;
+                                                       font-size: 0.8rem;">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
                                     </div>
                                 </div>
-                                ${entry.description ? `
-                                    <div style="color: #6B7280; font-size: 0.9rem; margin-top: 5px;">
-                                        ${entry.description}
-                                    </div>
-                                ` : ''}
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="text-align: center; color: #6B7280; padding: 40px;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                            <p>لا توجد معاملات مسجلة بعد</p>
+                        </div>
+                    `}
+                </div>
+                
+                <!-- إحصائيات سريعة -->
+                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px; margin-top: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
+                        <div>
+                            <div style="color: #10B981; font-size: 1.2rem; font-weight: bold;">
+                                ${sortedHistory.filter(e => e.amount > 0).reduce((sum, e) => sum + e.amount, 0)}
                             </div>
-                        `).join('') : 
-                        '<div style="text-align: center; color: #6B7280; padding: 40px;">لا توجد معاملات بعد</div>'
-                    }
+                            <div style="color: #6B7280; font-size: 0.85rem;">نقاط مكتسبة</div>
+                        </div>
+                        <div>
+                            <div style="color: #EF4444; font-size: 1.2rem; font-weight: bold;">
+                                ${Math.abs(sortedHistory.filter(e => e.amount < 0).reduce((sum, e) => sum + e.amount, 0))}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">نقاط مستخدمة</div>
+                        </div>
+                        <div>
+                            <div style="color: #3B82F6; font-size: 1.2rem; font-weight: bold;">
+                                ${walletData.lifetime || 0}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">إجمالي مدى الحياة</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         `,
-        width: '700px',
+        width: '800px',
         showCloseButton: true,
         showConfirmButton: false
     });
 }
 
+// دوال إدارة نقاط المحفظة
+async function showAddWalletPointsDialog(userId) {
+    const { value: pointsData } = await Swal.fire({
+        title: '➕ إضافة نقاط للمحفظة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        عدد النقاط
+                    </label>
+                    <input type="number" id="pointsAmount" class="swal2-input" 
+                           placeholder="100" value="100" min="1"
+                           style="width: 100%;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        السبب
+                    </label>
+                    <select id="pointsReason" class="swal2-input" style="width: 100%;">
+                        <option value="مكافأة إدارية">مكافأة إدارية</option>
+                        <option value="تعويض">تعويض</option>
+                        <option value="إضافة يدوية">إضافة يدوية</option>
+                        <option value="عرض خاص">عرض خاص</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        الوصف
+                    </label>
+                    <textarea id="pointsDescription" class="swal2-textarea" 
+                              placeholder="تفاصيل إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إضافة النقاط',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = document.getElementById('pointsAmount').value;
+            const reason = document.getElementById('pointsReason').value;
+            const description = document.getElementById('pointsDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description || 'نقاط محفظة إضافية'
+            };
+        }
+    });
+    
+    if (pointsData) {
+        const success = await addWalletPoints(
+            userId, 
+            pointsData.amount, 
+            pointsData.reason, 
+            pointsData.description
+        );
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم إضافة النقاط',
+                text: `تم إضافة ${pointsData.amount} نقطة للمحفظة بنجاح`,
+                confirmButtonColor: '#10B981'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
+
+async function showDeductWalletPointsDialog(userId) {
+    const { value: pointsData } = await Swal.fire({
+        title: '➖ خصم نقاط من المحفظة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #DC2626;">
+                        عدد النقاط المخصومة
+                    </label>
+                    <input type="number" id="deductAmount" class="swal2-input" 
+                           placeholder="50" value="50" min="1"
+                           style="width: 100%; border-color: #DC2626;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        سبب الخصم
+                    </label>
+                    <select id="deductReason" class="swal2-input" style="width: 100%;">
+                        <option value="استبدال بخصم">استبدال بخصم</option>
+                        <option value="تصحيح خطأ">تصحيح خطأ</option>
+                        <option value="إلغاء مكافأة">إلغاء مكافأة</option>
+                        <option value="أخرى">أخرى</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        التفاصيل
+                    </label>
+                    <textarea id="deductDescription" class="swal2-textarea" 
+                              placeholder="سبب الخصم بالتفصيل..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الخصم',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626',
+        preConfirm: () => {
+            const amount = document.getElementById('deductAmount').value;
+            const reason = document.getElementById('deductReason').value;
+            const description = document.getElementById('deductDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            if (!description) {
+                Swal.showValidationMessage('يجب إدخال سبب الخصم');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description
+            };
+        }
+    });
+    
+    if (pointsData) {
+        const success = await useWalletPoints(
+            userId, 
+            pointsData.amount, 
+            pointsData.reason, 
+            pointsData.description
+        );
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم خصم النقاط',
+                text: `تم خصم ${pointsData.amount} نقطة من المحفظة`,
+                confirmButtonColor: '#DC2626'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
+
+async function deleteWalletEntry(userId, timestamp) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل تريد حذف هذه المعاملة من سجل المحفظة؟ سيتم تعديل الرصيد تلقائياً',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            const userRef = db.collection('users').doc(userId);
+            const userDoc = await userRef.get();
+            const userData = userDoc.data();
+            
+            const history = userData.walletPoints?.history || [];
+            const entryToDelete = history.find(e => e.timestamp === timestamp);
+            
+            if (entryToDelete) {
+                const newHistory = history.filter(e => e.timestamp !== timestamp);
+                const newBalance = (userData.walletPoints?.balance || 0) - entryToDelete.amount;
+                
+                await userRef.update({
+                    'walletPoints.balance': newBalance,
+                    'walletPoints.history': newHistory,
+                    'walletPoints.lastUpdated': new Date().toISOString()
+                });
+                
+                Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
+                setTimeout(() => location.reload(), 1500);
+            }
+        } catch (error) {
+            console.error('خطأ في حذف المعاملة:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف المعاملة', 'error');
+        }
+    }
+}
+
+// دالة إضافة نقاط للمحفظة فقط
+async function addWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance + amount,
+            'walletPoints.lifetime': (userData.walletPoints?.lifetime || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'addition'
+            })
+        });
+        
+        console.log(`✅ تم إضافة ${amount} نقطة للمحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة نقاط المحفظة:', error);
+        return false;
+    }
+}
+
+// إضافة الدوال للـ window
 window.manageWalletSystem = manageWalletSystem;
+window.showAddWalletPointsDialog = showAddWalletPointsDialog;
+window.showDeductWalletPointsDialog = showDeductWalletPointsDialog;
+window.deleteWalletEntry = deleteWalletEntry;
+window.addWalletPoints = addWalletPoints;
+
 
         // دالة عرض نافذة خصم النقاط
 async function showDeductPointsDialog(userId) {
