@@ -751,6 +751,9 @@
         let filteredStudents = [];
         let currentFilter = 'all';
         let availableCourses = [];
+        let coursesWithOffers = [];
+let activeOffers = {};
+let customizationTemplates = [];
 let availablePaths = [];
 // ==================== 🗂️ البنية الجديدة المتكاملة للمستخدم ====================
 
@@ -2982,7 +2985,59 @@ async function loadAvailableCourses() {
     }
 }
 
-
+// دالة جلب جميع الدورات مع عروضها من Firebase
+async function loadCoursesWithOffers() {
+    try {
+        console.log('🔄 جاري تحميل الدورات والعروض...');
+        
+        const coursesSnapshot = await db.collection('courses').get();
+        coursesWithOffers = [];
+        
+        for (const doc of coursesSnapshot.docs) {
+            const courseData = doc.data();
+            const course = {
+                id: doc.id,
+                title: courseData.title || 'دورة غير محددة',
+                price: parseFloat(courseData.price) || 0,
+                salePrice: parseFloat(courseData.salePrice) || 0,
+                currency: courseData.currency || 'EGP',
+                
+                // الخصومات الزمنية
+                discounts: courseData.discounts || [],
+                
+                // خصم الدفع النقدي
+                cashDiscount: courseData.cashDiscount || {
+                    enabled: false,
+                    percentage: 0
+                },
+                
+                // خطط الأقساط
+                paymentPlans: courseData.paymentPlans || [],
+                
+                // خصومات المجموعات
+                groupDiscounts: courseData.groupDiscounts || [],
+                
+                // الكوبونات
+                coupons: courseData.coupons || [],
+                
+                // المنح
+                grants: courseData.grants || {
+                    enabled: false,
+                    seats: 0
+                }
+            };
+            
+            coursesWithOffers.push(course);
+        }
+        
+        console.log('✅ تم تحميل', coursesWithOffers.length, 'دورة بعروضها');
+        return coursesWithOffers;
+        
+    } catch (error) {
+        console.error('خطأ في جلب الدورات:', error);
+        return [];
+    }
+}
 // ==================== 🚀 دالة إنشاء الحساب المتكاملة ====================
 async function createAccount(studentId) {
     try {
@@ -4354,298 +4409,265 @@ window.smartMessaging = smartMessaging;
         // دالة تخصيص دورة إضافية مخصصة
 async function assignCustomCourse(studentId) {
     const student = allStudents.find(s => s.id === studentId);
-    if (!student || !student.userId) {
-        Swal.fire('خطأ', 'يجب إنشاء حساب أولاً', 'error');
+    if (!student) {
+        Swal.fire('خطأ', 'لم يتم العثور على الطالب', 'error');
         return;
     }
     
-    // جلب بيانات المستخدم
-    const userDoc = await db.collection('users').doc(student.userId).get();
-    const userData = userDoc.data();
+    // التحقق من وجود حساب
+    if (!student.userId) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'لا يوجد حساب',
+            text: 'يجب إنشاء حساب أولاً',
+            showCancelButton: true,
+            confirmButtonText: 'إنشاء حساب',
+            cancelButtonText: 'إلغاء'
+        });
+        
+        if (result.isConfirmed) {
+            await createAccount(studentId);
+        }
+        return;
+    }
     
-    const { value: customData } = await Swal.fire({
-        title: '🎨 إضافة دورة مخصصة',
+    // تحميل الدورات والعروض
+    Swal.fire({
+        title: 'جاري التحميل...',
+        text: 'يتم جلب الدورات والعروض المتاحة',
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        willOpen: () => { Swal.showLoading(); }
+    });
+    
+    await loadCoursesWithOffers();
+    
+    // عرض واجهة اختيار الدورة
+    const { value: selectedCourse } = await Swal.fire({
+        title: '🎨 تخصيص دورة إضافية',
         html: `
-            <div style="text-align: right; direction: rtl;">
+            <div style="text-align: right; direction: rtl; max-height: 60vh; overflow-y: auto;">
                 
                 <!-- معلومات الطالب -->
                 <div style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); 
                             color: white; padding: 15px; border-radius: 12px; margin-bottom: 20px;">
                     <h4 style="margin: 0;">${student.customer?.name}</h4>
                     <p style="margin: 5px 0; opacity: 0.9;">
-                        لديه ${userData.enrollments?.length || 0} دورة مسجلة
+                        ${student.customer?.whatsapp} | ${student.customer?.email || 'لا يوجد بريد'}
                     </p>
                 </div>
                 
-                <!-- بيانات الدورة -->
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                        <i class="fas fa-book"></i> اسم الدورة
-                    </label>
-                    <input type="text" id="courseName" class="swal2-input" 
-                           placeholder="مثال: دورة متقدمة في الإنياجرام"
-                           style="width: 100%;">
-                </div>
-                
-                <!-- التسعير -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                    <div>
-                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                            <i class="fas fa-tag"></i> السعر الأصلي
-                        </label>
-                        <input type="number" id="originalPrice" class="swal2-input" 
-                               placeholder="5000" onchange="calculateCustomPrice()"
-                               style="width: 100%;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                            <i class="fas fa-percentage"></i> نسبة الخصم %
-                        </label>
-                        <input type="number" id="discountPercent" class="swal2-input" 
-                               placeholder="20" min="0" max="100" 
-                               onchange="calculateCustomPrice()"
-                               style="width: 100%;">
-                    </div>
-                </div>
-                
-                <!-- السعر النهائي -->
-                <div style="background: #DCFCE7; padding: 15px; border-radius: 10px; 
-                            margin-bottom: 15px; text-align: center;">
-                    <div style="color: #065F46;">السعر النهائي</div>
-                    <div id="finalPriceDisplay" style="font-size: 1.5rem; font-weight: bold; 
-                                                       color: #10B981;">
-                        0 ج.م
-                    </div>
-                </div>
-                
-                <!-- طريقة الدفع -->
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                        <i class="fas fa-credit-card"></i> طريقة الدفع
-                    </label>
-                    <select id="paymentType" class="swal2-input" 
-                            onchange="toggleCustomInstallments()" style="width: 100%;">
-                        <option value="full">دفع كامل</option>
-                        <option value="installment">أقساط</option>
+                <!-- قائمة الدورات -->
+                <div style="margin-bottom: 20px;">
+                    <h4 style="color: #1F2937; margin-bottom: 15px;">
+                        <i class="fas fa-book"></i> اختر الدورة
+                    </h4>
+                    <select id="courseSelect" class="swal2-input" 
+                            onchange="updateCourseOffers()" 
+                            style="width: 100%; padding: 12px;">
+                        <option value="">-- اختر دورة --</option>
+                        ${coursesWithOffers.map(course => `
+                            <option value="${course.id}" 
+                                    data-price="${course.price}"
+                                    data-sale="${course.salePrice}">
+                                ${course.title} - ${course.price} ج.م
+                                ${course.salePrice ? `(مخفض: ${course.salePrice} ج.م)` : ''}
+                            </option>
+                        `).join('')}
                     </select>
                 </div>
                 
-                <!-- تفاصيل الأقساط -->
-                <div id="installmentDetails" style="display: none;">
-                    <div style="background: #F3F4F6; padding: 15px; border-radius: 10px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <div>
-                                <label style="display: block; margin-bottom: 8px;">
-                                    عدد الأقساط
-                                </label>
-                                <select id="installmentCount" class="swal2-input" 
-                                        onchange="calculateCustomInstallments()" 
-                                        style="width: 100%;">
-                                    <option value="2">قسطين</option>
-                                    <option value="3">3 أقساط</option>
-                                    <option value="4">4 أقساط</option>
-                                    <option value="6">6 أقساط</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label style="display: block; margin-bottom: 8px;">
-                                    قيمة القسط
-                                </label>
-                                <input type="text" id="installmentAmount" readonly 
-                                       style="width: 100%; padding: 8px; border: 1px solid #E5E7EB; 
-                                              border-radius: 5px; background: white;">
-                            </div>
-                        </div>
-                    </div>
+                <!-- منطقة العروض -->
+                <div id="offersArea" style="display: none;">
+                    <!-- ستملأ ديناميكياً -->
                 </div>
                 
-                <!-- المدة -->
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
-                        <i class="fas fa-calendar"></i> مدة الوصول
-                    </label>
-                    <select id="accessDuration" class="swal2-input" style="width: 100%;">
-                        <option value="3">3 أشهر</option>
-                        <option value="6" selected>6 أشهر</option>
-                        <option value="12">سنة</option>
-                        <option value="unlimited">غير محدود</option>
-                    </select>
+                <!-- حاسبة السعر -->
+                <div id="priceCalculator" style="display: none;">
+                    <!-- ستملأ ديناميكياً -->
                 </div>
             </div>
         `,
+        width: '800px',
         showCancelButton: true,
         confirmButtonText: 'تخصيص الدورة',
         cancelButtonText: 'إلغاء',
         confirmButtonColor: '#8B5CF6',
-        width: '600px',
         didOpen: () => {
-            // دوال الحساب
-            window.calculateCustomPrice = () => {
-                const original = parseFloat(document.getElementById('originalPrice').value) || 0;
-                const discount = parseFloat(document.getElementById('discountPercent').value) || 0;
-                const final = original - (original * discount / 100);
-                document.getElementById('finalPriceDisplay').textContent = 
-                    final.toLocaleString('ar-EG') + ' ج.م';
-                calculateCustomInstallments();
+            // إضافة الدوال للنافذة
+            window.updateCourseOffers = function() {
+                const select = document.getElementById('courseSelect');
+                const courseId = select.value;
+                
+                if (!courseId) {
+                    document.getElementById('offersArea').style.display = 'none';
+                    document.getElementById('priceCalculator').style.display = 'none';
+                    return;
+                }
+                
+                const course = coursesWithOffers.find(c => c.id === courseId);
+                if (!course) return;
+                
+                // عرض العروض المتاحة
+                showCourseOffers(course);
             };
             
-            window.toggleCustomInstallments = () => {
-                const type = document.getElementById('paymentType').value;
-                document.getElementById('installmentDetails').style.display = 
-                    type === 'installment' ? 'block' : 'none';
-                if (type === 'installment') calculateCustomInstallments();
-            };
-            
-            window.calculateCustomInstallments = () => {
-                const original = parseFloat(document.getElementById('originalPrice').value) || 0;
-                const discount = parseFloat(document.getElementById('discountPercent').value) || 0;
-                const final = original - (original * discount / 100);
-                const count = parseInt(document.getElementById('installmentCount').value) || 3;
-                const amount = Math.ceil(final / count);
-                document.getElementById('installmentAmount').value = 
-                    amount.toLocaleString('ar-EG') + ' ج.م';
+            window.showCourseOffers = function(course) {
+                const offersArea = document.getElementById('offersArea');
+                const priceCalc = document.getElementById('priceCalculator');
+                
+                offersArea.style.display = 'block';
+                priceCalc.style.display = 'block';
+                
+                // بناء HTML العروض
+                let offersHTML = `
+                    <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-tags"></i> العروض المتاحة
+                        </h4>
+                `;
+                
+                // العروض الزمنية
+                if (course.discounts && course.discounts.length > 0) {
+                    offersHTML += `
+                        <div style="margin-bottom: 15px;">
+                            <h5 style="color: #6B7280;">عروض زمنية:</h5>
+                            ${course.discounts.map((d, idx) => `
+                                <label style="display: block; margin: 5px 0;">
+                                    <input type="checkbox" id="discount_${idx}" 
+                                           value="${d.percentage}"
+                                           onchange="calculateFinalPrice()">
+                                    ${d.name} - خصم ${d.percentage}%
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                
+                // خصم نقدي
+                if (course.cashDiscount && course.cashDiscount.enabled) {
+                    offersHTML += `
+                        <div style="margin-bottom: 15px;">
+                            <label>
+                                <input type="checkbox" id="cashDiscount" 
+                                       value="${course.cashDiscount.percentage}"
+                                       onchange="calculateFinalPrice()">
+                                خصم الدفع النقدي ${course.cashDiscount.percentage}%
+                            </label>
+                        </div>
+                    `;
+                }
+                
+                // الأقساط
+                if (course.paymentPlans && course.paymentPlans.length > 0) {
+                    offersHTML += `
+                        <div style="margin-bottom: 15px;">
+                            <h5 style="color: #6B7280;">خطط الأقساط:</h5>
+                            <select id="installmentPlan" class="swal2-input" 
+                                    onchange="calculateFinalPrice()"
+                                    style="width: 100%;">
+                                <option value="">دفع كامل</option>
+                                ${course.paymentPlans.map(plan => `
+                                    <option value="${plan.installments}">
+                                        ${plan.name} - ${plan.installments} أقساط
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                    `;
+                }
+                
+                offersHTML += '</div>';
+                offersArea.innerHTML = offersHTML;
+                
+                // حاسبة السعر
+                priceCalc.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #10B981, #059669); 
+                                color: white; padding: 20px; border-radius: 12px;">
+                        <h4 style="margin: 0 0 15px 0;">
+                            <i class="fas fa-calculator"></i> حساب السعر
+                        </h4>
+                        <div id="priceDetails">
+                            <div>السعر الأصلي: ${course.price} ج.م</div>
+                        </div>
+                    </div>
+                `;
+                
+                // إضافة دالة الحساب
+                window.calculateFinalPrice = function() {
+                    let price = course.price;
+                    let totalDiscount = 0;
+                    let details = [`السعر الأصلي: ${price} ج.م`];
+                    
+                    // حساب الخصومات
+                    const discountInputs = document.querySelectorAll('[id^="discount_"]:checked');
+                    discountInputs.forEach(input => {
+                        const discount = parseFloat(input.value);
+                        const amount = price * (discount / 100);
+                        totalDiscount += amount;
+                        details.push(`خصم: -${amount.toFixed(0)} ج.م`);
+                    });
+                    
+                    // خصم نقدي
+                    const cashInput = document.getElementById('cashDiscount');
+                    if (cashInput && cashInput.checked) {
+                        const amount = price * (parseFloat(cashInput.value) / 100);
+                        totalDiscount += amount;
+                        details.push(`خصم نقدي: -${amount.toFixed(0)} ج.م`);
+                    }
+                    
+                    const finalPrice = price - totalDiscount;
+                    details.push(`<strong>السعر النهائي: ${finalPrice.toFixed(0)} ج.م</strong>`);
+                    
+                    document.getElementById('priceDetails').innerHTML = details.join('<br>');
+                };
             };
         },
         preConfirm: () => {
-            const courseName = document.getElementById('courseName').value.trim();
-            const originalPrice = parseFloat(document.getElementById('originalPrice').value);
-            
-            if (!courseName) {
-                Swal.showValidationMessage('يجب إدخال اسم الدورة');
+            const courseId = document.getElementById('courseSelect').value;
+            if (!courseId) {
+                Swal.showValidationMessage('يجب اختيار دورة');
                 return false;
             }
             
-            if (!originalPrice || originalPrice <= 0) {
-                Swal.showValidationMessage('يجب إدخال السعر');
-                return false;
+            const course = coursesWithOffers.find(c => c.id === courseId);
+            
+            // جمع العروض المختارة
+            const selectedOffers = {
+                discounts: [],
+                cashDiscount: false,
+                installmentPlan: null
+            };
+            
+            // الخصومات
+            document.querySelectorAll('[id^="discount_"]:checked').forEach(input => {
+                selectedOffers.discounts.push(parseFloat(input.value));
+            });
+            
+            // خصم نقدي
+            const cashInput = document.getElementById('cashDiscount');
+            if (cashInput && cashInput.checked) {
+                selectedOffers.cashDiscount = parseFloat(cashInput.value);
             }
             
-            const discountPercent = parseFloat(document.getElementById('discountPercent').value) || 0;
-            const finalPrice = originalPrice - (originalPrice * discountPercent / 100);
+            // الأقساط
+            const installmentSelect = document.getElementById('installmentPlan');
+            if (installmentSelect && installmentSelect.value) {
+                selectedOffers.installmentPlan = installmentSelect.value;
+            }
             
             return {
-                courseName,
-                originalPrice,
-                discountPercent,
-                finalPrice,
-                paymentType: document.getElementById('paymentType').value,
-                installmentCount: document.getElementById('paymentType').value === 'installment' ? 
-                    parseInt(document.getElementById('installmentCount').value) : null,
-                accessDuration: document.getElementById('accessDuration').value
+                course: course,
+                offers: selectedOffers,
+                student: student
             };
         }
     });
     
-    if (!customData) return;
+    if (!selectedCourse) return;
     
-    try {
-        // إنشاء enrollment جديد
-        const newEnrollment = {
-            id: `custom-${Date.now()}`,
-            title: customData.courseName,
-            type: 'custom',
-            
-            pricing: {
-                originalPrice: customData.originalPrice,
-                finalPrice: customData.finalPrice,
-                discountPercentage: customData.discountPercent,
-                savings: customData.originalPrice - customData.finalPrice
-            },
-            
-            payment: {
-                type: customData.paymentType,
-                status: 'pending',
-                totalAmount: customData.finalPrice,
-                paidAmount: 0,
-                remainingAmount: customData.finalPrice,
-                installments: customData.paymentType === 'installment' ? {
-                    isActive: true,
-                    totalInstallments: customData.installmentCount,
-                    paidInstallments: 0,
-                    schedule: []
-                } : null
-            },
-            
-            dates: {
-                enrolledAt: new Date().toISOString(),
-                startDate: new Date().toISOString(),
-                endDate: customData.accessDuration === 'unlimited' ? 
-                    new Date('2099-12-31').toISOString() : 
-                    new Date(Date.now() + (parseInt(customData.accessDuration) * 30 * 24 * 60 * 60 * 1000)).toISOString()
-            },
-            
-            status: {
-                current: 'active',
-                isActive: true
-            },
-            
-            metadata: {
-                source: 'custom_assignment',
-                assignedBy: 'admin',
-                assignedAt: new Date().toISOString()
-            }
-        };
-        
-        // إنشاء جدول الأقساط إذا لزم
-        if (customData.paymentType === 'installment') {
-            const installmentAmount = Math.ceil(customData.finalPrice / customData.installmentCount);
-            for (let i = 0; i < customData.installmentCount; i++) {
-                const dueDate = new Date();
-                dueDate.setMonth(dueDate.getMonth() + i);
-                
-                newEnrollment.payment.installments.schedule.push({
-                    installmentNumber: i + 1,
-                    amount: installmentAmount,
-                    dueDate: dueDate.toISOString(),
-                    status: 'pending'
-                });
-            }
-        }
-        
-        // إضافة للمستخدم
-        const enrollments = userData.enrollments || [];
-        enrollments.push(newEnrollment);
-        
-        await db.collection('users').doc(student.userId).update({
-            enrollments: enrollments,
-            'timestamps.updatedAt': new Date().toISOString()
-        });
-
-        // إضافة نقاط الدورة المخصصة
-        const customCoursePoints = Math.floor(customData.finalPrice / 100);
-        if (customCoursePoints > 0) {
-           if (customCoursePoints > 0) {
-    const paymentTypeText = customData.paymentType === 'installment' ? 
-        `${customData.installmentCount} أقساط` : 'دفعة كاملة';
-    
-    await addUnifiedPoints(
-        student.userId, 
-        customCoursePoints, 
-        `دورة مخصصة - ${customData.courseName}`,
-        `نقاط ارتواء - ${paymentTypeText} = ${customData.finalPrice.toLocaleString('ar-EG')} ج.م`
-    );
-}
-        }
-        
-        Swal.fire({
-            icon: 'success',
-            title: 'تم تخصيص الدورة بنجاح',
-            html: `
-                <div style="text-align: right;">
-                    <p><strong>الدورة:</strong> ${customData.courseName}</p>
-                    <p><strong>السعر:</strong> ${customData.finalPrice.toLocaleString('ar-EG')} ج.م</p>
-                    <p><strong>المدة:</strong> ${customData.accessDuration === 'unlimited' ? 'غير محدود' : customData.accessDuration + ' شهر'}</p>
-                </div>
-            `,
-            confirmButtonColor: '#10B981'
-        });
-        
-        await loadStudents();
-        
-    } catch (error) {
-        console.error('خطأ في تخصيص الدورة:', error);
-        Swal.fire('خطأ', 'حدث خطأ في تخصيص الدورة', 'error');
-    }
+    // حفظ التخصيص
+    await saveCustomAssignment(selectedCourse);
 }
 
 window.assignCustomCourse = assignCustomCourse;
