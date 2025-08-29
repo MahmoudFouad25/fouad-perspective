@@ -2136,7 +2136,7 @@ function createStudentCard(student) {
     ${hasAccount ? `
     <button class="btn" style="background: linear-gradient(135deg, ${levelColor}, ${levelColor}DD); color: white;"
             onclick="manageJourneySystem('${studentId}')">
-        <i class="fas ${levelIcon}"></i> رحلة الفؤاد
+        <i class="fas fa-seedling"></i> بذور الارتواء
     </button>
 ` : ''}
     
@@ -4724,11 +4724,11 @@ async function manageJourneySystem(studentId) {
 const journeyHistory = userData.journeyPoints?.history || [];
 const walletPoints = userData.walletPoints?.balance || 0;
 
-// دمج السجلات من النظامين
-const combinedHistory = [
-    ...(journeyHistory || []).map(h => ({...h, system: 'journey'})),
-    ...(userData.walletPoints?.history || []).map(h => ({...h, system: 'wallet'}))
-];
+// بدلاً من دمج السجلات، اعرض فقط سجل الرحلة
+const journeyHistory = userData.journeyPoints?.history || [];
+const sortedHistory = [...journeyHistory].sort((a, b) => 
+    new Date(b.timestamp) - new Date(a.timestamp)
+);
     
     const currentStage = userData.accountStatus?.journeyStage || 1;
     const stageInfo = FouadJourneySystem.stages[currentStage];
@@ -4740,7 +4740,7 @@ const combinedHistory = [
 
     
     await Swal.fire({
-        title: '🌟 رحلة منظور الفؤاد - سجل نقاط الارتواء',
+        title: '🌱 بذور الارتواء - سجل نقاط الرحلة',
         html: `
             <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
                 
@@ -4799,7 +4799,6 @@ const combinedHistory = [
                                                              color: white; padding: 2px 8px; border-radius: 12px; 
                                                              font-size: 0.85rem; font-weight: bold;">
                                                     ${entry.amount > 0 ? '+' : ''}${entry.amount}
-                                                        ${entry.system === 'wallet' ? '💰' : '⭐'}
                                                 </span>
                                                 <span style="font-weight: bold; color: #1F2937;">
                                                     ${entry.reason}
@@ -5065,8 +5064,25 @@ async function manageWalletSystem(studentId) {
 
 // دوال إدارة نقاط المحفظة
 async function showAddWalletPointsDialog(userId) {
+    // أولاً نسأل عن النظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'wallet': 'نقاط المحفظة فقط',
+            'journey': 'نقاط الارتواء فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
     const { value: pointsData } = await Swal.fire({
-        title: '➕ إضافة نقاط للمحفظة',
+        title: `➕ إضافة نقاط ${system === 'wallet' ? 'المحفظة' : system === 'journey' ? 'الارتواء' : 'للنظامين'}`,
         html: `
             <div style="text-align: right; direction: rtl;">
                 <div style="margin-bottom: 15px;">
@@ -5115,24 +5131,47 @@ async function showAddWalletPointsDialog(userId) {
             return {
                 amount: parseInt(amount),
                 reason: reason,
-                description: description || 'نقاط محفظة إضافية'
+                description: description || 'نقاط إضافية',
+                system: system
             };
         }
     });
     
     if (pointsData) {
-        const success = await addWalletPoints(
-            userId, 
-            pointsData.amount, 
-            pointsData.reason, 
-            pointsData.description
-        );
+        let success = false;
+        let systemText = '';
+        
+        if (pointsData.system === 'wallet') {
+            success = await addWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (محفظة فقط)', 
+                pointsData.description
+            );
+            systemText = 'للمحفظة';
+        } else if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (رحلة ارتواء فقط)', 
+                pointsData.description
+            );
+            systemText = 'للرحلة';
+        } else {
+            success = await addDualPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            systemText = 'للنظامين';
+        }
         
         if (success) {
             Swal.fire({
                 icon: 'success',
                 title: 'تم إضافة النقاط',
-                text: `تم إضافة ${pointsData.amount} نقطة للمحفظة بنجاح`,
+                text: `تم إضافة ${pointsData.amount} نقطة ${systemText}`,
                 confirmButtonColor: '#10B981'
             });
             
@@ -5142,8 +5181,25 @@ async function showAddWalletPointsDialog(userId) {
 }
 
 async function showDeductWalletPointsDialog(userId) {
+    // أولاً نسأل عن النظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'wallet': 'نقاط المحفظة فقط',
+            'journey': 'نقاط الارتواء فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
     const { value: pointsData } = await Swal.fire({
-        title: '➖ خصم نقاط من المحفظة',
+        title: `➖ خصم نقاط من ${system === 'wallet' ? 'المحفظة' : system === 'journey' ? 'الارتواء' : 'النظامين'}`,
         html: `
             <div style="text-align: right; direction: rtl;">
                 <div style="margin-bottom: 15px;">
@@ -5162,6 +5218,7 @@ async function showDeductWalletPointsDialog(userId) {
                         <option value="استبدال بخصم">استبدال بخصم</option>
                         <option value="تصحيح خطأ">تصحيح خطأ</option>
                         <option value="إلغاء مكافأة">إلغاء مكافأة</option>
+                        <option value="مخالفة">مخالفة</option>
                         <option value="أخرى">أخرى</option>
                     </select>
                 </div>
@@ -5197,24 +5254,55 @@ async function showDeductWalletPointsDialog(userId) {
             return {
                 amount: parseInt(amount),
                 reason: reason,
-                description: description
+                description: description,
+                system: system
             };
         }
     });
     
     if (pointsData) {
-        const success = await useWalletPoints(
-            userId, 
-            pointsData.amount, 
-            pointsData.reason, 
-            pointsData.description
-        );
+        let success = false;
+        let systemText = '';
+        
+        if (pointsData.system === 'wallet') {
+            success = await useWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (خصم محفظة فقط)', 
+                pointsData.description
+            );
+            systemText = 'من المحفظة';
+        } else if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(
+                userId, 
+                -pointsData.amount, 
+                pointsData.reason + ' (خصم رحلة ارتواء فقط)', 
+                pointsData.description
+            );
+            systemText = 'من الرحلة';
+        } else {
+            // خصم من النظامين
+            const success1 = await useWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            const success2 = await addJourneyPoints(
+                userId, 
+                -pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            success = success1 && success2;
+            systemText = 'من النظامين';
+        }
         
         if (success) {
             Swal.fire({
                 icon: 'success',
                 title: 'تم خصم النقاط',
-                text: `تم خصم ${pointsData.amount} نقطة من المحفظة`,
+                text: `تم خصم ${pointsData.amount} نقطة ${systemText}`,
                 confirmButtonColor: '#DC2626'
             });
             
@@ -5222,7 +5310,6 @@ async function showDeductWalletPointsDialog(userId) {
         }
     }
 }
-
 async function deleteWalletEntry(userId, timestamp) {
     const result = await Swal.fire({
         title: 'تأكيد الحذف',
@@ -5499,22 +5586,17 @@ async function deletePointsEntry(userId, timestamp) {
         // دالة إضافة النقاط المزدوجة - للنظامين معاً
 async function addDualPoints(userId, amount, reason, description) {
     try {
-        if (!userId || !amount) {
-            console.error('معاملات غير صحيحة لإضافة النقاط');
-            return false;
-        }
-        
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
         
-        if (!userDoc.exists) {
-            console.error('المستخدم غير موجود');
-            return false;
-        }
+        if (!userDoc.exists) return false;
         
         const userData = userDoc.data();
         const currentJourneyBalance = userData.journeyPoints?.balance || 0;
         const currentWalletBalance = userData.walletPoints?.balance || 0;
+        
+        // تحديد التسمية الصحيحة
+        const reasonLabel = reason.includes('(') ? reason : reason + ' (النظامين)';
         
         const updates = {
             // تحديث نقاط الارتواء
@@ -5523,7 +5605,7 @@ async function addDualPoints(userId, amount, reason, description) {
             'journeyPoints.lastUpdated': new Date().toISOString(),
             'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
                 amount: amount,
-                reason: reason + ' (رحلة)',
+                reason: reasonLabel,
                 description: description,
                 timestamp: new Date().toISOString(),
                 type: 'journey'
@@ -5535,7 +5617,7 @@ async function addDualPoints(userId, amount, reason, description) {
             'walletPoints.lastUpdated': new Date().toISOString(),
             'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
                 amount: amount,
-                reason: reason + ' (محفظة)',
+                reason: reasonLabel,
                 description: description,
                 timestamp: new Date().toISOString(),
                 type: 'wallet'
@@ -5543,8 +5625,6 @@ async function addDualPoints(userId, amount, reason, description) {
         };
         
         await userRef.update(updates);
-        
-        console.log(`✅ تم إضافة ${amount} نقطة للنظامين - المستخدم: ${userId}`);
         return true;
         
     } catch (error) {
