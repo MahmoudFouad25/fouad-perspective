@@ -5293,8 +5293,25 @@ window.addWalletPoints = addWalletPoints;
 
         // دالة عرض نافذة خصم النقاط
 async function showDeductPointsDialog(userId) {
+    // أولاً نسأل من أي نظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'journey': 'نقاط الارتواء (الرحلة)',
+            'wallet': 'نقاط المحفظة',
+            'both': 'كلا النظامين'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
     const { value: pointsData } = await Swal.fire({
-        title: '➖ خصم نقاط ارتواء',
+        title: `➖ خصم نقاط من ${system === 'journey' ? 'الرحلة' : system === 'wallet' ? 'المحفظة' : 'النظامين'}`,
         html: `
             <div style="text-align: right; direction: rtl;">
                 <div style="margin-bottom: 15px;">
@@ -5347,26 +5364,33 @@ async function showDeductPointsDialog(userId) {
             }
             
             return {
-                amount: -Math.abs(parseInt(amount)), // سالب دائماً
+                amount: parseInt(amount),
                 reason: reason,
-                description: description
+                description: description,
+                system: system
             };
         }
     });
     
     if (pointsData) {
-        const success = await addUnifiedPoints(
-            userId, 
-            pointsData.amount, 
-            pointsData.reason, 
-            pointsData.description
-        );
+        let success = false;
+        
+        if (pointsData.system === 'journey') {
+            // خصم من الرحلة فقط
+            success = await addJourneyPoints(userId, -pointsData.amount, pointsData.reason, pointsData.description);
+        } else if (pointsData.system === 'wallet') {
+            // خصم من المحفظة فقط
+            success = await useWalletPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        } else {
+            // خصم من النظامين
+            success = await addDualPoints(userId, -pointsData.amount, pointsData.reason, pointsData.description);
+        }
         
         if (success) {
             Swal.fire({
                 icon: 'success',
                 title: 'تم خصم النقاط',
-                text: `تم خصم ${Math.abs(pointsData.amount)} نقطة ارتواء`,
+                text: `تم خصم ${pointsData.amount} نقطة من ${pointsData.system === 'journey' ? 'الرحلة' : pointsData.system === 'wallet' ? 'المحفظة' : 'النظامين'}`,
                 confirmButtonColor: '#DC2626'
             });
             
@@ -5374,6 +5398,42 @@ async function showDeductPointsDialog(userId) {
         }
     }
 }
+
+        async function addJourneyPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.journeyPoints?.balance || 0;
+        
+        await userRef.update({
+            'journeyPoints.balance': currentBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            })
+        });
+        
+        console.log(`تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة رحلة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في تعديل نقاط الرحلة:', error);
+        return false;
+    }
+}
+
+window.addJourneyPoints = addJourneyPoints;
 
         // دالة حذف معاملة من السجل
 async function deletePointsEntry(userId, timestamp) {
