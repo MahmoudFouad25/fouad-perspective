@@ -3421,7 +3421,7 @@ https://fouad-perspective.web.app/login
     formData.slug, 
     50, 
     'إنشاء حساب جديد',
-    'نقاط ترحيبية عند الانضمام'
+    'نقاط ترحيبية عند الانضمام لمنظور الفؤاد'
 );
         // إرسال رسالة الترحيب
 await sendWelcomeMessage(student);
@@ -4720,15 +4720,24 @@ async function manageJourneySystem(studentId) {
     const userDoc = await db.collection('users').doc(student.userId).get();
     const userData = userDoc.data();
     
-    const totalPoints = userData.unifiedPoints?.balance || 0;
-    const pointsHistory = userData.unifiedPoints?.history || [];
+   const journeyPoints = userData.journeyPoints?.balance || 0;
+const journeyHistory = userData.journeyPoints?.history || [];
+const walletPoints = userData.walletPoints?.balance || 0;
+
+// دمج السجلات من النظامين
+const combinedHistory = [
+    ...(journeyHistory || []).map(h => ({...h, system: 'journey'})),
+    ...(userData.walletPoints?.history || []).map(h => ({...h, system: 'wallet'}))
+];
+    
     const currentStage = userData.accountStatus?.journeyStage || 1;
     const stageInfo = FouadJourneySystem.stages[currentStage];
     
     // ترتيب السجل من الأحدث للأقدم
-    const sortedHistory = [...pointsHistory].sort((a, b) => 
-        new Date(b.timestamp) - new Date(a.timestamp)
-    );
+   const sortedHistory = [...combinedHistory].sort((a, b) => 
+    new Date(b.timestamp) - new Date(a.timestamp)
+);
+
     
     await Swal.fire({
         title: '🌟 رحلة منظور الفؤاد - سجل نقاط الارتواء',
@@ -4745,9 +4754,12 @@ async function manageJourneySystem(studentId) {
                         </div>
                         <div style="text-align: center;">
                             <div style="font-size: 3rem; font-weight: bold;">
-                                ${totalPoints}
-                            </div>
-                            <div>نقطة ارتواء</div>
+    ${journeyPoints}
+</div>
+<div>نقطة ارتواء</div>
+<div style="font-size: 1.5rem; margin-top: 10px; opacity: 0.8;">
+    (${walletPoints} نقطة محفظة)
+</div>
                         </div>
                     </div>
                 </div>
@@ -4787,6 +4799,7 @@ async function manageJourneySystem(studentId) {
                                                              color: white; padding: 2px 8px; border-radius: 12px; 
                                                              font-size: 0.85rem; font-weight: bold;">
                                                     ${entry.amount > 0 ? '+' : ''}${entry.amount}
+                                                        ${entry.system === 'wallet' ? '💰' : '⭐'}
                                                 </span>
                                                 <span style="font-weight: bold; color: #1F2937;">
                                                     ${entry.reason}
@@ -5580,8 +5593,25 @@ async function useWalletPoints(userId, amount, reason, description) {
 
         // دالة عرض نافذة إضافة النقاط
 async function showAddPointsDialog(userId) {
+    // أولاً نسأل أي نظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'journey': 'نقاط الارتواء (الرحلة) فقط',
+            'wallet': 'نقاط المحفظة فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
     const { value: pointsData } = await Swal.fire({
-        title: '➕ إضافة نقاط ارتواء',
+        title: `➕ إضافة نقاط ${system === 'journey' ? 'الرحلة' : system === 'wallet' ? 'المحفظة' : 'للنظامين'}`,
         html: `
             <div style="text-align: right; direction: rtl;">
                 <div style="margin-bottom: 15px;">
@@ -5589,16 +5619,21 @@ async function showAddPointsDialog(userId) {
                         عدد النقاط
                     </label>
                     <input type="number" id="pointsAmount" class="swal2-input" 
-                           placeholder="50" value="50" min="1"
+                           placeholder="100" value="100" min="1"
                            style="width: 100%;">
                 </div>
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 8px; font-weight: bold;">
                         السبب
                     </label>
-                    <input type="text" id="pointsReason" class="swal2-input" 
-                           placeholder="مكافأة خاصة" value="مكافأة إدارية"
-                           style="width: 100%;">
+                    <select id="pointsReason" class="swal2-input" style="width: 100%;">
+                        <option value="مكافأة إدارية">مكافأة إدارية</option>
+                        <option value="نشاط متميز">نشاط متميز</option>
+                        <option value="إحالة ناجحة">إحالة ناجحة</option>
+                        <option value="تعويض">تعويض</option>
+                        <option value="عرض خاص">عرض خاص</option>
+                        <option value="أخرى">أخرى</option>
+                    </select>
                 </div>
                 <div>
                     <label style="display: block; margin-bottom: 8px; font-weight: bold;">
@@ -5606,7 +5641,7 @@ async function showAddPointsDialog(userId) {
                     </label>
                     <textarea id="pointsDescription" class="swal2-textarea" 
                               placeholder="تفاصيل إضافية..."
-                              style="width: 100%; height: 80px;">نقاط ارتواء إضافية من الإدارة</textarea>
+                              style="width: 100%; height: 80px;"></textarea>
                 </div>
             </div>
         `,
@@ -5626,29 +5661,32 @@ async function showAddPointsDialog(userId) {
             
             return {
                 amount: parseInt(amount),
-                reason: reason || 'مكافأة إدارية',
-                description: description || 'نقاط ارتواء إضافية'
+                reason: reason,
+                description: description || 'نقاط إضافية',
+                system: system
             };
         }
     });
     
     if (pointsData) {
-        const success = await addDualPoints(
-    userId, 
-    pointsData.amount, 
-    pointsData.reason, 
-    pointsData.description
-);
+        let success = false;
+        
+        if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        } else if (pointsData.system === 'wallet') {
+            success = await addWalletPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        } else {
+            success = await addDualPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        }
         
         if (success) {
             Swal.fire({
                 icon: 'success',
                 title: 'تم إضافة النقاط',
-               text: `تم إضافة ${pointsData.amount} نقطة في النظامين بنجاح`,
+                text: `تم إضافة ${pointsData.amount} نقطة ${pointsData.system === 'journey' ? 'للرحلة' : pointsData.system === 'wallet' ? 'للمحفظة' : 'للنظامين'}`,
                 confirmButtonColor: '#10B981'
             });
             
-            // تحديث العرض
             setTimeout(() => location.reload(), 1500);
         }
     }
