@@ -1834,7 +1834,16 @@ function createStudentCard(student) {
 
 // عرض النقاط المجمعة في البطاقة
 let pointsDisplay = totalPoints > 0 ? `(${totalPoints} نقطة)` : '';
-    
+    // جلب النقاط إذا كان له حساب
+if (student.userId) {
+    db.collection('users').doc(student.userId).get().then(doc => {
+        if (doc.exists) {
+            const points = doc.data().unifiedPoints?.balance || 0;
+            const element = document.getElementById(`points-${studentId}`);
+            if (element) element.textContent = points;
+        }
+    });
+}
     // HTML البطاقة
     return `
         <div class="student-card ${isNew ? 'new' : ''} ${hasAccount ? '' : 'new-account'}" 
@@ -1890,6 +1899,12 @@ let pointsDisplay = totalPoints > 0 ? `(${totalPoints} نقطة)` : '';
                     ` : ''}
                 </div>
                 <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="text-align: center; margin-left: 15px;">
+    <div style="font-size: 0.8rem; color: #6B7280;">النقاط</div>
+    <div style="font-weight: bold; color: #10B981;" id="points-${studentId}">
+        0
+    </div>
+</div>
                     <div style="text-align: center;">
                         <div style="font-size: 0.8rem; color: #6B7280;">اكتمال البيانات</div>
                         <div style="font-weight: bold; color: ${completeness > 70 ? '#10B981' : completeness > 40 ? '#F59E0B' : '#EF4444'};">
@@ -3276,6 +3291,13 @@ async function createAccount(studentId) {
         newUser.personalInfo.email = formData.email;
         newUser.auth.tempPassword = btoa(formData.password);
         newUser.accountStatus.level = formData.level;
+
+        // نظام النقاط الموحد
+newUser.unifiedPoints = {
+    balance: 0,
+    history: [],
+    lastUpdated: new Date().toISOString()
+};
         
         // إضافة البيانات المالية الأولية إذا كان هناك دفع مؤكد
         if (student.paymentConfirmed) {
@@ -4690,87 +4712,37 @@ async function manageJourneySystem(studentId) {
 
 // دالة واحدة موحدة لإضافة النقاط
 // دالة واحدة موحدة لإضافة النقاط
-async function addUnifiedPoints(userId, points = null, reason = null, description = null) {
-    // إذا تم تمرير البيانات مباشرة
-    if (points && reason) {
-        try {
-            const userDoc = await db.collection('users').doc(userId).get();
-            const currentTotal = userDoc.data()?.pointsSystem?.totalPoints || 0;
-            const newTotal = currentTotal + points;
-            
-            await db.collection('users').doc(userId).update({
-                'pointsSystem.totalPoints': newTotal,
-                'pointsSystem.lastUpdated': new Date().toISOString(),
-                'pointsSystem.history': firebase.firestore.FieldValue.arrayUnion({
-                    amount: points,
-                    reason: reason,
-                    description: description || reason,
-                    date: new Date().toISOString(),
-                    addedBy: 'system'
-                })
-            });
-            
-            console.log(`تم إضافة ${points} نقطة للمستخدم ${userId}`);
-            return true;
-        } catch (error) {
-            console.error('خطأ في إضافة النقاط:', error);
+async function addUnifiedPoints(userId, points, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) {
+            console.error('المستخدم غير موجود');
             return false;
         }
+        
+        const currentBalance = userDoc.data().unifiedPoints?.balance || 0;
+        const newBalance = currentBalance + points;
+        
+        await userRef.update({
+            'unifiedPoints.balance': newBalance,
+            'unifiedPoints.lastUpdated': new Date().toISOString(),
+            'unifiedPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: points,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString()
+            })
+        });
+        
+        console.log(`تم إضافة ${points} نقطة - الرصيد: ${newBalance}`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ:', error);
+        return false;
     }
-    
-    // إذا لم يتم تمرير بيانات، اعرض النافذة
-    const { value: formData } = await Swal.fire({
-        title: '➕ إضافة نقاط',
-        html: `
-            <div style="text-align: right; direction: rtl;">
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px;">عدد النقاط:</label>
-                    <input id="points" type="number" class="swal2-input" 
-                           placeholder="مثال: 50" style="width: 100%;">
-                </div>
-                <div>
-                    <label style="display: block; margin-bottom: 5px;">السبب:</label>
-                    <select id="reason" class="swal2-select" style="width: 100%;">
-                        <option value="تسجيل">تسجيل جديد</option>
-                        <option value="تخصيص دورة">تخصيص دورة</option>
-                        <option value="إتمام درس">إتمام درس</option>
-                        <option value="نشاط مميز">نشاط مميز</option>
-                        <option value="إحالة ناجحة">إحالة ناجحة</option>
-                        <option value="أخرى">أخرى</option>
-                    </select>
-                </div>
-            </div>
-        `,
-        confirmButtonText: 'إضافة',
-        confirmButtonColor: '#10B981',
-        showCancelButton: true,
-        cancelButtonText: 'إلغاء',
-        preConfirm: () => {
-            const pts = document.getElementById('points').value;
-            const rsn = document.getElementById('reason').value;
-            
-            if (!pts || pts <= 0) {
-                Swal.showValidationMessage('من فضلك أدخل عدد نقاط صحيح');
-                return false;
-            }
-            
-            return { points: parseInt(pts), reason: rsn };
-        }
-    });
-    
-    if (!formData) return;
-    
-    // استدعاء الدالة نفسها مع البيانات
-    await addUnifiedPoints(userId, formData.points, formData.reason);
-    
-    await Swal.fire({
-        icon: 'success',
-        title: 'تم بنجاح!',
-        text: `تم إضافة ${formData.points} نقطة`,
-        confirmButtonColor: '#10B981'
-    });
-    
-    await loadStudents();
 }
         // دالة إرسال رسالة ترحيب
 async function sendWelcomeMessage(student) {
