@@ -828,14 +828,7 @@ accountStatus: {
                 totalSavings: 0,
                 totalOriginalPrice: 0,
                 
-                // المحفظة الإلكترونية
-                wallet: {
-                    balance: 0,
-                    currency: 'EGP',
-                    autoApply: true,
-                    lastUpdated: now,
-                    transactions: []
-                },
+               
                 
                 // سجل المدفوعات
                 paymentHistory: [],
@@ -3518,11 +3511,11 @@ async function assignCourseToStudent(studentId) {
                                 </div>
                             </div>
                             <div>
-                                <div style="color: #6B7280; font-size: 0.85rem;">رصيد المحفظة</div>
-                                <div style="font-weight: bold; color: #3B82F6;">
-                                    ${(userData.financial?.wallet?.balance || 0).toLocaleString('ar-EG')} ج.م
-                                </div>
-                            </div>
+    <div style="color: #6B7280; font-size: 0.85rem;">نقاط الارتواء</div>
+    <div style="font-weight: bold; color: #3B82F6;">
+        ${(userData.unifiedPoints?.balance || 0).toLocaleString('ar-EG')} نقطة
+    </div>
+</div>
                         </div>
                     </div>
                     
@@ -3648,19 +3641,33 @@ async function assignCourseToStudent(studentId) {
                                 </select>
                             </div>
                             
-                            <!-- استخدام رصيد المحفظة -->
-                            ${userData.financial?.wallet?.balance > 0 ? `
-                            <div style="background: #F0F9FF; padding: 15px; border-radius: 10px;">
-                                <label style="cursor: pointer; display: flex; align-items: center;">
-                                    <input type="checkbox" id="useWalletBalance" checked 
-                                           style="margin-left: 10px; width: 20px; height: 20px;">
-                                    <span style="color: #0369A1;">
-                                        <i class="fas fa-wallet"></i> 
-                                        استخدام رصيد المحفظة (${userData.financial.wallet.balance} ج.م)
-                                    </span>
-                                </label>
-                            </div>
-                            ` : ''}
+                           <!-- استخدام نقاط الارتواء للخصم -->
+${userData.unifiedPoints?.balance > 0 ? `
+<div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+            padding: 15px; border-radius: 10px;">
+    <label style="cursor: pointer; display: flex; align-items: center;">
+        <input type="checkbox" id="usePoints" 
+               onchange="document.getElementById('pointsDiscountInfo').style.display = this.checked ? 'block' : 'none';"
+               style="margin-left: 10px; width: 20px; height: 20px;">
+        <span style="color: #92400E; font-weight: bold;">
+            <i class="fas fa-star"></i> 
+            استخدام نقاط الارتواء للحصول على خصم
+            (متاح: ${userData.unifiedPoints.balance} نقطة)
+        </span>
+    </label>
+    <div id="pointsDiscountInfo" style="display: none; margin-top: 10px; 
+                                        background: white; padding: 10px; 
+                                        border-radius: 8px;">
+        <select id="pointsDiscount" class="swal2-input" style="width: 100%;">
+            <option value="0">اختر قيمة الخصم</option>
+            ${userData.unifiedPoints.balance >= 100 ? '<option value="100">100 نقطة = خصم 50 ج.م</option>' : ''}
+            ${userData.unifiedPoints.balance >= 200 ? '<option value="200">200 نقطة = خصم 100 ج.م</option>' : ''}
+            ${userData.unifiedPoints.balance >= 500 ? '<option value="500">500 نقطة = خصم 300 ج.م</option>' : ''}
+            ${userData.unifiedPoints.balance >= 1000 ? '<option value="1000">1000 نقطة = خصم 700 ج.م</option>' : ''}
+        </select>
+    </div>
+</div>
+` : ''}
                             
                             <!-- ملاحظات -->
                             <div>
@@ -3684,7 +3691,8 @@ async function assignCourseToStudent(studentId) {
                 const enrollmentType = document.getElementById('enrollmentType').value;
                 const startDate = document.getElementById('startDate').value;
                 const accessPeriod = document.getElementById('accessPeriod').value;
-                const useWallet = document.getElementById('useWalletBalance')?.checked || false;
+                const usePoints = document.getElementById('usePoints')?.checked || false;
+const pointsToUse = usePoints ? parseInt(document.getElementById('pointsDiscount')?.value || 0) : 0;
                 const notes = document.getElementById('notes').value;
                 
                 if (!startDate) {
@@ -3706,7 +3714,8 @@ async function assignCourseToStudent(studentId) {
                     startDate, 
                     endDate, 
                     duration: accessPeriod === 'unlimited' ? 'غير محدود' : `${accessPeriod} شهر`,
-                    useWallet, 
+                    usePoints,
+pointsToUse,
                     notes,
                     isRenewal,
                     previousEnrollmentId: previousEnrollment?.id
@@ -3774,41 +3783,42 @@ if (formData.newExpectations || formData.newApplicationPlan) {
         // حساب الإجماليات المالية الجديدة
         const financialTotals = EnrollmentManager.calculateFinancialTotals(updatedEnrollments);
         
-        // معالجة رصيد المحفظة
-        let walletTransactions = [...(userData.financial?.wallet?.transactions || [])];
-        let walletBalance = userData.financial?.wallet?.balance || 0;
+     // معالجة استبدال النقاط بخصم
+let discountApplied = 0;
+if (formData.usePoints && formData.pointsToUse > 0) {
+    // حساب قيمة الخصم
+    const discountRates = {
+        100: 50,
+        200: 100,
+        500: 300,
+        1000: 700
+    };
+    
+    discountApplied = discountRates[formData.pointsToUse] || 0;
+    
+    if (discountApplied > 0) {
+        // خصم النقاط من الرصيد
+        await addUnifiedPoints(
+            student.userId,
+            -formData.pointsToUse,
+            'استبدال نقاط',
+            `خصم ${discountApplied} ج.م على ${student.courseName}`
+        );
         
-        if (formData.useWallet && walletBalance > 0) {
-            const amountToUse = Math.min(walletBalance, newEnrollment.payment.remainingAmount);
-            
-            if (amountToUse > 0) {
-                // إضافة معاملة الخصم
-                walletTransactions.push({
-                    id: `txn-${Date.now()}`,
-                    type: 'debit',
-                    amount: amountToUse,
-                    reason: 'course_payment',
-                    relatedEntityId: newEnrollment.id,
-                    description: `دفع جزئي لدورة ${student.courseName}`,
-                    date: new Date().toISOString(),
-                    balanceAfter: walletBalance - amountToUse
-                });
-                
-                walletBalance -= amountToUse;
-                
-                // تحديث المدفوع في الـ enrollment
-                const enrollmentIndex = updatedEnrollments.findIndex(e => e.id === newEnrollment.id);
-                if (enrollmentIndex !== -1) {
-                    updatedEnrollments[enrollmentIndex].payment.paidAmount += amountToUse;
-                    updatedEnrollments[enrollmentIndex].payment.remainingAmount -= amountToUse;
-                    
-                    if (updatedEnrollments[enrollmentIndex].payment.remainingAmount <= 0) {
-                        updatedEnrollments[enrollmentIndex].payment.status = 'paid';
-                        updatedEnrollments[enrollmentIndex].payment.fullyPaidDate = new Date().toISOString();
-                    }
-                }
-            }
+        // تحديث السعر في enrollment
+        const enrollmentIndex = updatedEnrollments.length - 1;
+        if (enrollmentIndex >= 0) {
+            updatedEnrollments[enrollmentIndex].pricing.finalPrice -= discountApplied;
+            updatedEnrollments[enrollmentIndex].pricing.pointsDiscount = {
+                pointsUsed: formData.pointsToUse,
+                discountAmount: discountApplied,
+                appliedAt: new Date().toISOString()
+            };
+            updatedEnrollments[enrollmentIndex].payment.totalAmount -= discountApplied;
+            updatedEnrollments[enrollmentIndex].payment.remainingAmount -= discountApplied;
         }
+    }
+}
         
      
         
@@ -3839,12 +3849,7 @@ if (formData.newExpectations || formData.newApplicationPlan) {
             'financial.totalPaid': financialTotals.totalPaid,
             'financial.totalDue': financialTotals.totalDue,
             'financial.totalSavings': financialTotals.totalSavings,
-            'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,
-            
-            'financial.wallet.balance': walletBalance,
-            'financial.wallet.transactions': walletTransactions,
-            'financial.wallet.lastUpdated': new Date().toISOString(),
-            
+            'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,        
                        
             bookingHistory: bookingHistory,
             
@@ -3912,14 +3917,15 @@ const coursePoints = Math.floor(actualPaidAmount / 100);
                         </div>
                     </div>
                     
-                    ${formData.useWallet && walletBalance !== (userData.financial?.wallet?.balance || 0) ? `
-                    <div style="background: #F0F9FF; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                        <p style="color: #0369A1; margin: 0;">
-                            <i class="fas fa-wallet"></i> 
-                            تم استخدام ${Math.min(userData.financial?.wallet?.balance || 0, newEnrollment.payment.remainingAmount)} ج.م من رصيد المحفظة
-                        </p>
-                    </div>
-                    ` : ''}
+                    ${discountApplied > 0 ? `
+<div style="background: #F0F9FF; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+    <p style="color: #0369A1; margin: 0;">
+        <i class="fas fa-star"></i> 
+        تم استخدام ${formData.pointsToUse} نقطة ارتواء
+        للحصول على خصم ${discountApplied} ج.م
+    </p>
+</div>
+` : ''}
                     
                     ${coursePoints > 0 ? `
                     <div style="background: #FEF3C7; padding: 15px; border-radius: 10px;">
