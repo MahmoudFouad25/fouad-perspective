@@ -4872,6 +4872,149 @@ async function manageInstallments(studentId) {
         showConfirmButton: false
     });
 }
+        // دالة تسجيل دفع قسط
+async function recordInstallmentPayment(userId, enrollmentId, installmentNumber) {
+    const { value: paymentData } = await Swal.fire({
+        title: '💳 تسجيل دفع القسط',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-calendar"></i> تاريخ الدفع
+                    </label>
+                    <input type="date" id="paymentDate" class="swal2-input" 
+                           value="${new Date().toISOString().split('T')[0]}"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-credit-card"></i> طريقة الدفع
+                    </label>
+                    <select id="paymentMethod" class="swal2-input" style="width: 100%;">
+                        <option value="cash">نقدي</option>
+                        <option value="vodafone">فودافون كاش</option>
+                        <option value="instapay">انستاباي</option>
+                        <option value="bank">تحويل بنكي</option>
+                        <option value="card">بطاقة ائتمان</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-hashtag"></i> رقم المرجع (اختياري)
+                    </label>
+                    <input type="text" id="reference" class="swal2-input" 
+                           placeholder="رقم العملية أو المرجع"
+                           style="width: 100%;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-sticky-note"></i> ملاحظات (اختياري)
+                    </label>
+                    <textarea id="notes" class="swal2-textarea" 
+                              placeholder="أي ملاحظات إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الدفع',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            return {
+                paymentDate: document.getElementById('paymentDate').value,
+                paymentMethod: document.getElementById('paymentMethod').value,
+                reference: document.getElementById('reference').value,
+                notes: document.getElementById('notes').value
+            };
+        }
+    });
+    
+    if (!paymentData) return;
+    
+    try {
+        // جلب بيانات المستخدم
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        
+        // تحديث القسط في الـ enrollment
+        const enrollments = userData.enrollments || [];
+        const enrollmentIndex = enrollments.findIndex(e => e.id === enrollmentId);
+        
+        if (enrollmentIndex !== -1) {
+            const installmentIndex = enrollments[enrollmentIndex].payment.installments.schedule
+                .findIndex(i => i.installmentNumber === installmentNumber);
+            
+            if (installmentIndex !== -1) {
+                // تحديث حالة القسط
+                enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex] = {
+                    ...enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex],
+                    status: 'paid',
+                    paidDate: paymentData.paymentDate,
+                    paidAmount: enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex].amount,
+                    paymentMethod: paymentData.paymentMethod,
+                    reference: paymentData.reference,
+                    notes: paymentData.notes
+                };
+                
+                // تحديث المدفوع والمتبقي
+                const paidAmount = enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex].amount;
+                enrollments[enrollmentIndex].payment.paidAmount += paidAmount;
+                enrollments[enrollmentIndex].payment.remainingAmount -= paidAmount;
+                enrollments[enrollmentIndex].payment.installments.paidInstallments++;
+                
+                // التحقق من اكتمال الدفع
+                if (enrollments[enrollmentIndex].payment.remainingAmount <= 0) {
+                    enrollments[enrollmentIndex].payment.status = 'paid';
+                    enrollments[enrollmentIndex].payment.fullyPaidDate = new Date().toISOString();
+                }
+                
+                // إضافة سجل في payment history
+                const paymentHistory = userData.financial.paymentHistory || [];
+                paymentHistory.push({
+                    id: `payment-${Date.now()}`,
+                    type: 'installment',
+                    amount: paidAmount,
+                    date: paymentData.paymentDate,
+                    method: paymentData.paymentMethod,
+                    reference: paymentData.reference,
+                    relatedEntity: 'enrollment',
+                    relatedEntityId: enrollmentId,
+                    description: `دفع القسط ${installmentNumber} - ${enrollments[enrollmentIndex].title}`,
+                    notes: paymentData.notes
+                });
+                
+                // حساب الإجماليات الجديدة
+                const financialTotals = EnrollmentManager.calculateFinancialTotals(enrollments);
+                
+                // تحديث Firebase
+                await db.collection('users').doc(userId).update({
+                    enrollments: enrollments,
+                    'financial.totalPaid': financialTotals.totalPaid,
+                    'financial.totalDue': financialTotals.totalDue,
+                    'financial.paymentHistory': paymentHistory,
+                    'timestamps.updatedAt': new Date().toISOString()
+                });
+                
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم تسجيل الدفع بنجاح',
+                    text: `تم تسجيل دفع القسط ${installmentNumber} بقيمة ${paidAmount.toLocaleString('ar-EG')} ج.م`,
+                    confirmButtonColor: '#10B981'
+                });
+                
+                // إعادة تحميل البيانات
+                await loadStudents();
+            }
+        }
+    } catch (error) {
+        console.error('خطأ في تسجيل الدفع:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تسجيل الدفع', 'error');
+    }
+}
     </script>
 </body>
 </html>
