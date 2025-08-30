@@ -1515,6 +1515,18 @@ async function saveUser() {
         };
         
         if (editMode) {
+            // التحقق من عدم تكرار البريد الإلكتروني
+const emailQuery = await db.collection('users')
+    .where('personalInfo.email', '==', userData.basic.email)
+    .where(firebase.firestore.FieldPath.documentId(), '!=', currentUserId)
+    .limit(1)
+    .get();
+
+if (!emailQuery.empty) {
+    showError('هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر');
+    hideLoading();
+    return;
+}
             await db.collection('users').doc(currentUserId).update(userDoc);
             showSuccess('تم حفظ التعديلات بنجاح');
             await updatePointsDisplay();
@@ -1534,14 +1546,14 @@ async function saveUser() {
             
             await db.collection('users').doc(userId).set(userDoc);
             showSuccess('تم إنشاء المستخدم بنجاح');
-            // إضافة أنظمة النقاط للمستخدم الجديد
+          // إضافة أنظمة النقاط للمستخدم الجديد
 userDoc.journeyPoints = {
-    balance: 100,
-    lifetime: 100,
+    balance: 50,  // تغيير من 100 إلى 50
+    lifetime: 50,  // تغيير من 100 إلى 50
     history: [{
-        amount: 100,
-        reason: 'مكافأة الانضمام',
-        description: 'نقاط ترحيبية لبداية الرحلة',
+        amount: 50,  // تغيير من 100 إلى 50
+        reason: 'إنشاء حساب جديد',
+        description: 'نقاط ترحيبية عند الانضمام لمنظور الفؤاد',
         timestamp: new Date().toISOString(),
         type: 'journey'
     }],
@@ -1549,12 +1561,12 @@ userDoc.journeyPoints = {
 };
 
 userDoc.walletPoints = {
-    balance: 100,
-    lifetime: 100,
+    balance: 50,  // تغيير من 100 إلى 50
+    lifetime: 50,  // تغيير من 100 إلى 50
     used: 0,
     history: [{
-        amount: 100,
-        reason: 'مكافأة الانضمام',
+        amount: 50,  // تغيير من 100 إلى 50
+        reason: 'إنشاء حساب جديد',
         description: 'نقاط ترحيبية للمحفظة',
         timestamp: new Date().toISOString(),
         type: 'wallet'
@@ -1564,11 +1576,13 @@ userDoc.walletPoints = {
     minRedemption: 100
 };
 
+
+
 userDoc.accountStatus.journeyStage = 1;
 
 await db.collection('users').doc(userId).set(userDoc);
 currentUserId = userId; // حفظ معرف المستخدم
-showSuccess('تم إنشاء المستخدم بنجاح مع 100 نقطة ترحيبية');
+showSuccess('تم إنشاء المستخدم بنجاح مع 50 نقطة ترحيبية');
 await updatePointsDisplay();
             setTimeout(() => {
                 window.location.href = 'dashboard.html';
@@ -1582,6 +1596,24 @@ await updatePointsDisplay();
         hideLoading();
         showError('حدث خطأ في الحفظ');
     }
+    // إضافة 50 نقطة إذا كان حساب جديد ولم يكن في وضع التعديل
+if (!editMode) {
+    await addDualPoints(
+        currentUserId || userId,
+        50,
+        'إنشاء حساب جديد',
+        'نقاط ترحيبية عند الانضمام لمنظور الفؤاد'
+    );
+    
+    // إرسال رسالة ترحيب
+    await sendWelcomeMessage({
+        customer: {
+            name: `${userData.basic.firstName} ${userData.basic.lastName}`,
+            whatsapp: userData.basic.phone,
+            email: userData.basic.email
+        }
+    });
+}
 }
 
 // ==================== وظائف مساعدة ====================
@@ -2251,6 +2283,27 @@ async function updatePointsDisplay() {
         document.getElementById('totalDeducted').textContent = 
             Math.abs(journeyHistory.filter(e => e.amount < 0).reduce((sum, e) => sum + e.amount, 0));
         document.getElementById('lifetimePoints').textContent = userData.journeyPoints?.lifetime || 0;
+        // تحديث بطاقة المرحلة الحالية
+const currentStage = FouadJourneySystem.stages[1]; // المرحلة الأولى دائماً حالياً
+const stageCard = document.getElementById('currentStageCard');
+if (stageCard) {
+    stageCard.style.background = `linear-gradient(135deg, ${currentStage.color}, ${currentStage.color}DD)`;
+    stageCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h3 style="margin: 0 0 10px 0; font-size: 28px; color: white;">
+                    <i class="fas ${currentStage.icon}"></i> ${currentStage.name}
+                </h3>
+                <div style="font-size: 20px; opacity: 0.95; color: white;">${currentStage.title}</div>
+                <p style="margin-top: 15px; opacity: 0.9; color: white;">${currentStage.description}</p>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 48px; font-weight: bold; color: white;">${journeyPoints}</div>
+                <div style="font-size: 16px; opacity: 0.9; color: white;">نقطة ارتواء</div>
+            </div>
+        </div>
+    `;
+}
         
         // تحديث سجل الارتواء
         updateJourneyHistory(journeyHistory);
@@ -2376,6 +2429,32 @@ window.showAddWalletPointsDialog = showAddWalletPointsDialog;
 window.showUseWalletPointsDialog = showUseWalletPointsDialog;
 window.showTransferPointsDialog = showTransferPointsDialog;
 window.updatePointsDisplay = updatePointsDisplay;
+    // دالة إرسال رسالة الترحيب
+async function sendWelcomeMessage(student) {
+    try {
+        const message = `
+🌟 *أهلاً وسهلاً ${student.customer?.name || 'بك'} في منظور الفؤاد*
+
+تم تفعيل حسابك بنجاح! 🎉
+
+🎁 *هدية الترحيب:*
+لقد حصلت على 50 نقطة ارتواء كهدية ترحيبية لبداية رحلتك معنا
+
+📚 *رحلتك تبدأ الآن من:*
+🔸 المرحلة الأولى: ملبي النداء
+
+نتمنى لك رحلة موفقة ومثمرة 💜
+        `.trim();
+        
+        console.log('📨 رسالة الترحيب:', message);
+        return true;
+    } catch (error) {
+        console.error('خطأ في إرسال رسالة الترحيب:', error);
+        return false;
+    }
+}
+
+window.sendWelcomeMessage = sendWelcomeMessage;
 console.log('✅ تم تحميل جميع الوظائف بنجاح');
 </script>
 </body>
