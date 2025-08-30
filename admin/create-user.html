@@ -1484,6 +1484,7 @@ const UserStructure = {
         showLoading();
         
         // جمع البيانات من النموذج
+        const passwordValue = document.getElementById('userPassword').value;
         const formData = {
             personalInfo: {
                 name: document.getElementById('userName').value.trim(),
@@ -1492,7 +1493,8 @@ const UserStructure = {
                 age: parseInt(document.getElementById('userAge').value) || 0
             },
             auth: {
-                tempPassword: document.getElementById('userPassword').value || UserStructure.generateStrongPassword()
+                tempPassword: btoa(passwordValue || UserStructure.generateStrongPassword()),
+                passwordChanged: false
             },
             accountStatus: {
                 status: document.getElementById('accountStatus').value,
@@ -1509,12 +1511,19 @@ const UserStructure = {
             throw new Error('يجب إدخال البريد الإلكتروني');
         }
         
+        // حفظ الملاحظات الإدارية
+        const adminNotes = document.getElementById('adminNotes').value;
+        
         if (isEditMode && currentUserId) {
             // تحديث مستخدم موجود
             await db.collection('users').doc(currentUserId).update({
                 ...formData,
-                'accountStatus.updatedAt': new Date().toISOString()
+                'accountStatus.updatedAt': new Date().toISOString(),
+                'metadata.adminNotes': adminNotes
             });
+            
+            // إعادة تحميل البيانات
+            await loadUserData(currentUserId);
             
             Swal.fire({
                 icon: 'success',
@@ -1524,26 +1533,92 @@ const UserStructure = {
             });
         } else {
             // إنشاء مستخدم جديد
+            const userSlug = document.getElementById('userSlug').value || UserStructure.generateUniqueSlug(formData.personalInfo.name);
+            
+            // التحقق من عدم تكرار المعرف
+            const existingDoc = await db.collection('users').doc(userSlug).get();
+            if (existingDoc.exists) {
+                throw new Error('هذا المعرف مستخدم بالفعل، اضغط على زر التوليد للحصول على معرف جديد');
+            }
+            
             const newUser = {
                 ...UserStructure.createNewUser({}),
                 ...formData,
-                id: document.getElementById('userSlug').value
+                id: userSlug,
+                accountStatus: {
+                    ...formData.accountStatus,
+                    createdAt: new Date().toISOString()
+                },
+                metadata: {
+                    source: 'admin-panel',
+                    createdBy: 'admin',
+                    createdAt: new Date().toISOString(),
+                    adminNotes: adminNotes
+                }
             };
             
-            await db.collection('users').doc(newUser.id).set(newUser);
+            // حفظ في Firebase
+            await db.collection('users').doc(userSlug).set(newUser);
             
             // إضافة نقاط الترحيب
-            await addDualPoints(newUser.id, 50, 'إنشاء حساب جديد', 'نقاط ترحيبية');
+            await addDualPoints(userSlug, 50, 'إنشاء حساب جديد', 'نقاط ترحيبية');
             
-            currentUserId = newUser.id;
+            currentUserId = userSlug;
             isEditMode = true;
+            currentUserData = newUser;
             
-            Swal.fire({
-                icon: 'success',
-                title: 'تم الإنشاء',
-                text: 'تم إنشاء المستخدم بنجاح',
-                confirmButtonColor: '#10b981'
-            });
+            // تحديث URL
+            const newUrl = window.location.pathname + '?userId=' + userSlug;
+            window.history.replaceState({}, '', newUrl);
+            
+            document.getElementById('saveButtonText').textContent = 'حفظ التعديلات';
+            document.getElementById('pageTitle').textContent = `إدارة: ${formData.personalInfo.name}`;
+            
+            // إرسال رسالة WhatsApp
+            if (formData.personalInfo.whatsapp) {
+                const message = `
+🎉 *مرحباً ${formData.personalInfo.name}*
+
+تم إنشاء حسابك في منظور الفؤاد بنجاح!
+
+📧 *البريد:* ${formData.personalInfo.email}
+🔑 *كلمة المرور:* ${passwordValue}
+🆔 *المعرف:* ${userSlug}
+⭐ *المرحلة:* ${formData.accountStatus.journeyTitle}
+
+📱 *رابط الدخول:*
+https://fouad-perspective.web.app/login
+
+احتفظ بهذه البيانات في مكان آمن 🔐
+
+مع تحيات فريق منظور الفؤاد 💜`;
+                
+                const whatsappUrl = `https://wa.me/${formData.personalInfo.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+                
+                const sendWhatsApp = await Swal.fire({
+                    icon: 'success',
+                    title: 'تم إنشاء الحساب بنجاح!',
+                    text: 'هل تريد إرسال بيانات الدخول عبر WhatsApp؟',
+                    showCancelButton: true,
+                    confirmButtonText: 'نعم، أرسل',
+                    cancelButtonText: 'لا، شكراً',
+                    confirmButtonColor: '#10b981'
+                });
+                
+                if (sendWhatsApp.isConfirmed) {
+                    window.open(whatsappUrl, '_blank');
+                }
+            } else {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم الإنشاء',
+                    text: 'تم إنشاء المستخدم بنجاح',
+                    confirmButtonColor: '#10b981'
+                });
+            }
+            
+            // إعادة تحميل البيانات لعرضها
+            await loadUserData(userSlug);
         }
         
     } catch (error) {
@@ -1560,8 +1635,11 @@ const UserStructure = {
 }
 
 function generateNewSlug() {
-    const name = document.getElementById('userName').value;
-    document.getElementById('userSlug').value = UserStructure.generateUniqueSlug(name);
+    const name = document.getElementById('userName').value || 'user';
+    const newSlug = UserStructure.generateUniqueSlug(name);
+    document.getElementById('userSlug').value = newSlug;
+    document.getElementById('userSlug').readOnly = false;
+    document.getElementById('editSlugBtn').style.background = 'linear-gradient(135deg, #10b981, #059669)';
 }
 
 function generateNewPassword() {
@@ -1616,7 +1694,13 @@ function populateUserData() {
     
     // ملء معلومات الحساب
     document.getElementById('userSlug').value = currentUserId || '';
-    document.getElementById('userPassword').value = atob(currentUserData.auth?.tempPassword || '') || '';
+    if (currentUserData.auth?.tempPassword) {
+        try {
+            document.getElementById('userPassword').value = atob(currentUserData.auth.tempPassword);
+        } catch(e) {
+            document.getElementById('userPassword').value = currentUserData.auth.tempPassword || '';
+        }
+    }
     document.getElementById('accountStatus').value = currentUserData.accountStatus?.status || 'active';
     document.getElementById('journeyStage').value = currentUserData.accountStatus?.journeyStage || 1;
     
@@ -1628,6 +1712,53 @@ function populateUserData() {
         const date = new Date(currentUserData.accountStatus.createdAt);
         document.getElementById('createdAt').value = date.toLocaleString('ar-EG');
     }
+    
+    // ملء المعلومات الإضافية
+    if (currentUserData.auth?.lastLogin) {
+        const date = new Date(currentUserData.auth.lastLogin);
+        document.getElementById('lastLogin').value = date.toLocaleString('ar-EG');
+    }
+    document.getElementById('loginCount').value = currentUserData.auth?.loginCount || 0;
+    document.getElementById('coursesCount').value = currentUserData.courses?.length || 0;
+    document.getElementById('totalPaid').value = (currentUserData.financial?.totalPaid || 0) + ' ج.م';
+    document.getElementById('adminNotes').value = currentUserData.metadata?.adminNotes || '';
+    
+    // تحديث بطاقات النقاط في تبويب متقدم
+    const journeyBalance = currentUserData.journeyPoints?.balance || 0;
+    const walletBalance = currentUserData.walletPoints?.balance || 0;
+    const walletCash = (walletBalance * 0.1).toFixed(2);
+    const walletUsed = currentUserData.walletPoints?.used || 0;
+    
+    // تحديث عناصر نقاط الارتواء
+    const journeyPointsEl = document.getElementById('journeyPointsBalance');
+    if (journeyPointsEl) journeyPointsEl.textContent = journeyBalance;
+    
+    const journeyStageEl = document.getElementById('currentJourneyStage');
+    if (journeyStageEl) {
+        const stage = currentUserData.accountStatus?.journeyStage || 1;
+        const stageInfo = FouadJourneySystem.stages[stage];
+        journeyStageEl.innerHTML = `${stageInfo.name}: ${stageInfo.title}`;
+    }
+    
+    // تحديث عناصر المحفظة
+    const walletBalanceEl = document.getElementById('walletBalance');
+    if (walletBalanceEl) walletBalanceEl.textContent = walletBalance;
+    
+    const walletCashEl = document.getElementById('walletCashValue');
+    if (walletCashEl) walletCashEl.textContent = walletCash + ' ج.م';
+    
+    const walletUsedEl = document.getElementById('walletUsed');
+    if (walletUsedEl) walletUsedEl.textContent = walletUsed;
+    
+    // تحديث البيانات المالية
+    const totalPaidEl = document.getElementById('totalPaidAmount');
+    if (totalPaidEl) totalPaidEl.textContent = (currentUserData.financial?.totalPaid || 0) + ' ج.م';
+    
+    const totalDueEl = document.getElementById('totalDueAmount');
+    if (totalDueEl) totalDueEl.textContent = (currentUserData.financial?.totalDue || 0) + ' ج.م';
+    
+    const installmentsEl = document.getElementById('installmentsCount');
+    if (installmentsEl) installmentsEl.textContent = currentUserData.financial?.installments?.length || 0;
 }
         
         // ==================== التهيئة عند تحميل الصفحة ====================
@@ -2533,7 +2664,8 @@ await loadUserData(currentUserId);
                 confirmButtonColor: '#10B981'
             });
             
-            setTimeout(() => location.reload(), 1500);
+           // بدلاً من إعادة تحميل الصفحة، أعد تحميل البيانات فقط
+await loadUserData(currentUserId);
         }
     }
 }
@@ -2644,7 +2776,7 @@ await loadUserData(currentUserId);
                 confirmButtonColor: '#DC2626'
             });
             
-            setTimeout(() => location.reload(), 1500);
+            await loadUserData(currentUserId);
         }
     }
 }
@@ -2682,7 +2814,7 @@ async function deleteWalletEntry(userId, timestamp) {
                 });
                 
                 Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
-                setTimeout(() => location.reload(), 1500);
+                await loadUserData(currentUserId);
             }
         } catch (error) {
             console.error('خطأ في حذف المعاملة:', error);
@@ -2748,7 +2880,7 @@ async function deletePointsEntry(userId, timestamp) {
                 }
                 
                 Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
-                setTimeout(() => location.reload(), 1500);
+                await loadUserData(currentUserId);
             }
         } catch (error) {
             console.error('خطأ في حذف المعاملة:', error);
