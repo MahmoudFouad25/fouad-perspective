@@ -1071,36 +1071,99 @@ document.addEventListener('DOMContentLoaded', async function() {
 async function loadStudentData() {
     try {
         showLoading();
-        
-        // جلب بيانات الطالب من Firebase
-        const studentDoc = await db.collection('individualStudents').doc(currentStudentId).get();
-        
+
+        console.log('🔍 البحث عن:', currentStudentId);
+
+        // البحث أولاً في individualStudents
+        let studentDoc = await db.collection('individualStudents').doc(currentStudentId).get();
+
         if (!studentDoc.exists) {
-            throw new Error('لم يتم العثور على بيانات العميل');
+            console.log('⚠️ ليس في individualStudents، البحث في users...');
+
+            // البحث في users بواسطة userId
+            const userSearch = await db.collection('individualStudents')
+                .where('userId', '==', currentStudentId)
+                .limit(1)
+                .get();
+
+            if (!userSearch.empty) {
+                studentDoc = userSearch.docs[0];
+                currentStudentId = studentDoc.id; // تحديث المعرف للمعرف الصحيح
+                console.log('✅ تم العثور عليه بمعرف المستخدم');
+            } else {
+                throw new Error('لم يتم العثور على البيانات');
+            }
         }
-        
+
         currentStudentData = {
             id: studentDoc.id,
             ...studentDoc.data()
         };
-        
-        // تحديث معلومات الهيدر
+
+        console.log('✅ البيانات:', currentStudentData);
+
+        // تحديث allStudents
+        allStudents = [currentStudentData];
+
         updateHeaderInfo();
-        
-        // تحميل محتوى التبويب الحالي
         loadTabContent(currentTab);
-        
+
     } catch (error) {
-        console.error('خطأ في تحميل البيانات:', error);
+        console.error('❌ خطأ:', error);
+
+        // عرض قائمة الطلاب المتاحين
+        const snapshot = await db.collection('individualStudents').limit(5).get();
+        let links = '';
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.customer?.name) {
+                const url = ${window.location.pathname}?studentId=${doc.id};
+                links += <div style="margin: 10px 0;">
+                    <a href="${url}" style="color: #3b82f6; text-decoration: none;">
+                        ${data.customer.name} - ${doc.id}
+                    </a>
+                </div>;
+            }
+        });
+
         Swal.fire({
-            icon: 'error',
-            title: 'خطأ في التحميل',
-            text: error.message || 'حدث خطأ في تحميل بيانات العميل'
+            icon: 'info',
+            title: 'اختر طالب',
+            html: <div style="text-align: right; direction: rtl;">
+                <p>المعرف المطلوب غير موجود</p>
+                <hr style="margin: 20px 0;">
+                <strong>طلاب متاحين:</strong>
+                ${links}
+            </div>,
+            confirmButtonText: 'حسناً'
         });
     } finally {
         hideLoading();
     }
 }
+الخطوة 2: إضافة دالة مساعدة للحصول على روابط صحيحة
+أضف هذا الكود بعد دالة loadStudentData:
+// دالة لعرض الروابط الصالحة
+async function showAvailableLinks() {
+    const snapshot = await db.collection('individualStudents').limit(10).get();
+
+    console.log('📋 روابط صالحة للصفحة:');
+    console.log('========================');
+
+    snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.customer?.name) {
+            const url = ${window.location.origin}${window.location.pathname}?studentId=${doc.id};
+            console.log(${data.customer.name}:);
+            console.log(url);
+            console.log('---');
+        }
+    });
+}
+
+window.showAvailableLinks = showAvailableLinks;
+
 
 // ==================== تحديث معلومات الهيدر ====================
 function updateHeaderInfo() {
