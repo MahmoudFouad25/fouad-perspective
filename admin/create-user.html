@@ -594,54 +594,99 @@
         });
 
         // ==================== تحميل بيانات الطالب ====================
-        async function loadStudentData() {
-            try {
-                showLoading();
-                console.log('🔍 البحث عن:', currentStudentId);
-                
-                // جلب بيانات الطالب
-                const studentDoc = await db.collection('individualStudents').doc(currentStudentId).get();
-                
-                if (!studentDoc.exists) {
-                    console.error('❌ المستند غير موجود');
-                    
-                    // محاولة البحث في كل المستندات
-                    console.log('🔍 البحث في كل المستندات...');
-                    const allDocs = await db.collection('individualStudents').get();
-                    
-                    console.log('📊 عدد المستندات:', allDocs.size);
-                    console.log('🗂️ المعرفات المتاحة:');
-                    allDocs.forEach(doc => {
-                        console.log('- ', doc.id);
-                    });
-                    
-                    showError(
-                        'لم يتم العثور على بيانات العميل',
-                        `المعرف "${currentStudentId}" غير موجود في قاعدة البيانات`
-                    );
-                    return;
-                }
-                
-                currentStudentData = {
-                    id: studentDoc.id,
-                    ...studentDoc.data()
-                };
-                
-                console.log('✅ تم تحميل البيانات:', currentStudentData);
-                
-                // تحديث معلومات الهيدر
-                updateHeaderInfo();
-                
-                // تحميل محتوى التبويب
-                loadTabContent(currentTab);
-                
-            } catch (error) {
-                console.error('❌ خطأ في تحميل البيانات:', error);
-                showError('خطأ في التحميل', error.message);
-            } finally {
-                hideLoading();
+       async function loadStudentData() {
+    try {
+        showLoading();
+        
+        console.log('🔍 البحث عن:', currentStudentId);
+        
+        // البحث أولاً في individualStudents
+        let studentDoc = await db.collection('individualStudents').doc(currentStudentId).get();
+        
+        if (!studentDoc.exists) {
+            console.log('⚠️ ليس في individualStudents، البحث في users...');
+            
+            // البحث في users بواسطة userId
+            const userSearch = await db.collection('individualStudents')
+                .where('userId', '==', currentStudentId)
+                .limit(1)
+                .get();
+            
+            if (!userSearch.empty) {
+                studentDoc = userSearch.docs[0];
+                currentStudentId = studentDoc.id; // تحديث المعرف للمعرف الصحيح
+                console.log('✅ تم العثور عليه بمعرف المستخدم');
+            } else {
+                throw new Error('لم يتم العثور على البيانات');
             }
         }
+        
+        currentStudentData = {
+            id: studentDoc.id,
+            ...studentDoc.data()
+        };
+        
+        console.log('✅ البيانات:', currentStudentData);
+        
+        // تحديث allStudents
+        allStudents = [currentStudentData];
+        
+        updateHeaderInfo();
+        loadTabContent(currentTab);
+        
+    } catch (error) {
+        console.error('❌ خطأ:', error);
+        
+        // عرض قائمة الطلاب المتاحين
+        const snapshot = await db.collection('individualStudents').limit(5).get();
+        let links = '';
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.customer?.name) {
+                const url = `${window.location.pathname}?studentId=${doc.id}`;
+                links += `<div style="margin: 10px 0;">
+                    <a href="${url}" style="color: #3b82f6; text-decoration: none;">
+                        ${data.customer.name} - ${doc.id}
+                    </a>
+                </div>`;
+            }
+        });
+        
+        Swal.fire({
+            icon: 'info',
+            title: 'اختر طالب',
+            html: `<div style="text-align: right; direction: rtl;">
+                <p>المعرف المطلوب غير موجود</p>
+                <hr style="margin: 20px 0;">
+                <strong>طلاب متاحين:</strong>
+                ${links}
+            </div>`,
+            confirmButtonText: 'حسناً'
+        });
+    } finally {
+        hideLoading();
+    }
+}
+        // دالة لعرض الروابط الصالحة
+async function showAvailableLinks() {
+    const snapshot = await db.collection('individualStudents').limit(10).get();
+    
+    console.log('📋 روابط صالحة للصفحة:');
+    console.log('========================');
+    
+    snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.customer?.name) {
+            const url = `${window.location.origin}${window.location.pathname}?studentId=${doc.id}`;
+            console.log(`${data.customer.name}:`);
+            console.log(url);
+            console.log('---');
+        }
+    });
+}
+
+window.showAvailableLinks = showAvailableLinks;
 
         // ==================== عرض رسالة الخطأ ====================
         function showError(title, message) {
