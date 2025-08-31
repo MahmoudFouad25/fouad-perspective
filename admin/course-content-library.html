@@ -3915,9 +3915,34 @@ async function addContentToModule(moduleId, contentId) {
     }
 }
 
-function removeLessonFromModule(lessonId) {
-    console.log('سيتم حذف الدرس:', lessonId);
-    // سيتم تنفيذها في المرحلة التالية
+async function removeLessonFromModule(moduleId, lessonId) {
+    try {
+        // جلب بيانات الوحدة
+        const moduleDoc = await db.collection('contentModules').doc(moduleId).get();
+        const moduleData = moduleDoc.data();
+        
+        // إزالة الدرس
+        const updatedLessons = moduleData.lessons.filter(l => l.id !== lessonId);
+        
+        // إعادة حساب المجاميع
+        const totalDuration = updatedLessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0);
+        const totalPoints = updatedLessons.reduce((sum, lesson) => sum + (lesson.points || 0), 0);
+        
+        // تحديث الوحدة
+        await db.collection('contentModules').doc(moduleId).update({
+            lessons: updatedLessons,
+            totalDuration: totalDuration,
+            totalPoints: totalPoints,
+            lastModified: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // إعادة فتح المحرر
+        openModuleEditor(moduleId);
+        
+    } catch (error) {
+        console.error('خطأ في حذف الدرس:', error);
+        Swal.fire('خطأ', 'حدث خطأ في حذف الدرس', 'error');
+    }
 }
 
 function filterAvailableContent() {
@@ -3935,8 +3960,110 @@ function filterAvailableContent() {
 }
 
 async function previewModule(moduleId) {
-    // سيتم تنفيذها في المرحلة التالية
-    Swal.fire('قريباً', 'ميزة المعاينة قيد التطوير', 'info');
+    try {
+        const moduleDoc = await db.collection('contentModules').doc(moduleId).get();
+        const moduleData = moduleDoc.data();
+        
+        let lessonsHTML = '';
+        if (moduleData.lessons && moduleData.lessons.length > 0) {
+            for (const [index, lesson] of moduleData.lessons.entries()) {
+                // جلب تفاصيل المحتوى الأصلي
+                let contentDetails = '';
+                if (lesson.libraryContentId) {
+                    try {
+                        const contentDoc = await db.collection('courseContentLibrary').doc(lesson.libraryContentId).get();
+                        if (contentDoc.exists) {
+                            const contentData = contentDoc.data();
+                            contentDetails = `
+                                <div style="background: #f0f9ff; padding: 10px; border-radius: 8px; margin-top: 10px;">
+                                    <small style="color: #0369a1;">
+                                        <strong>النوع:</strong> ${contentData.type}<br>
+                                        ${contentData.videoData?.url ? `<strong>الرابط:</strong> ${contentData.videoData.url}<br>` : ''}
+                                        ${contentData.quizData?.questions?.length ? `<strong>عدد الأسئلة:</strong> ${contentData.quizData.questions.length}<br>` : ''}
+                                    </small>
+                                </div>
+                            `;
+                        }
+                    } catch (error) {
+                        console.error('خطأ في جلب تفاصيل المحتوى:', error);
+                    }
+                }
+                
+                lessonsHTML += `
+                    <div style="background: white; padding: 15px; margin-bottom: 15px; border-radius: 10px; border-right: 4px solid ${lesson.points > 50 ? '#dc2626' : lesson.points > 20 ? '#f59e0b' : '#10b981'};">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <h5 style="margin: 0 0 8px 0; color: #1f2937;">
+                                    ${index + 1}. ${lesson.title}
+                                </h5>
+                                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                                    <span style="color: #6b7280; font-size: 0.9rem;">
+                                        <i class="fas fa-clock"></i> ${lesson.duration || 15} دقيقة
+                                    </span>
+                                    ${lesson.points ? `
+                                        <span style="color: #f59e0b; font-weight: bold;">
+                                            🏆 ${lesson.points} نقطة
+                                        </span>
+                                    ` : ''}
+                                    ${lesson.isFreePreview ? `
+                                        <span style="color: #10b981;">
+                                            <i class="fas fa-eye"></i> معاينة مجانية
+                                        </span>
+                                    ` : ''}
+                                </div>
+                                ${contentDetails}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            lessonsHTML = '<p style="text-align: center; color: #999;">لا توجد دروس في هذه الوحدة</p>';
+        }
+        
+        await Swal.fire({
+            title: `📦 معاينة الوحدة: ${moduleData.name}`,
+            html: `
+                <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                    <!-- معلومات الوحدة -->
+                    <div style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h3 style="margin: 0 0 10px 0;">${moduleData.name}</h3>
+                        <p style="margin: 0 0 15px 0; opacity: 0.9;">${moduleData.description || 'بدون وصف'}</p>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center;">
+                            <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                                <div style="font-size: 1.5rem; font-weight: bold;">${moduleData.lessons?.length || 0}</div>
+                                <div style="font-size: 0.9rem;">درس</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                                <div style="font-size: 1.5rem; font-weight: bold;">${moduleData.totalDuration || 0}</div>
+                                <div style="font-size: 0.9rem;">دقيقة</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;">
+                                <div style="font-size: 1.5rem; font-weight: bold;">${moduleData.totalPoints || 0}</div>
+                                <div style="font-size: 0.9rem;">نقطة</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- قائمة الدروس -->
+                    <h4 style="color: var(--primary); margin-bottom: 15px;">
+                        <i class="fas fa-list"></i> محتويات الوحدة
+                    </h4>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 10px;">
+                        ${lessonsHTML}
+                    </div>
+                </div>
+            `,
+            width: '800px',
+            showCloseButton: true,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('خطأ في معاينة الوحدة:', error);
+        Swal.fire('خطأ', 'حدث خطأ في معاينة الوحدة', 'error');
+    }
 }
 
 async function deleteModule(moduleId) {
@@ -3974,8 +4101,195 @@ async function saveModuleChanges(moduleId) {
 }
 
 // دوال القوالب
-function editTemplate(templateId) {
-    Swal.fire('قريباً', 'ميزة تعديل القالب قيد التطوير', 'info');
+async function editTemplate(templateId) {
+    try {
+        const templateDoc = await db.collection('courseTemplates').doc(templateId).get();
+        const templateData = templateDoc.data();
+        
+        // جلب الوحدات المتاحة
+        const modulesSnapshot = await db.collection('contentModules').get();
+        const availableModules = [];
+        modulesSnapshot.forEach(doc => {
+            availableModules.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        const selectedModules = templateData.modules || [];
+        
+        await Swal.fire({
+            title: `🎓 تحرير القالب: ${templateData.name}`,
+            html: `
+                <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                    <!-- معلومات القالب -->
+                    <div style="margin-bottom: 20px;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold;">اسم القالب</label>
+                            <input type="text" id="editTemplateName" value="${templateData.name}" 
+                                   style="width: 100%; padding: 8px; border: 2px solid #e5e7eb; border-radius: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold;">الوصف</label>
+                            <textarea id="editTemplateDescription" 
+                                      style="width: 100%; padding: 8px; border: 2px solid #e5e7eb; border-radius: 8px; height: 80px;">${templateData.description || ''}</textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- الوحدات المختارة -->
+                    <h4 style="color: var(--primary); margin-bottom: 15px;">
+                        <i class="fas fa-cubes"></i> الوحدات في القالب
+                    </h4>
+                    <div id="templateModulesList" style="background: #f8f9fa; padding: 15px; border-radius: 10px; min-height: 100px; margin-bottom: 20px;">
+                        ${selectedModules.length > 0 ? 
+                            selectedModules.map(moduleId => {
+                                const module = availableModules.find(m => m.id === moduleId);
+                                if (!module) return '';
+                                return `
+                                    <div style="background: white; padding: 10px; margin-bottom: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <strong>${module.name}</strong>
+                                            <span style="color: #666; margin-right: 10px;">(${module.lessons?.length || 0} دروس)</span>
+                                        </div>
+                                        <button onclick="removeModuleFromTemplate('${templateId}', '${moduleId}')" 
+                                                style="background: #dc2626; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                `;
+                            }).join('') :
+                            '<p style="text-align: center; color: #999;">لم يتم إضافة وحدات بعد</p>'
+                        }
+                    </div>
+                    
+                    <!-- إضافة وحدات -->
+                    <h4 style="color: var(--primary); margin-bottom: 15px;">
+                        <i class="fas fa-plus-circle"></i> إضافة وحدات
+                    </h4>
+                    <div style="max-height: 200px; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 10px;">
+                        ${availableModules.map(module => {
+                            const isSelected = selectedModules.includes(module.id);
+                            return `
+                                <div style="background: white; padding: 10px; margin-bottom: 8px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; ${isSelected ? 'opacity: 0.5;' : ''}">
+                                    <div>
+                                        <strong>${module.name}</strong>
+                                        <span style="color: #666; margin-right: 10px;">(${module.lessons?.length || 0} دروس)</span>
+                                    </div>
+                                    <button onclick="addModuleToTemplate('${templateId}', '${module.id}')" 
+                                            ${isSelected ? 'disabled' : ''}
+                                            style="background: ${isSelected ? '#ccc' : '#10b981'}; color: white; border: none; padding: 5px 15px; border-radius: 5px; cursor: ${isSelected ? 'not-allowed' : 'pointer'};">
+                                        ${isSelected ? 'مضاف' : 'إضافة'}
+                                    </button>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `,
+            width: '800px',
+            showCancelButton: true,
+            confirmButtonText: 'حفظ التغييرات',
+            confirmButtonColor: '#10b981',
+            preConfirm: () => {
+                const name = document.getElementById('editTemplateName').value.trim();
+                const description = document.getElementById('editTemplateDescription').value.trim();
+                
+                if (!name) {
+                    Swal.showValidationMessage('يجب إدخال اسم القالب');
+                    return false;
+                }
+                
+                return { name, description };
+            }
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                await db.collection('courseTemplates').doc(templateId).update({
+                    name: result.value.name,
+                    description: result.value.description,
+                    lastModified: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                Swal.fire('تم الحفظ', 'تم حفظ التغييرات بنجاح', 'success');
+                loadTemplates();
+            }
+        });
+        
+    } catch (error) {
+        console.error('خطأ في تحرير القالب:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تحرير القالب', 'error');
+    }
+}
+
+    // إضافة وحدة للقالب
+async function addModuleToTemplate(templateId, moduleId) {
+    try {
+        const templateDoc = await db.collection('courseTemplates').doc(templateId).get();
+        const templateData = templateDoc.data();
+        
+        const updatedModules = [...(templateData.modules || []), moduleId];
+        
+        // حساب المجاميع
+        let totalDuration = 0;
+        let totalPoints = 0;
+        
+        for (const modId of updatedModules) {
+            const modDoc = await db.collection('contentModules').doc(modId).get();
+            if (modDoc.exists) {
+                const modData = modDoc.data();
+                totalDuration += modData.totalDuration || 0;
+                totalPoints += modData.totalPoints || 0;
+            }
+        }
+        
+        await db.collection('courseTemplates').doc(templateId).update({
+            modules: updatedModules,
+            totalDuration: totalDuration,
+            totalPoints: totalPoints,
+            lastModified: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // إعادة فتح المحرر
+        editTemplate(templateId);
+        
+    } catch (error) {
+        console.error('خطأ في إضافة الوحدة:', error);
+    }
+}
+
+// إزالة وحدة من القالب
+async function removeModuleFromTemplate(templateId, moduleId) {
+    try {
+        const templateDoc = await db.collection('courseTemplates').doc(templateId).get();
+        const templateData = templateDoc.data();
+        
+        const updatedModules = (templateData.modules || []).filter(id => id !== moduleId);
+        
+        // حساب المجاميع
+        let totalDuration = 0;
+        let totalPoints = 0;
+        
+        for (const modId of updatedModules) {
+            const modDoc = await db.collection('contentModules').doc(modId).get();
+            if (modDoc.exists) {
+                const modData = modDoc.data();
+                totalDuration += modData.totalDuration || 0;
+                totalPoints += modData.totalPoints || 0;
+            }
+        }
+        
+        await db.collection('courseTemplates').doc(templateId).update({
+            modules: updatedModules,
+            totalDuration: totalDuration,
+            totalPoints: totalPoints,
+            lastModified: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // إعادة فتح المحرر
+        editTemplate(templateId);
+        
+    } catch (error) {
+        console.error('خطأ في إزالة الوحدة:', error);
+    }
 }
 
 function previewTemplate(templateId) {
@@ -4128,8 +4442,9 @@ function displayModules() {
                                         <strong>${index + 1}. ${lesson.title}</strong>
                                         <span style="color: #666; margin-right: 10px;">(${lesson.duration} دقيقة)</span>
                                         ${lesson.points ? `<span style="background: #fbbf24; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">🏆 ${lesson.points} نقطة</span>` : ''}
+                                        ${lesson.isFreePreview ? `<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-right: 5px;">👁️ معاينة مجانية</span>` : ''}
                                     </div>
-                                    <button onclick="removeLessonFromModule('${lesson.id}')" style="background: #dc2626; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">
+                                    <button onclick="removeLessonFromModule('${moduleId}', '${lesson.id}')" style="background: #dc2626; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">
                                         <i class="fas fa-times"></i>
                                     </button>
                                 </div>
@@ -4371,6 +4686,8 @@ window.createCourseTemplate = createCourseTemplate;
 window.editTemplate = editTemplate;
 window.previewTemplate = previewTemplate;
 window.deleteTemplate = deleteTemplate;
+    window.addModuleToTemplate = addModuleToTemplate;
+window.removeModuleFromTemplate = removeModuleFromTemplate;
     window.displayFilteredContent = displayFilteredContent;
 window.showAllContent = showAllContent;
 
