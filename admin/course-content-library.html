@@ -823,6 +823,9 @@
             <button class="btn btn-warning btn-large" onclick="createSampleData()" title="إنشاء بيانات تجريبية للاختبار">
     <span>🧪</span> بيانات تجريبية
 </button>
+        <button class="btn btn-danger" onclick="deleteOldModules()" style="margin-left: 10px;">
+    <span>🗑️</span> حذف كل الوحدات القديمة
+</button>    
     <button class="btn btn-primary btn-large" onclick="openContentCreator()">
         <span>➕</span> محتوى مفرد
     </button>
@@ -3659,28 +3662,20 @@ async function createModule(moduleData) {
             isActive: true
         };
         
-        // حفظ في Firebase
         const docRef = await db.collection('contentModules').add(newModule);
         
         Swal.fire({
             icon: 'success',
             title: 'تم إنشاء الوحدة',
             text: 'يمكنك الآن إضافة المحتوى إليها',
-            confirmButtonText: 'إضافة محتوى',
-            showCancelButton: true,
-            cancelButtonText: 'لاحقاً'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                // إعادة تحميل الوحدات ثم فتح المحرر
-                loadModules().then(() => {
-                    openModuleEditor(docRef.id); // استخدم docRef.id هنا
-                });
-            } else {
-                switchTab('modules');
-            }
+            timer: 2000,
+            showConfirmButton: false
         });
         
-        return docRef.id; // إرجاع المعرف الصحيح
+        // إعادة تحميل الوحدات
+        await loadModules();
+        
+        return docRef.id;
         
     } catch (error) {
         console.error('خطأ في إنشاء الوحدة:', error);
@@ -4433,12 +4428,10 @@ async function loadModules() {
         
         allModules = [];
         snapshot.forEach(doc => {
-            const moduleData = {
-                id: doc.id,  // هذا هو المعرف الصحيح من Firebase
+            allModules.push({
+                id: doc.id,  // معرف Firebase هو المعرف الوحيد
                 ...doc.data()
-            };
-            allModules.push(moduleData);
-            console.log('✅ تم تحميل وحدة:', moduleData.name, 'بالمعرف:', doc.id);
+            });
         });
         
         console.log('📦 إجمالي الوحدات المحملة:', allModules.length);
@@ -4449,14 +4442,10 @@ async function loadModules() {
         Swal.fire('خطأ', 'فشل تحميل الوحدات', 'error');
     }
 }
-
 function displayModules() {
     const container = document.getElementById('modulesGrid');
     
-    if (!container) {
-        console.log('⚠️ لم يتم العثور على حاوية الوحدات');
-        return;
-    }
+    if (!container) return;
     
     if (allModules.length === 0) {
         container.innerHTML = `
@@ -4475,16 +4464,6 @@ function displayModules() {
     let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.5rem;">';
     
     allModules.forEach(module => {
-        // استخدم module.id الذي يأتي من Firebase مباشرة
-        const moduleId = module.id;
-        
-        if (!moduleId) {
-            console.error('⚠️ وحدة بدون معرف:', module);
-            return;
-        }
-        
-        console.log('📦 عرض الوحدة:', module.name, 'بالمعرف:', moduleId);
-        
         const lessonsCount = module.lessons?.length || 0;
         const totalPoints = module.totalPoints || 0;
         
@@ -4512,13 +4491,13 @@ function displayModules() {
                     </div>
                     
                     <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-primary" onclick="openModuleEditor('${moduleId}')" style="flex: 1;">
+                        <button class="btn btn-primary" onclick="openModuleEditor('${module.id}')" style="flex: 1;">
                             <i class="fas fa-edit"></i> تعديل
                         </button>
-                        <button class="btn btn-info" onclick="previewModule('${moduleId}')" style="flex: 1;">
+                        <button class="btn btn-info" onclick="previewModule('${module.id}')" style="flex: 1;">
                             <i class="fas fa-eye"></i> معاينة
                         </button>
-                        <button class="btn btn-danger" onclick="deleteModule('${moduleId}')">
+                        <button class="btn btn-danger" onclick="deleteModule('${module.id}')">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -4529,8 +4508,6 @@ function displayModules() {
     
     html += '</div>';
     container.innerHTML = html;
-    
-    console.log('✅ تم عرض', allModules.length, 'وحدة');
 }
 
 async function openModuleEditor(moduleId) {
@@ -4747,6 +4724,37 @@ function showUsageModal(content, usageList) {
 function closeUsageModal() {
     const modal = document.getElementById('usageModal');
     if (modal) modal.remove();
+}
+    async function deleteOldModules() {
+    const result = await Swal.fire({
+        title: 'حذف الوحدات القديمة',
+        text: 'هل تريد حذف جميع الوحدات الموجودة والبدء من جديد؟',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف الكل',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            const snapshot = await db.collection('contentModules').get();
+            const batch = db.batch();
+            
+            snapshot.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            
+            await batch.commit();
+            
+            Swal.fire('تم الحذف', 'تم حذف جميع الوحدات القديمة', 'success');
+            await loadModules();
+            
+        } catch (error) {
+            console.error('خطأ في الحذف:', error);
+            Swal.fire('خطأ', 'فشل حذف الوحدات', 'error');
+        }
+    }
 }
 
     // ===============================
