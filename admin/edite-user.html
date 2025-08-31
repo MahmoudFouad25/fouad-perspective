@@ -3403,6 +3403,335 @@ function displayCombinedPointsHistory() {
     
     return html;
 }
+
+        // ==================== 💰 نظام إدارة المدفوعات والأقساط المتكامل ====================
+
+// دالة إدارة الأقساط المحدثة للمستخدم الحالي
+async function manageUserInstallments() {
+    if (!currentUserData || !currentUserId) {
+        Swal.fire('خطأ', 'لم يتم تحميل بيانات المستخدم', 'error');
+        return;
+    }
+    
+    const enrollments = currentUserData.enrollments || [];
+    
+    // جمع كل الأقساط من كل الدورات
+    let allInstallments = [];
+    enrollments.forEach(enrollment => {
+        if (enrollment.payment?.installments?.schedule) {
+            enrollment.payment.installments.schedule.forEach(inst => {
+                allInstallments.push({
+                    ...inst,
+                    courseName: enrollment.title,
+                    courseId: enrollment.id,
+                    enrollmentId: enrollment.id
+                });
+            });
+        }
+    });
+    
+    // فرز الأقساط حسب التاريخ
+    allInstallments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    
+    // حساب الإحصائيات
+    const stats = {
+        total: allInstallments.length,
+        paid: allInstallments.filter(i => i.status === 'paid').length,
+        pending: allInstallments.filter(i => i.status === 'pending').length,
+        late: allInstallments.filter(i => i.status === 'pending' && new Date(i.dueDate) < new Date()).length
+    };
+    
+    await Swal.fire({
+        title: '💰 إدارة الأقساط',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- معلومات المستخدم -->
+                <div style="background: linear-gradient(135deg, #1e293b, #334155); 
+                            color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="margin: 0; color: white;">
+                        <i class="fas fa-user"></i> ${currentUserData.personalInfo?.name || 'المستخدم'}
+                    </h4>
+                    <p style="margin: 5px 0; opacity: 0.9;">
+                        ${currentUserId} | ${currentUserData.accountStatus?.journeyTitle || 'ملبي النداء'}
+                    </p>
+                </div>
+                
+                <!-- إحصائيات الأقساط -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+                    <div style="background: white; padding: 15px; border-radius: 10px; text-align: center; 
+                                border: 2px solid #E5E7EB;">
+                        <div style="color: #6B7280; font-size: 0.8rem;">إجمالي</div>
+                        <div style="font-weight: bold; color: #1F2937; font-size: 1.5rem;">
+                            ${stats.total}
+                        </div>
+                        <div style="color: #6B7280; font-size: 0.75rem;">قسط</div>
+                    </div>
+                    <div style="background: #DCFCE7; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="color: #065F46; font-size: 0.8rem;">مدفوع</div>
+                        <div style="font-weight: bold; color: #10B981; font-size: 1.5rem;">
+                            ${stats.paid}
+                        </div>
+                        <div style="color: #065F46; font-size: 0.75rem;">قسط</div>
+                    </div>
+                    <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="color: #92400E; font-size: 0.8rem;">قادم</div>
+                        <div style="font-weight: bold; color: #F59E0B; font-size: 1.5rem;">
+                            ${stats.pending}
+                        </div>
+                        <div style="color: #92400E; font-size: 0.75rem;">قسط</div>
+                    </div>
+                    <div style="background: #FEE2E2; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="color: #991B1B; font-size: 0.8rem;">متأخر</div>
+                        <div style="font-weight: bold; color: #DC2626; font-size: 1.5rem;">
+                            ${stats.late}
+                        </div>
+                        <div style="color: #991B1B; font-size: 0.75rem;">قسط</div>
+                    </div>
+                </div>
+                
+                <!-- قائمة الأقساط -->
+                <div style="background: white; border-radius: 12px; padding: 20px;">
+                    <h5 style="color: #1F2937; margin: 0 0 20px 0;">
+                        <i class="fas fa-list"></i> جدول الأقساط التفصيلي
+                    </h5>
+                    
+                    ${allInstallments.length > 0 ? allInstallments.map((inst, idx) => {
+                        const isLate = inst.status === 'pending' && new Date(inst.dueDate) < new Date();
+                        const daysLate = isLate ? Math.floor((new Date() - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24)) : 0;
+                        
+                        return `
+                        <div style="border: 2px solid ${inst.status === 'paid' ? '#10B981' : isLate ? '#EF4444' : '#F59E0B'}; 
+                                    border-radius: 12px; padding: 20px; margin-bottom: 15px;
+                                    background: ${inst.status === 'paid' ? '#F0FDF4' : isLate ? '#FEF2F2' : '#FFFBEB'};">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div style="flex: 1;">
+                                    <h6 style="margin: 0 0 8px 0; color: #1F2937; font-size: 1.1rem;">
+                                        القسط ${inst.installmentNumber} - ${inst.courseName}
+                                    </h6>
+                                    <p style="margin: 5px 0; color: #6B7280; font-size: 0.9rem;">
+                                        <i class="fas fa-calendar"></i> 
+                                        استحقاق: ${formatDate(inst.dueDate)}
+                                        ${isLate ? `<span style="color: #DC2626; font-weight: bold;"> (متأخر ${daysLate} يوم)</span>` : ''}
+                                    </p>
+                                    ${inst.status === 'paid' ? `
+                                        <p style="margin: 5px 0; color: #10B981; font-size: 0.85rem;">
+                                            <i class="fas fa-check-circle"></i> 
+                                            تم الدفع في: ${formatDate(inst.paidDate)}
+                                        </p>
+                                        ${inst.paymentMethod ? `
+                                            <p style="margin: 5px 0; color: #6B7280; font-size: 0.85rem;">
+                                                <i class="fas fa-credit-card"></i> 
+                                                طريقة الدفع: ${inst.paymentMethod}
+                                            </p>
+                                        ` : ''}
+                                    ` : ''}
+                                </div>
+                                <div style="text-align: left;">
+                                    <div style="font-size: 1.5rem; font-weight: bold; 
+                                                color: ${inst.status === 'paid' ? '#10B981' : '#1F2937'};">
+                                        ${inst.amount.toLocaleString()} ج.م
+                                    </div>
+                                    ${inst.status === 'pending' ? `
+                                        <button onclick="recordUserInstallmentPayment('${inst.enrollmentId}', ${inst.installmentNumber})" 
+                                                style="background: linear-gradient(135deg, #10B981, #059669); 
+                                                       color: white; border: none; 
+                                                       padding: 10px 20px; border-radius: 8px; cursor: pointer;
+                                                       margin-top: 10px; font-weight: bold; font-size: 0.9rem;
+                                                       transition: all 0.3s;">
+                                            <i class="fas fa-check"></i> تسجيل دفع
+                                        </button>
+                                    ` : `
+                                        <span style="background: #10B981; color: white; padding: 6px 15px; 
+                                                     border-radius: 20px; font-size: 0.85rem; display: inline-block;
+                                                     margin-top: 10px;">
+                                            <i class="fas fa-check-double"></i> مدفوع
+                                        </span>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                        `;
+                    }).join('') : `
+                        <div style="text-align: center; color: #6B7280; padding: 60px;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                            <p>لا توجد أقساط مسجلة</p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `,
+        width: '900px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دالة تسجيل دفع قسط للمستخدم الحالي
+async function recordUserInstallmentPayment(enrollmentId, installmentNumber) {
+    const { value: paymentData } = await Swal.fire({
+        title: '💳 تسجيل دفع القسط',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-calendar"></i> تاريخ الدفع
+                    </label>
+                    <input type="date" id="paymentDate" class="swal2-input" 
+                           value="${new Date().toISOString().split('T')[0]}"
+                           style="width: 100%;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-credit-card"></i> طريقة الدفع
+                    </label>
+                    <select id="paymentMethod" class="swal2-input" style="width: 100%;">
+                        <option value="cash">نقدي</option>
+                        <option value="vodafone">فودافون كاش</option>
+                        <option value="instapay">انستاباي</option>
+                        <option value="bank">تحويل بنكي</option>
+                        <option value="card">بطاقة ائتمان</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-hashtag"></i> رقم المرجع (اختياري)
+                    </label>
+                    <input type="text" id="reference" class="swal2-input" 
+                           placeholder="رقم العملية أو المرجع"
+                           style="width: 100%;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        <i class="fas fa-sticky-note"></i> ملاحظات (اختياري)
+                    </label>
+                    <textarea id="notes" class="swal2-textarea" 
+                              placeholder="أي ملاحظات إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الدفع',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            return {
+                paymentDate: document.getElementById('paymentDate').value,
+                paymentMethod: document.getElementById('paymentMethod').value,
+                reference: document.getElementById('reference').value,
+                notes: document.getElementById('notes').value
+            };
+        }
+    });
+    
+    if (!paymentData) return;
+    
+    try {
+        // تحديث القسط في الـ enrollment
+        const enrollments = currentUserData.enrollments || [];
+        const enrollmentIndex = enrollments.findIndex(e => e.id === enrollmentId);
+        
+        if (enrollmentIndex !== -1) {
+            const installmentIndex = enrollments[enrollmentIndex].payment.installments.schedule
+                .findIndex(i => i.installmentNumber === installmentNumber);
+            
+            if (installmentIndex !== -1) {
+                const installmentAmount = enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex].amount;
+                
+                // تحديث حالة القسط
+                enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex] = {
+                    ...enrollments[enrollmentIndex].payment.installments.schedule[installmentIndex],
+                    status: 'paid',
+                    paidDate: paymentData.paymentDate,
+                    paidAmount: installmentAmount,
+                    paymentMethod: paymentData.paymentMethod,
+                    reference: paymentData.reference,
+                    notes: paymentData.notes
+                };
+                
+                // تحديث المدفوع والمتبقي
+                enrollments[enrollmentIndex].payment.paidAmount = 
+                    (enrollments[enrollmentIndex].payment.paidAmount || 0) + installmentAmount;
+                enrollments[enrollmentIndex].payment.remainingAmount = 
+                    (enrollments[enrollmentIndex].payment.remainingAmount || 0) - installmentAmount;
+                enrollments[enrollmentIndex].payment.installments.paidInstallments = 
+                    (enrollments[enrollmentIndex].payment.installments.paidInstallments || 0) + 1;
+                
+                // التحقق من اكتمال الدفع
+                if (enrollments[enrollmentIndex].payment.remainingAmount <= 0) {
+                    enrollments[enrollmentIndex].payment.status = 'paid';
+                    enrollments[enrollmentIndex].payment.fullyPaidDate = new Date().toISOString();
+                }
+                
+                // إضافة سجل في payment history
+                const paymentHistory = currentUserData.financial?.paymentHistory || [];
+                paymentHistory.push({
+                    id: `payment-${Date.now()}`,
+                    type: 'installment',
+                    amount: installmentAmount,
+                    date: paymentData.paymentDate,
+                    method: paymentData.paymentMethod,
+                    reference: paymentData.reference,
+                    relatedEntity: 'enrollment',
+                    relatedEntityId: enrollmentId,
+                    description: `دفع القسط ${installmentNumber} - ${enrollments[enrollmentIndex].title}`,
+                    notes: paymentData.notes,
+                    recordedAt: new Date().toISOString()
+                });
+                
+                // حساب الإجماليات الجديدة
+                const totalPaid = enrollments.reduce((sum, e) => sum + (e.payment?.paidAmount || 0), 0);
+                const totalDue = enrollments.reduce((sum, e) => sum + (e.payment?.remainingAmount || 0), 0);
+                
+                // تحديث Firebase
+                await db.collection('users').doc(currentUserId).update({
+                    enrollments: enrollments,
+                    'financial.totalPaid': totalPaid,
+                    'financial.totalDue': totalDue,
+                    'financial.paymentHistory': paymentHistory,
+                    'timestamps.lastUpdated': new Date().toISOString()
+                });
+                
+                // إضافة نقاط للدفعة
+                const installmentPoints = Math.floor(installmentAmount / 100); // نقطة لكل 100 جنيه
+                if (installmentPoints > 0) {
+                    await addDualPoints(
+                        currentUserId, 
+                        installmentPoints, 
+                        'دفع قسط', 
+                        `قسط ${installmentNumber} - ${installmentAmount} ج.م`
+                    );
+                }
+                
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم تسجيل الدفع بنجاح',
+                    text: `تم تسجيل دفع القسط ${installmentNumber} بقيمة ${installmentAmount.toLocaleString()} ج.م`,
+                    confirmButtonColor: '#10B981'
+                });
+                
+                // إعادة تحميل البيانات
+                await loadUserData();
+                
+                // إعادة فتح نافذة الأقساط
+                setTimeout(() => {
+                    manageUserInstallments();
+                }, 1500);
+                
+            }
+        }
+    } catch (error) {
+        console.error('خطأ في تسجيل الدفع:', error);
+        Swal.fire('خطأ', 'حدث خطأ في تسجيل الدفع', 'error');
+    }
+}
+
+// تسجيل الدوال globally
+window.recordUserInstallmentPayment = recordUserInstallmentPayment;
 // ==================== حساب الترتيب ====================
 function calculateRank(points) {
     if (points >= 10000) return 'أسطوري';
@@ -3531,6 +3860,33 @@ function displayFinancialData() {
     const financial = currentUserData.financial || {};
     const totalPaid = financial.totalPaid || 0;
     const totalDue = financial.totalDue || 0;
+
+    // حساب أقساط المستخدم
+    let upcomingInstallments = [];
+    let totalInstallments = 0;
+    let paidInstallments = 0;
+    
+    if (currentUserData.enrollments) {
+        currentUserData.enrollments.forEach(enrollment => {
+            if (enrollment.payment?.installments?.schedule) {
+                enrollment.payment.installments.schedule.forEach(inst => {
+                    totalInstallments++;
+                    if (inst.status === 'paid') {
+                        paidInstallments++;
+                    } else {
+                        upcomingInstallments.push({
+                            ...inst,
+                            courseTitle: enrollment.title,
+                            enrollmentId: enrollment.id
+                        });
+                    }
+                });
+            }
+        });
+    }
+    
+    // ترتيب الأقساط القادمة حسب التاريخ
+    upcomingInstallments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
     
     // نقاط الرحلة (الارتواء)
     const journeyPoints = currentUserData.journeyPoints || {};
@@ -3618,7 +3974,27 @@ function displayFinancialData() {
                     </button>
                 </div>
             </div>
-            
+
+            <!-- أزرار إدارة المدفوعات -->
+<div class="payment-controls" style="margin-top: 15px;">
+    <button onclick="manageUserInstallments()" class="control-btn installments">
+        <i class="fas fa-file-invoice-dollar"></i>
+        إدارة الأقساط (${totalInstallments - paidInstallments}/${totalInstallments})
+    </button>
+    <button onclick="addGeneralPayment()" class="control-btn payment">
+        <i class="fas fa-plus-circle"></i>
+        إضافة دفعة
+    </button>
+    <button onclick="viewPaymentHistory()" class="control-btn history">
+        <i class="fas fa-history"></i>
+        سجل المدفوعات
+    </button>
+    <button onclick="viewFinancialReport()" class="control-btn report">
+        <i class="fas fa-chart-pie"></i>
+        التقرير المالي
+    </button>
+</div>
+
             <!-- آخر معاملات النقاط -->
             <div class="recent-transactions-section">
                 <h3 class="section-title">
