@@ -25,7 +25,11 @@ if (typeof firebase.analytics !== 'undefined') {
 // متغيرات Firebase العامة
 const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
+
+// إزالة Firebase Storage لأنه غير مُحمّل في الصفحة
+// إذا كنت تحتاج Storage، أضف هذا السطر في HTML:
+// <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-storage-compat.js"></script>
+// const storage = firebase.storage();
 
 // ================== AUTHENTICATION FUNCTIONS ==================
 function signOut() {
@@ -476,7 +480,7 @@ window.firebaseDB = {
 window.firebase = firebase;
 window.db = db;
 window.auth = auth;
-window.storage = storage;
+// window.storage = storage; // مُعلّق لأن Firebase Storage غير محمّل
 
 // تأكيد التهيئة
 console.log('✅ Firebase initialized successfully');
