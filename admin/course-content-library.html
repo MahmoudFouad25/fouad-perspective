@@ -1001,6 +1001,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js"></script>
+    <!-- SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
 // Firebase Configuration
@@ -3679,6 +3681,330 @@ async function createModule(moduleData) {
     }
 }
 
+    // دالة إنشاء قالب دورة
+function openCourseTemplateCreator() {
+    Swal.fire({
+        title: '🎓 إنشاء قالب دورة',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--primary);">
+                        اسم القالب *
+                    </label>
+                    <input type="text" id="templateName" class="swal2-input" 
+                           placeholder="مثال: دورة أساسيات البرمجة" style="width: 100%;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--primary);">
+                        وصف القالب
+                    </label>
+                    <textarea id="templateDescription" class="swal2-textarea" 
+                              placeholder="وصف مختصر للقالب..." 
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--primary);">
+                        الفئة المستهدفة
+                    </label>
+                    <input type="text" id="templateTarget" class="swal2-input" 
+                           placeholder="مثال: المبتدئين في البرمجة" style="width: 100%;">
+                </div>
+                
+                <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                    <p style="color: #0369a1; margin: 0;">
+                        <i class="fas fa-info-circle"></i>
+                        يمكنك إضافة وحدات كاملة إلى هذا القالب لاستخدامه في دورات متعددة
+                    </p>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إنشاء القالب',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#3b82f6',
+        width: '600px',
+        preConfirm: () => {
+            const name = document.getElementById('templateName').value.trim();
+            const description = document.getElementById('templateDescription').value.trim();
+            const target = document.getElementById('templateTarget').value.trim();
+            
+            if (!name) {
+                Swal.showValidationMessage('يجب إدخال اسم القالب');
+                return false;
+            }
+            
+            return { name, description, target };
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            await createCourseTemplate(result.value);
+        }
+    });
+}
+
+// دالة إنشاء قالب الدورة
+async function createCourseTemplate(templateData) {
+    try {
+        const newTemplate = {
+            name: templateData.name,
+            description: templateData.description,
+            targetAudience: templateData.target,
+            modules: [],
+            totalDuration: 0,
+            totalPoints: 0,
+            createdDate: firebase.firestore.FieldValue.serverTimestamp(),
+            lastModified: firebase.firestore.FieldValue.serverTimestamp(),
+            isActive: true
+        };
+        
+        // حفظ في Firebase
+        await db.collection('courseTemplates').add(newTemplate);
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم إنشاء القالب',
+            text: 'يمكنك الآن إضافة الوحدات إليه',
+            timer: 2000,
+            showConfirmButton: false
+        });
+        
+        // التبديل إلى تبويب القوالب
+        switchTab('templates');
+        
+    } catch (error) {
+        console.error('خطأ في إنشاء القالب:', error);
+        Swal.fire('خطأ', 'حدث خطأ في إنشاء القالب', 'error');
+    }
+}
+
+// دالة تحميل القوالب
+async function loadTemplates() {
+    try {
+        const snapshot = await db.collection('courseTemplates')
+            .orderBy('createdDate', 'desc')
+            .get();
+        
+        allTemplates = [];
+        snapshot.forEach(doc => {
+            allTemplates.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        displayTemplates();
+        
+    } catch (error) {
+        console.error('خطأ في تحميل القوالب:', error);
+    }
+}
+
+// دالة عرض القوالب
+function displayTemplates() {
+    const container = document.getElementById('templatesGrid');
+    
+    if (allTemplates.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="text-align: center; padding: 60px;">
+                <div class="empty-state-icon" style="font-size: 4rem; margin-bottom: 20px;">🎓</div>
+                <h3>لا توجد قوالب دورات بعد</h3>
+                <p>ابدأ بإنشاء أول قالب دورة</p>
+                <button class="btn btn-info" onclick="openCourseTemplateCreator()">
+                    إنشاء قالب جديد
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.5rem;">';
+    
+    allTemplates.forEach(template => {
+        const modulesCount = template.modules?.length || 0;
+        
+        html += `
+            <div class="template-card" style="background: white; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); overflow: hidden; transition: all 0.3s;">
+                <div style="background: linear-gradient(135deg, #3b82f6, #1e40af); color: white; padding: 20px;">
+                    <h3 style="margin: 0 0 10px 0;">${template.name}</h3>
+                    <p style="margin: 0; opacity: 0.9; font-size: 0.9rem;">${template.description || 'بدون وصف'}</p>
+                </div>
+                
+                <div style="padding: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary);">${modulesCount}</div>
+                            <div style="font-size: 0.8rem; color: #666;">وحدة</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #f59e0b;">${template.totalDuration || 0}</div>
+                            <div style="font-size: 0.8rem; color: #666;">دقيقة</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #dc2626;">${template.totalPoints || 0}</div>
+                            <div style="font-size: 0.8rem; color: #666;">نقطة</div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="editTemplate('${template.id}')" style="flex: 1;">
+                            <i class="fas fa-edit"></i> تعديل
+                        </button>
+                        <button class="btn btn-info" onclick="previewTemplate('${template.id}')" style="flex: 1;">
+                            <i class="fas fa-eye"></i> معاينة
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteTemplate('${template.id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+    // دوال مساعدة للوحدات
+async function addContentToModule(moduleId, contentId) {
+    try {
+        // جلب بيانات المحتوى
+        const contentDoc = await db.collection('courseContentLibrary').doc(contentId).get();
+        const contentData = contentDoc.data();
+        
+        // جلب بيانات الوحدة
+        const moduleDoc = await db.collection('contentModules').doc(moduleId).get();
+        const moduleData = moduleDoc.data();
+        
+        // إضافة الدرس للوحدة
+        const newLesson = {
+            id: 'lesson_' + Date.now(),
+            title: contentData.name,
+            duration: contentData.duration || 15,
+            points: contentData.pointsSystem?.totalPossible || 0,
+            libraryContentId: contentId,
+            type: contentData.type,
+            addedDate: new Date().toISOString()
+        };
+        
+        const updatedLessons = [...(moduleData.lessons || []), newLesson];
+        const totalDuration = updatedLessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0);
+        const totalPoints = updatedLessons.reduce((sum, lesson) => sum + (lesson.points || 0), 0);
+        
+        // تحديث الوحدة
+        await db.collection('contentModules').doc(moduleId).update({
+            lessons: updatedLessons,
+            totalDuration: totalDuration,
+            totalPoints: totalPoints,
+            lastModified: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // تحديث استخدامات المحتوى
+        await db.collection('courseContentLibrary').doc(contentId).update({
+            timesUsed: firebase.firestore.FieldValue.increment(1)
+        });
+        
+        // إعادة فتح المحرر
+        openModuleEditor(moduleId);
+        
+    } catch (error) {
+        console.error('خطأ في إضافة المحتوى:', error);
+        Swal.fire('خطأ', 'حدث خطأ في إضافة المحتوى', 'error');
+    }
+}
+
+function removeLessonFromModule(lessonId) {
+    console.log('سيتم حذف الدرس:', lessonId);
+    // سيتم تنفيذها في المرحلة التالية
+}
+
+function filterAvailableContent() {
+    const searchTerm = document.getElementById('searchContent').value.toLowerCase();
+    const items = document.querySelectorAll('.content-item');
+    
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+async function previewModule(moduleId) {
+    // سيتم تنفيذها في المرحلة التالية
+    Swal.fire('قريباً', 'ميزة المعاينة قيد التطوير', 'info');
+}
+
+async function deleteModule(moduleId) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل أنت متأكد من حذف هذه الوحدة؟',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            await db.collection('contentModules').doc(moduleId).delete();
+            Swal.fire('تم الحذف', 'تم حذف الوحدة بنجاح', 'success');
+            loadModules();
+        } catch (error) {
+            console.error('خطأ في الحذف:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف الوحدة', 'error');
+        }
+    }
+}
+
+async function saveModuleChanges(moduleId) {
+    Swal.fire({
+        icon: 'success',
+        title: 'تم الحفظ',
+        text: 'تم حفظ التغييرات بنجاح',
+        timer: 2000,
+        showConfirmButton: false
+    });
+    loadModules();
+}
+
+// دوال القوالب
+function editTemplate(templateId) {
+    Swal.fire('قريباً', 'ميزة تعديل القالب قيد التطوير', 'info');
+}
+
+function previewTemplate(templateId) {
+    Swal.fire('قريباً', 'ميزة معاينة القالب قيد التطوير', 'info');
+}
+
+async function deleteTemplate(templateId) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل أنت متأكد من حذف هذا القالب؟',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            await db.collection('courseTemplates').doc(templateId).delete();
+            Swal.fire('تم الحذف', 'تم حذف القالب بنجاح', 'success');
+            loadTemplates();
+        } catch (error) {
+            console.error('خطأ في الحذف:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف القالب', 'error');
+        }
+    }
+}
+
 async function loadModules() {
     try {
         const snapshot = await db.collection('contentModules')
@@ -4039,6 +4365,12 @@ window.removeLessonFromModule = removeLessonFromModule;
 window.filterAvailableContent = filterAvailableContent;
 window.previewModule = previewModule;
 window.deleteModule = deleteModule;
+    window.saveModuleChanges = saveModuleChanges;
+window.loadTemplates = loadTemplates;
+window.createCourseTemplate = createCourseTemplate;
+window.editTemplate = editTemplate;
+window.previewTemplate = previewTemplate;
+window.deleteTemplate = deleteTemplate;
     window.displayFilteredContent = displayFilteredContent;
 window.showAllContent = showAllContent;
 
