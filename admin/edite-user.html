@@ -2071,6 +2071,267 @@
 
     <script>
         // ==================== متغيرات عامة ====================
+        // ==================== 🌟 نظام النقاط الكامل - منظور الفؤاد ====================
+
+// نظام مراحل الرحلة
+const FouadJourneySystem = {
+    stages: {
+        1: { name: 'المرحلة الأولى', title: 'ملبي النداء', color: '#94a3b8' },
+        2: { name: 'المرحلة الثانية', title: 'واصل الطريق', color: '#64748b' },
+        3: { name: 'المرحلة الثالثة', title: 'باني الأساس', color: '#3b82f6' },
+        4: { name: 'المرحلة الرابعة', title: 'متجذر الهوية', color: '#10b981' },
+        5: { name: 'المرحلة الخامسة', title: 'مثمر الخير', color: '#f59e0b' },
+        6: { name: 'المرحلة السادسة', title: 'نبيل القصد', color: '#fbbf24' },
+        7: { name: 'المرحلة السابعة', title: 'محيي الأرواح', color: '#ef4444' }
+    }
+};
+
+// دالة إضافة النقاط المزدوجة - للنظامين معاً
+async function addDualPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentJourneyBalance = userData.journeyPoints?.balance || 0;
+        const currentWalletBalance = userData.walletPoints?.balance || 0;
+        
+        // تحديد التسمية الصحيحة بناءً على السبب
+        let reasonLabel = reason;
+        if (!reason.includes('(')) {
+            reasonLabel = reason + ' (النظامين)';
+        }
+        
+        const updates = {
+            // تحديث نقاط الارتواء
+            'journeyPoints.balance': currentJourneyBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reasonLabel,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            }),
+            
+            // تحديث نقاط المحفظة
+            'walletPoints.balance': currentWalletBalance + amount,
+            'walletPoints.lifetime': amount > 0 ? 
+                (userData.walletPoints?.lifetime || 0) + amount : 
+                userData.walletPoints?.lifetime || 0,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reasonLabel,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'wallet'
+            })
+        };
+        
+        await userRef.update(updates);
+        console.log(`✅ تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة للنظامين`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة النقاط المزدوجة:', error);
+        return false;
+    }
+}
+
+// دالة إضافة نقاط الرحلة فقط
+async function addJourneyPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.journeyPoints?.balance || 0;
+        
+        await userRef.update({
+            'journeyPoints.balance': currentBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            })
+        });
+        
+        console.log(`✅ تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة رحلة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في تعديل نقاط الرحلة:', error);
+        return false;
+    }
+}
+
+// دالة إضافة نقاط المحفظة فقط
+async function addWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance + amount,
+            'walletPoints.lifetime': (userData.walletPoints?.lifetime || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'addition'
+            })
+        });
+        
+        console.log(`✅ تم إضافة ${amount} نقطة للمحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة نقاط المحفظة:', error);
+        return false;
+    }
+}
+
+// دالة استخدام نقاط المحفظة
+async function useWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        if (currentBalance < amount) {
+            Swal.fire('خطأ', 'الرصيد غير كافي', 'error');
+            return false;
+        }
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance - amount,
+            'walletPoints.used': (userData.walletPoints?.used || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: -amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'redemption'
+            })
+        });
+        
+        console.log(`✅ تم استخدام ${amount} نقطة من المحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في استخدام نقاط المحفظة:', error);
+        return false;
+    }
+}
+
+// دالة حذف معاملة من سجل الرحلة
+async function deleteJourneyEntry(userId, timestamp) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل تريد حذف هذه المعاملة من سجل الرحلة؟ سيتم تعديل الرصيد تلقائياً',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            const userRef = db.collection('users').doc(userId);
+            const userDoc = await userRef.get();
+            const userData = userDoc.data();
+            
+            const history = userData.journeyPoints?.history || [];
+            const entryToDelete = history.find(e => e.timestamp === timestamp);
+            
+            if (entryToDelete) {
+                const newHistory = history.filter(e => e.timestamp !== timestamp);
+                const newBalance = (userData.journeyPoints?.balance || 0) - entryToDelete.amount;
+                
+                await userRef.update({
+                    'journeyPoints.balance': newBalance,
+                    'journeyPoints.history': newHistory,
+                    'journeyPoints.lastUpdated': new Date().toISOString()
+                });
+                
+                Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
+                setTimeout(() => loadUserData(), 1500);
+            }
+        } catch (error) {
+            console.error('خطأ في حذف المعاملة:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف المعاملة', 'error');
+        }
+    }
+}
+
+// دالة حذف معاملة من سجل المحفظة
+async function deleteWalletEntry(userId, timestamp) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل تريد حذف هذه المعاملة من سجل المحفظة؟ سيتم تعديل الرصيد تلقائياً',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            const userRef = db.collection('users').doc(userId);
+            const userDoc = await userRef.get();
+            const userData = userDoc.data();
+            
+            const history = userData.walletPoints?.history || [];
+            const entryToDelete = history.find(e => e.timestamp === timestamp);
+            
+            if (entryToDelete) {
+                const newHistory = history.filter(e => e.timestamp !== timestamp);
+                const newBalance = (userData.walletPoints?.balance || 0) - entryToDelete.amount;
+                
+                await userRef.update({
+                    'walletPoints.balance': newBalance,
+                    'walletPoints.history': newHistory,
+                    'walletPoints.lastUpdated': new Date().toISOString()
+                });
+                
+                Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
+                setTimeout(() => loadUserData(), 1500);
+            }
+        } catch (error) {
+            console.error('خطأ في حذف المعاملة:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف المعاملة', 'error');
+        }
+    }
+}
+        
         let currentUserId = null;
         let currentUserData = null;
         let currentTab = 'basic';
@@ -2989,27 +3250,28 @@ async function upgradeJourney() {
 }
 
         // ==================== عرض البيانات المالية ====================
+// ==================== عرض البيانات المالية المحدثة مع النظامين ====================
 function displayFinancialData() {
     if (!currentUserData) return '';
     
-    // حساب الإجماليات المالية
+    // البيانات المالية
     const financial = currentUserData.financial || {};
     const totalPaid = financial.totalPaid || 0;
     const totalDue = financial.totalDue || 0;
-    const totalBalance = totalPaid - totalDue;
     
-    // بيانات المحفظة
-    const wallet = currentUserData.wallet || {};
-    const walletBalance = wallet.balance || 0;
-    const walletPoints = wallet.points || 0;
+    // نقاط الرحلة (الارتواء)
+    const journeyPoints = currentUserData.journeyPoints || {};
+    const journeyBalance = journeyPoints.balance || 0;
+    const journeyHistory = journeyPoints.history || [];
     
-    // نقاط الارتواء
-    const irtiwaaPoints = currentUserData.irtiwaaPoints || {};
-    const totalIrtiwaaPoints = irtiwaaPoints.total || 0;
-    
-    // النقاط الموحدة
-    const unifiedPoints = currentUserData.unifiedPoints || {};
-    const unifiedBalance = unifiedPoints.balance || 0;
+    // نقاط المحفظة
+    const walletPoints = currentUserData.walletPoints || {};
+    const walletBalance = walletPoints.balance || 0;
+    const walletUsed = walletPoints.used || 0;
+    const walletLifetime = walletPoints.lifetime || 0;
+    const conversionRate = walletPoints.conversionRate || 0.1;
+    const cashValue = Math.floor(walletBalance * conversionRate);
+    const walletHistory = walletPoints.history || [];
     
     let financialHTML = `
         <div class="financial-overview">
@@ -3035,104 +3297,62 @@ function displayFinancialData() {
                     </div>
                 </div>
                 
-                <div class="summary-card balance">
-                    <div class="summary-icon">
-                        <i class="fas fa-balance-scale"></i>
+                <div class="summary-card journey-points">
+                    <div class="summary-icon" style="background: linear-gradient(135deg, #10b981, #3b82f6);">
+                        <i class="fas fa-tint"></i>
                     </div>
                     <div class="summary-content">
-                        <div class="summary-label">الرصيد</div>
-                        <div class="summary-value ${totalBalance >= 0 ? 'positive' : 'negative'}">${totalBalance.toLocaleString()} ج.م</div>
+                        <div class="summary-label">نقاط الارتواء</div>
+                        <div class="summary-value" style="color: var(--primary-green);">${journeyBalance.toLocaleString()}</div>
                     </div>
                 </div>
                 
-                <div class="summary-card wallet">
-                    <div class="summary-icon">
+                <div class="summary-card wallet-points">
+                    <div class="summary-icon" style="background: linear-gradient(135deg, #fbbf24, #f59e0b);">
                         <i class="fas fa-wallet"></i>
                     </div>
                     <div class="summary-content">
-                        <div class="summary-label">رصيد المحفظة</div>
-                        <div class="summary-value">${walletBalance.toLocaleString()} ج.م</div>
+                        <div class="summary-label">نقاط المحفظة</div>
+                        <div class="summary-value" style="color: var(--gold-accent);">${walletBalance.toLocaleString()}</div>
+                        <div style="font-size: 12px; color: var(--text-muted);">≈ ${cashValue} ج.م</div>
                     </div>
                 </div>
             </div>
             
-            <!-- أنظمة النقاط -->
-            <div class="points-section">
+            <!-- أنظمة النقاط المتقدمة -->
+            <div class="points-management-section">
                 <h3 class="section-title">
-                    <i class="fas fa-star"></i>
-                    أنظمة النقاط والمكافآت
+                    <i class="fas fa-coins"></i>
+                    إدارة أنظمة النقاط
                 </h3>
                 
-                <div class="points-cards">
-                    <div class="points-card unified">
-                        <div class="points-header">
-                            <div class="points-icon">
-                                <i class="fas fa-coins"></i>
-                            </div>
-                            <div class="points-info">
-                                <h4>النقاط الموحدة</h4>
-                                <p>نقاط النظام الموحد للمكافآت</p>
-                            </div>
-                        </div>
-                        <div class="points-value">${unifiedBalance.toLocaleString()}</div>
-                        <div class="points-actions">
-                            <button onclick="viewPointsHistory('unified')" class="points-btn">
-                                <i class="fas fa-history"></i>
-                                السجل
-                            </button>
-                            <button onclick="addPoints('unified')" class="points-btn primary">
-                                <i class="fas fa-plus"></i>
-                                إضافة
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="points-card irtiwaa">
-                        <div class="points-header">
-                            <div class="points-icon" style="background: linear-gradient(135deg, var(--primary-green), var(--primary-blue));">
-                                <i class="fas fa-tint"></i>
-                            </div>
-                            <div class="points-info">
-                                <h4>نقاط الارتواء</h4>
-                                <p>نقاط التقدم والإنجاز</p>
-                            </div>
-                        </div>
-                        <div class="points-value">${totalIrtiwaaPoints.toLocaleString()}</div>
-                        <div class="points-actions">
-                            <button onclick="viewPointsHistory('irtiwaa')" class="points-btn">
-                                <i class="fas fa-history"></i>
-                                السجل
-                            </button>
-                            <button onclick="addPoints('irtiwaa')" class="points-btn primary">
-                                <i class="fas fa-plus"></i>
-                                إضافة
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="points-card wallet-points">
-                        <div class="points-header">
-                            <div class="points-icon" style="background: linear-gradient(135deg, var(--gold-accent), var(--accent-orange));">
-                                <i class="fas fa-gem"></i>
-                            </div>
-                            <div class="points-info">
-                                <h4>نقاط المحفظة</h4>
-                                <p>نقاط قابلة للاستبدال</p>
-                            </div>
-                        </div>
-                        <div class="points-value">${walletPoints.toLocaleString()}</div>
-                        <div class="points-actions">
-                            <button onclick="viewPointsHistory('wallet')" class="points-btn">
-                                <i class="fas fa-history"></i>
-                                السجل
-                            </button>
-                            <button onclick="convertPoints()" class="points-btn gold">
-                                <i class="fas fa-exchange-alt"></i>
-                                تحويل
-                            </button>
-                        </div>
-                    </div>
+                <div class="points-controls">
+                    <button onclick="openJourneyManagement()" class="control-btn journey">
+                        <i class="fas fa-route"></i>
+                        إدارة نقاط الارتواء
+                    </button>
+                    <button onclick="openWalletManagement()" class="control-btn wallet">
+                        <i class="fas fa-wallet"></i>
+                        إدارة نقاط المحفظة
+                    </button>
+                    <button onclick="quickAddPoints()" class="control-btn add">
+                        <i class="fas fa-plus-circle"></i>
+                        إضافة سريعة
+                    </button>
+                    <button onclick="quickDeductPoints()" class="control-btn deduct">
+                        <i class="fas fa-minus-circle"></i>
+                        خصم سريع
+                    </button>
                 </div>
+            </div>
+            
+            <!-- آخر معاملات النقاط -->
+            <div class="recent-transactions-section">
+                <h3 class="section-title">
+                    <i class="fas fa-history"></i>
+                    آخر المعاملات
+                </h3>
+                ${displayRecentTransactions(journeyHistory, walletHistory)}
             </div>
             
             <!-- المعاملات المالية للدورات -->
@@ -3152,6 +3372,307 @@ function displayFinancialData() {
     return financialHTML;
 }
 
+// عرض آخر المعاملات
+function displayRecentTransactions(journeyHistory, walletHistory) {
+    // دمج وترتيب المعاملات
+    const allTransactions = [];
+    
+    journeyHistory.forEach(t => {
+        allTransactions.push({...t, system: 'journey'});
+    });
+    
+    walletHistory.forEach(t => {
+        allTransactions.push({...t, system: 'wallet'});
+    });
+    
+    // ترتيب حسب التاريخ
+    allTransactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    // أخذ آخر 10 معاملات
+    const recent = allTransactions.slice(0, 10);
+    
+    if (recent.length === 0) {
+        return `
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <p>لا توجد معاملات مسجلة</p>
+            </div>
+        `;
+    }
+    
+    let html = '<div class="transactions-list">';
+    
+    recent.forEach(transaction => {
+        const isPositive = transaction.amount > 0;
+        const systemIcon = transaction.system === 'journey' ? 'fa-tint' : 'fa-wallet';
+        const systemColor = transaction.system === 'journey' ? '#10b981' : '#fbbf24';
+        
+        html += `
+            <div class="transaction-item">
+                <div class="transaction-icon" style="background: ${systemColor}20; color: ${systemColor};">
+                    <i class="fas ${systemIcon}"></i>
+                </div>
+                <div class="transaction-info">
+                    <div class="transaction-reason">${transaction.reason}</div>
+                    <div class="transaction-date">${formatDate(transaction.timestamp)}</div>
+                </div>
+                <div class="transaction-amount ${isPositive ? 'positive' : 'negative'}">
+                    ${isPositive ? '+' : ''}${transaction.amount}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+        // ==================== دوال إدارة النقاط من الواجهة ====================
+
+// فتح إدارة نقاط الارتواء
+async function openJourneyManagement() {
+    const journeyPoints = currentUserData.journeyPoints || {};
+    const balance = journeyPoints.balance || 0;
+    const history = journeyPoints.history || [];
+    const currentStage = currentUserData.accountStatus?.journeyStage || 1;
+    const stageInfo = FouadJourneySystem.stages[currentStage];
+    
+    // ترتيب السجل
+    const sortedHistory = [...history].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    
+    await Swal.fire({
+        title: '🌱 بذور الارتواء - سجل نقاط الرحلة',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- المرحلة الحالية -->
+                <div style="background: linear-gradient(135deg, ${stageInfo.color}, ${stageInfo.color}DD); 
+                            color: white; padding: 20px; border-radius: 20px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3 style="margin: 0;">${stageInfo.name}</h3>
+                            <div style="font-size: 1.2rem; opacity: 0.9;">${stageInfo.title}</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 3rem; font-weight: bold;">
+                                ${balance}
+                            </div>
+                            <div>نقطة ارتواء</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- أزرار الإدارة -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button onclick="showAddPointsDialog('journey')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-plus-circle"></i> إضافة نقاط
+                    </button>
+                    <button onclick="showDeductPointsDialog('journey')" 
+                            style="background: linear-gradient(135deg, #EF4444, #DC2626); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-minus-circle"></i> خصم نقاط
+                    </button>
+                </div>
+                
+                <!-- السجل التفصيلي -->
+                <div style="background: white; border: 2px solid #E5E7EB; 
+                            border-radius: 15px; padding: 20px;">
+                    <h4 style="color: #1F2937; margin: 0 0 20px 0;">
+                        <i class="fas fa-history"></i> سجل المعاملات (${sortedHistory.length} معاملة)
+                    </h4>
+                    
+                    ${sortedHistory.length > 0 ? `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${sortedHistory.map((entry, index) => `
+                                <div style="border-bottom: 1px solid #E5E7EB; padding: 15px 0; 
+                                            ${index === sortedHistory.length - 1 ? 'border-bottom: none;' : ''}">
+                                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                                        <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                                <span style="background: ${entry.amount > 0 ? '#10B981' : '#EF4444'}; 
+                                                             color: white; padding: 2px 8px; border-radius: 12px; 
+                                                             font-size: 0.85rem; font-weight: bold;">
+                                                    ${entry.amount > 0 ? '+' : ''}${entry.amount}
+                                                </span>
+                                                <span style="font-weight: bold; color: #1F2937;">
+                                                    ${entry.reason}
+                                                </span>
+                                            </div>
+                                            <div style="color: #6B7280; font-size: 0.9rem; margin: 5px 0;">
+                                                ${entry.description}
+                                            </div>
+                                            <div style="color: #9CA3AF; font-size: 0.85rem;">
+                                                <i class="fas fa-clock"></i> 
+                                                ${formatDate(entry.timestamp)}
+                                            </div>
+                                        </div>
+                                        <button onclick="deleteJourneyEntry('${currentUserId}', '${entry.timestamp}')" 
+                                                style="background: #FEE2E2; color: #991B1B; border: none; 
+                                                       padding: 5px 10px; border-radius: 5px; cursor: pointer;
+                                                       font-size: 0.8rem;">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="text-align: center; color: #6B7280; padding: 40px;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                            <p>لا توجد معاملات مسجلة بعد</p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// فتح إدارة نقاط المحفظة
+async function openWalletManagement() {
+    const walletData = currentUserData.walletPoints || {};
+    const balance = walletData.balance || 0;
+    const used = walletData.used || 0;
+    const lifetime = walletData.lifetime || 0;
+    const history = walletData.history || [];
+    const conversionRate = walletData.conversionRate || 0.1;
+    const cashValue = Math.floor(balance * conversionRate);
+    
+    // ترتيب السجل
+    const sortedHistory = [...history].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    
+    await Swal.fire({
+        title: '💰 محفظة النقاط',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- الرصيد الحالي -->
+                <div style="background: linear-gradient(135deg, #FFD700, #F59E0B); 
+                            color: white; padding: 25px; border-radius: 20px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center;">
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${balance}
+                            </div>
+                            <div style="opacity: 0.9;">نقطة متاحة</div>
+                        </div>
+                        <div style="border-left: 2px solid rgba(255,255,255,0.3); 
+                                    border-right: 2px solid rgba(255,255,255,0.3);">
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${cashValue} ج.م
+                            </div>
+                            <div style="opacity: 0.9;">قيمة نقدية</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${used}
+                            </div>
+                            <div style="opacity: 0.9;">نقطة مستخدمة</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- أزرار الإدارة -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button onclick="showAddPointsDialog('wallet')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-plus-circle"></i> إضافة نقاط
+                    </button>
+                    <button onclick="showDeductPointsDialog('wallet')" 
+                            style="background: linear-gradient(135deg, #EF4444, #DC2626); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-minus-circle"></i> خصم نقاط
+                    </button>
+                </div>
+                
+                <!-- جدول التحويل -->
+                <div style="background: white; border: 2px solid #FFD700; 
+                            border-radius: 15px; padding: 20px; margin-bottom: 20px;">
+                    <h4 style="color: #F59E0B; margin: 0 0 15px 0;">
+                        <i class="fas fa-exchange-alt"></i> معدل التحويل
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="color: #92400E; font-weight: bold;">100 نقطة</div>
+                            <div style="color: #DC2626; font-size: 1.2rem;">= 10 ج.م</div>
+                        </div>
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="color: #92400E; font-weight: bold;">1000 نقطة</div>
+                            <div style="color: #DC2626; font-size: 1.2rem;">= 100 ج.م</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- السجل التفصيلي -->
+                <div style="background: white; border: 2px solid #E5E7EB; 
+                            border-radius: 15px; padding: 20px;">
+                    <h4 style="color: #1F2937; margin: 0 0 20px 0;">
+                        <i class="fas fa-history"></i> سجل المعاملات (${sortedHistory.length} معاملة)
+                    </h4>
+                    
+                    ${sortedHistory.length > 0 ? `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${sortedHistory.map((entry, index) => `
+                                <div style="border-bottom: 1px solid #E5E7EB; padding: 15px 0; 
+                                            ${index === sortedHistory.length - 1 ? 'border-bottom: none;' : ''}">
+                                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                                        <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                                <span style="background: ${entry.amount > 0 ? '#10B981' : '#EF4444'}; 
+                                                             color: white; padding: 2px 8px; border-radius: 12px; 
+                                                             font-size: 0.85rem; font-weight: bold;">
+                                                    ${entry.amount > 0 ? '+' : ''}${entry.amount}
+                                                </span>
+                                                <span style="font-weight: bold; color: #1F2937;">
+                                                    ${entry.reason}
+                                                </span>
+                                            </div>
+                                            <div style="color: #6B7280; font-size: 0.9rem; margin: 5px 0;">
+                                                ${entry.description}
+                                            </div>
+                                            <div style="color: #9CA3AF; font-size: 0.85rem;">
+                                                <i class="fas fa-clock"></i> 
+                                                ${formatDate(entry.timestamp)}
+                                            </div>
+                                        </div>
+                                        <button onclick="deleteWalletEntry('${currentUserId}', '${entry.timestamp}')" 
+                                                style="background: #FEE2E2; color: #991B1B; border: none; 
+                                                       padding: 5px 10px; border-radius: 5px; cursor: pointer;
+                                                       font-size: 0.8rem;">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="text-align: center; color: #6B7280; padding: 40px;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                            <p>لا توجد معاملات مسجلة بعد</p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
 // ==================== عرض المعاملات المالية للدورات ====================
 function displayCoursesFinancial() {
     if (!currentUserData?.enrollments || currentUserData.enrollments.length === 0) {
