@@ -4634,25 +4634,52 @@ function showContentTypes(moduleId) {
 
 // Open Content Library Modal
 function openContentLibrary(moduleId) {
-    Swal.close(); // Close the content types modal
+    Swal.close();
     
     Swal.fire({
         title: '📚 اختر محتوى من المكتبة',
         html: `
-            <div id="libraryLoadingState" style="text-align: center; padding: 2rem;">
-                <div class="spinner" style="border: 3px solid #f3f3f3; border-top: 3px solid #6366f1; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
-                <p style="margin-top: 1rem;">جاري تحميل المحتوى...</p>
-            </div>
-            <div id="libraryContentGrid" style="display: none;">
-                <!-- سيتم ملؤها بواسطة JavaScript -->
-            </div>
-            <div id="libraryEmptyState" style="display: none; text-align: center; padding: 2rem; color: #666;">
-                <i class="fas fa-book" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
-                <h4>لا يوجد محتوى في المكتبة</h4>
-                <p>قم بإنشاء محتوى في مكتبة المحتوى التعليمي أولاً</p>
-                <button class="btn btn-primary" onclick="openContentCreatorPage()" style="margin-top: 1rem;">
-                    <i class="fas fa-plus"></i> إنشاء محتوى جديد
-                </button>
+            <div style="text-align: right; direction: rtl;">
+                <!-- تبويبات الاختيار -->
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
+                    <button onclick="showLibraryTab('content')" id="contentTabBtn" 
+                            style="padding: 8px 20px; background: #6366f1; color: white; border: none; border-radius: 8px 8px 0 0; cursor: pointer;">
+                        📄 محتوى مفرد
+                    </button>
+                    <button onclick="showLibraryTab('modules')" id="modulesTabBtn"
+                            style="padding: 8px 20px; background: #e5e7eb; color: #666; border: none; border-radius: 8px 8px 0 0; cursor: pointer;">
+                        📦 وحدات جاهزة
+                    </button>
+                    <button onclick="showLibraryTab('templates')" id="templatesTabBtn"
+                            style="padding: 8px 20px; background: #e5e7eb; color: #666; border: none; border-radius: 8px 8px 0 0; cursor: pointer;">
+                        🎓 قوالب دورات
+                    </button>
+                </div>
+                
+                <!-- البحث -->
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="librarySearchInput" placeholder="🔍 ابحث..." 
+                           onkeyup="filterLibraryContent()"
+                           style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px;">
+                </div>
+                
+                <!-- المحتوى -->
+                <div id="libraryLoadingState" style="text-align: center; padding: 2rem;">
+                    <div class="spinner" style="border: 3px solid #f3f3f3; border-top: 3px solid #6366f1; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+                    <p style="margin-top: 1rem;">جاري تحميل المحتوى...</p>
+                </div>
+                
+                <div id="libraryContentTab" style="display: none;">
+                    <!-- محتوى مفرد -->
+                </div>
+                
+                <div id="libraryModulesTab" style="display: none;">
+                    <!-- وحدات جاهزة -->
+                </div>
+                
+                <div id="libraryTemplatesTab" style="display: none;">
+                    <!-- قوالب دورات -->
+                </div>
             </div>
         `,
         width: '90%',
@@ -4662,8 +4689,360 @@ function openContentLibrary(moduleId) {
         cancelButtonText: 'إغلاق'
     });
     
-    // Load content from library
-    loadLibraryContent(moduleId);
+    // Store moduleId globally for use
+    window.currentTargetModuleId = moduleId;
+    
+    // Load all library content
+    loadAllLibraryContent();
+}
+
+        // تحميل كل محتوى المكتبة
+async function loadAllLibraryContent() {
+    try {
+        // تحميل المحتوى المفرد
+        const contentSnapshot = await db.collection('courseContentLibrary')
+            .orderBy('createdDate', 'desc')
+            .get();
+        
+        const individualContent = [];
+        contentSnapshot.forEach(doc => {
+            individualContent.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        // تحميل الوحدات
+        const modulesSnapshot = await db.collection('contentModules')
+            .orderBy('createdDate', 'desc')
+            .get();
+        
+        const modules = [];
+        modulesSnapshot.forEach(doc => {
+            modules.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        // تحميل القوالب
+        const templatesSnapshot = await db.collection('courseTemplates')
+            .orderBy('createdDate', 'desc')
+            .get();
+        
+        const templates = [];
+        templatesSnapshot.forEach(doc => {
+            templates.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        // إخفاء التحميل وعرض المحتوى
+        document.getElementById('libraryLoadingState').style.display = 'none';
+        
+        // عرض المحتوى المفرد
+        displayIndividualContent(individualContent);
+        
+        // عرض الوحدات
+        displayModulesContent(modules);
+        
+        // عرض القوالب
+        displayTemplatesContent(templates);
+        
+        // إظهار التبويب الأول
+        showLibraryTab('content');
+        
+    } catch (error) {
+        console.error('خطأ في تحميل المكتبة:', error);
+        document.getElementById('libraryLoadingState').innerHTML = `
+            <div style="color: #dc3545;">
+                <i class="fas fa-exclamation-triangle" style="font-size: 2rem;"></i>
+                <p>خطأ في تحميل المحتوى</p>
+            </div>
+        `;
+    }
+}
+
+// عرض المحتوى المفرد
+function displayIndividualContent(content) {
+    const container = document.getElementById('libraryContentTab');
+    
+    if (content.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #999;">لا يوجد محتوى مفرد</p>';
+        return;
+    }
+    
+    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; max-height: 400px; overflow-y: auto; padding: 10px;">';
+    
+    content.forEach(item => {
+        const icon = getContentIcon(item.type);
+        const points = item.pointsSystem?.totalPossible || 0;
+        
+        html += `
+            <div class="library-item" onclick="selectIndividualContent('${item.id}')" 
+                 style="background: white; border: 2px solid #e5e7eb; border-radius: 10px; padding: 15px; cursor: pointer; transition: all 0.3s;">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                    <span style="font-size: 1.5rem;">${icon}</span>
+                    ${points > 0 ? `<span style="background: #fbbf24; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">🏆 ${points}</span>` : ''}
+                </div>
+                <h5 style="margin: 0 0 5px 0; color: #1f2937;">${item.name}</h5>
+                <p style="font-size: 0.85rem; color: #6b7280; margin: 0;">${item.duration || 15} دقيقة</p>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+// عرض الوحدات
+function displayModulesContent(modules) {
+    const container = document.getElementById('libraryModulesTab');
+    
+    if (modules.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #999;">لا توجد وحدات جاهزة</p>';
+        return;
+    }
+    
+    let html = '<div style="max-height: 400px; overflow-y: auto; padding: 10px;">';
+    
+    modules.forEach(module => {
+        const lessonsCount = module.lessons?.length || 0;
+        const totalPoints = module.totalPoints || 0;
+        
+        html += `
+            <div class="module-item" style="background: white; border: 2px solid #10b981; border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h4 style="margin: 0 0 8px 0; color: #059669;">📦 ${module.name}</h4>
+                        <p style="font-size: 0.9rem; color: #6b7280; margin: 0 0 8px 0;">${module.description || 'بدون وصف'}</p>
+                        <div style="display: flex; gap: 15px; font-size: 0.85rem;">
+                            <span><strong>${lessonsCount}</strong> درس</span>
+                            <span><strong>${module.totalDuration || 0}</strong> دقيقة</span>
+                            ${totalPoints > 0 ? `<span style="color: #f59e0b;"><strong>🏆 ${totalPoints}</strong> نقطة</span>` : ''}
+                        </div>
+                    </div>
+                    <button onclick="addModuleToUnit('${module.id}')" 
+                            style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                        إضافة الوحدة
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+// عرض القوالب
+function displayTemplatesContent(templates) {
+    const container = document.getElementById('libraryTemplatesTab');
+    
+    if (templates.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #999;">لا توجد قوالب دورات</p>';
+        return;
+    }
+    
+    let html = '<div style="max-height: 400px; overflow-y: auto; padding: 10px;">';
+    
+    templates.forEach(template => {
+        const modulesCount = template.modules?.length || 0;
+        
+        html += `
+            <div class="template-item" style="background: white; border: 2px solid #3b82f6; border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h4 style="margin: 0 0 8px 0; color: #1e40af;">🎓 ${template.name}</h4>
+                        <p style="font-size: 0.9rem; color: #6b7280; margin: 0 0 8px 0;">${template.description || 'بدون وصف'}</p>
+                        <div style="display: flex; gap: 15px; font-size: 0.85rem;">
+                            <span><strong>${modulesCount}</strong> وحدة</span>
+                            <span><strong>${template.totalDuration || 0}</strong> دقيقة</span>
+                            <span style="color: #f59e0b;"><strong>🏆 ${template.totalPoints || 0}</strong> نقطة</span>
+                        </div>
+                    </div>
+                    <button onclick="addTemplateToCourse('${template.id}')" 
+                            style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                        استخدام القالب
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+// تبديل التبويبات
+function showLibraryTab(tabName) {
+    // إخفاء كل التبويبات
+    document.getElementById('libraryContentTab').style.display = 'none';
+    document.getElementById('libraryModulesTab').style.display = 'none';
+    document.getElementById('libraryTemplatesTab').style.display = 'none';
+    
+    // إعادة تعيين ألوان الأزرار
+    document.getElementById('contentTabBtn').style.background = '#e5e7eb';
+    document.getElementById('contentTabBtn').style.color = '#666';
+    document.getElementById('modulesTabBtn').style.background = '#e5e7eb';
+    document.getElementById('modulesTabBtn').style.color = '#666';
+    document.getElementById('templatesTabBtn').style.background = '#e5e7eb';
+    document.getElementById('templatesTabBtn').style.color = '#666';
+    
+    // إظهار التبويب المحدد
+    switch(tabName) {
+        case 'content':
+            document.getElementById('libraryContentTab').style.display = 'block';
+            document.getElementById('contentTabBtn').style.background = '#6366f1';
+            document.getElementById('contentTabBtn').style.color = 'white';
+            break;
+        case 'modules':
+            document.getElementById('libraryModulesTab').style.display = 'block';
+            document.getElementById('modulesTabBtn').style.background = '#6366f1';
+            document.getElementById('modulesTabBtn').style.color = 'white';
+            break;
+        case 'templates':
+            document.getElementById('libraryTemplatesTab').style.display = 'block';
+            document.getElementById('templatesTabBtn').style.background = '#6366f1';
+            document.getElementById('templatesTabBtn').style.color = 'white';
+            break;
+    }
+}
+
+// فلترة المحتوى
+function filterLibraryContent() {
+    const searchTerm = document.getElementById('librarySearchInput').value.toLowerCase();
+    const items = document.querySelectorAll('.library-item, .module-item, .template-item');
+    
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(searchTerm) ? 'block' : 'none';
+    });
+}
+
+// دالة مساعدة للأيقونات
+function getContentIcon(type) {
+    const icons = {
+        'educational-video': '🎥',
+        'quiz': '❓',
+        'assignment': '📝',
+        'discussion': '💬',
+        'presentation': '📊',
+        'exercise': '💪',
+        'case-study': '📋',
+        'survey': '📊',
+        'custom': '🎨'
+    };
+    return icons[type] || '📄';
+}
+
+        // اختيار محتوى مفرد
+function selectIndividualContent(contentId) {
+    selectLibraryContent(contentId, window.currentTargetModuleId);
+}
+
+// إضافة وحدة كاملة
+async function addModuleToUnit(moduleId) {
+    try {
+        // جلب بيانات الوحدة
+        const moduleDoc = await db.collection('contentModules').doc(moduleId).get();
+        const moduleData = moduleDoc.data();
+        
+        // إنشاء وحدة جديدة في الدورة
+        const newModule = {
+            id: 'module_' + Date.now(),
+            title: moduleData.name,
+            description: moduleData.description || '',
+            lessons: [],
+            isExpanded: true
+        };
+        
+        // نسخ كل الدروس
+        if (moduleData.lessons && moduleData.lessons.length > 0) {
+            for (const lesson of moduleData.lessons) {
+                const newLesson = {
+                    id: 'lesson_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                    type: 'library-content',
+                    title: lesson.title,
+                    duration: lesson.duration || 15,
+                    description: lesson.description || '',
+                    libraryContentId: lesson.libraryContentId,
+                    libraryContentType: lesson.type,
+                    points: lesson.points || 0,
+                    isCompleted: false
+                };
+                newModule.lessons.push(newLesson);
+                
+                // تحديث عدد الاستخدامات
+                if (lesson.libraryContentId) {
+                    await db.collection('courseContentLibrary').doc(lesson.libraryContentId).update({
+                        timesUsed: firebase.firestore.FieldValue.increment(1)
+                    });
+                }
+            }
+        }
+        
+        // إضافة الوحدة للدورة
+        courseData.modules.push(newModule);
+        
+        // تحديث العرض
+        renderModules();
+        updateCurriculumStats();
+        autoSave();
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم إضافة الوحدة',
+            text: `تم إضافة وحدة "${moduleData.name}" مع ${moduleData.lessons?.length || 0} درس`,
+            timer: 2000,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('خطأ في إضافة الوحدة:', error);
+        Swal.fire('خطأ', 'حدث خطأ في إضافة الوحدة', 'error');
+    }
+}
+
+// إضافة قالب دورة كامل
+async function addTemplateToCourse(templateId) {
+    try {
+        const result = await Swal.fire({
+            title: 'إضافة قالب الدورة',
+            text: 'سيتم إضافة كل وحدات القالب إلى الدورة الحالية',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'إضافة القالب',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#3b82f6'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        // جلب بيانات القالب
+        const templateDoc = await db.collection('courseTemplates').doc(templateId).get();
+        const templateData = templateDoc.data();
+        
+        // إضافة كل وحدات القالب
+        if (templateData.modules && templateData.modules.length > 0) {
+            for (const moduleId of templateData.modules) {
+                await addModuleToUnit(moduleId);
+            }
+        }
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم إضافة القالب',
+            text: `تم إضافة قالب "${templateData.name}" بنجاح`,
+            timer: 2000,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('خطأ في إضافة القالب:', error);
+        Swal.fire('خطأ', 'حدث خطأ في إضافة القالب', 'error');
+    }
 }
 
 // Load Content from Firebase
@@ -9791,6 +10170,14 @@ function debugLog(...args) {
         console.log('[Course Builder]', new Date().toLocaleTimeString(), ...args);
     }
 }
+
+        // دوال المكتبة المحسنة
+window.showLibraryTab = showLibraryTab;
+window.filterLibraryContent = filterLibraryContent;
+window.selectIndividualContent = selectIndividualContent;
+window.addModuleToUnit = addModuleToUnit;
+window.addTemplateToCourse = addTemplateToCourse;
+window.loadAllLibraryContent = loadAllLibraryContent;
     
     </script>
 </body>
