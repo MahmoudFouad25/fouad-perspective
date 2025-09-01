@@ -1578,7 +1578,7 @@
                         <i class="fas fa-quote-left"></i>
                     </span>
                 </h2>
-                <p class="testimonials-subtitle">كلمات من القلب من أشخاص غيّرت حياتهم</p>
+                <p class="testimonials-subtitle">كلمات من القلب من أشخاص تغيّرت حياتهم</p>
             </div>
         </div>
         
@@ -1835,161 +1835,175 @@
             displayContent();
         }
 
-        // نظام الشهادات المحسن مع التوافق مع البيانات الموجودة
+       // نظام الشهادات الحقيقي من Firebase
 const testimonialsSystem = {
-    testimonials: [],
+    allTestimonials: [],
     highlightedTestimonials: [],
     regularTestimonials: [],
     currentIndex: 0,
     rotationInterval: null,
-    displayQueue: [],
     isAnimating: false,
     
-    // تحميل الشهادات من Firebase
-    async loadTestimonialsFromFirebase() {
-        try {
-            const snapshot = await db.collection('testimonials')
-                .where('status', '==', 'active')
-                .orderBy('order', 'asc')
-                .get();
-            
-            const testimonials = [];
-            snapshot.forEach(doc => {
-                testimonials.push({
-                    id: doc.id,
-                    ...doc.data()
-                });
-            });
-            
-            return testimonials;
-        } catch (error) {
-            console.error('Error loading testimonials:', error);
-            return [];
-        }
-    },
-    
-    // تهيئة النظام
+    // تهيئة النظام وجلب البيانات الحقيقية
     async init() {
-        console.log('بدء تحميل الشهادات...');
+        console.log('جاري تحميل الشهادات الحقيقية من Firebase...');
         
-        // تحميل الشهادات من Firebase
-        const firebaseTestimonials = await this.loadTestimonialsFromFirebase();
-        
-        if (firebaseTestimonials.length > 0) {
-            this.processTestimonials(firebaseTestimonials);
-        } else {
-            // عرض شهادات افتراضية إذا لم توجد في قاعدة البيانات
-            this.showDefaultTestimonials();
+        try {
+            // جلب جميع الشهادات من مجموعة testimonials
+            const snapshot = await db.collection('testimonials').get();
+            
+            if (!snapshot.empty) {
+                const testimonials = [];
+                
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // التحقق من أن الشهادة نشطة
+                    if (data.status === 'active' || data.status === 'published' || !data.status) {
+                        testimonials.push({
+                            id: doc.id,
+                            name: data.name || data.studentName || 'متدرب',
+                            text: data.text || data.content || data.testimonial || '',
+                            rating: data.rating || 5,
+                            verified: data.verified === true || data.verified === 'true',
+                            highlight: data.highlight === true || data.highlight === 'true' || data.featured === true,
+                            course: data.course || data.courseName || '',
+                            date: data.date || data.createdAt || '',
+                            order: data.order || 999
+                        });
+                    }
+                });
+                
+                // ترتيب الشهادات حسب الأولوية
+                testimonials.sort((a, b) => a.order - b.order);
+                
+                console.log(`تم جلب ${testimonials.length} شهادة من Firebase`);
+                
+                if (testimonials.length > 0) {
+                    this.processTestimonials(testimonials);
+                } else {
+                    this.loadDefaultTestimonials();
+                }
+            } else {
+                console.log('لا توجد شهادات في قاعدة البيانات');
+                this.loadDefaultTestimonials();
+            }
+            
+        } catch (error) {
+            console.error('خطأ في جلب الشهادات:', error);
+            this.loadDefaultTestimonials();
         }
     },
     
-    // معالجة الشهادات
-    processTestimonials(testimonialsArray) {
-        // فلترة الشهادات المعتمدة
-        const verifiedTestimonials = testimonialsArray.filter(t => 
-            t.verified === true || t.verified === 'true'
-        );
+    // معالجة الشهادات المجلوبة
+    processTestimonials(testimonials) {
+        this.allTestimonials = testimonials;
         
-        const finalTestimonials = verifiedTestimonials.length > 0 ? 
-            verifiedTestimonials : testimonialsArray;
+        // فصل الشهادات المميزة عن العادية
+        this.highlightedTestimonials = testimonials.filter(t => t.highlight);
+        this.regularTestimonials = testimonials.filter(t => !t.highlight);
         
-        // تقسيم الشهادات حسب النوع
-        this.highlightedTestimonials = finalTestimonials.filter(t => 
-            t.highlight === true || t.highlight === 'true'
-        );
+        // إذا لم توجد شهادات عادية، اعتبر كل الشهادات عادية
+        if (this.regularTestimonials.length === 0) {
+            this.regularTestimonials = this.allTestimonials;
+            this.highlightedTestimonials = [];
+        }
         
-        this.regularTestimonials = finalTestimonials.filter(t => 
-            !(t.highlight === true || t.highlight === 'true')
-        );
+        console.log(`شهادات مميزة: ${this.highlightedTestimonials.length}, عادية: ${this.regularTestimonials.length}`);
         
-        console.log(`تم تحميل: ${this.highlightedTestimonials.length} مميزة، ${this.regularTestimonials.length} عادية`);
-        
-        // بدء العرض
-        this.startSequentialDisplay();
+        // بدء العرض المتتالي
+        this.startDisplay();
     },
     
-    // بدء العرض المتتالي
-    startSequentialDisplay() {
+    // بدء عرض الشهادات بالتتالي
+    async startDisplay() {
         const container = document.getElementById('testimonialsContainer');
         if (!container) return;
         
+        // مسح التحميل الوهمي
         container.innerHTML = '';
-        this.prepareDisplayQueue();
-        this.displayTestimonialsSequentially();
-        this.startRotationCycle();
-    },
-    
-    // تحضير قائمة العرض
-    prepareDisplayQueue() {
-        this.displayQueue = [];
         
-        // إضافة الشهادات المميزة
-        this.highlightedTestimonials.forEach(testimonial => {
-            this.displayQueue.push({...testimonial, isHighlighted: true});
-        });
+        // عرض الشهادات المميزة أولاً
+        for (let testimonial of this.highlightedTestimonials) {
+            await this.addTestimonialCard(testimonial, true);
+            await this.delay(400); // تأخير بين كل بطاقة
+        }
         
-        // إضافة شهادات عادية
-        const regularToShow = Math.min(3 - this.highlightedTestimonials.length, 
-            this.regularTestimonials.length);
+        // حساب عدد الشهادات العادية المطلوب عرضها
+        const slotsRemaining = 3 - this.highlightedTestimonials.length;
+        const regularToShow = Math.min(slotsRemaining, this.regularTestimonials.length);
         
+        // عرض الشهادات العادية
         for (let i = 0; i < regularToShow; i++) {
             const index = (this.currentIndex + i) % this.regularTestimonials.length;
-            this.displayQueue.push({
-                ...this.regularTestimonials[index], 
-                isHighlighted: false
-            });
-        }
-    },
-    
-    // عرض الشهادات بالتتالي
-    async displayTestimonialsSequentially() {
-        const container = document.getElementById('testimonialsContainer');
-        if (!container || this.isAnimating) return;
-        
-        this.isAnimating = true;
-        
-        for (let i = 0; i < this.displayQueue.length; i++) {
-            const testimonial = this.displayQueue[i];
-            const cardHtml = this.createTestimonialCard(testimonial, testimonial.isHighlighted);
-            
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = cardHtml;
-            const card = tempDiv.firstElementChild;
-            
-            card.style.opacity = '0';
-            card.style.transform = 'translateY(30px)';
-            container.appendChild(card);
-            
-            // تأخير ثم إظهار
-            await this.delay(100);
-            card.style.opacity = '1';
-            card.style.transform = 'translateY(0)';
-            
-            await this.delay(300);
+            await this.addTestimonialCard(this.regularTestimonials[index], false);
+            await this.delay(400);
         }
         
-        this.isAnimating = false;
+        // بدء التدوير التلقائي إذا كان هناك شهادات أكثر
+        if (this.regularTestimonials.length > slotsRemaining && slotsRemaining > 0) {
+            this.startRotation();
+        }
+        
+        // تحديث المؤشرات
         this.updateIndicators();
     },
     
-    // إنشاء كارت الشهادة
-    createTestimonialCard(testimonial, isHighlighted) {
-        const stars = this.generateStars(testimonial.rating || 5);
-        const highlightBadge = isHighlighted ? 
-            '<span class="highlight-badge"><i class="fas fa-crown"></i> مميز</span>' : '';
-        const verifiedBadge = testimonial.verified ? 
-            '<span class="verified-badge"><i class="fas fa-check-circle"></i> موثق</span>' : '';
+    // إضافة بطاقة شهادة مع أنيميشن
+    async addTestimonialCard(testimonial, isHighlighted) {
+        const container = document.getElementById('testimonialsContainer');
+        if (!container) return;
         
-        const {displayName, jobTitle} = this.parseNameAndJob(testimonial.name);
+        const cardHtml = this.createCard(testimonial, isHighlighted);
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = cardHtml;
+        const card = tempDiv.firstElementChild;
+        
+        // إضافة البطاقة مخفية
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(30px) scale(0.95)';
+        container.appendChild(card);
+        
+        // إظهار البطاقة بأنيميشن
+        await this.delay(50);
+        card.style.transition = 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+        card.style.opacity = '1';
+        card.style.transform = 'translateY(0) scale(1)';
+    },
+    
+    // إنشاء HTML البطاقة
+    createCard(testimonial, isHighlighted) {
+        // فصل الاسم والوظيفة
+        let displayName = testimonial.name;
+        let jobTitle = '';
+        
+        // البحث عن فواصل مختلفة
+        const separators = ['$$', '##', '||', '-', '،'];
+        for (let sep of separators) {
+            if (testimonial.name && testimonial.name.includes(sep)) {
+                const parts = testimonial.name.split(sep);
+                displayName = parts[0].trim();
+                jobTitle = parts[1] ? parts[1].trim() : '';
+                break;
+            }
+        }
+        
+        // توليد النجوم
+        let stars = '';
+        const rating = parseInt(testimonial.rating) || 5;
+        for (let i = 1; i <= 5; i++) {
+            stars += i <= rating ? 
+                '<i class="fas fa-star"></i>' : 
+                '<i class="far fa-star"></i>';
+        }
         
         return `
             <div class="testimonial-card ${isHighlighted ? 'highlighted' : ''}">
-                ${highlightBadge}
+                ${isHighlighted ? '<span class="highlight-badge"><i class="fas fa-crown"></i> مميز</span>' : ''}
                 <div class="testimonial-header">
                     <div class="stars">${stars}</div>
-                    ${verifiedBadge}
+                    ${testimonial.verified ? '<span class="verified-badge"><i class="fas fa-check-circle"></i> موثق</span>' : ''}
                 </div>
-                <p class="testimonial-text">"${testimonial.text || testimonial.content}"</p>
+                <p class="testimonial-text">"${testimonial.text}"</p>
                 <div class="testimonial-author">
                     <div class="author-avatar">
                         <i class="fas fa-user"></i>
@@ -2004,48 +2018,71 @@ const testimonialsSystem = {
         `;
     },
     
-    // فصل الاسم عن الوظيفة
-    parseNameAndJob(fullName) {
-        if (!fullName) return {displayName: 'متدرب', jobTitle: null};
+    // بدء التدوير التلقائي
+    startRotation() {
+        if (this.rotationInterval) return;
         
-        const separators = ['$$', '##', '||', '-'];
-        for (let sep of separators) {
-            if (fullName.includes(sep)) {
-                const parts = fullName.split(sep);
-                return {
-                    displayName: parts[0].trim(),
-                    jobTitle: parts[1] ? parts[1].trim() : null
-                };
-            }
-        }
-        
-        return {displayName: fullName, jobTitle: null};
+        this.rotationInterval = setInterval(async () => {
+            await this.rotateTestimonials();
+        }, 8000); // كل 8 ثواني
     },
     
-    // توليد النجوم
-    generateStars(rating) {
-        let stars = '';
-        for (let i = 1; i <= 5; i++) {
-            stars += i <= rating ? 
-                '<i class="fas fa-star"></i>' : 
-                '<i class="far fa-star"></i>';
+    // تدوير الشهادات
+    async rotateTestimonials() {
+        if (this.isAnimating) return;
+        this.isAnimating = true;
+        
+        const container = document.getElementById('testimonialsContainer');
+        const cards = container.querySelectorAll('.testimonial-card:not(.highlighted)');
+        
+        // إخفاء البطاقات العادية الحالية
+        for (let card of cards) {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(-20px) scale(0.95)';
         }
-        return stars;
+        
+        await this.delay(600);
+        
+        // حذف البطاقات العادية القديمة
+        cards.forEach(card => card.remove());
+        
+        // تحديث المؤشر
+        const slotsForRegular = 3 - this.highlightedTestimonials.length;
+        this.currentIndex = (this.currentIndex + slotsForRegular) % this.regularTestimonials.length;
+        
+        // إضافة البطاقات الجديدة
+        const regularToShow = Math.min(slotsForRegular, this.regularTestimonials.length);
+        for (let i = 0; i < regularToShow; i++) {
+            const index = (this.currentIndex + i) % this.regularTestimonials.length;
+            await this.addTestimonialCard(this.regularTestimonials[index], false);
+            await this.delay(200);
+        }
+        
+        // تحديث المؤشرات
+        this.updateIndicators();
+        
+        this.isAnimating = false;
     },
     
-    // تحديث المؤشرات
+    // تحديث مؤشرات التنقل
     updateIndicators() {
         const container = document.getElementById('testimonialsIndicators');
         if (!container) return;
         
-        const totalGroups = Math.ceil(this.regularTestimonials.length / 3);
-        if (totalGroups <= 1) return;
+        const slotsForRegular = 3 - this.highlightedTestimonials.length;
+        if (slotsForRegular <= 0 || this.regularTestimonials.length <= slotsForRegular) {
+            container.innerHTML = '';
+            return;
+        }
+        
+        const totalGroups = Math.ceil(this.regularTestimonials.length / slotsForRegular);
+        const currentGroup = Math.floor(this.currentIndex / slotsForRegular);
         
         container.innerHTML = '';
         for (let i = 0; i < totalGroups; i++) {
             const indicator = document.createElement('div');
             indicator.className = 'indicator';
-            if (i === Math.floor(this.currentIndex / 3)) {
+            if (i === currentGroup) {
                 indicator.classList.add('active');
             }
             indicator.onclick = () => this.goToGroup(i);
@@ -2054,45 +2091,21 @@ const testimonialsSystem = {
     },
     
     // الانتقال لمجموعة محددة
-    goToGroup(groupIndex) {
-        this.currentIndex = groupIndex * 3;
-        this.rotateToNext();
-    },
-    
-    // بدء دورة التدوير
-    startRotationCycle() {
+    async goToGroup(groupIndex) {
+        if (this.isAnimating) return;
+        
+        // إيقاف التدوير التلقائي مؤقتاً
         if (this.rotationInterval) {
             clearInterval(this.rotationInterval);
         }
         
-        const maxRegularToShow = 3 - this.highlightedTestimonials.length;
-        if (this.regularTestimonials.length > maxRegularToShow) {
-            this.rotationInterval = setInterval(() => {
-                this.rotateToNext();
-            }, 8000);
-        }
-    },
-    
-    // التدوير للمجموعة التالية
-    async rotateToNext() {
-        if (this.isAnimating) return;
+        const slotsForRegular = 3 - this.highlightedTestimonials.length;
+        this.currentIndex = groupIndex * slotsForRegular;
         
-        this.currentIndex = (this.currentIndex + 3) % this.regularTestimonials.length;
+        await this.rotateTestimonials();
         
-        const container = document.getElementById('testimonialsContainer');
-        const cards = container.querySelectorAll('.testimonial-card');
-        
-        // إخفاء الكروت الحالية
-        cards.forEach(card => {
-            card.style.opacity = '0';
-            card.style.transform = 'translateY(-20px)';
-        });
-        
-        await this.delay(500);
-        container.innerHTML = '';
-        
-        this.prepareDisplayQueue();
-        this.displayTestimonialsSequentially();
+        // استئناف التدوير
+        this.startRotation();
     },
     
     // دالة التأخير
@@ -2100,29 +2113,30 @@ const testimonialsSystem = {
         return new Promise(resolve => setTimeout(resolve, ms));
     },
     
-    // عرض الشهادات الافتراضية
-    showDefaultTestimonials() {
+    // شهادات افتراضية في حالة عدم وجود بيانات
+    loadDefaultTestimonials() {
+        console.log('عرض شهادات افتراضية');
         const defaultTestimonials = [
             {
-                name: 'توفيق الصادق$$مدير تنفيذي',
-                text: 'رحلة تحويلية بكل معنى الكلمة، غيرت نظرتي للحياة وساعدتني على اكتشاف قدراتي الحقيقية',
+                name: 'أحمد محمد - مهندس',
+                text: 'رحلة رائعة غيرت نظرتي للحياة بشكل كامل',
                 rating: 5,
                 verified: true,
-                course: 'رحلة مرآة النفس'
+                course: 'رحلة الأشواق التسعة'
             },
             {
-                name: 'سارة أحمد',
-                text: 'المحتوى عميق ومؤثر، والمتابعة ممتازة. أنصح كل من يبحث عن التغيير الحقيقي',
+                name: 'سارة أحمد - طبيبة',
+                text: 'محتوى عميق ومؤثر، أنصح به كل من يبحث عن التطوير الحقيقي',
                 rating: 5,
                 verified: true,
                 course: 'رحلة القلب السليم'
             },
             {
-                name: 'نرمين عطا$$كوتش علاقات',
-                text: 'استثمار حقيقي في النفس. الكوتش محمود فؤاد له أسلوب فريد في الوصول للقلب',
+                name: 'محمد علي - رائد أعمال',
+                text: 'تجربة فريدة مع كوتش محترف يفهم احتياجات المتدربين',
                 rating: 5,
                 verified: true,
-                course: 'رحلة الاكتفاء الواثق'
+                course: 'رحلة الانطلاق المبهج'
             }
         ];
         
