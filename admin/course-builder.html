@@ -663,13 +663,7 @@
     align-items: center;
 }
 
-.lesson-meta-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.8rem;
-    color: var(--text-muted);
-}
+
 
 .lesson-meta-item i {
     font-size: 0.75rem;
@@ -679,10 +673,11 @@
 .lesson-type-badge {
     background: linear-gradient(135deg, #6366f1, #4f46e5);
     color: white;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 12px;
     font-size: 0.75rem;
-    font-weight: 500;
+    font-weight: 600;
+    display: inline-block;
 }
 
 .lesson-points-badge {
@@ -695,6 +690,14 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
+}
+
+.lesson-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: #6b7280;
 }
 
 .lesson-actions {
@@ -5410,31 +5413,66 @@ async function addModuleToUnit(moduleId) {
             id: 'module_' + Date.now(),
             title: moduleData.name || 'وحدة بدون اسم',
             description: moduleData.description || '',
+            objectives: moduleData.objectives || '',
             lessons: [],
             isExpanded: true,
-            sourceModuleId: moduleId // حفظ معرف الوحدة الأصلية
+            sourceModuleId: moduleId
         };
         
-        // نسخ كل الدروس
+        // نسخ كل الدروس مع كافة التفاصيل
         if (moduleData.lessons && moduleData.lessons.length > 0) {
             for (const lesson of moduleData.lessons) {
+                // إذا كان الدرس له معرف في المكتبة، اجلب بياناته الكاملة
+                let fullLessonData = { ...lesson };
+                
+                if (lesson.libraryContentId) {
+                    try {
+                        const contentDoc = await db.collection('courseContentLibrary').doc(lesson.libraryContentId).get();
+                        if (contentDoc.exists) {
+                            const contentData = contentDoc.data();
+                            fullLessonData = {
+                                ...lesson,
+                                type: contentData.type, // النوع الحقيقي
+                                pointsSystem: contentData.pointsSystem || null,
+                                points: contentData.pointsSystem?.totalPossible || lesson.points || 0,
+                                videoData: contentData.videoData || null,
+                                quizData: contentData.quizData || null,
+                                assignmentData: contentData.assignmentData || null,
+                                objectives: contentData.objectives || '',
+                                prerequisites: contentData.prerequisites || '',
+                                resources: contentData.resources || []
+                            };
+                        }
+                    } catch (error) {
+                        console.error('خطأ في جلب تفاصيل المحتوى:', error);
+                    }
+                }
+                
                 const newLesson = {
                     id: 'lesson_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                    type: 'library-content',
-                    title: lesson.title,
-                    duration: lesson.duration || 15,
-                    description: lesson.description || '',
-                    libraryContentId: lesson.libraryContentId,
-                    libraryContentType: lesson.type,
-                    points: lesson.points || 0,
+                    type: fullLessonData.type || lesson.type,
+                    title: fullLessonData.title || lesson.title,
+                    duration: fullLessonData.duration || 15,
+                    description: fullLessonData.description || '',
+                    libraryContentId: fullLessonData.libraryContentId || null,
+                    libraryContentType: fullLessonData.type || lesson.type,
+                    pointsSystem: fullLessonData.pointsSystem || null,
+                    points: fullLessonData.points || 0,
+                    videoData: fullLessonData.videoData || null,
+                    quizData: fullLessonData.quizData || null,
+                    assignmentData: fullLessonData.assignmentData || null,
+                    objectives: fullLessonData.objectives || '',
+                    prerequisites: fullLessonData.prerequisites || '',
+                    resources: fullLessonData.resources || [],
                     isCompleted: false,
                     isFreePreview: false
                 };
+                
                 newModule.lessons.push(newLesson);
                 
                 // تحديث عدد الاستخدامات للمحتوى
-                if (lesson.libraryContentId) {
-                    await db.collection('courseContentLibrary').doc(lesson.libraryContentId).update({
+                if (fullLessonData.libraryContentId) {
+                    await db.collection('courseContentLibrary').doc(fullLessonData.libraryContentId).update({
                         timesUsed: firebase.firestore.FieldValue.increment(1)
                     });
                 }
@@ -5641,16 +5679,27 @@ function selectLibraryContent(contentId, moduleId) {
                 const contentDoc = await db.collection('courseContentLibrary').doc(contentId).get();
                 const contentData = contentDoc.data();
                 
-                // Create lesson with library content
+                // Create lesson with ALL library content details
                 const lesson = {
                     id: 'lesson_' + Date.now(),
-                    type: 'library-content',
+                    type: contentData.type, // النوع الحقيقي وليس library-content
                     title: contentData.name,
                     duration: contentData.duration || 15,
                     description: contentData.description || '',
                     libraryContentId: contentId,
                     libraryContentType: contentData.type,
-                    isCompleted: false
+                    isCompleted: false,
+                    isFreePreview: false,
+                    // نقل نظام النقاط بالكامل
+                    pointsSystem: contentData.pointsSystem || null,
+                    points: contentData.pointsSystem?.totalPossible || 0,
+                    // نقل كل البيانات الإضافية
+                    videoData: contentData.videoData || null,
+                    quizData: contentData.quizData || null,
+                    assignmentData: contentData.assignmentData || null,
+                    objectives: contentData.objectives || '',
+                    prerequisites: contentData.prerequisites || '',
+                    resources: contentData.resources || []
                 };
                 
                 // Find the module and add the lesson
@@ -5689,7 +5738,6 @@ function selectLibraryContent(contentId, moduleId) {
         }
     });
 }
-
 // Open Content Creator Page
 function openContentCreatorPage() {
     window.open('course-content-library.html', '_blank');
