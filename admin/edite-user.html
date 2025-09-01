@@ -2353,14 +2353,12 @@ async function addDualPoints(userId, amount, reason, description) {
         const currentJourneyBalance = userData.journeyPoints?.balance || 0;
         const currentWalletBalance = userData.walletPoints?.balance || 0;
         
-        // تحديد التسمية الصحيحة بناءً على السبب
         let reasonLabel = reason;
         if (!reason.includes('(')) {
             reasonLabel = reason + ' (النظامين)';
         }
         
         const updates = {
-            // تحديث نقاط الارتواء
             'journeyPoints.balance': currentJourneyBalance + amount,
             'journeyPoints.lifetime': amount > 0 ? 
                 (userData.journeyPoints?.lifetime || 0) + amount : 
@@ -2374,7 +2372,6 @@ async function addDualPoints(userId, amount, reason, description) {
                 type: 'journey'
             }),
             
-            // تحديث نقاط المحفظة
             'walletPoints.balance': currentWalletBalance + amount,
             'walletPoints.lifetime': amount > 0 ? 
                 (userData.walletPoints?.lifetime || 0) + amount : 
@@ -2390,11 +2387,17 @@ async function addDualPoints(userId, amount, reason, description) {
         };
         
         await userRef.update(updates);
+        
+        // فحص الشارات التلقائية مباشرة بعد التحديث
+        console.log('🔍 فحص الشارات التلقائية...');
         await checkAutomaticBadges(userId);
-
+        
+        // تحديث البيانات المحلية
+        await loadUserData();
+        
         console.log(`✅ تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة للنظامين`);
         return true;
-        // التحقق من الشارات التلقائية
+        
     } catch (error) {
         console.error('خطأ في إضافة النقاط المزدوجة:', error);
         return false;
@@ -3582,7 +3585,14 @@ function displayUserBadges() {
                onmouseout="this.style.transform='scale(1)'">
                 <i class="fas fa-plus-circle"></i> منح شارة يدوية
             </button>
+            <button onclick="immediateCheckBadges()" 
+        style="margin-right: 10px; background: linear-gradient(135deg, #3b82f6, #1e40af); 
+               color: white; border: none; padding: 10px 20px; 
+               border-radius: 8px; cursor: pointer; font-weight: bold;">
+    🔄 فحص الشارات المستحقة
+</button>
         </div>
+        
     `;
     
     return html;
@@ -3591,62 +3601,91 @@ function displayUserBadges() {
 // منح شارة للمستخدم
 async function grantBadgeToUser() {
     try {
-        // جلب الشارات المتاحة
+        if (!currentUserId) {
+            Swal.fire('خطأ', 'لم يتم تحديد المستخدم', 'error');
+            return;
+        }
+        
+        // جلب جميع الشارات
         const badgesSnapshot = await db.collection('badges').get();
         const availableBadges = [];
         
         badgesSnapshot.forEach(doc => {
-            availableBadges.push({
-                id: doc.id,
-                ...doc.data()
-            });
+            const badge = { id: doc.id, ...doc.data() };
+            // فقط الشارات اليدوية أو جميع الشارات للاختبار
+            availableBadges.push(badge);
         });
         
-        // فلتر الشارات اليدوية فقط
-        const manualBadges = availableBadges.filter(b => b.type === 'manual');
-        
-        if (manualBadges.length === 0) {
-            Swal.fire('تنبيه', 'لا توجد شارات يدوية متاحة', 'info');
+        if (availableBadges.length === 0) {
+            Swal.fire('تنبيه', 'لا توجد شارات متاحة', 'info');
             return;
         }
         
+        // إنشاء خيارات الاختيار
+        const badgeOptions = {};
+        availableBadges.forEach(badge => {
+            const typeLabel = {
+                'manual': '(يدوية)',
+                'points': `(${badge.conditions?.requiredPoints || 0} نقطة)`,
+                'content': '(محتوى)',
+                'streak': `(${badge.conditions?.streakDays || 0} يوم)`
+            };
+            badgeOptions[badge.id] = `${badge.icon || '🏅'} ${badge.name} ${typeLabel[badge.type] || ''}`;
+        });
+        
         const { value: selectedBadgeId } = await Swal.fire({
-            title: 'منح شارة',
+            title: '🏅 منح شارة',
             input: 'select',
-            inputOptions: manualBadges.reduce((options, badge) => {
-                options[badge.id] = `${badge.icon} ${badge.name}`;
-                return options;
-            }, {}),
+            inputOptions: badgeOptions,
             inputPlaceholder: 'اختر الشارة',
             showCancelButton: true,
             confirmButtonText: 'منح الشارة',
-            cancelButtonText: 'إلغاء'
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10b981'
         });
         
         if (selectedBadgeId) {
-            const selectedBadge = manualBadges.find(b => b.id === selectedBadgeId);
+            const selectedBadge = availableBadges.find(b => b.id === selectedBadgeId);
             
-            const userBadges = currentUserData.badges || [];
-            userBadges.push({
+            // التحقق من عدم وجود الشارة مسبقاً
+            const currentBadges = currentUserData.badges || [];
+            if (currentBadges.some(b => b.id === selectedBadgeId)) {
+                Swal.fire('تنبيه', 'المستخدم يملك هذه الشارة بالفعل', 'warning');
+                return;
+            }
+            
+            // إضافة الشارة
+            const newBadge = {
                 id: selectedBadgeId,
                 name: selectedBadge.name,
-                icon: selectedBadge.icon,
-                awardedDate: new Date().toISOString()
-            });
+                icon: selectedBadge.icon || '🏅',
+                reason: 'منحت يدوياً من الإدارة',
+                awardedDate: new Date().toISOString(),
+                type: 'manual'
+            };
+            
+            currentBadges.push(newBadge);
             
             await db.collection('users').doc(currentUserId).update({
-                badges: userBadges
+                badges: currentBadges
             });
             
-            // تحديث عدد مرات المنح
             await db.collection('badges').doc(selectedBadgeId).update({
                 timesAwarded: firebase.firestore.FieldValue.increment(1)
             });
             
-            Swal.fire('تم المنح', 'تم منح الشارة بنجاح', 'success');
-            loadUserData();
+            Swal.fire({
+                icon: 'success',
+                title: 'تم المنح',
+                text: `تم منح شارة "${selectedBadge.name}" بنجاح`,
+                timer: 2000,
+                showConfirmButton: false
+            });
+            
+            // تحديث العرض
+            await loadUserData();
+            
         }
-        
     } catch (error) {
         console.error('خطأ في منح الشارة:', error);
         Swal.fire('خطأ', 'فشل منح الشارة', 'error');
@@ -3724,6 +3763,96 @@ async function checkAutomaticBadges(userId) {
         
     } catch (error) {
         console.error('خطأ في التحقق من الشارات التلقائية:', error);
+    }
+}
+
+        // فحص فوري للشارات عند تغيير النقاط
+async function immediateCheckBadges() {
+    try {
+        if (!currentUserId) {
+            console.error('لا يوجد معرف مستخدم');
+            return;
+        }
+        
+        console.log('🔄 بدء الفحص الفوري للشارات...');
+        
+        // جلب البيانات المحدثة
+        const userDoc = await db.collection('users').doc(currentUserId).get();
+        if (!userDoc.exists) return;
+        
+        const userData = userDoc.data();
+        const currentPoints = userData.journeyPoints?.balance || 0;
+        const currentBadges = userData.badges || [];
+        const currentBadgeIds = currentBadges.map(b => b.id);
+        
+        console.log(`📊 النقاط الحالية: ${currentPoints}`);
+        console.log(`🏅 الشارات الحالية: ${currentBadgeIds.length}`);
+        
+        // جلب جميع الشارات من قاعدة البيانات
+        const badgesSnapshot = await db.collection('badges').get();
+        const newBadgesToAdd = [];
+        
+        badgesSnapshot.forEach(doc => {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // تجاهل الشارات المكتسبة مسبقاً
+            if (currentBadgeIds.includes(badge.id)) {
+                return;
+            }
+            
+            // فحص شارات النقاط
+            if (badge.type === 'points' && badge.conditions?.requiredPoints) {
+                console.log(`🔍 فحص شارة: ${badge.name} - تحتاج ${badge.conditions.requiredPoints} نقطة`);
+                
+                if (currentPoints >= badge.conditions.requiredPoints) {
+                    console.log(`✨ مؤهل للشارة: ${badge.name}`);
+                    newBadgesToAdd.push({
+                        id: badge.id,
+                        name: badge.name,
+                        icon: badge.icon || '🏅',
+                        reason: `حصلت على ${badge.conditions.requiredPoints} نقطة`,
+                        awardedDate: new Date().toISOString(),
+                        type: 'automatic'
+                    });
+                }
+            }
+        });
+        
+        // إضافة الشارات الجديدة
+        if (newBadgesToAdd.length > 0) {
+            console.log(`🎉 شارات جديدة للإضافة: ${newBadgesToAdd.length}`);
+            
+            const updatedBadges = [...currentBadges, ...newBadgesToAdd];
+            
+            await db.collection('users').doc(currentUserId).update({
+                badges: updatedBadges
+            });
+            
+            // تحديث عداد الشارات
+            for (const badge of newBadgesToAdd) {
+                await db.collection('badges').doc(badge.id).update({
+                    timesAwarded: firebase.firestore.FieldValue.increment(1)
+                });
+            }
+            
+            // إظهار إشعار
+            if (newBadgesToAdd.length === 1) {
+                showBadgeNotification(newBadgesToAdd[0]);
+            } else {
+                showMultipleBadgesNotification(newBadgesToAdd);
+            }
+            
+            // تحديث العرض
+            currentUserData.badges = updatedBadges;
+            if (currentTab === 'progress') {
+                switchTab('progress');
+            }
+        } else {
+            console.log('❌ لا توجد شارات جديدة مستحقة');
+        }
+        
+    } catch (error) {
+        console.error('خطأ في الفحص الفوري:', error);
     }
 }
 // إشعار بشارة جديدة
@@ -5893,6 +6022,7 @@ if (document.readyState === 'loading') {
         // تصدير الدوال للاستخدام العام
 window.checkAndAddBasicBadges = checkAndAddBasicBadges;
 window.displayUserBadges = displayUserBadges;
+window.immediateCheckBadges = immediateCheckBadges;
 window.grantBadgeToUser = grantBadgeToUser;
 window.checkAutomaticBadges = checkAutomaticBadges;
     </script>
