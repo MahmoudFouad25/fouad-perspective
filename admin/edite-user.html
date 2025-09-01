@@ -2647,8 +2647,106 @@ async function deleteWalletEntry(userId, timestamp) {
             confirmButtonColor: '#ef4444'
         });
     }
+                if (currentUserId && currentUserData) {
+        // فحص الشارات التلقائية بعد تحميل البيانات
+        setTimeout(async () => {
+            await checkAutomaticBadges(currentUserId);
+            // تحديث العرض إذا كان في تبويب التقدم
+            if (currentTab === 'progress') {
+                const progressContent = document.getElementById('progressContent');
+                if (progressContent) {
+                    progressContent.innerHTML = displayProgressData();
+                }
+            }
+        }, 500);
+    }
+
 }
 
+        // دالة للتحقق الدوري من الشارات
+async function periodicBadgeCheck() {
+    if (!currentUserId || !currentUserData) return;
+    
+    const currentPoints = currentUserData.journeyPoints?.balance || 0;
+    const badges = currentUserData.badges || [];
+    let hasChanges = false;
+    
+    // جلب تعريفات الشارات
+    const badgesSnapshot = await db.collection('badges').get();
+    const badgeDefinitions = {};
+    badgesSnapshot.forEach(doc => {
+        badgeDefinitions[doc.id] = doc.data();
+    });
+    
+    // فحص الشارات المستحقة
+    for (const [badgeId, badgeDef] of Object.entries(badgeDefinitions)) {
+        const hasBadge = badges.some(b => b.id === badgeId);
+        
+        if (badgeDef.type === 'points' && !hasBadge) {
+            if (currentPoints >= badgeDef.conditions?.requiredPoints) {
+                // منح الشارة
+                badges.push({
+                    id: badgeId,
+                    name: badgeDef.name,
+                    icon: badgeDef.icon || '🏅',
+                    reason: `حصلت على ${badgeDef.conditions.requiredPoints} نقطة`,
+                    awardedDate: new Date().toISOString(),
+                    type: 'automatic'
+                });
+                hasChanges = true;
+                
+                // إشعار
+                showBadgeNotification({
+                    name: badgeDef.name,
+                    icon: badgeDef.icon,
+                    reason: `حصلت على ${badgeDef.conditions.requiredPoints} نقطة`
+                });
+            }
+        }
+    }
+    
+    // فحص الشارات غير المستحقة (للحذف)
+    const validBadges = badges.filter(badge => {
+        if (badge.type === 'manual') return true; // الشارات اليدوية تبقى دائماً
+        
+        const badgeDef = badgeDefinitions[badge.id];
+        if (!badgeDef) return true; // احتفظ بالشارة إذا لم نجد تعريفها
+        
+        if (badgeDef.type === 'points') {
+            return currentPoints >= badgeDef.conditions?.requiredPoints;
+        }
+        
+        return true;
+    });
+    
+    if (validBadges.length !== badges.length) {
+        hasChanges = true;
+    }
+    
+    // حفظ التغييرات
+    if (hasChanges) {
+        await db.collection('users').doc(currentUserId).update({
+            badges: validBadges
+        });
+        
+        currentUserData.badges = validBadges;
+        
+        // تحديث العرض
+        if (currentTab === 'progress') {
+            const progressContent = document.getElementById('progressContent');
+            if (progressContent) {
+                progressContent.innerHTML = displayProgressData();
+            }
+        }
+    }
+}
+
+// استدعاء الفحص الدوري كل 5 ثواني
+setInterval(() => {
+    if (currentUserId && currentUserData) {
+        periodicBadgeCheck();
+    }
+}, 5000);
         // التحقق من الشارات الأساسية وإضافتها
 async function checkAndAddBasicBadges() {
     try {
@@ -4985,27 +5083,63 @@ function calculateStreak() {
 
 // ==================== عرض الإنجازات ====================
 function displayAchievements() {
-    const achievements = [
-        { icon: 'fa-user-check', title: 'البداية الموفقة', desc: 'إنشاء الحساب', earned: true },
-        { icon: 'fa-book', title: 'طالب علم', desc: 'أول دورة', earned: currentUserData.enrollments?.length > 0 },
-        { icon: 'fa-trophy', title: 'الإنجاز الأول', desc: 'إكمال دورة', earned: false },
-        { icon: 'fa-fire', title: 'المثابر', desc: '30 يوم متتالي', earned: false },
-        { icon: 'fa-star', title: 'النجم الصاعد', desc: '1000 نقطة', earned: (currentUserData.irtiwaaPoints?.total || 0) >= 1000 },
-        { icon: 'fa-crown', title: 'القائد', desc: 'المرحلة السابعة', earned: false }
-    ];
+    const userBadges = currentUserData?.badges || [];
     
-    let html = '';
-    achievements.forEach(achievement => {
+    if (userBadges.length === 0) {
+        return `
+            <div style="text-align: center; padding: 40px; color: #999;">
+                <div style="font-size: 3rem; margin-bottom: 15px;">🏅</div>
+                <p>لا توجد شارات مكتسبة بعد</p>
+                <button onclick="immediateCheckBadges()" 
+                        style="background: #3b82f6; color: white; border: none; 
+                               padding: 10px 20px; border-radius: 8px; 
+                               cursor: pointer; margin-top: 15px;">
+                    🔄 فحص الشارات المستحقة
+                </button>
+            </div>
+        `;
+    }
+    
+    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px;">';
+    
+    userBadges.forEach(badge => {
+        const bgColor = badge.type === 'automatic' ? 
+            'linear-gradient(135deg, #fbbf24, #f59e0b)' : 
+            'linear-gradient(135deg, #3b82f6, #1e40af)';
+        
         html += `
-            <div class="achievement-card ${achievement.earned ? 'earned' : 'locked'}">
-                <div class="achievement-icon">
-                    <i class="fas ${achievement.icon}"></i>
+            <div style="background: ${bgColor}; padding: 15px; 
+                        border-radius: 12px; text-align: center; 
+                        color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                        cursor: pointer; transition: transform 0.3s;"
+                 onmouseover="this.style.transform='scale(1.05)'"
+                 onmouseout="this.style.transform='scale(1)'">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">
+                    ${badge.icon || '🏅'}
                 </div>
-                <div class="achievement-title">${achievement.title}</div>
-                <div class="achievement-desc">${achievement.desc}</div>
+                <div style="font-weight: bold; font-size: 0.9rem;">
+                    ${badge.name}
+                </div>
+                <div style="font-size: 0.75rem; opacity: 0.9; margin-top: 5px;">
+                    ${formatDate(badge.awardedDate)}
+                </div>
             </div>
         `;
     });
+    
+    html += '</div>';
+    
+    // إضافة زر إدارة الشارات
+    html += `
+        <div style="text-align: center; margin-top: 20px;">
+            <button onclick="openBadgesManagement()" 
+                    style="background: linear-gradient(135deg, #f59e0b, #dc2626); 
+                           color: white; border: none; padding: 12px 30px; 
+                           border-radius: 10px; cursor: pointer; font-weight: bold;">
+                🏅 إدارة الشارات
+            </button>
+        </div>
+    `;
     
     return html;
 }
@@ -5426,6 +5560,13 @@ async function openJourneyManagement() {
         width: '800px',
         showCloseButton: true,
         showConfirmButton: false
+        didClose: async () => {
+    // فحص الشارات التلقائية عند إغلاق النافذة
+    if (currentUserId) {
+        await immediateCheckBadges();
+    }
+}
+
     });
 }
 
@@ -5563,6 +5704,13 @@ async function openWalletManagement() {
         width: '800px',
         showCloseButton: true,
         showConfirmButton: false
+        didClose: async () => {
+    // فحص الشارات التلقائية عند إغلاق النافذة
+    if (currentUserId) {
+        await immediateCheckBadges();
+    }
+}
+
     });
 }
 
@@ -5691,6 +5839,9 @@ async function showAddPointsDialog(system) {
         }
         
         if (success) {
+                        // فحص الشارات فوراً بعد إضافة النقاط
+            await immediateCheckBadges();
+
             Swal.fire({
                 icon: 'success',
                 title: 'تم إضافة النقاط',
@@ -5790,6 +5941,9 @@ async function showDeductPointsDialog(system) {
         }
         
         if (success) {
+                        // فحص الشارات فوراً بعد إضافة النقاط
+            await immediateCheckBadges();
+
             Swal.fire({
                 icon: 'success',
                 title: 'تم خصم النقاط',
@@ -6291,6 +6445,11 @@ window.moveBadgeDown = moveBadgeDown;
 window.removeBadge = removeBadge;
 window.grantAllEligibleBadges = grantAllEligibleBadges;
 window.checkAndRemoveInvalidBadges = checkAndRemoveInvalidBadges;
+        // إضافة الدوال للـ window
+window.showAddPointsDialog = showAddPointsDialog;
+window.showDeductPointsDialog = showDeductPointsDialog;
+window.displayAchievements = displayAchievements;
+window.periodicBadgeCheck = periodicBadgeCheck;
     </script>
 </body>
 </html>
