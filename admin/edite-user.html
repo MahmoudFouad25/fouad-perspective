@@ -2392,7 +2392,8 @@ async function addDualPoints(userId, amount, reason, description) {
         await userRef.update(updates);
         console.log(`✅ تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة للنظامين`);
         return true;
-        
+        // التحقق من الشارات التلقائية
+await checkAutomaticBadges(userId);
     } catch (error) {
         console.error('خطأ في إضافة النقاط المزدوجة:', error);
         return false;
@@ -3547,6 +3548,171 @@ async function grantBadgeToUser() {
         console.error('خطأ في منح الشارة:', error);
         Swal.fire('خطأ', 'فشل منح الشارة', 'error');
     }
+}
+
+        // التحقق من الشارات التلقائية
+async function checkAutomaticBadges(userId) {
+    try {
+        // جلب بيانات المستخدم الحالية
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        
+        // جلب جميع الشارات
+        const badgesSnapshot = await db.collection('badges').get();
+        const allBadges = [];
+        badgesSnapshot.forEach(doc => {
+            allBadges.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        // الشارات الحالية للمستخدم
+        const currentBadges = userData.badges || [];
+        const currentBadgeIds = currentBadges.map(b => b.id);
+        
+        // شارات جديدة محتملة
+        const newBadges = [];
+        
+        // فحص شارات النقاط
+        const pointsBadges = allBadges.filter(b => b.type === 'points');
+        const currentPoints = userData.journeyPoints?.balance || 0;
+        
+        for (const badge of pointsBadges) {
+            if (!currentBadgeIds.includes(badge.id)) {
+                if (currentPoints >= badge.conditions.requiredPoints) {
+                    newBadges.push({
+                        id: badge.id,
+                        name: badge.name,
+                        icon: badge.icon,
+                        awardedDate: new Date().toISOString(),
+                        reason: `وصلت إلى ${badge.conditions.requiredPoints} نقطة`
+                    });
+                    
+                    console.log(`🏅 منح شارة جديدة: ${badge.name}`);
+                }
+            }
+        }
+        
+        // فحص شارات الانتظام (لو موجود تاريخ آخر دخول)
+        if (userData.lastActiveDate) {
+            const today = new Date();
+            const lastActive = new Date(userData.lastActiveDate);
+            const daysDiff = Math.floor((today - lastActive) / (1000 * 60 * 60 * 24));
+            
+            if (daysDiff === 1) {
+                // يوم متتالي
+                const currentStreak = (userData.currentStreak || 0) + 1;
+                
+                // تحديث الـ streak
+                await db.collection('users').doc(userId).update({
+                    currentStreak: currentStreak,
+                    lastActiveDate: today.toISOString()
+                });
+                
+                // فحص شارات الانتظام
+                const streakBadges = allBadges.filter(b => b.type === 'streak');
+                
+                for (const badge of streakBadges) {
+                    if (!currentBadgeIds.includes(badge.id)) {
+                        if (currentStreak >= badge.conditions.streakDays) {
+                            newBadges.push({
+                                id: badge.id,
+                                name: badge.name,
+                                icon: badge.icon,
+                                awardedDate: new Date().toISOString(),
+                                reason: `${badge.conditions.streakDays} يوم متتالي`
+                            });
+                        }
+                    }
+                }
+            } else if (daysDiff > 1) {
+                // انقطاع - إعادة تعيين العداد
+                await db.collection('users').doc(userId).update({
+                    currentStreak: 1,
+                    lastActiveDate: today.toISOString()
+                });
+            }
+        } else {
+            // أول مرة
+            await db.collection('users').doc(userId).update({
+                currentStreak: 1,
+                lastActiveDate: new Date().toISOString()
+            });
+        }
+        
+        // حفظ الشارات الجديدة
+        if (newBadges.length > 0) {
+            const updatedBadges = [...currentBadges, ...newBadges];
+            
+            await db.collection('users').doc(userId).update({
+                badges: updatedBadges
+            });
+            
+            // تحديث عدد مرات المنح لكل شارة
+            for (const badge of newBadges) {
+                await db.collection('badges').doc(badge.id).update({
+                    timesAwarded: firebase.firestore.FieldValue.increment(1)
+                });
+            }
+            
+            // إشعار بالشارات الجديدة
+            if (newBadges.length === 1) {
+                showBadgeNotification(newBadges[0]);
+            } else {
+                showMultipleBadgesNotification(newBadges);
+            }
+        }
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من الشارات:', error);
+    }
+}
+
+// إشعار بشارة جديدة
+function showBadgeNotification(badge) {
+    Swal.fire({
+        title: '🎉 مبروك! شارة جديدة',
+        html: `
+            <div style="text-align: center;">
+                <div style="font-size: 5rem; margin: 20px;">
+                    ${badge.icon}
+                </div>
+                <h3 style="color: #f59e0b; margin: 10px 0;">
+                    ${badge.name}
+                </h3>
+                <p style="color: #666;">
+                    ${badge.reason}
+                </p>
+            </div>
+        `,
+        icon: 'success',
+        confirmButtonText: 'رائع!',
+        confirmButtonColor: '#f59e0b'
+    });
+}
+
+// إشعار بعدة شارات
+function showMultipleBadgesNotification(badges) {
+    let badgesHTML = '';
+    badges.forEach(badge => {
+        badgesHTML += `
+            <div style="display: inline-block; margin: 10px; text-align: center;">
+                <div style="font-size: 3rem;">${badge.icon}</div>
+                <div style="font-size: 0.9rem; color: #f59e0b;">
+                    ${badge.name}
+                </div>
+            </div>
+        `;
+    });
+    
+    Swal.fire({
+        title: `🎉 مبروك! ${badges.length} شارات جديدة`,
+        html: badgesHTML,
+        icon: 'success',
+        confirmButtonText: 'رائع!',
+        confirmButtonColor: '#f59e0b'
+    });
 }
 // عرض سجل النقاط المدمج
 function displayCombinedPointsHistory() {
