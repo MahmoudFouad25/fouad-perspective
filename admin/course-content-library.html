@@ -863,6 +863,11 @@
             <div class="stat-number" id="completionRate">85%</div>
             <div class="stat-title">معدل الإكمال</div>
         </div>
+        <div class="stat-card" style="background: linear-gradient(135deg, #fef3c7, #fed7aa);">
+    <div class="stat-icon" style="color: #f59e0b;">🏅</div>
+    <div class="stat-number" id="totalBadgesCount" style="color: #dc2626;">0</div>
+    <div class="stat-title" style="color: #92400e;">إجمالي الشارات</div>
+</div>
     </div>
 
     <!-- Content Types -->
@@ -1612,6 +1617,10 @@ if (statsContainer && !document.getElementById('pointsStatCard')) {
     `;
     statsContainer.insertAdjacentHTML('beforeend', pointsStatHTML);
 }
+    // تحديث عدد الشارات
+db.collection('badges').get().then(snapshot => {
+    document.getElementById('totalBadgesCount').textContent = snapshot.size;
+});
 }
 
 // Filter by Type
@@ -2739,6 +2748,58 @@ if (specificData) {
        console.error('❌ خطأ في حفظ المحتوى:', error);
        showNotification('خطأ في حفظ المحتوى: ' + error.message, 'error');
    }
+}
+
+    // التحقق من شارات المحتوى عند إكمال محتوى
+async function checkContentBadges(userId, contentId, contentType) {
+    try {
+        const badgesSnapshot = await db.collection('badges').get();
+        const contentBadges = [];
+        
+        badgesSnapshot.forEach(doc => {
+            const badge = doc.data();
+            if (badge.type === 'content' && badge.conditions.linkedContent === contentType) {
+                contentBadges.push({
+                    id: doc.id,
+                    ...badge
+                });
+            }
+        });
+        
+        // منح الشارات المناسبة
+        for (const badge of contentBadges) {
+            await grantContentBadge(userId, badge);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في فحص شارات المحتوى:', error);
+    }
+}
+
+// منح شارة محتوى
+async function grantContentBadge(userId, badge) {
+    const userDoc = await db.collection('users').doc(userId).get();
+    const userData = userDoc.data();
+    const currentBadges = userData.badges || [];
+    
+    // تحقق من عدم وجود الشارة مسبقاً
+    if (!currentBadges.find(b => b.id === badge.id)) {
+        currentBadges.push({
+            id: badge.id,
+            name: badge.name,
+            icon: badge.icon,
+            awardedDate: new Date().toISOString(),
+            reason: 'إكمال محتوى'
+        });
+        
+        await db.collection('users').doc(userId).update({
+            badges: currentBadges
+        });
+        
+        await db.collection('badges').doc(badge.id).update({
+            timesAwarded: firebase.firestore.FieldValue.increment(1)
+        });
+    }
 }
 
 // دالة جمع البيانات المخصصة - جديدة ومحسنة
@@ -5827,6 +5888,8 @@ window.loadTemplateModules = loadTemplateModules;
 window.quoteModulesToTemplate = quoteModulesToTemplate;
     window.createSampleData = createSampleData;
     window.displayFilteredContent = displayFilteredContent;
+    window.checkContentBadges = checkContentBadges;
+window.grantContentBadge = grantContentBadge;
 window.showAllContent = showAllContent;
 
 
