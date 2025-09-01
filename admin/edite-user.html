@@ -3307,28 +3307,15 @@ function displayProgressData() {
 
 
                 <!-- الشارات والإنجازات -->
-<div class="badges-section" style="
-    background: white;
-    border-radius: 15px;
-    padding: 30px;
-    margin-top: 30px;
-    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-">
-    <h3 class="section-title" style="
-        color: var(--primary);
-        margin-bottom: 25px;
-        font-size: 1.5rem;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    ">
-        <i class="fas fa-trophy" style="color: #f59e0b;"></i>
-        الشارات والإنجازات
-    </h3>
-    
-    ${displayUserBadges()}
+<div style="margin-top: 20px; text-align: center;">
+    <button onclick="openBadgesManagement()" 
+            style="background: linear-gradient(135deg, #f59e0b, #dc2626); 
+                   color: white; border: none; padding: 12px 30px; 
+                   border-radius: 10px; cursor: pointer; font-weight: bold;
+                   font-size: 1rem; margin: 5px;">
+        🏅 إدارة الشارات
+    </button>
 </div>
-
                 <!-- سجل النقاط الأخيرة -->
                 <div class="points-history">
                     <h4>آخر الحركات على النقاط</h4>
@@ -3692,6 +3679,279 @@ async function grantBadgeToUser() {
     }
 }
 
+        // فتح نافذة إدارة الشارات الشاملة
+async function openBadgesManagement() {
+    if (!currentUserId || !currentUserData) {
+        Swal.fire('خطأ', 'لم يتم تحديد المستخدم', 'error');
+        return;
+    }
+    
+    const userBadges = currentUserData.badges || [];
+    const currentPoints = currentUserData.journeyPoints?.balance || 0;
+    
+    // بناء HTML للشارات الحالية
+    let badgesHTML = '<div style="max-height: 400px; overflow-y: auto;">';
+    
+    if (userBadges.length === 0) {
+        badgesHTML += '<p style="text-align: center; color: #999;">لا توجد شارات</p>';
+    } else {
+        badgesHTML += '<div id="badgesList" style="display: flex; flex-direction: column; gap: 10px;">';
+        
+        userBadges.forEach((badge, index) => {
+            badgesHTML += `
+                <div class="badge-item" data-index="${index}" style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 15px;
+                    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+                    border-radius: 10px;
+                    border: 2px solid #d1d5db;
+                ">
+                    <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
+                        <div class="drag-handle" style="cursor: move; color: #9ca3af;">
+                            <i class="fas fa-grip-vertical"></i>
+                        </div>
+                        <div style="font-size: 2rem;">${badge.icon || '🏅'}</div>
+                        <div>
+                            <div style="font-weight: bold; color: #1f2937;">${badge.name}</div>
+                            <div style="font-size: 0.9rem; color: #6b7280;">${badge.reason || ''}</div>
+                            <div style="font-size: 0.8rem; color: #9ca3af;">${formatDate(badge.awardedDate)}</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="moveBadgeUp(${index})" 
+                                style="padding: 5px 10px; background: #3b82f6; color: white; 
+                                       border: none; border-radius: 5px; cursor: pointer;"
+                                ${index === 0 ? 'disabled style="opacity: 0.5;"' : ''}>
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+                        <button onclick="moveBadgeDown(${index})" 
+                                style="padding: 5px 10px; background: #3b82f6; color: white; 
+                                       border: none; border-radius: 5px; cursor: pointer;"
+                                ${index === userBadges.length - 1 ? 'disabled style="opacity: 0.5;"' : ''}>
+                            <i class="fas fa-arrow-down"></i>
+                        </button>
+                        <button onclick="removeBadge(${index})" 
+                                style="padding: 5px 10px; background: #dc2626; color: white; 
+                                       border: none; border-radius: 5px; cursor: pointer;">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        badgesHTML += '</div>';
+    }
+    
+    badgesHTML += '</div>';
+    
+    // فحص الشارات المستحقة بناءً على النقاط
+    const badgesSnapshot = await db.collection('badges').get();
+    let eligibleBadges = [];
+    
+    badgesSnapshot.forEach(doc => {
+        const badge = { id: doc.id, ...doc.data() };
+        const alreadyHas = userBadges.some(b => b.id === badge.id);
+        
+        if (!alreadyHas && badge.type === 'points' && currentPoints >= badge.conditions?.requiredPoints) {
+            eligibleBadges.push(badge);
+        }
+    });
+    
+    let eligibleHTML = '';
+    if (eligibleBadges.length > 0) {
+        eligibleHTML = `
+            <div style="background: #fef3c7; padding: 15px; border-radius: 10px; margin-top: 20px;">
+                <h4 style="color: #92400e; margin: 0 0 10px 0;">
+                    ⚠️ شارات مستحقة غير ممنوحة (${eligibleBadges.length})
+                </h4>
+                <button onclick="grantAllEligibleBadges()" 
+                        style="background: #f59e0b; color: white; border: none; 
+                               padding: 10px 20px; border-radius: 8px; cursor: pointer; 
+                               font-weight: bold;">
+                    منح جميع الشارات المستحقة
+                </button>
+            </div>
+        `;
+    }
+    
+    await Swal.fire({
+        title: '🏅 إدارة الشارات',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="background: #f0f9ff; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>إجمالي الشارات:</strong> ${userBadges.length}
+                        </div>
+                        <div>
+                            <strong>النقاط الحالية:</strong> ${currentPoints}
+                        </div>
+                    </div>
+                </div>
+                
+                ${eligibleHTML}
+                
+                <h4 style="margin: 20px 0 10px 0;">الشارات الحالية:</h4>
+                ${badgesHTML}
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px; justify-content: center;">
+                    <button onclick="grantBadgeToUser()" 
+                            style="background: #10b981; color: white; border: none; 
+                                   padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                        ➕ منح شارة جديدة
+                    </button>
+                    <button onclick="immediateCheckBadges()" 
+                            style="background: #3b82f6; color: white; border: none; 
+                                   padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                        🔄 فحص الشارات
+                    </button>
+                    <button onclick="checkAndRemoveInvalidBadges()" 
+                            style="background: #dc2626; color: white; border: none; 
+                                   padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                        🧹 تنظيف الشارات غير المستحقة
+                    </button>
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showConfirmButton: false,
+        showCloseButton: true
+    });
+}
+
+// تحريك الشارة لأعلى
+async function moveBadgeUp(index) {
+    if (index === 0) return;
+    
+    const badges = [...currentUserData.badges];
+    [badges[index], badges[index - 1]] = [badges[index - 1], badges[index]];
+    
+    await db.collection('users').doc(currentUserId).update({ badges });
+    currentUserData.badges = badges;
+    openBadgesManagement();
+}
+
+// تحريك الشارة لأسفل
+async function moveBadgeDown(index) {
+    const badges = [...currentUserData.badges];
+    if (index === badges.length - 1) return;
+    
+    [badges[index], badges[index + 1]] = [badges[index + 1], badges[index]];
+    
+    await db.collection('users').doc(currentUserId).update({ badges });
+    currentUserData.badges = badges;
+    openBadgesManagement();
+}
+
+// حذف شارة
+async function removeBadge(index) {
+    const badge = currentUserData.badges[index];
+    
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: `هل تريد حذف شارة "${badge.name}"؟`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc2626'
+    });
+    
+    if (result.isConfirmed) {
+        const badges = currentUserData.badges.filter((_, i) => i !== index);
+        
+        await db.collection('users').doc(currentUserId).update({ badges });
+        currentUserData.badges = badges;
+        
+        // تقليل عداد المنح
+        if (badge.id) {
+            await db.collection('badges').doc(badge.id).update({
+                timesAwarded: firebase.firestore.FieldValue.increment(-1)
+            });
+        }
+        
+        Swal.fire('تم الحذف', 'تم حذف الشارة بنجاح', 'success');
+        setTimeout(() => openBadgesManagement(), 1500);
+    }
+}
+
+// منح جميع الشارات المستحقة
+async function grantAllEligibleBadges() {
+    await immediateCheckBadges();
+    setTimeout(() => openBadgesManagement(), 1500);
+}
+
+// التحقق وإزالة الشارات غير المستحقة
+async function checkAndRemoveInvalidBadges() {
+    const currentPoints = currentUserData.journeyPoints?.balance || 0;
+    const badges = currentUserData.badges || [];
+    const validBadges = [];
+    const removedBadges = [];
+    
+    // جلب معلومات الشارات
+    const badgesSnapshot = await db.collection('badges').get();
+    const badgesInfo = {};
+    badgesSnapshot.forEach(doc => {
+        badgesInfo[doc.id] = doc.data();
+    });
+    
+    // فحص كل شارة
+    for (const badge of badges) {
+        let keepBadge = true;
+        
+        // الشارات الأساسية تبقى دائماً
+        if (badge.id === 'welcome_badge' || badge.id === 'first_course_badge') {
+            validBadges.push(badge);
+            continue;
+        }
+        
+        // فحص شارات النقاط
+        if (badge.id && badgesInfo[badge.id]) {
+            const badgeInfo = badgesInfo[badge.id];
+            
+            if (badgeInfo.type === 'points' && badgeInfo.conditions?.requiredPoints) {
+                if (currentPoints < badgeInfo.conditions.requiredPoints) {
+                    keepBadge = false;
+                    removedBadges.push(badge.name);
+                }
+            }
+        }
+        
+        if (keepBadge) {
+            validBadges.push(badge);
+        }
+    }
+    
+    if (removedBadges.length > 0) {
+        const result = await Swal.fire({
+            title: 'شارات غير مستحقة',
+            html: `
+                <p>تم العثور على ${removedBadges.length} شارة غير مستحقة بناءً على النقاط الحالية:</p>
+                <ul style="text-align: right;">
+                    ${removedBadges.map(name => `<li>${name}</li>`).join('')}
+                </ul>
+                <p>هل تريد إزالتها؟</p>
+            `,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'نعم، أزل',
+            cancelButtonText: 'إلغاء'
+        });
+        
+        if (result.isConfirmed) {
+            await db.collection('users').doc(currentUserId).update({ badges: validBadges });
+            currentUserData.badges = validBadges;
+            
+            Swal.fire('تم التنظيف', `تم إزالة ${removedBadges.length} شارة غير مستحقة`, 'success');
+            setTimeout(() => openBadgesManagement(), 1500);
+        }
+    } else {
+        Swal.fire('ممتاز', 'جميع الشارات الحالية مستحقة', 'success');
+    }
+}
         // التحقق من الشارات التلقائية
 // التحقق من الشارات التلقائية - محسنة
 async function checkAutomaticBadges(userId) {
@@ -6025,6 +6285,12 @@ window.displayUserBadges = displayUserBadges;
 window.immediateCheckBadges = immediateCheckBadges;
 window.grantBadgeToUser = grantBadgeToUser;
 window.checkAutomaticBadges = checkAutomaticBadges;
+        window.openBadgesManagement = openBadgesManagement;
+window.moveBadgeUp = moveBadgeUp;
+window.moveBadgeDown = moveBadgeDown;
+window.removeBadge = removeBadge;
+window.grantAllEligibleBadges = grantAllEligibleBadges;
+window.checkAndRemoveInvalidBadges = checkAndRemoveInvalidBadges;
     </script>
 </body>
 </html>
