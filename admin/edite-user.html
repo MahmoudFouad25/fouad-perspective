@@ -3245,7 +3245,24 @@ function displayProgressData() {
                         إدارة نقاط المحفظة
                     </button>
                 </div>
-                
+
+
+                <!-- الشارات المكتسبة -->
+<div class="badges-section" style="margin-top: 20px;">
+    <h4 style="color: var(--primary); margin-bottom: 15px;">
+        🏅 الشارات المكتسبة
+    </h4>
+    <div id="userBadgesDisplay" style="display: flex; flex-wrap: wrap; gap: 15px;">
+        ${displayUserBadges()}
+    </div>
+    <button onclick="grantBadgeToUser()" 
+            style="margin-top: 15px; background: #f59e0b; color: white; 
+                   border: none; padding: 10px 20px; border-radius: 8px; 
+                   cursor: pointer; font-weight: bold;">
+        ➕ منح شارة يدوية
+    </button>
+</div>
+
                 <!-- سجل النقاط الأخيرة -->
                 <div class="points-history">
                     <h4>آخر الحركات على النقاط</h4>
@@ -3435,6 +3452,101 @@ function displayPointsHistory(history) {
     });
     
     return html;
+}
+
+        // عرض شارات المستخدم
+function displayUserBadges() {
+    const userBadges = currentUserData.badges || [];
+    
+    if (userBadges.length === 0) {
+        return '<p style="color: #999;">لم يحصل على شارات بعد</p>';
+    }
+    
+    let html = '';
+    userBadges.forEach(badge => {
+        html += `
+            <div style="background: linear-gradient(135deg, #fef3c7, #fed7aa); 
+                        padding: 15px; border-radius: 10px; 
+                        text-align: center; min-width: 120px;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">
+                    ${badge.icon || '🏅'}
+                </div>
+                <div style="font-weight: bold; color: #92400e; font-size: 0.9rem;">
+                    ${badge.name}
+                </div>
+                <div style="font-size: 0.75rem; color: #78350f; margin-top: 5px;">
+                    ${formatDate(badge.awardedDate)}
+                </div>
+            </div>
+        `;
+    });
+    
+    return html;
+}
+
+// منح شارة للمستخدم
+async function grantBadgeToUser() {
+    try {
+        // جلب الشارات المتاحة
+        const badgesSnapshot = await db.collection('badges').get();
+        const availableBadges = [];
+        
+        badgesSnapshot.forEach(doc => {
+            availableBadges.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        // فلتر الشارات اليدوية فقط
+        const manualBadges = availableBadges.filter(b => b.type === 'manual');
+        
+        if (manualBadges.length === 0) {
+            Swal.fire('تنبيه', 'لا توجد شارات يدوية متاحة', 'info');
+            return;
+        }
+        
+        const { value: selectedBadgeId } = await Swal.fire({
+            title: 'منح شارة',
+            input: 'select',
+            inputOptions: manualBadges.reduce((options, badge) => {
+                options[badge.id] = `${badge.icon} ${badge.name}`;
+                return options;
+            }, {}),
+            inputPlaceholder: 'اختر الشارة',
+            showCancelButton: true,
+            confirmButtonText: 'منح الشارة',
+            cancelButtonText: 'إلغاء'
+        });
+        
+        if (selectedBadgeId) {
+            const selectedBadge = manualBadges.find(b => b.id === selectedBadgeId);
+            
+            const userBadges = currentUserData.badges || [];
+            userBadges.push({
+                id: selectedBadgeId,
+                name: selectedBadge.name,
+                icon: selectedBadge.icon,
+                awardedDate: new Date().toISOString()
+            });
+            
+            await db.collection('users').doc(currentUserId).update({
+                badges: userBadges
+            });
+            
+            // تحديث عدد مرات المنح
+            await db.collection('badges').doc(selectedBadgeId).update({
+                timesAwarded: firebase.firestore.FieldValue.increment(1)
+            });
+            
+            Swal.fire('تم المنح', 'تم منح الشارة بنجاح', 'success');
+            loadUserData();
+        }
+        
+    } catch (error) {
+        console.error('خطأ في منح الشارة:', error);
+        Swal.fire('خطأ', 'فشل منح الشارة', 'error');
+    }
 }
 // عرض سجل النقاط المدمج
 function displayCombinedPointsHistory() {
