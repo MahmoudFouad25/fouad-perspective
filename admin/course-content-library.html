@@ -6206,6 +6206,224 @@ async function deleteBadge(badgeId) {
         }
     }
 }
+    // أضف هذا الكود بعد دالة deleteBadge
+async function editBadge(badgeId) {
+    try {
+        // جلب بيانات الشارة
+        const badgeDoc = await db.collection('badges').doc(badgeId).get();
+        if (!badgeDoc.exists) {
+            Swal.fire('خطأ', 'الشارة غير موجودة', 'error');
+            return;
+        }
+        
+        const badgeData = badgeDoc.data();
+        
+        const { value: formData } = await Swal.fire({
+            title: '✏️ تعديل الشارة',
+            html: `
+                <div style="text-align: right; direction: rtl;">
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                            اسم الشارة
+                        </label>
+                        <input type="text" id="editBadgeName" class="swal2-input" 
+                               value="${badgeData.name}" style="width: 100%;">
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                            وصف الشارة
+                        </label>
+                        <textarea id="editBadgeDescription" class="swal2-textarea" 
+                                  style="width: 100%; height: 60px;">${badgeData.description || ''}</textarea>
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                            أيقونة الشارة
+                        </label>
+                        <select id="editBadgeIcon" class="swal2-input" style="width: 100%; font-size: 1.5rem;">
+                            <option value="⭐" ${badgeData.icon === '⭐' ? 'selected' : ''}>⭐ نجمة</option>
+                            <option value="🏆" ${badgeData.icon === '🏆' ? 'selected' : ''}>🏆 كأس</option>
+                            <option value="🥇" ${badgeData.icon === '🥇' ? 'selected' : ''}>🥇 ذهبية</option>
+                            <option value="🥈" ${badgeData.icon === '🥈' ? 'selected' : ''}>🥈 فضية</option>
+                            <option value="🥉" ${badgeData.icon === '🥉' ? 'selected' : ''}>🥉 برونزية</option>
+                            <option value="💎" ${badgeData.icon === '💎' ? 'selected' : ''}>💎 ماسة</option>
+                            <option value="🔥" ${badgeData.icon === '🔥' ? 'selected' : ''}>🔥 نار</option>
+                            <option value="⚡" ${badgeData.icon === '⚡' ? 'selected' : ''}>⚡ برق</option>
+                            <option value="🌟" ${badgeData.icon === '🌟' ? 'selected' : ''}>🌟 نجمة لامعة</option>
+                            <option value="👑" ${badgeData.icon === '👑' ? 'selected' : ''}>👑 تاج</option>
+                        </select>
+                    </div>
+                    
+                    ${badgeData.type === 'points' ? `
+                        <div style="background: #f0f9ff; padding: 15px; border-radius: 8px;">
+                            <label style="color: #0369a1; font-weight: bold;">عدد النقاط المطلوبة:</label>
+                            <input type="number" id="editRequiredPoints" class="swal2-input" 
+                                   value="${badgeData.conditions?.requiredPoints || 100}" 
+                                   min="1" style="width: 100%; margin-top: 8px;">
+                        </div>
+                    ` : ''}
+                    
+                    ${badgeData.type === 'streak' ? `
+                        <div style="background: #f0f9ff; padding: 15px; border-radius: 8px;">
+                            <label style="color: #0369a1; font-weight: bold;">عدد الأيام المتتالية:</label>
+                            <input type="number" id="editStreakDays" class="swal2-input" 
+                                   value="${badgeData.conditions?.streakDays || 7}" 
+                                   min="1" style="width: 100%; margin-top: 8px;">
+                        </div>
+                    ` : ''}
+                </div>
+            `,
+            width: '600px',
+            showCancelButton: true,
+            confirmButtonText: 'حفظ التغييرات',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10b981',
+            preConfirm: () => {
+                const name = document.getElementById('editBadgeName').value.trim();
+                if (!name) {
+                    Swal.showValidationMessage('يجب إدخال اسم الشارة');
+                    return false;
+                }
+                
+                let conditions = badgeData.conditions;
+                
+                if (badgeData.type === 'points') {
+                    conditions.requiredPoints = parseInt(document.getElementById('editRequiredPoints')?.value) || 100;
+                } else if (badgeData.type === 'streak') {
+                    conditions.streakDays = parseInt(document.getElementById('editStreakDays')?.value) || 7;
+                }
+                
+                return {
+                    name: name,
+                    description: document.getElementById('editBadgeDescription').value.trim(),
+                    icon: document.getElementById('editBadgeIcon').value,
+                    conditions: conditions
+                };
+            }
+        });
+        
+        if (formData) {
+            await db.collection('badges').doc(badgeId).update({
+                name: formData.name,
+                description: formData.description,
+                icon: formData.icon,
+                conditions: formData.conditions,
+                lastModified: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            Swal.fire('تم التحديث', 'تم تحديث الشارة بنجاح', 'success');
+            viewAllBadges();
+        }
+        
+    } catch (error) {
+        console.error('خطأ في تعديل الشارة:', error);
+        Swal.fire('خطأ', 'فشل تعديل الشارة', 'error');
+    }
+}
+
+// أضف للـ window
+window.editBadge = editBadge;
+
+    // دالة للتحقق من استحقاق الشارات تلقائياً
+async function checkAndAwardBadges(userId, userPoints, completedContentType) {
+    try {
+        const badgesSnapshot = await db.collection('badges').get();
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        const currentBadges = userData.badges || [];
+        
+        const newBadges = [];
+        
+        badgesSnapshot.forEach(doc => {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // تحقق من عدم حصول المستخدم على الشارة مسبقاً
+            const alreadyHas = currentBadges.some(b => b.id === badge.id);
+            if (alreadyHas) return;
+            
+            // تحقق من الشروط
+            let shouldAward = false;
+            
+            switch(badge.type) {
+                case 'points':
+                    if (userPoints >= badge.conditions.requiredPoints) {
+                        shouldAward = true;
+                    }
+                    break;
+                    
+                case 'content':
+                    if (badge.conditions.linkedContent === completedContentType ||
+                        badge.conditions.linkedContent === 'any_lesson') {
+                        shouldAward = true;
+                    }
+                    break;
+                    
+                case 'streak':
+                    // يحتاج لنظام تتبع الأيام المتتالية
+                    const streak = userData.currentStreak || 0;
+                    if (streak >= badge.conditions.streakDays) {
+                        shouldAward = true;
+                    }
+                    break;
+            }
+            
+            if (shouldAward) {
+                newBadges.push({
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon,
+                    awardedDate: new Date().toISOString(),
+                    type: badge.type
+                });
+                
+                // زيادة عداد المنح
+                db.collection('badges').doc(doc.id).update({
+                    timesAwarded: firebase.firestore.FieldValue.increment(1)
+                });
+            }
+        });
+        
+        // إضافة الشارات الجديدة للمستخدم
+        if (newBadges.length > 0) {
+            const allBadges = [...currentBadges, ...newBadges];
+            
+            await db.collection('users').doc(userId).update({
+                badges: allBadges,
+                lastBadgeEarned: new Date().toISOString()
+            });
+            
+            // إشعار بالشارات الجديدة
+            showBadgeNotification(newBadges);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من الشارات:', error);
+    }
+}
+
+// دالة عرض إشعار الشارات الجديدة
+function showBadgeNotification(badges) {
+    const badgesHTML = badges.map(badge => `
+        <div style="display: flex; align-items: center; gap: 10px; margin: 10px 0;">
+            <span style="font-size: 2rem;">${badge.icon}</span>
+            <span style="font-weight: bold;">${badge.name}</span>
+        </div>
+    `).join('');
+    
+    Swal.fire({
+        title: '🎉 مبروك! حصلت على شارات جديدة',
+        html: badgesHTML,
+        icon: 'success',
+        confirmButtonText: 'رائع!',
+        confirmButtonColor: '#10b981'
+    });
+}
+
+// أضف للـ window
+window.checkAndAwardBadges = checkAndAwardBadges;
+window.showBadgeNotification = showBadgeNotification;
 
 // إضافة للـ window
 window.viewAllBadges = viewAllBadges;
