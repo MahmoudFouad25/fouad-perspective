@@ -2601,47 +2601,101 @@ async function deleteWalletEntry(userId, timestamp) {
 
         // ==================== تحميل بيانات المستخدم من Firebase ====================
         async function loadUserData() {
-            try {
-                currentUserId = getUserIdFromURL();
-                
-                if (!currentUserId) {
-                    showNoUserMessage('لم يتم تحديد معرف المستخدم في الرابط');
-                    return;
-                }
+    try {
+        // الحصول على معرف المستخدم بالطريقة الصحيحة
+        currentUserId = getUserIdFromURL();
+        
+        if (!currentUserId) {
+            showNoUserMessage('لم يتم تحديد معرف المستخدم في الرابط');
+            return;
+        }
+        
+        // تحديث حالة التحميل
+        document.getElementById('loadingStatus').textContent = `جاري البحث عن المستخدم: ${currentUserId}`;
+        
+        // جلب البيانات من Firebase
+        const userDoc = await db.collection('users').doc(currentUserId).get();
+        
+        if (!userDoc.exists) {
+            showNoUserMessage(currentUserId);
+            return;
+        }
+        
+        // حفظ البيانات
+        currentUserData = userDoc.data();
+        console.log('تم تحميل بيانات المستخدم:', currentUserData);
+        
+        // التحقق من الشارات الأساسية وإضافتها إذا لم تكن موجودة
+        await checkAndAddBasicBadges();
+        
+        // عرض البيانات في الواجهة
+        displayUserData();
+        
+        // إخفاء شاشة التحميل وعرض المحتوى
+        hideLoading();
+        showContent();
+        
+    } catch (error) {
+        console.error('خطأ في تحميل البيانات:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ في التحميل',
+            text: 'حدث خطأ أثناء تحميل بيانات المستخدم: ' + error.message,
+            confirmButtonColor: '#ef4444'
+        });
+    }
+}
 
-                // تحديث حالة التحميل
-                document.getElementById('loadingStatus').textContent = `جاري البحث عن المستخدم: ${currentUserId}`;
-
-                // جلب البيانات من Firebase
-                const userDoc = await db.collection('users').doc(currentUserId).get();
-
-                if (!userDoc.exists) {
-                    showNoUserMessage(currentUserId);
-                    return;
-                }
-
-                // حفظ البيانات
-                currentUserData = userDoc.data();
-                console.log('تم تحميل بيانات المستخدم:', currentUserData);
-
-                // عرض البيانات في الواجهة
-                displayUserData();
-
-                // إخفاء شاشة التحميل وعرض المحتوى
-                hideLoading();
-                showContent();
-
-            } catch (error) {
-                console.error('خطأ في تحميل البيانات:', error);
-                Swal.fire({
-                    icon: 'error',
-                    title: 'خطأ في التحميل',
-                    text: 'حدث خطأ أثناء تحميل بيانات المستخدم: ' + error.message,
-                    confirmButtonColor: '#ef4444'
+        // التحقق من الشارات الأساسية وإضافتها
+async function checkAndAddBasicBadges() {
+    try {
+        if (!currentUserData.badges) {
+            currentUserData.badges = [];
+        }
+        
+        const existingBadgeIds = currentUserData.badges.map(b => b.id || b.name);
+        let needsUpdate = false;
+        
+        // شارة البداية الموفقة - إنشاء الحساب
+        if (!existingBadgeIds.includes('welcome_badge')) {
+            currentUserData.badges.push({
+                id: 'welcome_badge',
+                name: 'البداية الموفقة',
+                icon: '🌟',
+                reason: 'إنشاء الحساب والانضمام للمنصة',
+                awardedDate: currentUserData.registeredDate || new Date().toISOString(),
+                type: 'automatic'
+            });
+            needsUpdate = true;
+        }
+        
+        // شارة طالب علم - أول دورة
+        if (currentUserData.enrollments && currentUserData.enrollments.length > 0) {
+            if (!existingBadgeIds.includes('first_course_badge')) {
+                currentUserData.badges.push({
+                    id: 'first_course_badge',
+                    name: 'طالب علم',
+                    icon: '📚',
+                    reason: 'التسجيل في أول دورة تعليمية',
+                    awardedDate: currentUserData.enrollments[0].enrollmentDate || new Date().toISOString(),
+                    type: 'automatic'
                 });
+                needsUpdate = true;
             }
         }
-
+        
+        // حفظ التحديثات إذا كانت هناك شارات جديدة
+        if (needsUpdate) {
+            await db.collection('users').doc(currentUserId).update({
+                badges: currentUserData.badges
+            });
+            console.log('✅ تم إضافة الشارات الأساسية');
+        }
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من الشارات الأساسية:', error);
+    }
+}
         // ==================== عرض بيانات المستخدم ====================
         function displayUserData() {
     if (!currentUserData) return;
@@ -3249,20 +3303,27 @@ function displayProgressData() {
                 </div>
 
 
-                <!-- الشارات المكتسبة -->
-<div class="badges-section" style="margin-top: 20px;">
-    <h4 style="color: var(--primary); margin-bottom: 15px;">
-        🏅 الشارات المكتسبة
-    </h4>
-    <div id="userBadgesDisplay" style="display: flex; flex-wrap: wrap; gap: 15px;">
-        ${displayUserBadges()}
-    </div>
-    <button onclick="grantBadgeToUser()" 
-            style="margin-top: 15px; background: #f59e0b; color: white; 
-                   border: none; padding: 10px 20px; border-radius: 8px; 
-                   cursor: pointer; font-weight: bold;">
-        ➕ منح شارة يدوية
-    </button>
+                <!-- الشارات والإنجازات -->
+<div class="badges-section" style="
+    background: white;
+    border-radius: 15px;
+    padding: 30px;
+    margin-top: 30px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+">
+    <h3 class="section-title" style="
+        color: var(--primary);
+        margin-bottom: 25px;
+        font-size: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    ">
+        <i class="fas fa-trophy" style="color: #f59e0b;"></i>
+        الشارات والإنجازات
+    </h3>
+    
+    ${displayUserBadges()}
 </div>
 
                 <!-- سجل النقاط الأخيرة -->
@@ -3457,31 +3518,72 @@ function displayPointsHistory(history) {
 }
 
         // عرض شارات المستخدم
+// عرض شارات المستخدم - محسنة
 function displayUserBadges() {
-    const userBadges = currentUserData.badges || [];
+    const userBadges = currentUserData?.badges || [];
     
     if (userBadges.length === 0) {
-        return '<p style="color: #999;">لم يحصل على شارات بعد</p>';
+        return '<p style="text-align: center; color: #999; padding: 40px;">لا توجد شارات مكتسبة بعد</p>';
     }
     
-    let html = '';
+    let html = '<div class="badges-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px;">';
+    
+    // عرض الشارات المكتسبة
     userBadges.forEach(badge => {
+        const badgeColor = badge.type === 'automatic' ? 
+            'linear-gradient(135deg, #fbbf24, #f59e0b)' : 
+            'linear-gradient(135deg, #3b82f6, #1e40af)';
+        
         html += `
-            <div style="background: linear-gradient(135deg, #fef3c7, #fed7aa); 
-                        padding: 15px; border-radius: 10px; 
-                        text-align: center; min-width: 120px;">
-                <div style="font-size: 2.5rem; margin-bottom: 8px;">
+            <div class="badge-card" style="
+                background: ${badgeColor};
+                padding: 20px;
+                border-radius: 15px;
+                text-align: center;
+                color: white;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+                transition: transform 0.3s;
+                cursor: pointer;
+            " onmouseover="this.style.transform='translateY(-5px)'" 
+               onmouseout="this.style.transform='translateY(0)'">
+                <div style="font-size: 3rem; margin-bottom: 10px;">
                     ${badge.icon || '🏅'}
                 </div>
-                <div style="font-weight: bold; color: #92400e; font-size: 0.9rem;">
+                <div style="font-weight: bold; font-size: 1rem; margin-bottom: 5px;">
                     ${badge.name}
                 </div>
-                <div style="font-size: 0.75rem; color: #78350f; margin-top: 5px;">
+                <div style="font-size: 0.8rem; opacity: 0.9;">
+                    ${badge.reason || ''}
+                </div>
+                <div style="font-size: 0.7rem; margin-top: 10px; opacity: 0.8;">
                     ${formatDate(badge.awardedDate)}
                 </div>
             </div>
         `;
     });
+    
+    html += '</div>';
+    
+    // إضافة زر منح شارة يدوية
+    html += `
+        <div style="text-align: center; margin-top: 30px;">
+            <button onclick="grantBadgeToUser()" style="
+                background: linear-gradient(135deg, #10b981, #059669);
+                color: white;
+                border: none;
+                padding: 15px 40px;
+                border-radius: 10px;
+                font-size: 1.1rem;
+                font-weight: bold;
+                cursor: pointer;
+                box-shadow: 0 5px 15px rgba(16, 185, 129, 0.3);
+                transition: all 0.3s;
+            " onmouseover="this.style.transform='scale(1.05)'" 
+               onmouseout="this.style.transform='scale(1)'">
+                <i class="fas fa-plus-circle"></i> منح شارة يدوية
+            </button>
+        </div>
+    `;
     
     return html;
 }
@@ -3552,13 +3654,19 @@ async function grantBadgeToUser() {
 }
 
         // التحقق من الشارات التلقائية
+// التحقق من الشارات التلقائية - محسنة
 async function checkAutomaticBadges(userId) {
     try {
-        // جلب بيانات المستخدم الحالية
+        // جلب بيانات المستخدم المحدثة
         const userDoc = await db.collection('users').doc(userId).get();
-        const userData = userDoc.data();
+        if (!userDoc.exists) return;
         
-        // جلب جميع الشارات
+        const userData = userDoc.data();
+        const currentBadges = userData.badges || [];
+        const currentBadgeIds = currentBadges.map(b => b.id);
+        const newBadges = [];
+        
+        // جلب الشارات من قاعدة البيانات
         const badgesSnapshot = await db.collection('badges').get();
         const allBadges = [];
         badgesSnapshot.forEach(doc => {
@@ -3568,16 +3676,9 @@ async function checkAutomaticBadges(userId) {
             });
         });
         
-        // الشارات الحالية للمستخدم
-        const currentBadges = userData.badges || [];
-        const currentBadgeIds = currentBadges.map(b => b.id);
-        
-        // شارات جديدة محتملة
-        const newBadges = [];
-        
         // فحص شارات النقاط
-        const pointsBadges = allBadges.filter(b => b.type === 'points');
         const currentPoints = userData.journeyPoints?.balance || 0;
+        const pointsBadges = allBadges.filter(b => b.type === 'points');
         
         for (const badge of pointsBadges) {
             if (!currentBadgeIds.includes(badge.id)) {
@@ -3585,62 +3686,19 @@ async function checkAutomaticBadges(userId) {
                     newBadges.push({
                         id: badge.id,
                         name: badge.name,
-                        icon: badge.icon,
+                        icon: badge.icon || '🏅',
+                        reason: `وصلت إلى ${badge.conditions.requiredPoints} نقطة`,
                         awardedDate: new Date().toISOString(),
-                        reason: `وصلت إلى ${badge.conditions.requiredPoints} نقطة`
+                        type: 'automatic'
                     });
-                    
-                    console.log(`🏅 منح شارة جديدة: ${badge.name}`);
                 }
             }
         }
         
-        // فحص شارات الانتظام (لو موجود تاريخ آخر دخول)
-        if (userData.lastActiveDate) {
-            const today = new Date();
-            const lastActive = new Date(userData.lastActiveDate);
-            const daysDiff = Math.floor((today - lastActive) / (1000 * 60 * 60 * 24));
-            
-            if (daysDiff === 1) {
-                // يوم متتالي
-                const currentStreak = (userData.currentStreak || 0) + 1;
-                
-                // تحديث الـ streak
-                await db.collection('users').doc(userId).update({
-                    currentStreak: currentStreak,
-                    lastActiveDate: today.toISOString()
-                });
-                
-                // فحص شارات الانتظام
-                const streakBadges = allBadges.filter(b => b.type === 'streak');
-                
-                for (const badge of streakBadges) {
-                    if (!currentBadgeIds.includes(badge.id)) {
-                        if (currentStreak >= badge.conditions.streakDays) {
-                            newBadges.push({
-                                id: badge.id,
-                                name: badge.name,
-                                icon: badge.icon,
-                                awardedDate: new Date().toISOString(),
-                                reason: `${badge.conditions.streakDays} يوم متتالي`
-                            });
-                        }
-                    }
-                }
-            } else if (daysDiff > 1) {
-                // انقطاع - إعادة تعيين العداد
-                await db.collection('users').doc(userId).update({
-                    currentStreak: 1,
-                    lastActiveDate: today.toISOString()
-                });
-            }
-        } else {
-            // أول مرة
-            await db.collection('users').doc(userId).update({
-                currentStreak: 1,
-                lastActiveDate: new Date().toISOString()
-            });
-        }
+        // فحص شارات المحتوى
+        const contentBadges = allBadges.filter(b => b.type === 'content');
+        
+        // هنا يمكن إضافة المزيد من الفحوصات للمحتوى
         
         // حفظ الشارات الجديدة
         if (newBadges.length > 0) {
@@ -3650,26 +3708,24 @@ async function checkAutomaticBadges(userId) {
                 badges: updatedBadges
             });
             
-            // تحديث عدد مرات المنح لكل شارة
+            // تحديث عدد مرات المنح
             for (const badge of newBadges) {
                 await db.collection('badges').doc(badge.id).update({
                     timesAwarded: firebase.firestore.FieldValue.increment(1)
                 });
             }
             
-            // إشعار بالشارات الجديدة
-            if (newBadges.length === 1) {
-                showBadgeNotification(newBadges[0]);
-            } else {
-                showMultipleBadgesNotification(newBadges);
-            }
+            // إظهار الإشعار
+            showBadgeNotification(newBadges[0]);
+            
+            // تحديث البيانات المحلية
+            currentUserData.badges = updatedBadges;
         }
         
     } catch (error) {
-        console.error('خطأ في التحقق من الشارات:', error);
+        console.error('خطأ في التحقق من الشارات التلقائية:', error);
     }
 }
-
 // إشعار بشارة جديدة
 function showBadgeNotification(badge) {
     Swal.fire({
@@ -5834,6 +5890,11 @@ if (document.readyState === 'loading') {
 } else {
     setTimeout(initializePage, 1000);
 }
+        // تصدير الدوال للاستخدام العام
+window.checkAndAddBasicBadges = checkAndAddBasicBadges;
+window.displayUserBadges = displayUserBadges;
+window.grantBadgeToUser = grantBadgeToUser;
+window.checkAutomaticBadges = checkAutomaticBadges;
     </script>
 </body>
 </html>
