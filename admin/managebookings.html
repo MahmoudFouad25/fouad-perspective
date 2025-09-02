@@ -532,6 +532,19 @@
 #floating-details-window::-webkit-scrollbar-thumb:hover {
     background: #2563EB;
 }
+
+        @keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(14, 165, 233, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(14, 165, 233, 0);
+    }
+}
+
     </style>
 </head>
 <body>
@@ -1075,6 +1088,21 @@ function createBookingCard(booking) {
             <!-- شارة الحالة -->
             <span class="status-badge status-${status}">${getStatusText(status)}</span>
 
+<!-- مؤشر التليجرام -->
+${booking.telegramConnected ? `
+    <div style="position: absolute; top: 20px; right: 350px; 
+                background: linear-gradient(135deg, #E0F2FE, #DBEAFE); 
+                padding: 5px 12px; border-radius: 20px; 
+                border: 2px solid #0EA5E9;">
+        <i class="fab fa-telegram" style="color: #0EA5E9;"></i>
+        <span style="color: #0369A1; font-weight: bold; font-size: 0.85rem;">
+            متصل بالتليجرام
+        </span>
+        <span style="color: #64748B; font-size: 0.75rem; margin-right: 5px;">
+            ${booking.telegramCode}
+        </span>
+    </div>
+` : ''}
             <!-- عرض إجمالي التوفير إن وجد -->
             ${booking.totalSavings && booking.totalSavings > 0 ? `
                 <div style="position: absolute; top: 20px; right: 200px; 
@@ -1249,16 +1277,37 @@ function createBookingCard(booking) {
                             </button>`;
                     }
                     else if (status === 'confirmed') {
-                        buttons = `
-                            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white; font-weight: bold;" 
-                                    onclick="markAsPaid('${booking.id}')">
-                                <i class="fas fa-money-bill-wave"></i> تسجيل الدفع
-                            </button>
-                            <button class="btn" style="background: #6B7280; color: white;" 
-                                    onclick="sendReminder('${booking.id}')">
-                                <i class="fas fa-bell"></i> تذكير بالدفع
-                            </button>`;
-                    } 
+    // تحديد الزر حسب حالة التليجرام
+    let paymentButton = '';
+    
+    if (booking.telegramConnected && booking.awaitingAdminConfirmation) {
+        // زر خاص للحجوزات المتصلة بالتليجرام
+        paymentButton = `
+            <button class="btn" style="background: linear-gradient(135deg, #0EA5E9, #0369A1); 
+                                       color: white; font-weight: bold;
+                                       animation: pulse 2s infinite;" 
+                    onclick="markAsPaidWithAutomation('${booking.id}')">
+                <i class="fas fa-robot"></i> تأكيد الدفع + أتمتة
+            </button>
+        `;
+    } else {
+        // الزر العادي
+        paymentButton = `
+            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                                       color: white; font-weight: bold;" 
+                    onclick="markAsPaid('${booking.id}')">
+                <i class="fas fa-money-bill-wave"></i> تسجيل الدفع
+            </button>
+        `;
+    }
+    
+    buttons = paymentButton + `
+        <button class="btn" style="background: #6B7280; color: white;" 
+                onclick="sendReminder('${booking.id}')">
+            <i class="fas fa-bell"></i> تذكير بالدفع
+        </button>
+    `;
+}
                     else if (status === 'paid') {
                         // الحالة المهمة - مدفوع لكن لم يحول بعد
                         const transferIcon = type === 'individual' ? 'fa-user-graduate' : 
@@ -1352,6 +1401,30 @@ function createIndividualContent(booking) {
     const activeOffer = booking.activeOffer || null;
     const coupon = booking.coupon || {};
 
+    // إضافة مؤشر التليجرام في البداية
+    let telegramIndicator = '';
+    if (booking.telegramConnected) {
+        telegramIndicator = `
+            <div style="background: linear-gradient(135deg, #E0F2FE, #DBEAFE); 
+                        padding: 15px; border-radius: 12px; margin-bottom: 20px; 
+                        border: 2px solid #0EA5E9; text-align: center;">
+                <i class="fab fa-telegram" style="color: #0EA5E9; font-size: 1.5rem;"></i>
+                <span style="color: #0369A1; font-weight: bold; font-size: 1.1rem; margin: 0 10px;">
+                    حجز متصل بالتليجرام
+                </span>
+                <span style="background: white; padding: 5px 15px; border-radius: 20px; 
+                             color: #0284C7; font-family: monospace; font-weight: bold;">
+                    كود: ${booking.telegramCode}
+                </span>
+                ${booking.awaitingAdminConfirmation ? `
+                    <span style="background: #FEF3C7; color: #92400E; padding: 5px 15px; 
+                                 border-radius: 20px; margin-right: 10px; font-weight: bold;">
+                        <i class="fas fa-clock"></i> بانتظار تأكيد الدفع
+                    </span>
+                ` : ''}
+            </div>
+        `;
+    }
     /* 
  * 🎯 نظام حساب اكتمال البيانات:
  * - كل معلومة يملأها العميل = نقطة
@@ -1397,6 +1470,7 @@ function createIndividualContent(booking) {
     const completeness = Math.round((filledFields / totalFields) * 100);
     
     let html = `
+        ${telegramIndicator}
         <!-- شريط المعلومات الرئيسي المطور -->
         <div style="background: linear-gradient(135deg, ${levelBg}, white); 
                     padding: 25px; border-radius: 20px; margin-bottom: 25px; 
@@ -4769,9 +4843,7 @@ document.getElementById('remainingInstallments').parentElement.appendChild(insta
     }
 }
 
-        <!-- أضف هذا الكود في صفحة managebookings.html -->
 
-<!-- 1. أضف هذه الدالة الجديدة بعد دالة markAsPaid -->
 async function markAsPaidWithAutomation(bookingId) {
     // جلب بيانات الحجز أولاً
     const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
@@ -4934,59 +5006,7 @@ async function autoTransferToSpecialized(bookingId, type) {
     }
 }
 
-// 4. أضف مؤشر للحجوزات المتصلة بالتليجرام في واجهة العرض
-// عدّل دالة createIndividualContent بإضافة هذا الجزء:
-function createIndividualContent(booking) {
-    // ... الكود الموجود ...
-    
-    // أضف هذا الجزء في بداية المحتوى
-    let telegramStatus = '';
-    if (booking.telegramConnected) {
-        telegramStatus = `
-            <div style="background: linear-gradient(135deg, #E0F2FE, #DBEAFE); 
-                        padding: 10px; border-radius: 8px; margin-bottom: 15px; 
-                        border-right: 3px solid #0EA5E9;">
-                <i class="fab fa-telegram" style="color: #0EA5E9;"></i>
-                <span style="color: #0369A1; font-weight: bold;">
-                    متصل بالتليجرام
-                </span>
-                <span style="color: #64748B; font-size: 0.85rem; margin-right: 10px;">
-                    كود: ${booking.telegramCode}
-                </span>
-            </div>
-        `;
-    }
-    
-    return `
-        ${telegramStatus}
-        <!-- باقي المحتوى كما هو -->
-        ${existingContent}
-    `;
-}
 
-// 5. أضف زر للدفع مع الأتمتة في الواجهة
-// استبدل زر "تم الدفع" الموجود بهذا:
-function createPaymentButton(booking) {
-    if (booking.status === 'confirmed' || booking.status === 'pending') {
-        if (booking.telegramConnected && booking.awaitingAdminConfirmation) {
-            return `
-                <button onclick="markAsPaidWithAutomation('${booking.id}')" 
-                        class="btn btn-success btn-sm" 
-                        style="background: linear-gradient(135deg, #10B981, #059669);">
-                    <i class="fas fa-robot"></i> تأكيد الدفع والأتمتة
-                </button>
-            `;
-        } else {
-            return `
-                <button onclick="markAsPaid('${booking.id}')" 
-                        class="btn btn-success btn-sm">
-                    <i class="fas fa-check-circle"></i> تم الدفع
-                </button>
-            `;
-        }
-    }
-    return '';
-}
         
        // دالة إلغاء الحجز
        async function cancelBooking(bookingId) {
@@ -6206,6 +6226,103 @@ function showTodayFollowups() {
                document.getElementById('lastUpdate').textContent = timeString;
            }
        }, 60000); // كل دقيقة
+
+        // دالة الدفع مع الأتمتة
+async function markAsPaidWithAutomation(bookingId) {
+    console.log('🤖 بدء عملية الأتمتة للحجز:', bookingId);
+    
+    // استدعاء دالة markAsPaid الأصلية أولاً
+    await markAsPaid(bookingId);
+    
+    // الانتظار ثانيتين
+    setTimeout(async () => {
+        // جلب بيانات الحجز المحدثة
+        const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+        if (!bookingDoc.exists) return;
+        
+        const booking = bookingDoc.data();
+        
+        // إذا كان متصل بالتليجرام، أرسل إشعار
+        if (booking.telegramChatId && booking.telegramConnected) {
+            console.log('📱 إرسال إشعار للتليجرام...');
+            
+            try {
+                await fetch('http://localhost:3000/notify-payment-confirmed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        bookingId: bookingId,
+                        chatId: booking.telegramChatId,
+                        customerName: booking.customer?.name,
+                        courseName: booking.courseName,
+                        amount: booking.pricing?.finalPrice
+                    })
+                });
+            } catch (error) {
+                console.error('خطأ في إرسال الإشعار:', error);
+            }
+        }
+        
+        // التحويل التلقائي
+        console.log('🔄 بدء التحويل التلقائي...');
+        await autoTransferToSpecialized(bookingId, 'individual');
+        
+    }, 2000);
+}
+
+// دالة التحويل التلقائي
+async function autoTransferToSpecialized(bookingId, type) {
+    console.log('🚀 تحويل تلقائي للحجز:', bookingId);
+    
+    // استدعاء دالة transferToSpecialized الموجودة
+    // لكن بدون إظهار رسائل تأكيد
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    
+    try {
+        // نسخ كل البيانات
+        const completeData = {
+            ...booking,
+            transferInfo: {
+                transferredAt: new Date().toISOString(),
+                transferredFrom: 'tempBookings',
+                transferredBy: 'auto-telegram',
+                automatedTransfer: true
+            },
+            accountStatus: 'pending_creation',
+            progress: {
+                accountSetup: 0,
+                courseAssignment: 0,
+                firstPayment: 100,
+                welcomeMessage: 0,
+                totalProgress: 25
+            }
+        };
+        
+        // حفظ في individualStudents
+        await db.collection('individualStudents').doc(bookingId).set(completeData);
+        
+        // تحديث tempBookings
+        await db.collection('tempBookings').doc(bookingId).update({
+            status: 'transferred',
+            transferredAt: new Date().toISOString(),
+            transferredTo: 'individualStudents',
+            automatedTransfer: true
+        });
+        
+        console.log('✅ تم التحويل التلقائي بنجاح');
+        
+        // إعادة تحميل الصفحة
+        setTimeout(() => {
+            loadBookings();
+        }, 1000);
+        
+    } catch (error) {
+        console.error('❌ خطأ في التحويل:', error);
+    }
+}
    </script>
 </body>
 </html>
