@@ -528,20 +528,33 @@
             completed: 0
         };
         
-        // Message Templates
+        // Message Templates with Inline Keyboards
         const messageTemplates = {
-            receivedBooking: (name, course) => `
-🎉 *حجز جديد!*
+            receivedBooking: (name, course, bookingId) => ({
+                text: `
+🎉 *حجز جديد وارد!*
 ━━━━━━━━━━━━━━
 👤 الاسم: ${name}
 📚 الدورة: ${course}
+🆔 رقم الحجز: #${bookingId.slice(-6)}
 ⏰ التوقيت: ${new Date().toLocaleString('ar-EG')}
 ━━━━━━━━━━━━━━
 ✅ تم استلام طلبك بنجاح
-سيتم التواصل معك قريباً
-            `,
+اختر الإجراء المطلوب:
+                `,
+                keyboard: [
+                    [
+                        { text: '✅ تأكيد البيانات', callback_data: `confirm_${bookingId}` },
+                        { text: '📝 تعديل البيانات', callback_data: `edit_${bookingId}` }
+                    ],
+                    [
+                        { text: '❌ إلغاء الحجز', callback_data: `cancel_${bookingId}` }
+                    ]
+                ]
+            }),
             
-            confirmRequest: (name, amount, method) => `
+            confirmRequest: (name, amount, method, bookingId) => ({
+                text: `
 📋 *تأكيد البيانات*
 ━━━━━━━━━━━━━━
 👤 ${name}
@@ -549,29 +562,53 @@
 💳 طريقة الدفع: ${method}
 ━━━━━━━━━━━━━━
 هل البيانات صحيحة؟
-الرد بـ "نعم" للتأكيد
-            `,
+                `,
+                keyboard: [
+                    [
+                        { text: '✅ نعم، صحيحة', callback_data: `data_confirmed_${bookingId}` },
+                        { text: '❌ لا، تعديل', callback_data: `data_edit_${bookingId}` }
+                    ]
+                ]
+            }),
             
-            paymentInstructions: (method, amount) => `
+            paymentInstructions: (method, amount, bookingId) => ({
+                text: `
 💳 *تعليمات الدفع*
 ━━━━━━━━━━━━━━
 المبلغ المطلوب: ${amount} جنيه
 
 ${getPaymentDetails(method)}
 
-بعد الدفع، أرسل رقم العملية
-            `,
+اختر بعد إتمام الدفع:
+                `,
+                keyboard: [
+                    [
+                        { text: '✅ تم الدفع', callback_data: `paid_${bookingId}` }
+                    ],
+                    [
+                        { text: '💬 التواصل مع الدعم', callback_data: `support_${bookingId}` },
+                        { text: '🔄 طريقة دفع أخرى', callback_data: `change_payment_${bookingId}` }
+                    ]
+                ]
+            }),
             
-            paymentConfirmed: (name) => `
-✅ *تم تأكيد الدفع*
+            paymentConfirmed: (name, bookingId) => ({
+                text: `
+✅ *تم استلام إشعار الدفع*
 ━━━━━━━━━━━━━━
 شكراً لك ${name}
-تم تأكيد دفعتك بنجاح
-جاري تجهيز حسابك...
-            `,
+جاري مراجعة الدفعة...
+                `,
+                keyboard: [
+                    [
+                        { text: '📊 متابعة الحالة', callback_data: `status_${bookingId}` }
+                    ]
+                ]
+            }),
             
-            accountCreated: (email, password, courseLink) => `
-🎓 *تم إنشاء حسابك!*
+            accountCreated: (email, password, courseLink, bookingId) => ({
+                text: `
+🎓 *تم إنشاء حسابك بنجاح!*
 ━━━━━━━━━━━━━━
 📧 البريد: ${email}
 🔑 كلمة المرور: ${password}
@@ -580,7 +617,17 @@ ${getPaymentDetails(method)}
 ${courseLink}
 
 احتفظ بهذه البيانات
-            `
+                `,
+                keyboard: [
+                    [
+                        { text: '🌐 دخول المنصة', url: courseLink }
+                    ],
+                    [
+                        { text: '📱 واتساب الدعم', url: 'https://wa.me/201234567890' },
+                        { text: '📚 دورات أخرى', callback_data: `more_courses_${bookingId}` }
+                    ]
+                ]
+            })
         };
         
         // Helper Functions
@@ -653,34 +700,114 @@ ${courseLink}
             }, 3000);
         }
         
-        // Telegram Functions
-        async function sendTelegramMessage(message) {
+        // Telegram Functions with Inline Keyboards
+        async function sendTelegramMessage(messageData) {
             if (!document.getElementById('telegramToggle').classList.contains('active')) {
                 console.log('Telegram disabled');
                 return;
             }
             
             try {
-                // في الإنتاج: استخدم Cloud Function
-                // هنا: محاكاة محلية
-                console.log('Sending to Telegram:', message);
-                addMessageToLog(message, 'telegram');
+                // تحويل الأزرار لصيغة Telegram
+                const inline_keyboard = messageData.keyboard ? 
+                    messageData.keyboard.map(row => 
+                        row.map(button => {
+                            if (button.url) {
+                                return { text: button.text, url: button.url };
+                            } else {
+                                return { text: button.text, callback_data: button.callback_data };
+                            }
+                        })
+                    ) : [];
                 
-                // محاكاة إرسال حقيقي (اختياري)
+                // عرض في السجل مع الأزرار
+                const buttonsHTML = messageData.keyboard ? 
+                    '<div style="margin-top: 10px;">' +
+                    messageData.keyboard.map(row => 
+                        '<div style="margin: 5px 0;">' +
+                        row.map(btn => 
+                            `<button style="margin: 2px; padding: 5px 10px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;" 
+                                onclick="handleButtonClick('${btn.callback_data || btn.url}')">${btn.text}</button>`
+                        ).join('') +
+                        '</div>'
+                    ).join('') +
+                    '</div>' : '';
+                
+                addMessageToLog(messageData.text + buttonsHTML, 'telegram');
+                
+                // في الإنتاج: إرسال حقيقي للتليجرام
                 // const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 //     method: 'POST',
                 //     headers: { 'Content-Type': 'application/json' },
                 //     body: JSON.stringify({
                 //         chat_id: TELEGRAM_CHAT_ID,
-                //         text: message,
-                //         parse_mode: 'Markdown'
+                //         text: messageData.text,
+                //         parse_mode: 'Markdown',
+                //         reply_markup: { inline_keyboard }
                 //     })
                 // });
+                
+                console.log('Telegram message with buttons:', {
+                    text: messageData.text,
+                    buttons: inline_keyboard
+                });
                 
                 return true;
             } catch (error) {
                 console.error('Telegram error:', error);
                 return false;
+            }
+        }
+        
+        // معالج نقرات الأزرار
+        function handleButtonClick(data) {
+            if (!data) return;
+            
+            // إذا كان رابط
+            if (data.startsWith('http')) {
+                window.open(data, '_blank');
+                return;
+            }
+            
+            // معالجة callback_data
+            const [action, ...params] = data.split('_');
+            const bookingId = params.join('_');
+            
+            console.log('Button clicked:', action, bookingId);
+            
+            // محاكاة الاستجابات للأزرار
+            switch(action) {
+                case 'confirm':
+                    addMessageToLog('✅ العميل ضغط: تأكيد البيانات', 'system');
+                    simulateCustomerConfirmation();
+                    break;
+                    
+                case 'data':
+                    if (params[0] === 'confirmed') {
+                        addMessageToLog('✅ العميل أكد صحة البيانات', 'system');
+                        sendPaymentInstructions();
+                    }
+                    break;
+                    
+                case 'paid':
+                    addMessageToLog('💰 العميل أبلغ عن إتمام الدفع', 'system');
+                    simulatePaymentConfirmation();
+                    break;
+                    
+                case 'support':
+                    addMessageToLog('💬 العميل يريد التواصل مع الدعم', 'system');
+                    sendSupportMessage();
+                    break;
+                    
+                case 'status':
+                    addMessageToLog('📊 العميل يستعلم عن الحالة', 'system');
+                    sendStatusUpdate();
+                    break;
+                    
+                case 'cancel':
+                    addMessageToLog('❌ العميل يريد إلغاء الحجز', 'system');
+                    handleCancellation();
+                    break;
             }
         }
         
@@ -695,7 +822,7 @@ ${courseLink}
             addMessageToLog(`📱 إلى ${phone}:\n${message}`, 'whatsapp');
         }
         
-        // Main Booking Process
+        // Main Booking Process - Updated with buttons
         async function processBooking(bookingData) {
             showLoading(true);
             
@@ -724,30 +851,16 @@ ${courseLink}
                 // 3. تحديث حالة سير العمل
                 updateWorkflowStatus('received');
                 
-                // 4. إرسال رسالة الاستلام
+                // 4. إرسال رسالة الاستلام مع الأزرار
                 const receivedMsg = messageTemplates.receivedBooking(
                     bookingData.customerName,
-                    bookingData.selectedCourse
+                    bookingData.selectedCourse,
+                    currentBookingId
                 );
                 await sendTelegramMessage(receivedMsg);
-                sendWhatsAppMessage(bookingData.customerPhone, receivedMsg);
                 
-                // 5. انتظار ثم طلب التأكيد
-                const confirmDelay = parseInt(document.getElementById('confirmDelay').value) * 1000;
-                setTimeout(async () => {
-                    const confirmMsg = messageTemplates.confirmRequest(
-                        bookingData.customerName,
-                        bookingData.amount,
-                        bookingData.paymentMethod
-                    );
-                    await sendTelegramMessage(confirmMsg);
-                    sendWhatsAppMessage(bookingData.customerPhone, confirmMsg);
-                    
-                    // محاكاة التأكيد التلقائي بعد فترة
-                    setTimeout(() => {
-                        simulateCustomerConfirmation();
-                    }, 3000);
-                }, confirmDelay);
+                // إرسال نفس الرسالة للواتساب (بدون أزرار)
+                sendWhatsAppMessage(bookingData.customerPhone, receivedMsg.text);
                 
                 showAlert('success', 'تم إرسال الحجز بنجاح!');
                 
@@ -759,8 +872,30 @@ ${courseLink}
             }
         }
         
-        // Simulate Customer Actions
+        // Simulate Customer Actions - Updated
         async function simulateCustomerConfirmation() {
+            if (!currentBookingId) return;
+            
+            // الانتظار قليلاً ثم إرسال طلب التأكيد
+            const confirmDelay = parseInt(document.getElementById('confirmDelay').value) * 1000;
+            
+            setTimeout(async () => {
+                const doc = await db.collection('automationTest').doc(currentBookingId).get();
+                const data = doc.data();
+                
+                const confirmMsg = messageTemplates.confirmRequest(
+                    data.customerName,
+                    data.amount,
+                    data.paymentMethod,
+                    currentBookingId
+                );
+                await sendTelegramMessage(confirmMsg);
+                sendWhatsAppMessage(data.customerPhone, confirmMsg.text);
+            }, confirmDelay);
+        }
+        
+        // Send Payment Instructions
+        async function sendPaymentInstructions() {
             if (!currentBookingId) return;
             
             // تحديث الحالة في Firebase
@@ -784,28 +919,113 @@ ${courseLink}
             
             const paymentMsg = messageTemplates.paymentInstructions(
                 data.paymentMethod,
-                data.amount
+                data.amount,
+                currentBookingId
             );
             await sendTelegramMessage(paymentMsg);
-            sendWhatsAppMessage(data.customerPhone, paymentMsg);
+            sendWhatsAppMessage(data.customerPhone, paymentMsg.text);
             
             // إعداد التذكير التلقائي
             scheduleReminder();
         }
         
+        // Support Message
+        function sendSupportMessage() {
+            const supportMsg = {
+                text: `
+💬 *الدعم الفني*
+━━━━━━━━━━━━━━
+مواعيد الدعم: 9 صباحاً - 9 مساءً
+📞 اتصال: 01234567890
+📱 واتساب: wa.me/201234567890
+                `,
+                keyboard: [
+                    [
+                        { text: '📱 واتساب مباشر', url: 'https://wa.me/201234567890' }
+                    ],
+                    [
+                        { text: '🔙 رجوع', callback_data: `back_${currentBookingId}` }
+                    ]
+                ]
+            };
+            sendTelegramMessage(supportMsg);
+        }
+        
+        // Status Update
+        async function sendStatusUpdate() {
+            if (!currentBookingId) return;
+            
+            const doc = await db.collection('automationTest').doc(currentBookingId).get();
+            const data = doc.data();
+            
+            let statusText = '📊 *حالة حجزك*\n━━━━━━━━━━━━━━\n';
+            
+            if (data.workflow.completed) {
+                statusText += '✅ مكتمل - تم إنشاء الحساب';
+            } else if (data.workflow.paid) {
+                statusText += '💰 تم الدفع - جاري إنشاء الحساب';
+            } else if (data.workflow.confirmed) {
+                statusText += '⏳ في انتظار الدفع';
+            } else {
+                statusText += '🔄 قيد المراجعة';
+            }
+            
+            const statusMsg = {
+                text: statusText,
+                keyboard: [
+                    [
+                        { text: '🔙 رجوع', callback_data: `back_${currentBookingId}` }
+                    ]
+                ]
+            };
+            
+            sendTelegramMessage(statusMsg);
+        }
+        
+        // Handle Cancellation
+        async function handleCancellation() {
+            const cancelMsg = {
+                text: `
+⚠️ *تأكيد الإلغاء*
+━━━━━━━━━━━━━━
+هل أنت متأكد من إلغاء الحجز؟
+                `,
+                keyboard: [
+                    [
+                        { text: '✅ نعم، إلغاء', callback_data: `confirm_cancel_${currentBookingId}` },
+                        { text: '❌ لا، تراجع', callback_data: `no_cancel_${currentBookingId}` }
+                    ]
+                ]
+            };
+            
+            sendTelegramMessage(cancelMsg);
+        }
+        
+        // Schedule Reminder with buttons
         function scheduleReminder() {
             const reminderDelay = parseInt(document.getElementById('reminderDelay').value) * 1000;
             setTimeout(() => {
                 if (bookingStats.confirmed > 0) {
-                    const reminderMsg = `
+                    const reminderMsg = {
+                        text: `
 ⏰ *تذكير بالدفع*
 ━━━━━━━━━━━━━━
 لديك دفعة معلقة
 يرجى إتمام الدفع في أقرب وقت
-للمساعدة: 01234567890
-                    `;
+للاستفادة من العرض الحالي
+                        `,
+                        keyboard: [
+                            [
+                                { text: '✅ دفعت الآن', callback_data: `paid_${currentBookingId}` }
+                            ],
+                            [
+                                { text: '⏰ ذكرني لاحقاً', callback_data: `remind_later_${currentBookingId}` },
+                                { text: '💬 أحتاج مساعدة', callback_data: `support_${currentBookingId}` }
+                            ]
+                        ]
+                    };
                     sendTelegramMessage(reminderMsg);
-                    addMessageToLog('تم إرسال تذكير آلي', 'system');
+                    addMessageToLog('تم إرسال تذكير آلي بالأزرار', 'system');
                 }
             }, reminderDelay);
         }
@@ -835,13 +1055,16 @@ ${courseLink}
                 // تحديث سير العمل
                 updateWorkflowStatus('payment');
                 
-                // إرسال تأكيد الدفع
+                // إرسال تأكيد الدفع مع الأزرار
                 const doc = await db.collection('automationTest').doc(currentBookingId).get();
                 const data = doc.data();
                 
-                const paidMsg = messageTemplates.paymentConfirmed(data.customerName);
+                const paidMsg = messageTemplates.paymentConfirmed(
+                    data.customerName,
+                    currentBookingId
+                );
                 await sendTelegramMessage(paidMsg);
-                sendWhatsAppMessage(data.customerPhone, paidMsg);
+                sendWhatsAppMessage(data.customerPhone, paidMsg.text);
                 
                 // محاكاة إنشاء الحساب
                 setTimeout(async () => {
@@ -873,26 +1096,38 @@ ${courseLink}
             // تحديث سير العمل
             updateWorkflowStatus('completed');
             
-            // إرسال بيانات الحساب
-            const accountMsg = messageTemplates.accountCreated(email, password, courseLink);
+            // إرسال بيانات الحساب مع الأزرار
+            const accountMsg = messageTemplates.accountCreated(
+                email, 
+                password, 
+                courseLink,
+                currentBookingId
+            );
             await sendTelegramMessage(accountMsg);
-            sendWhatsAppMessage(bookingData.customerPhone, accountMsg);
+            sendWhatsAppMessage(bookingData.customerPhone, accountMsg.text);
             
             addMessageToLog('✅ العملية اكتملت بنجاح!', 'system');
         }
         
         function sendManualReminder() {
-            const reminderMsg = `
+            const reminderMsg = {
+                text: `
 📢 *تذكير عاجل*
 ━━━━━━━━━━━━━━
 عزيزي العميل،
 يرجى إتمام عملية الدفع
 للاستفادة من العرض الحالي
 ━━━━━━━━━━━━━━
-للمساعدة: 01234567890
-            `;
+                `,
+                keyboard: [
+                    [
+                        { text: '✅ سأدفع الآن', callback_data: `will_pay_${currentBookingId}` },
+                        { text: '💬 أحتاج مساعدة', callback_data: `support_${currentBookingId}` }
+                    ]
+                ]
+            };
             sendTelegramMessage(reminderMsg);
-            addMessageToLog('تم إرسال تذكير يدوي', 'system');
+            addMessageToLog('تم إرسال تذكير يدوي بالأزرار', 'system');
         }
         
         // Form Handler
