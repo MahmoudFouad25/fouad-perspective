@@ -4768,6 +4768,226 @@ document.getElementById('remainingInstallments').parentElement.appendChild(insta
         }
     }
 }
+
+        <!-- أضف هذا الكود في صفحة managebookings.html -->
+
+<!-- 1. أضف هذه الدالة الجديدة بعد دالة markAsPaid -->
+async function markAsPaidWithAutomation(bookingId) {
+    // جلب بيانات الحجز أولاً
+    const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+    if (!bookingDoc.exists) {
+        Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
+        return;
+    }
+    
+    const booking = { id: bookingDoc.id, ...bookingDoc.data() };
+    
+    // استدعاء دالة markAsPaid الأصلية
+    await markAsPaid(bookingId);
+    
+    // إذا كان الحجز متصل بالتليجرام، أرسل إشعار
+    if (booking.telegramChatId && booking.telegramConnected) {
+        await sendTelegramAccountCreationNotification(booking);
+    }
+    
+    // التحويل التلقائي بعد 2 ثانية
+    setTimeout(async () => {
+        await autoTransferToSpecialized(bookingId, 'individual');
+    }, 2000);
+}
+
+// 2. دالة إرسال إشعار للتليجرام عند تأكيد الدفع
+async function sendTelegramAccountCreationNotification(booking) {
+    try {
+        const response = await fetch('http://localhost:3000/notify-payment-confirmed', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                bookingId: booking.id,
+                chatId: booking.telegramChatId,
+                customerName: booking.customer?.name,
+                courseName: booking.courseName,
+                amount: booking.pricing?.finalPrice
+            })
+        });
+        
+        if (response.ok) {
+            console.log('✅ تم إرسال الإشعار للتليجرام');
+        }
+    } catch (error) {
+        console.error('خطأ في إرسال الإشعار:', error);
+    }
+}
+
+// 3. دالة التحويل التلقائي المحسنة
+async function autoTransferToSpecialized(bookingId, type) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    
+    if (!booking) {
+        console.error('لم يتم العثور على الحجز');
+        return;
+    }
+    
+    // التحقق من وجود المستخدم
+    const userCheck = await checkExistingUser(booking);
+    console.log('🔍 نتيجة البحث عن المستخدم:', userCheck);
+    
+    try {
+        // إنشاء نسخة كاملة من البيانات
+        const completeData = {
+            ...booking,
+            userAccountInfo: {
+                hasExistingAccount: userCheck.exists,
+                existingUserId: userCheck.userId,
+                checkedAt: new Date().toISOString()
+            },
+            paymentInfo: {
+                status: booking.status,
+                paymentConfirmed: booking.paymentConfirmed || false,
+                paymentMethod: booking.paymentMethod || null,
+                paymentReference: booking.paymentReference || null,
+                paymentDetails: booking.paymentDetails || null,
+                paidAt: booking.paidAt || null,
+                paymentConfirmedAt: booking.paymentConfirmedAt || null,
+                paymentConfirmedBy: booking.paymentConfirmedBy || null,
+                isInstallment: booking.paymentDetails?.type === 'installment',
+                fullyPaid: booking.paymentDetails?.fullyPaid || false,
+                totalAmount: booking.paymentDetails?.totalAmount || 0,
+                paidAmount: booking.paymentDetails?.paidAmount || 0,
+                remainingAmount: booking.paymentDetails?.remainingAmount || 0,
+                installmentSchedule: booking.paymentDetails?.installmentSchedule || [],
+                nextDueDate: booking.paymentDetails?.nextDueDate || null,
+                totalInstallments: booking.paymentDetails?.totalInstallments || 0,
+                paidInstallments: booking.paymentDetails?.paidInstallments || 0
+            },
+            transferInfo: {
+                transferredAt: new Date().toISOString(),
+                transferredFrom: 'tempBookings',
+                transferredBy: 'auto-telegram',
+                originalBookingId: bookingId,
+                displayBookingId: booking.id.slice(-8).toUpperCase(),
+                originalDocumentId: booking.id,
+                automatedTransfer: true
+            },
+            accountStatus: 'pending_creation',
+            accountCreated: false,
+            courseAssigned: false,
+            progress: {
+                accountSetup: 0,
+                courseAssignment: 0,
+                firstPayment: booking.status === 'paid' ? 100 : 0,
+                welcomeMessage: 0,
+                totalProgress: 25
+            },
+            timestamps: {
+                originalBooking: booking.timestamp || booking.bookingDate,
+                transferred: new Date().toISOString(),
+                lastUpdated: new Date().toISOString()
+            },
+            dataCompleteness: {
+                hasName: !!(booking.customer?.name),
+                hasWhatsapp: !!(booking.customer?.whatsapp),
+                hasEmail: !!(booking.customer?.email),
+                hasPaymentMethod: !!(booking.customer?.paymentMethods?.length > 0),
+                hasPricing: !!(booking.pricing?.finalPrice),
+                hasDiscounts: !!(booking.discounts?.length > 0),
+                isComplete: false
+            }
+        };
+        
+        // حساب نسبة اكتمال البيانات
+        const completenessValues = Object.values(completeData.dataCompleteness).filter(v => typeof v === 'boolean');
+        const trueCount = completenessValues.filter(v => v === true).length;
+        completeData.dataCompleteness.isComplete = (trueCount / completenessValues.length) > 0.7;
+        completeData.dataCompleteness.percentage = Math.round((trueCount / completenessValues.length) * 100);
+        
+        // إضافة معلومات الحساب
+        completeData.accountCreated = userCheck.exists;
+        completeData.accountCreatedAt = userCheck.exists ? null : new Date().toISOString();
+        completeData.accountStatus = userCheck.exists ? 'existing' : 'pending_creation';
+        completeData.userId = userCheck.userId || null;
+        
+        // حفظ في individualStudents
+        await db.collection('individualStudents').doc(bookingId).set(completeData);
+        console.log('✅ تم النقل التلقائي إلى individualStudents');
+        
+        // تحديث الحالة في tempBookings
+        await db.collection('tempBookings').doc(bookingId).update({
+            status: 'transferred',
+            transferredAt: new Date().toISOString(),
+            transferredTo: 'individualStudents',
+            transferredToPage: 'bookings/individual.html',
+            automatedTransfer: true
+        });
+        
+        // بدء عملية إنشاء الحساب التلقائي
+        if (!userCheck.exists) {
+            setTimeout(() => {
+                autoCreateAccountAndAssignCourse(bookingId);
+            }, 1000);
+        }
+        
+    } catch (error) {
+        console.error('❌ خطأ في التحويل التلقائي:', error);
+    }
+}
+
+// 4. أضف مؤشر للحجوزات المتصلة بالتليجرام في واجهة العرض
+// عدّل دالة createIndividualContent بإضافة هذا الجزء:
+function createIndividualContent(booking) {
+    // ... الكود الموجود ...
+    
+    // أضف هذا الجزء في بداية المحتوى
+    let telegramStatus = '';
+    if (booking.telegramConnected) {
+        telegramStatus = `
+            <div style="background: linear-gradient(135deg, #E0F2FE, #DBEAFE); 
+                        padding: 10px; border-radius: 8px; margin-bottom: 15px; 
+                        border-right: 3px solid #0EA5E9;">
+                <i class="fab fa-telegram" style="color: #0EA5E9;"></i>
+                <span style="color: #0369A1; font-weight: bold;">
+                    متصل بالتليجرام
+                </span>
+                <span style="color: #64748B; font-size: 0.85rem; margin-right: 10px;">
+                    كود: ${booking.telegramCode}
+                </span>
+            </div>
+        `;
+    }
+    
+    return `
+        ${telegramStatus}
+        <!-- باقي المحتوى كما هو -->
+        ${existingContent}
+    `;
+}
+
+// 5. أضف زر للدفع مع الأتمتة في الواجهة
+// استبدل زر "تم الدفع" الموجود بهذا:
+function createPaymentButton(booking) {
+    if (booking.status === 'confirmed' || booking.status === 'pending') {
+        if (booking.telegramConnected && booking.awaitingAdminConfirmation) {
+            return `
+                <button onclick="markAsPaidWithAutomation('${booking.id}')" 
+                        class="btn btn-success btn-sm" 
+                        style="background: linear-gradient(135deg, #10B981, #059669);">
+                    <i class="fas fa-robot"></i> تأكيد الدفع والأتمتة
+                </button>
+            `;
+        } else {
+            return `
+                <button onclick="markAsPaid('${booking.id}')" 
+                        class="btn btn-success btn-sm">
+                    <i class="fas fa-check-circle"></i> تم الدفع
+                </button>
+            `;
+        }
+    }
+    return '';
+}
+        
        // دالة إلغاء الحجز
        async function cancelBooking(bookingId) {
            const result = await Swal.fire({
