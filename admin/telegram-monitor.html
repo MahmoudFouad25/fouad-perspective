@@ -414,83 +414,233 @@ const db = firebase.firestore();
         let messagesListener = null;
         
         // تحميل قائمة المحادثات
-        async function loadChats() {
-            try {
-                const snapshot = await db.collection('telegramChats')
-                    .orderBy('lastActivity', 'desc')
-                    .limit(50)
-                    .get();
-                
-                const chatsList = document.getElementById('chatsList');
-                chatsList.innerHTML = '';
-                
-                let totalChats = 0;
-                let activeToday = 0;
-                const today = new Date().setHours(0, 0, 0, 0);
-                
-               snapshot.forEach(doc => {
-    const msg = doc.data();
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${msg.type}`;
-    
-    let messageContent = msg.message;
-    
-    // معالجة الصور المرفقة
-    if (msg.hasAttachment && msg.attachmentType === 'photo') {
-        if (msg.photoUrl) {
-            // عرض الصورة إذا كان لدينا رابط
-            messageContent = `
-                <div style="margin-bottom: 10px;">
-                    <img src="${msg.photoUrl}" style="max-width: 300px; border-radius: 10px; cursor: pointer;" 
-                         onclick="window.open('${msg.photoUrl}', '_blank')" 
-                         alt="صورة مرفقة">
+       // استبدل دالة loadChats بالكامل بهذا الكود الصحيح:
+
+async function loadChats() {
+    try {
+        const snapshot = await db.collection('telegramChats')
+            .orderBy('lastActivity', 'desc')
+            .limit(50)
+            .get();
+        
+        const chatsList = document.getElementById('chatsList');
+        chatsList.innerHTML = '';
+        
+        let totalChats = 0;
+        let activeToday = 0;
+        const today = new Date().setHours(0, 0, 0, 0);
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const chatId = doc.id;
+            chatsData[chatId] = data;
+            
+            totalChats++;
+            
+            // حساب النشط اليوم
+            if (data.lastActivity && data.lastActivity.toDate() > today) {
+                activeToday++;
+            }
+            
+            // إنشاء عنصر المحادثة
+            const chatItem = document.createElement('div');
+            chatItem.className = 'chat-item';
+            chatItem.onclick = () => loadChat(chatId);
+            
+            const name = data.userInfo?.firstName || 'مستخدم';
+            const initial = name.charAt(0).toUpperCase();
+            const lastMessage = data.lastMessage || 'لا توجد رسائل';
+            const time = data.lastActivity ? formatTime(data.lastActivity.toDate()) : '';
+            
+            chatItem.innerHTML = `
+                <div class="avatar">${initial}</div>
+                <div class="info">
+                    <div class="name">${name}</div>
+                    <div class="last-message">${lastMessage}</div>
                 </div>
-                ${msg.caption ? `<div style="margin-top: 10px;">${msg.caption}</div>` : ''}
-                <div style="background: #FEF3C7; color: #92400E; padding: 8px 12px; border-radius: 8px; margin-top: 8px; font-size: 13px;">
-                    <i class="fas fa-image"></i> إيصال دفع - اضغط للتكبير
+                <div>
+                    <div class="time">${time}</div>
                 </div>
             `;
-        } else {
-            // عرض رسالة أن هناك صورة بدون رابط
-            messageContent += `<div class="attachment">
-                <i class="fas fa-image"></i> صورة مرفقة (غير متاحة للعرض المباشر)
-                <br><small>File ID: ${msg.fileId}</small>
-            </div>`;
-        }
-    } else if (msg.hasAttachment && msg.attachmentType === 'document') {
-        messageContent += `<div class="attachment">
-            <i class="fas fa-file"></i> ${msg.fileName || 'مستند مرفق'}
-            ${msg.fileSize ? `<br><small>الحجم: ${(msg.fileSize/1024).toFixed(2)} KB</small>` : ''}
-        </div>`;
-    } else if (msg.isCallback) {
-        // عرض خاص للأزرار المضغوطة
-        messageContent = `<div style="background: #E0F2FE; padding: 8px; border-radius: 8px; font-size: 13px;">
-            <i class="fas fa-mouse-pointer"></i> ضغط على زر: ${msg.callbackData}
-        </div>`;
+            
+            chatsList.appendChild(chatItem);
+        });
+        
+        // تحديث الإحصائيات
+        document.getElementById('totalChats').textContent = totalChats;
+        document.getElementById('activeToday').textContent = activeToday;
+        
+        // حساب الحجوزات
+        await updateBookingStats();
+        
+    } catch (error) {
+        console.error('خطأ في تحميل المحادثات:', error);
+        document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
+    }
+}
+
+// استبدل دالة loadChat بالكامل بهذا الكود:
+async function loadChat(chatId) {
+    currentChatId = chatId;
+    
+    // تحديث العرض
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('chatContent').style.display = 'flex';
+    document.getElementById('chatContent').style.flexDirection = 'column';
+    
+    // تحديث النشط
+    document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    event.currentTarget.classList.add('active');
+    
+    // عرض معلومات المحادثة
+    const chatData = chatsData[chatId];
+    document.getElementById('chatName').textContent = chatData.userInfo?.firstName || 'مستخدم';
+    document.getElementById('chatInfo').textContent = `Chat ID: ${chatId}`;
+    
+    // تفعيل إمكانية الرد
+    document.getElementById('messageInput').disabled = false;
+    document.querySelector('.input-area button').disabled = false;
+    
+    // إلغاء المستمع السابق
+    if (messagesListener) {
+        messagesListener();
     }
     
-    messageDiv.innerHTML = `
-        <div class="bubble">
-            ${messageContent}
-            <div class="time">${msg.timestamp ? formatTime(msg.timestamp.toDate()) : ''}</div>
-        </div>
-    `;
+    // الاستماع للرسائل
+    const messagesContainer = document.getElementById('messagesContainer');
+    messagesContainer.innerHTML = '<div class="loading">جاري تحميل المحادثة...</div>';
     
-    messagesContainer.appendChild(messageDiv);
-});
+    messagesListener = db.collection('telegramChats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('timestamp', 'asc')
+        .onSnapshot(snapshot => {
+            messagesContainer.innerHTML = '';
+            
+            snapshot.forEach(doc => {
+                const msg = doc.data();
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${msg.type}`;
                 
-                // تحديث الإحصائيات
-                document.getElementById('totalChats').textContent = totalChats;
-                document.getElementById('activeToday').textContent = activeToday;
+                let messageContent = msg.message;
                 
-                // حساب الحجوزات
-                await updateBookingStats();
+                // معالجة الصور المرفقة
+                if (msg.hasAttachment && msg.attachmentType === 'photo') {
+                    if (msg.photoUrl) {
+                        // عرض الصورة إذا كان لدينا رابط
+                        messageContent = `
+                            <div style="margin-bottom: 10px;">
+                                <img src="${msg.photoUrl}" style="max-width: 300px; border-radius: 10px; cursor: pointer;" 
+                                     onclick="window.open('${msg.photoUrl}', '_blank')" 
+                                     alt="صورة مرفقة">
+                            </div>
+                            ${msg.caption ? `<div style="margin-top: 10px;">${msg.caption}</div>` : ''}
+                            <div style="background: #FEF3C7; color: #92400E; padding: 8px 12px; border-radius: 8px; margin-top: 8px; font-size: 13px;">
+                                <i class="fas fa-image"></i> إيصال دفع - اضغط للتكبير
+                            </div>
+                        `;
+                    } else {
+                        // عرض رسالة أن هناك صورة بدون رابط
+                        messageContent += `<div class="attachment">
+                            <i class="fas fa-image"></i> صورة مرفقة (غير متاحة للعرض المباشر)
+                            <br><small>File ID: ${msg.fileId}</small>
+                        </div>`;
+                    }
+                } else if (msg.hasAttachment && msg.attachmentType === 'document') {
+                    messageContent += `<div class="attachment">
+                        <i class="fas fa-file"></i> ${msg.fileName || 'مستند مرفق'}
+                        ${msg.fileSize ? `<br><small>الحجم: ${(msg.fileSize/1024).toFixed(2)} KB</small>` : ''}
+                    </div>`;
+                } else if (msg.isCallback) {
+                    // عرض خاص للأزرار المضغوطة
+                    messageContent = `<div style="background: #E0F2FE; padding: 8px; border-radius: 8px; font-size: 13px;">
+                        <i class="fas fa-mouse-pointer"></i> ضغط على زر: ${msg.callbackData}
+                    </div>`;
+                } else if (msg.type === 'admin') {
+                    // تمييز رسائل الأدمن
+                    messageContent = `<div style="background: #F0FDF4; padding: 5px 8px; border-radius: 5px; margin-bottom: 5px; font-size: 11px; color: #065F46;">
+                        <i class="fas fa-user-shield"></i> رسالة من الأدمن
+                    </div>${messageContent}`;
+                }
                 
-            } catch (error) {
-                console.error('خطأ في تحميل المحادثات:', error);
-                document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
-            }
+                messageDiv.innerHTML = `
+                    <div class="bubble">
+                        ${messageContent}
+                        <div class="time">${msg.timestamp ? formatTime(msg.timestamp.toDate()) : ''}</div>
+                    </div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+            });
+            
+            // التمرير للأسفل
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        });
+}
+
+// إضافة دالة إرسال رسالة من الأدمن
+async function sendAdminMessage() {
+    const messageInput = document.getElementById('messageInput');
+    const message = messageInput.value.trim();
+    
+    if (!message || !currentChatId) return;
+    
+    try {
+        // حفظ الرسالة في Firebase
+        await db.collection('telegramChats')
+            .doc(currentChatId)
+            .collection('messages')
+            .add({
+                chatId: currentChatId,
+                type: 'admin',
+                message: message,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                sentBy: 'admin_panel',
+                adminName: 'مدير النظام'
+            });
+        
+        // إرسال الرسالة عبر API البوت
+        const response = await fetch('http://localhost:3000/send-admin-message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chatId: currentChatId,
+                message: message
+            })
+        });
+        
+        if (response.ok) {
+            // مسح حقل الإدخال
+            messageInput.value = '';
+            
+            // رسالة نجاح
+            console.log('✅ تم إرسال الرسالة');
+        } else {
+            alert('خطأ في إرسال الرسالة');
         }
+        
+    } catch (error) {
+        console.error('خطأ:', error);
+        alert('حدث خطأ في إرسال الرسالة');
+    }
+}
+
+// السماح بالإرسال بضغط Enter
+document.addEventListener('DOMContentLoaded', function() {
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendAdminMessage();
+            }
+        });
+    }
+});
         
         // تحميل محادثة معينة
         async function loadChat(chatId) {
