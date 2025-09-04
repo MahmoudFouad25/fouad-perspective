@@ -548,6 +548,77 @@
 .pulse-animation {
     animation: pulse 2s infinite;
 }
+
+        .payment-editor-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: none;
+    z-index: 20000;
+    align-items: center;
+    justify-content: center;
+}
+
+.payment-editor-content {
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 900px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.plan-option {
+    background: linear-gradient(135deg, #F9FAFB, #F3F4F6);
+    border: 2px solid #E5E7EB;
+    border-radius: 15px;
+    padding: 20px;
+    margin: 15px 0;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+}
+
+.plan-option:hover {
+    border-color: #3B82F6;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(59,130,246,0.2);
+}
+
+.plan-option.current {
+    border-color: #10B981;
+    background: linear-gradient(135deg, #DCFCE7, #D1FAE5);
+}
+
+.plan-option.recommended {
+    border-color: #F59E0B;
+    background: linear-gradient(135deg, #FEF3C7, #FED7AA);
+}
+
+.savings-badge {
+    position: absolute;
+    top: -10px;
+    right: 20px;
+    background: linear-gradient(135deg, #DC2626, #B91C1C);
+    color: white;
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.installment-breakdown {
+    background: white;
+    padding: 15px;
+    border-radius: 10px;
+    margin-top: 15px;
+    border-left: 4px solid #3B82F6;
+}
     </style>
 </head>
 <body>
@@ -785,7 +856,44 @@
             </div>
         </div>
     </div>
-    
+
+        <!-- نافذة تعديل خطة الدفع -->
+<div class="payment-editor-modal" id="paymentEditorModal">
+    <div class="payment-editor-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h2 style="color: #1F2937; margin: 0;">
+                <i class="fas fa-edit"></i> تعديل خطة الدفع
+            </h2>
+            <button onclick="closePaymentEditor()" style="background: #EF4444; color: white; border: none; 
+                           padding: 10px; border-radius: 50%; cursor: pointer; width: 40px; height: 40px;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <!-- معلومات الحجز الحالي -->
+        <div id="currentBookingInfo" style="background: #F0FDF4; padding: 20px; border-radius: 15px; margin-bottom: 25px; border: 2px solid #10B981;">
+            <!-- سيتم ملؤها ديناميكياً -->
+        </div>
+        
+        <!-- خيارات خطط الدفع -->
+        <div id="paymentPlansContainer">
+            <!-- سيتم ملؤها ديناميكياً -->
+        </div>
+        
+        <!-- أزرار التأكيد -->
+        <div style="display: flex; gap: 15px; justify-content: center; margin-top: 30px;">
+            <button id="confirmPlanChange" class="btn" style="background: linear-gradient(135deg, #10B981, #059669); 
+                           color: white; padding: 15px 40px; font-size: 1.1rem; border-radius: 10px; display: none;">
+                <i class="fas fa-check"></i> تأكيد التغيير
+            </button>
+            <button onclick="closePaymentEditor()" style="background: #6B7280; color: white; border: none; 
+                           padding: 15px 40px; border-radius: 10px; cursor: pointer;">
+                <i class="fas fa-arrow-right"></i> إلغاء
+            </button>
+        </div>
+    </div>
+</div>
+        
     <script>
         // إعدادات Firebase
         const firebaseConfig = {
@@ -5452,6 +5560,142 @@ function shareVoucherStory(bookingId) {
     });
 }
 
+        // ═══════════════════════════════════════════
+// نظام تعديل خطط الدفع
+// ═══════════════════════════════════════════
+
+let currentEditingBooking = null;
+let selectedNewPlan = null;
+
+// دالة فتح محرر خطة الدفع
+async function openPaymentPlanEditor(bookingId) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) {
+        Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
+        return;
+    }
+    
+    currentEditingBooking = booking;
+    const modal = document.getElementById('paymentEditorModal');
+    
+    // عرض معلومات الحجز الحالي
+    displayCurrentBookingInfo(booking);
+    
+    // عرض خيارات خطط الدفع
+    await displayPaymentPlans(booking);
+    
+    modal.style.display = 'flex';
+}
+
+// دالة إغلاق المحرر
+function closePaymentEditor() {
+    document.getElementById('paymentEditorModal').style.display = 'none';
+    currentEditingBooking = null;
+    selectedNewPlan = null;
+    document.getElementById('confirmPlanChange').style.display = 'none';
+}
+
+// دالة عرض معلومات الحجز الحالي
+function displayCurrentBookingInfo(booking) {
+    const container = document.getElementById('currentBookingInfo');
+    const pricing = booking.pricing || {};
+    const customer = booking.customer || {};
+    
+    // تحديد الخطة الحالية
+    let currentPlanText = 'غير محدد';
+    let currentPlanType = 'unknown';
+    
+    if (booking.payment?.code === 'installment' || booking.paymentDetails?.type === 'installment') {
+        currentPlanType = 'installment';
+        const schedule = booking.paymentDetails?.installmentSchedule || [];
+        if (schedule.length > 0) {
+            const totalInstallments = booking.paymentDetails.totalInstallments || schedule.length;
+            currentPlanText = `أقساط (${totalInstallments} دفعات)`;
+        } else {
+            currentPlanText = 'أقساط';
+        }
+    } else {
+        currentPlanType = 'cash';
+        currentPlanText = 'دفعة واحدة';
+    }
+    
+    container.innerHTML = `
+        <h3 style="color: #065F46; margin-bottom: 15px; display: flex; align-items: center;">
+            <i class="fas fa-info-circle" style="margin-left: 10px;"></i>
+            معلومات الحجز الحالي
+        </h3>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+            <div>
+                <strong style="color: #047857;">العميل:</strong>
+                <span>${customer.name || 'غير محدد'}</span>
+            </div>
+            <div>
+                <strong style="color: #047857;">الدورة:</strong>
+                <span>${booking.courseName || 'غير محدد'}</span>
+            </div>
+            <div>
+                <strong style="color: #047857;">الخطة الحالية:</strong>
+                <span style="background: #DCFCE7; color: #166534; padding: 3px 10px; border-radius: 10px; font-weight: bold;">
+                    ${currentPlanText}
+                </span>
+            </div>
+            <div>
+                <strong style="color: #047857;">السعر الحالي:</strong>
+                <span style="font-size: 1.2rem; color: #DC2626; font-weight: bold;">
+                    ${pricing.finalPrice || '0 ج.م'}
+                </span>
+            </div>
+        </div>
+        
+        ${booking.paymentDetails?.type === 'installment' && booking.paymentDetails?.installmentSchedule ? `
+            <div style="margin-top: 15px; padding: 15px; background: white; border-radius: 10px; border-left: 4px solid #3B82F6;">
+                <strong style="color: #1E40AF;">جدول الأقساط الحالي:</strong>
+                <div style="margin-top: 10px;">
+                    المدفوع: ${booking.paymentDetails.paidAmount?.toLocaleString('ar-EG') || 0} ج.م |
+                    المتبقي: ${booking.paymentDetails.remainingAmount?.toLocaleString('ar-EG') || 0} ج.م
+                </div>
+            </div>
+        ` : ''}
+    `;
+}
+
+// دالة عرض خيارات خطط الدفع
+async function displayPaymentPlans(booking) {
+    const container = document.getElementById('paymentPlansContainer');
+    const basePrice = extractNumberFromArabicText(booking.pricing?.basePrice) || 
+                     booking.pricing?.basePriceNumber || 10000;
+    
+    // تحديد الخطة الحالية
+    const currentPlanType = getCurrentPlanType(booking);
+    
+    container.innerHTML = `
+        <h3 style="color: #1F2937; margin-bottom: 20px;">
+            <i class="fas fa-credit-card"></i> اختر خطة الدفع الجديدة:
+        </h3>
+        <div id="plansGrid"></div>
+    `;
+    
+    // إنشاء خيارات الخطط
+    const plansGrid = document.getElementById('plansGrid');
+    
+    // خطة الدفع النقدي
+    const cashPlan = createCashPlanOption(booking, basePrice, currentPlanType);
+    plansGrid.appendChild(cashPlan);
+    
+    // خطط الأقساط
+    const installmentPlans = await createInstallmentPlanOptions(booking, basePrice, currentPlanType);
+    installmentPlans.forEach(plan => plansGrid.appendChild(plan));
+}
+
+// دالة تحديد نوع الخطة الحالية
+function getCurrentPlanType(booking) {
+    if (booking.payment?.code === 'installment' || 
+        booking.paymentDetails?.type === 'installment') {
+        return 'installment';
+    }
+    return 'cash';
+}
         // دوال إضافية للحجز الفردي
         // دالة إرسال تذكير بالدفع
 async function sendReminder(bookingId) {
