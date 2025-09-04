@@ -1249,16 +1249,35 @@ function createBookingCard(booking) {
                             </button>`;
                     }
                     else if (status === 'confirmed') {
-                        buttons = `
-                            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white; font-weight: bold;" 
-                                    onclick="markAsPaid('${booking.id}')">
-                                <i class="fas fa-money-bill-wave"></i> تسجيل الدفع
-                            </button>
-                            <button class="btn" style="background: #6B7280; color: white;" 
-                                    onclick="sendReminder('${booking.id}')">
-                                <i class="fas fa-bell"></i> تذكير بالدفع
-                            </button>`;
-                    } 
+    // تحقق من الاتصال بالتليجرام
+    const isTelegramConnected = booking.telegramConnected && booking.telegramChatId;
+    const hasPaymentProof = booking.automationWorkflow?.receiptReceived;
+    
+    if (isTelegramConnected && hasPaymentProof) {
+        buttons = `
+            <button class="btn pulse-animation" 
+                    style="background: linear-gradient(135deg, #10B981, #059669); 
+                           color: white; font-weight: bold; font-size: 1.1rem;"
+                    onclick="markAsPaidWithAutomation('${booking.id}')">
+                <i class="fas fa-robot"></i> تأكيد الدفع + أتمتة كاملة
+            </button>
+            <button class="btn" style="background: #6B7280; color: white;" 
+                    onclick="sendReminder('${booking.id}')">
+                <i class="fas fa-bell"></i> تذكير
+            </button>`;
+    } else {
+        buttons = `
+            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                           color: white; font-weight: bold;" 
+                    onclick="markAsPaid('${booking.id}')">
+                <i class="fas fa-money-bill-wave"></i> تسجيل الدفع العادي
+            </button>
+            <button class="btn" style="background: #6B7280; color: white;" 
+                    onclick="sendReminder('${booking.id}')">
+                <i class="fas fa-bell"></i> تذكير بالدفع
+            </button>`;
+    }
+}
                     else if (status === 'paid') {
                         // الحالة المهمة - مدفوع لكن لم يحول بعد
                         const transferIcon = type === 'individual' ? 'fa-user-graduate' : 
@@ -4766,6 +4785,236 @@ document.getElementById('remainingInstallments').parentElement.appendChild(insta
                 confirmButtonColor: '#EF4444'
             });
         }
+    }
+}
+
+        // دالة تأكيد الدفع مع الأتمتة الكاملة
+async function markAsPaidWithAutomation(bookingId) {
+    try {
+        // جلب بيانات الحجز
+        const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+        if (!bookingDoc.exists) {
+            Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
+            return;
+        }
+        
+        const booking = { id: bookingDoc.id, ...bookingDoc.data() };
+        
+        // استدعاء دالة تسجيل الدفع الأصلية أولاً
+        await markAsPaid(bookingId);
+        
+        // إذا كان الحجز متصل بالتليجرام
+        if (booking.telegramChatId && booking.telegramConnected) {
+            // إرسال إشعار للعميل على التليجرام
+            await sendTelegramPaymentConfirmation(booking);
+            
+            // الانتظار قليلاً ثم بدء التحويل التلقائي
+            setTimeout(async () => {
+                console.log('🚀 بدء التحويل التلقائي...');
+                await autoTransferToSpecialized(bookingId);
+            }, 2000);
+        } else {
+            // إذا لم يكن متصل بالتليجرام، فقط نقل عادي
+            setTimeout(async () => {
+                await autoTransferToSpecialized(bookingId);
+            }, 2000);
+        }
+        
+    } catch (error) {
+        console.error('❌ خطأ في تأكيد الدفع مع الأتمتة:', error);
+        Swal.fire('خطأ!', 'حدث خطأ في العملية', 'error');
+    }
+}
+
+// دالة إرسال تأكيد الدفع للتليجرام
+async function sendTelegramPaymentConfirmation(booking) {
+    try {
+        const customerName = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+        const courseName = booking.courseName || 'الدورة';
+        const isInstallment = booking.paymentDetails?.type === 'installment';
+        
+        let message = `
+🎉 *مبروك يا ${customerName}!*
+
+تم تأكيد دفعتك بنجاح ✅
+
+━━━━━━━━━━━━━━━━━━
+📚 الدورة: *${courseName}*
+💰 المبلغ المدفوع: *${booking.paymentDetails?.paidAmount || booking.pricing?.finalPrice || '0'} ج.م*
+`;
+
+        if (isInstallment) {
+            const remaining = booking.paymentDetails?.remainingAmount || 0;
+            const nextDue = booking.paymentDetails?.nextDueDate;
+            
+            message += `
+💳 المتبقي: *${remaining} ج.م*
+📅 القسط القادم: ${nextDue ? new Date(nextDue).toLocaleDateString('ar-EG') : 'الشهر القادم'}
+`;
+        }
+
+        message += `
+━━━━━━━━━━━━━━━━━━
+
+⏳ *ماذا يحدث الآن؟*
+- جاري إنشاء حسابك الشخصي
+- تخصيص الدورة لك
+- تجهيز المواد التعليمية
+
+🚀 ستصلك بيانات الدخول خلال دقائق قليلة...
+
+شكراً لثقتك في منظور الفؤاد 💚
+        `;
+        
+        const response = await fetch('http://localhost:3000/send-message-to-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: booking.telegramChatId,
+                message: message
+            })
+        });
+        
+        if (response.ok) {
+            console.log('✅ تم إرسال تأكيد الدفع للتليجرام');
+        }
+        
+    } catch (error) {
+        console.error('خطأ في إرسال الإشعار:', error);
+    }
+}
+
+        // دالة التحويل التلقائي المتقدمة
+async function autoTransferToSpecialized(bookingId) {
+    try {
+        console.log('🔄 بدء عملية التحويل التلقائي للحجز:', bookingId);
+        
+        // جلب البيانات الكاملة
+        const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+        if (!bookingDoc.exists) {
+            console.error('❌ الحجز غير موجود');
+            return;
+        }
+        
+        const booking = { id: bookingDoc.id, ...bookingDoc.data() };
+        const type = booking.bookingType || booking.type || 'individual';
+        
+        // التحقق من وجود حساب سابق
+        const userCheck = await checkExistingUser(booking);
+        console.log('🔍 فحص الحساب:', userCheck);
+        
+        // بناء البيانات الكاملة للتحويل
+        const completeData = {
+            // نسخ كل البيانات الأصلية
+            ...booking,
+            
+            // معلومات الحساب
+            userAccountInfo: {
+                hasExistingAccount: userCheck.exists,
+                existingUserId: userCheck.userId,
+                checkedAt: new Date().toISOString()
+            },
+            
+            // معلومات الدفع المفصلة
+            paymentInfo: {
+                status: booking.status,
+                paymentConfirmed: booking.paymentConfirmed || false,
+                paymentMethod: booking.paymentMethod || null,
+                paymentReference: booking.paymentReference || null,
+                paymentDetails: booking.paymentDetails || null,
+                paidAt: booking.paidAt || null,
+                isInstallment: booking.paymentDetails?.type === 'installment',
+                fullyPaid: booking.paymentDetails?.fullyPaid || false,
+                totalAmount: booking.paymentDetails?.totalAmount || 0,
+                paidAmount: booking.paymentDetails?.paidAmount || 0,
+                remainingAmount: booking.paymentDetails?.remainingAmount || 0
+            },
+            
+            // معلومات التحويل
+            transferInfo: {
+                transferredAt: new Date().toISOString(),
+                transferredFrom: 'tempBookings',
+                transferredBy: 'auto-telegram',
+                originalBookingId: bookingId,
+                automatedTransfer: true,
+                telegramIntegrated: booking.telegramConnected || false
+            },
+            
+            // حالة الحساب
+            accountStatus: userCheck.exists ? 'existing' : 'pending_creation',
+            accountCreated: userCheck.exists,
+            courseAssigned: false,
+            
+            // التقدم
+            progress: {
+                accountSetup: userCheck.exists ? 100 : 0,
+                courseAssignment: 0,
+                firstPayment: 100,
+                welcomeMessage: 0,
+                totalProgress: userCheck.exists ? 50 : 25
+            }
+        };
+        
+        // حفظ في المجموعة الجديدة
+        await db.collection('individualStudents').doc(bookingId).set(completeData);
+        console.log('✅ تم النقل إلى individualStudents');
+        
+        // تحديث الحجز الأصلي
+        await db.collection('tempBookings').doc(bookingId).update({
+            status: 'transferred',
+            transferredAt: new Date().toISOString(),
+            transferredTo: 'individualStudents',
+            automatedTransfer: true
+        });
+        
+        // إشعار التليجرام بالتحويل
+        if (booking.telegramChatId) {
+            const message = userCheck.exists ? 
+                '🔄 تم نقل بياناتك لحسابك الموجود\nجاري تخصيص الدورة الجديدة...' :
+                '🆕 تم نقل بياناتك بنجاح\nجاري إنشاء حسابك الجديد...';
+                
+            await fetch('http://localhost:3000/send-message-to-chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chatId: booking.telegramChatId,
+                    message: message
+                })
+            });
+        }
+        
+        // رسالة نجاح للأدمن
+        await Swal.fire({
+            icon: 'success',
+            title: 'تم التحويل التلقائي!',
+            html: `
+                <div style="text-align: center;">
+                    <p>تم نقل الحجز بنجاح إلى القسم المختص</p>
+                    <p style="margin-top: 10px;">
+                        ${userCheck.exists ? 
+                            '⚠️ العميل له حساب موجود - سيتم تخصيص الدورة فقط' :
+                            '🆕 عميل جديد - سيتم إنشاء حساب جديد'
+                        }
+                    </p>
+                    <button onclick="window.location.href='individual.html?id=${bookingId}&action=auto'" 
+                            style="background: #10B981; color: white; border: none; 
+                                   padding: 10px 20px; border-radius: 8px; 
+                                   margin-top: 15px; cursor: pointer;">
+                        الذهاب للصفحة المختصة
+                    </button>
+                </div>
+            `,
+            showConfirmButton: false
+        });
+        
+        // إعادة تحميل الصفحة بعد 3 ثواني
+        setTimeout(() => {
+            loadBookings();
+        }, 3000);
+        
+    } catch (error) {
+        console.error('❌ خطأ في التحويل التلقائي:', error);
+        Swal.fire('خطأ!', 'فشل التحويل التلقائي', 'error');
     }
 }
        // دالة إلغاء الحجز
