@@ -374,13 +374,12 @@
                     </div>
                     <div class="messages-container" id="messagesContainer">
                         <!-- الرسائل ستظهر هنا -->
-                    </div>
                     <div class="input-area">
-                        <input type="text" id="messageInput" placeholder="اكتب رسالة للعميل..." disabled>
-                        <button onclick="sendAdminMessage()" disabled>
-                            <i class="fas fa-paper-plane"></i> إرسال
-                        </button>
-                    </div>
+    <input type="text" id="messageInput" placeholder="اكتب رسالة للعميل...">
+    <button onclick="sendAdminMessage()">
+        <i class="fas fa-paper-plane"></i> إرسال
+    </button>
+</div>
                 </div>
             </div>
         </div>
@@ -416,67 +415,114 @@ const db = firebase.firestore();
         // تحميل قائمة المحادثات
        // استبدل دالة loadChats بالكامل بهذا الكود الصحيح:
 
-async function loadChats() {
-    try {
-        const snapshot = await db.collection('telegramChats')
-            .orderBy('lastActivity', 'desc')
-            .limit(50)
-            .get();
-        
-        const chatsList = document.getElementById('chatsList');
-        chatsList.innerHTML = '';
-        
-        let totalChats = 0;
-        let activeToday = 0;
-        const today = new Date().setHours(0, 0, 0, 0);
-        
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const chatId = doc.id;
-            chatsData[chatId] = data;
-            
-            totalChats++;
-            
-            // حساب النشط اليوم
-            if (data.lastActivity && data.lastActivity.toDate() > today) {
-                activeToday++;
-            }
-            
-            // إنشاء عنصر المحادثة
-            const chatItem = document.createElement('div');
-            chatItem.className = 'chat-item';
-            chatItem.onclick = () => loadChat(chatId);
-            
-            const name = data.userInfo?.firstName || 'مستخدم';
-            const initial = name.charAt(0).toUpperCase();
-            const lastMessage = data.lastMessage || 'لا توجد رسائل';
-            const time = data.lastActivity ? formatTime(data.lastActivity.toDate()) : '';
-            
-            chatItem.innerHTML = `
-                <div class="avatar">${initial}</div>
-                <div class="info">
-                    <div class="name">${name}</div>
-                    <div class="last-message">${lastMessage}</div>
-                </div>
-                <div>
-                    <div class="time">${time}</div>
-                </div>
-            `;
-            
-            chatsList.appendChild(chatItem);
-        });
-        
-        // تحديث الإحصائيات
-        document.getElementById('totalChats').textContent = totalChats;
-        document.getElementById('activeToday').textContent = activeToday;
-        
-        // حساب الحجوزات
-        await updateBookingStats();
-        
-    } catch (error) {
-        console.error('خطأ في تحميل المحادثات:', error);
-        document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
+async function loadChat(chatId) {
+    currentChatId = chatId;
+    
+    // تحديث العرض
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('chatContent').style.display = 'flex';
+    document.getElementById('chatContent').style.flexDirection = 'column';
+    
+    // تحديث النشط
+    document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    // التعامل مع event بشكل آمن
+    if (event && event.currentTarget) {
+        event.currentTarget.classList.add('active');
     }
+    
+    // عرض معلومات المحادثة
+    const chatData = chatsData[chatId];
+    document.getElementById('chatName').textContent = chatData.userInfo?.firstName || 'مستخدم';
+    document.getElementById('chatInfo').textContent = `Chat ID: ${chatId}`;
+    
+    // *** الكود المهم - تفعيل حقل الإدخال ***
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.querySelector('.input-area button');
+    
+    // إزالة disabled وتفعيل العناصر
+    if (messageInput) {
+        messageInput.disabled = false;
+        messageInput.removeAttribute('disabled');
+        messageInput.style.backgroundColor = '#ffffff';
+        messageInput.style.cursor = 'text';
+        console.log('✅ تم تفعيل حقل الإدخال');
+    }
+    
+    if (sendButton) {
+        sendButton.disabled = false;
+        sendButton.removeAttribute('disabled');
+        sendButton.style.opacity = '1';
+        sendButton.style.cursor = 'pointer';
+        console.log('✅ تم تفعيل زر الإرسال');
+    }
+    
+    // إلغاء المستمع السابق
+    if (messagesListener) {
+        messagesListener();
+    }
+    
+    // الاستماع للرسائل
+    const messagesContainer = document.getElementById('messagesContainer');
+    messagesContainer.innerHTML = '<div class="loading">جاري تحميل المحادثة...</div>';
+    
+    messagesListener = db.collection('telegramChats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('timestamp', 'asc')
+        .onSnapshot(snapshot => {
+            messagesContainer.innerHTML = '';
+            
+            snapshot.forEach(doc => {
+                const msg = doc.data();
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${msg.type}`;
+                
+                let messageContent = msg.message;
+                
+                // معالجة المرفقات
+                if (msg.hasAttachment && msg.permanentUrl) {
+                    if (msg.attachmentType === 'photo') {
+                        messageContent = `
+                            <div style="margin-bottom: 10px;">
+                                <img src="${msg.permanentUrl}" 
+                                     style="max-width: 300px; border-radius: 10px; cursor: pointer; border: 2px solid #10B981;" 
+                                     onclick="window.open('${msg.permanentUrl}', '_blank')" 
+                                     alt="صورة مرفقة">
+                            </div>
+                            ${msg.caption ? `<div style="margin-top: 10px;">${msg.caption}</div>` : ''}
+                            <div style="background: #10B981; color: white; padding: 8px 12px; border-radius: 8px; margin-top: 8px; font-size: 13px;">
+                                <i class="fas fa-check-circle"></i> إيصال محفوظ - اضغط للتكبير
+                            </div>
+                        `;
+                    }
+                } else if (msg.hasAttachment && msg.photoUrl) {
+                    // الصور القديمة
+                    messageContent = `
+                        <div style="margin-bottom: 10px;">
+                            <img src="${msg.photoUrl}" style="max-width: 300px; border-radius: 10px; cursor: pointer;" 
+                                 onclick="window.open('${msg.photoUrl}', '_blank')" 
+                                 alt="صورة مرفقة">
+                        </div>
+                        ${msg.caption ? `<div style="margin-top: 10px;">${msg.caption}</div>` : ''}
+                    `;
+                }
+                
+                messageDiv.innerHTML = `
+                    <div class="bubble">
+                        ${messageContent}
+                        <div class="time">${msg.timestamp ? formatTime(msg.timestamp.toDate()) : ''}</div>
+                    </div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+            });
+            
+            // التمرير للأسفل
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        });
 }
 
 // استبدل دالة loadChat بالكامل بهذا الكود:
@@ -962,6 +1008,23 @@ document.addEventListener('DOMContentLoaded', function() {
             // تحديث كل 30 ثانية
             setInterval(loadChats, 30000);
         };
+
+        // تفعيل الإرسال بـ Enter
+window.addEventListener('load', function() {
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        // إزالة disabled مرة أخرى للتأكد
+        messageInput.removeAttribute('disabled');
+        
+        // إضافة معالج Enter
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendAdminMessage();
+            }
+        });
+    }
+});
     </script>
 </body>
 </html>
