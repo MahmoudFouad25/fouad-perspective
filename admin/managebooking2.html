@@ -3892,13 +3892,14 @@ function requestMoreInfo(bookingId) {
 let currentEditingBooking = null;
 let selectedNewPlan = null;
 // ============================================
-// نظام تعديل خطط الدفع - النسخة الصحيحة
+// نظام تعديل خطط الدفع - النسخة الصحيحة المنقحة
 // ============================================
 
-// دالة استخراج معلومات الخطة الحالية من البيانات المخزنة
+// دالة تحليل الخطة الحالية بدقة
 function analyzeCurrentPlan(booking) {
     const result = {
         type: 'unknown',
+        displayText: 'غير محدد',
         hasInstallments: false,
         installmentMonths: 0,
         hasCashDiscount: false,
@@ -3913,47 +3914,48 @@ function analyzeCurrentPlan(booking) {
     
     // استخراج السعر الحالي
     result.currentPrice = booking.pricing?.finalPriceNumber || 
-                         extractNumberFromArabicText(booking.pricing?.finalPrice) || 
-                         0;
+                         extractNumberFromArabicText(booking.pricing?.finalPrice) || 0;
     
-    // تحليل طريقة الدفع من payment
-    if (booking.payment?.code === 'cash' || booking.payment?.method === 'دفعة واحدة') {
+    // تحليل payment للخطة الحالية
+    const paymentCode = booking.payment?.code;
+    const paymentMethod = booking.payment?.method;
+    
+    if (paymentCode === 'cash' || paymentMethod === 'دفعة واحدة') {
         result.type = 'cash';
+        result.displayText = 'دفعة واحدة';
         result.hasInstallments = false;
         
-        // البحث عن خصم نقدي في الخصومات
+        // التحقق من وجود خصم نقدي
         if (booking.discounts && Array.isArray(booking.discounts)) {
             const cashDiscount = booking.discounts.find(d => d.type === 'cash');
-            if (cashDiscount) {
-                result.hasCashDiscount = true;
-            }
+            result.hasCashDiscount = !!cashDiscount;
         }
-    } 
-    else if (booking.payment?.code?.startsWith('plan_') || 
-             booking.payment?.installmentDetails || 
-             booking.paymentDetails?.type === 'installment') {
+    }
+    else if (paymentCode?.startsWith('plan_')) {
         result.type = 'installment';
         result.hasInstallments = true;
         
-        // محاولة استخراج عدد الأشهر
-        if (booking.payment?.method) {
-            const match = booking.payment.method.match(/(\d+)/);
-            if (match) {
-                result.installmentMonths = parseInt(match[1]);
-            }
+        // استخراج عدد الشهور من الكود
+        const planMatch = paymentCode.match(/plan_(\d+)/);
+        if (planMatch) {
+            result.installmentMonths = parseInt(planMatch[1]);
+            result.displayText = `${result.installmentMonths} شهور`;
         }
+    }
+    else if (booking.payment?.installmentDetails || booking.paymentDetails?.type === 'installment') {
+        result.type = 'installment';
+        result.hasInstallments = true;
         
-        // أو من installmentDetails
-        if (!result.installmentMonths && booking.payment?.installmentDetails) {
+        // استخراج من النص
+        if (booking.payment?.installmentDetails) {
             const match = booking.payment.installmentDetails.match(/(\d+)\s*[×xX]/);
             if (match) {
-                result.installmentMonths = parseInt(match[1]) + 1; // +1 للدفعة الأولى
+                result.installmentMonths = parseInt(match[1]) + 1;
+                result.displayText = `${result.installmentMonths} شهور`;
             }
-        }
-        
-        // أو من paymentDetails
-        if (!result.installmentMonths && booking.paymentDetails?.totalInstallments) {
+        } else if (booking.paymentDetails?.totalInstallments) {
             result.installmentMonths = booking.paymentDetails.totalInstallments;
+            result.displayText = `${result.installmentMonths} شهور`;
         }
     }
     
@@ -3961,12 +3963,14 @@ function analyzeCurrentPlan(booking) {
     return result;
 }
 
-// دالة استخراج الخصومات النشطة
+// دالة استخراج الخصومات بدقة
 function extractActiveDiscounts(booking) {
     const discounts = {
         timeDiscount: 0,
         couponDiscount: 0,
-        cashDiscountPercentage: 15 // النسبة الافتراضية
+        couponType: 'fixed', // أو percentage
+        couponValue: 0,
+        cashDiscountPercentage: 15
     };
     
     if (booking.discounts && Array.isArray(booking.discounts)) {
@@ -3976,30 +3980,36 @@ function extractActiveDiscounts(booking) {
             }
             else if (discount.type === 'coupon') {
                 discounts.couponDiscount = discount.amount || extractNumberFromArabicText(discount.value) || 0;
-            }
-            else if (discount.type === 'cash') {
-                // حساب النسبة من الخصم الفعلي
-                const cashAmount = discount.amount || extractNumberFromArabicText(discount.value) || 0;
-                const baseAfterOther = booking.pricing?.basePriceNumber - discounts.timeDiscount - discounts.couponDiscount;
-                if (baseAfterOther > 0) {
-                    discounts.cashDiscountPercentage = Math.round((cashAmount / baseAfterOther) * 100);
+                // محاولة تحديد إذا كان نسبة أو مبلغ ثابت
+                if (discount.label && discount.label.includes('%')) {
+                    discounts.couponType = 'percentage';
+                    // استخراج النسبة من النص
+                    const percentMatch = discount.label.match(/(\d+)%/);
+                    if (percentMatch) {
+                        discounts.couponValue = parseInt(percentMatch[1]);
+                    }
+                } else {
+                    discounts.couponType = 'fixed';
+                    discounts.couponValue = discounts.couponDiscount;
                 }
             }
         });
     }
     
-    console.log('💰 الخصومات النشطة:', discounts);
+    console.log('💰 الخصومات المستخرجة:', discounts);
     return discounts;
 }
 
-// دالة حساب السعر لأي خطة
+// دالة الحساب الصحيحة للسعر - مطابقة لصفحة العروض
 function calculatePlanPrice(basePrice, planType, months, activeDiscounts) {
     let price = basePrice;
     let appliedDiscounts = [];
+    let priceAfterTimeDiscount = basePrice;
     
-    // تطبيق الخصم الزمني (لكل الخطط)
+    // 1. تطبيق الخصم الزمني أولاً
     if (activeDiscounts.timeDiscount > 0) {
         price -= activeDiscounts.timeDiscount;
+        priceAfterTimeDiscount = price;
         appliedDiscounts.push({
             type: 'time',
             amount: activeDiscounts.timeDiscount,
@@ -4007,19 +4017,10 @@ function calculatePlanPrice(basePrice, planType, months, activeDiscounts) {
         });
     }
     
-    // تطبيق خصم الكوبون (لكل الخطط)
-    if (activeDiscounts.couponDiscount > 0) {
-        price -= activeDiscounts.couponDiscount;
-        appliedDiscounts.push({
-            type: 'coupon',
-            amount: activeDiscounts.couponDiscount,
-            label: 'خصم الكوبون'
-        });
-    }
-    
-    // تطبيق الخصم النقدي (فقط للدفع الكامل)
+    // 2. حساب وتطبيق الخصم النقدي (من السعر بعد الخصم الزمني فقط - قبل الكوبون)
     if (planType === 'cash') {
-        const cashDiscount = Math.round(price * activeDiscounts.cashDiscountPercentage / 100);
+        // الخصم النقدي يُحسب من السعر بعد الخصم الزمني فقط
+        const cashDiscount = Math.round(priceAfterTimeDiscount * activeDiscounts.cashDiscountPercentage / 100);
         price -= cashDiscount;
         appliedDiscounts.push({
             type: 'cash',
@@ -4028,10 +4029,32 @@ function calculatePlanPrice(basePrice, planType, months, activeDiscounts) {
         });
     }
     
-    // التقريب
+    // 3. تطبيق الكوبون أخيراً (على السعر بعد كل الخصومات الأخرى)
+    if (activeDiscounts.couponDiscount > 0 || activeDiscounts.couponValue > 0) {
+        let couponAmount = 0;
+        
+        if (activeDiscounts.couponType === 'percentage' && activeDiscounts.couponValue > 0) {
+            // كوبون نسبة مئوية - يُحسب من السعر الحالي
+            couponAmount = Math.round(price * activeDiscounts.couponValue / 100);
+        } else {
+            // كوبون مبلغ ثابت
+            couponAmount = activeDiscounts.couponDiscount;
+        }
+        
+        if (couponAmount > 0) {
+            price -= couponAmount;
+            appliedDiscounts.push({
+                type: 'coupon',
+                amount: couponAmount,
+                label: 'خصم الكوبون'
+            });
+        }
+    }
+    
+    // التقريب النهائي
     price = Math.round(price / 10) * 10;
     
-    // حساب الأقساط
+    // حساب تفاصيل الأقساط
     let installmentDetails = null;
     if (planType === 'installment' && months > 0) {
         const firstPaymentPercent = months <= 3 ? 40 : 30;
@@ -4055,11 +4078,50 @@ function calculatePlanPrice(basePrice, planType, months, activeDiscounts) {
     };
 }
 
-// دالة عرض خطط الدفع المحدثة
+// تحديث دالة displayCurrentBookingInfo
+function displayCurrentBookingInfo(booking) {
+    const container = document.getElementById('currentBookingInfo');
+    const pricing = booking.pricing || {};
+    const customer = booking.customer || {};
+    
+    // تحليل الخطة الحالية بدقة
+    const currentPlan = analyzeCurrentPlan(booking);
+    
+    container.innerHTML = `
+        <h3 style="color: #065F46; margin-bottom: 15px; display: flex; align-items: center;">
+            <i class="fas fa-info-circle" style="margin-left: 10px;"></i>
+            معلومات الحجز الحالي
+        </h3>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+            <div>
+                <strong style="color: #047857;">العميل:</strong>
+                <span>${customer.name || 'غير محدد'}</span>
+            </div>
+            <div>
+                <strong style="color: #047857;">الدورة:</strong>
+                <span>${booking.courseName || 'غير محدد'}</span>
+            </div>
+            <div>
+                <strong style="color: #047857;">الخطة الحالية:</strong>
+                <span style="background: #DCFCE7; color: #166534; padding: 3px 10px; border-radius: 10px; font-weight: bold;">
+                    ${currentPlan.displayText}
+                </span>
+            </div>
+            <div>
+                <strong style="color: #047857;">السعر الحالي:</strong>
+                <span style="font-size: 1.2rem; color: #DC2626; font-weight: bold;">
+                    ${pricing.finalPrice || '0 ج.م'}
+                </span>
+            </div>
+        </div>
+    `;
+}
+
+// دالة عرض الخطط المحدثة
 function displayPaymentPlansNew(booking) {
     const container = document.getElementById('paymentPlansContainer');
     
-    // تحليل الوضع الحالي
     const currentPlan = analyzeCurrentPlan(booking);
     const activeDiscounts = extractActiveDiscounts(booking);
     const basePrice = currentPlan.basePrice;
@@ -4075,25 +4137,27 @@ function displayPaymentPlansNew(booking) {
     
     // خطة الدفع النقدي
     const cashCalc = calculatePlanPrice(basePrice, 'cash', 0, activeDiscounts);
-    const cashDiv = createPlanOptionNew('cash', cashCalc, currentPlan, 'دفعة واحدة كاملة');
+    const cashDiv = createPlanOptionNew('cash', cashCalc, currentPlan, 'دفعة واحدة كاملة', 0);
     plansGrid.appendChild(cashDiv);
     
-    // خطط الأقساط من 2 إلى 5 شهور
+    // خطط الأقساط
     for (let months = 2; months <= 5; months++) {
         const installmentCalc = calculatePlanPrice(basePrice, 'installment', months, activeDiscounts);
-        const planDiv = createPlanOptionNew(`plan_${months}`, installmentCalc, currentPlan, `${months} أشهر`);
+        const planDiv = createPlanOptionNew(`plan_${months}`, installmentCalc, currentPlan, `${months} أشهر`, months);
         plansGrid.appendChild(planDiv);
     }
 }
 
 // دالة إنشاء عنصر الخطة
-function createPlanOptionNew(planId, calculation, currentPlan, planName) {
+function createPlanOptionNew(planId, calculation, currentPlan, planName, months) {
     const div = document.createElement('div');
     div.className = 'plan-option';
     
-    // تحديد إذا كانت الخطة الحالية
+    // تحديد الخطة الحالية بدقة
     const isCurrent = (planId === 'cash' && currentPlan.type === 'cash') ||
-                     (planId === `plan_${currentPlan.installmentMonths}` && currentPlan.type === 'installment');
+                     (planId === `plan_${currentPlan.installmentMonths}` && 
+                      currentPlan.type === 'installment' && 
+                      months === currentPlan.installmentMonths);
     
     if (isCurrent) {
         div.classList.add('current');
@@ -4101,7 +4165,6 @@ function createPlanOptionNew(planId, calculation, currentPlan, planName) {
     
     const priceDiff = calculation.finalPrice - currentPlan.currentPrice;
     
-    // محتوى HTML
     let html = `
         <div style="padding: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -4117,7 +4180,7 @@ function createPlanOptionNew(planId, calculation, currentPlan, planName) {
                 </div>
             </div>`;
     
-    // عرض الخصومات المطبقة
+    // عرض الخصومات
     if (calculation.appliedDiscounts.length > 0) {
         html += '<div style="margin: 15px 0;">';
         calculation.appliedDiscounts.forEach(discount => {
@@ -4132,7 +4195,7 @@ function createPlanOptionNew(planId, calculation, currentPlan, planName) {
         html += '</div>';
     }
     
-    // عرض تفاصيل الأقساط
+    // تفاصيل الأقساط
     if (calculation.installmentDetails) {
         html += `
             <div style="background: #F3F4F6; padding: 15px; border-radius: 10px; margin-top: 15px;">
@@ -4141,7 +4204,7 @@ function createPlanOptionNew(planId, calculation, currentPlan, planName) {
             </div>`;
     }
     
-    // عرض الفرق في السعر
+    // الفرق في السعر
     if (!isCurrent) {
         html += `
             <div style="margin-top: 15px; padding: 10px; border-radius: 8px; text-align: center;
@@ -4158,45 +4221,39 @@ function createPlanOptionNew(planId, calculation, currentPlan, planName) {
     html += '</div>';
     div.innerHTML = html;
     
-    // إضافة حدث النقر
     if (!isCurrent) {
         div.style.cursor = 'pointer';
         div.onclick = function() {
-            selectPaymentPlanNew(planId, calculation, this);
+            selectPaymentPlanNew(planId, calculation, this, months);
         };
     }
     
     return div;
 }
 
-// دالة اختيار الخطة الجديدة
-function selectPaymentPlanNew(planId, calculation, element) {
-    // إزالة التحديد السابق
+// بقية الدوال كما هي...
+function selectPaymentPlanNew(planId, calculation, element, months) {
     document.querySelectorAll('.plan-option').forEach(plan => {
         plan.style.border = '2px solid #E5E7EB';
         plan.style.background = 'linear-gradient(135deg, #F9FAFB, #F3F4F6)';
     });
     
-    // تحديد الخطة الجديدة
     element.style.border = '3px solid #3B82F6';
     element.style.background = 'linear-gradient(135deg, #EFF6FF, #DBEAFE)';
     
-    // حفظ الاختيار
     selectedNewPlan = {
         id: planId,
         type: planId === 'cash' ? 'cash' : 'installment',
+        months: months,
         calculation: calculation
     };
     
-    // إظهار زر التأكيد
-    const confirmBtn = document.getElementById('confirmPlanChange');
-    confirmBtn.style.display = 'inline-block';
-    confirmBtn.onclick = function() {
+    document.getElementById('confirmPlanChange').style.display = 'inline-block';
+    document.getElementById('confirmPlanChange').onclick = function() {
         confirmPaymentPlanChangeNew();
     };
 }
 
-// دالة تأكيد وتطبيق التغيير
 async function confirmPaymentPlanChangeNew() {
     if (!selectedNewPlan || !currentEditingBooking) {
         Swal.fire('خطأ!', 'لم يتم اختيار خطة جديدة', 'error');
@@ -4234,7 +4291,6 @@ async function confirmPaymentPlanChangeNew() {
     }
 }
 
-// دالة تطبيق التغييرات في Firebase
 async function applyPaymentPlanChangeNew(booking, newPlan) {
     const updateData = {
         lastUpdated: new Date().toISOString(),
@@ -4242,11 +4298,9 @@ async function applyPaymentPlanChangeNew(booking, newPlan) {
         planChangedBy: 'admin'
     };
     
-    // تحديث pricing
     updateData['pricing.finalPrice'] = `${newPlan.calculation.finalPrice.toLocaleString('ar-EG')} ج.م`;
     updateData['pricing.finalPriceNumber'] = newPlan.calculation.finalPrice;
     
-    // تحديث الخصومات
     updateData.discounts = newPlan.calculation.appliedDiscounts.map(d => ({
         type: d.type,
         label: d.label,
@@ -4254,7 +4308,6 @@ async function applyPaymentPlanChangeNew(booking, newPlan) {
         amount: d.amount
     }));
     
-    // تحديث payment
     if (newPlan.type === 'cash') {
         updateData.payment = {
             code: 'cash',
@@ -4262,19 +4315,15 @@ async function applyPaymentPlanChangeNew(booking, newPlan) {
             installmentDetails: null,
             installmentHTML: null
         };
-        
-        // حذف paymentDetails للأقساط
         updateData.paymentDetails = firebase.firestore.FieldValue.delete();
     } else {
         const details = newPlan.calculation.installmentDetails;
         updateData.payment = {
-            code: newPlan.id,
+            code: `plan_${newPlan.months}`,
             method: `${details.months} شهور`,
             installmentDetails: details.description,
             installmentHTML: details.description
         };
-        
-        // إضافة paymentDetails للأقساط
         updateData.paymentDetails = {
             type: 'installment',
             totalAmount: details.total,
@@ -4285,13 +4334,10 @@ async function applyPaymentPlanChangeNew(booking, newPlan) {
         };
     }
     
-    // تحديث في Firebase
     await db.collection('tempBookings').doc(booking.id).update(updateData);
-    
     return true;
 }
 
-// استبدال الدالة القديمة
 window.openPaymentPlanEditor = async function(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) {
@@ -4302,10 +4348,7 @@ window.openPaymentPlanEditor = async function(bookingId) {
     currentEditingBooking = booking;
     const modal = document.getElementById('paymentEditorModal');
     
-    // عرض معلومات الحجز الحالي
     displayCurrentBookingInfo(booking);
-    
-    // عرض خطط الدفع بالنظام الجديد
     displayPaymentPlansNew(booking);
     
     modal.style.display = 'flex';
