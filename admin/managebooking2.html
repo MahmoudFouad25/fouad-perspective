@@ -3931,68 +3931,116 @@ function analyzeCurrentPlan(booking) {
     // استخراج السعر الأساسي
     result.basePrice = booking.pricing?.basePriceNumber || 
                        extractNumberFromArabicText(booking.pricing?.basePrice) || 
-                       10000;
+                       7500; // القيمة الافتراضية من مثالك
     
     // استخراج السعر الحالي
     result.currentPrice = booking.pricing?.finalPriceNumber || 
                          extractNumberFromArabicText(booking.pricing?.finalPrice) || 
                          0;
     
-    // تحليل طريقة الدفع
-    if (booking.payment?.code === 'cash' || 
-        booking.payment?.method === 'دفعة واحدة' ||
-        (booking.payment && !booking.payment.installmentDetails)) {
-        
-        result.type = 'cash';
-        result.displayName = 'دفعة واحدة';
-        result.hasInstallments = false;
-        
-        // التحقق من وجود خصم نقدي في الخصومات
-        if (booking.discounts && Array.isArray(booking.discounts)) {
-            const cashDiscount = booking.discounts.find(d => d.type === 'cash');
-            result.hasCashDiscount = !!cashDiscount;
-        }
-    } 
-    else if (booking.payment?.code?.startsWith('plan_') || 
-             booking.payment?.installmentDetails || 
-             booking.paymentDetails?.type === 'installment') {
-        
-        result.type = 'installment';
-        result.hasInstallments = true;
-        
-        // استخراج رقم الخطة
-        if (booking.payment?.code) {
-            const match = booking.payment.code.match(/plan_(\d+)/);
-            if (match) {
-                result.planNumber = parseInt(match[1]);
+    // تحليل طريقة الدفع من payment
+    if (booking.payment) {
+        // التحقق من الدفع النقدي
+        if (booking.payment.code === 'cash' || 
+            booking.payment.method === 'دفعة واحدة' ||
+            (!booking.payment.installmentDetails && !booking.payment.installmentHTML)) {
+            
+            result.type = 'cash';
+            result.displayName = 'دفعة واحدة';
+            result.hasInstallments = false;
+            
+            // البحث عن خصم نقدي في الخصومات
+            if (booking.discounts && Array.isArray(booking.discounts)) {
+                result.hasCashDiscount = booking.discounts.some(d => d.type === 'cash');
             }
         }
-        
-        // استخراج عدد الأشهر
-        const installmentText = booking.payment?.installmentDetails || 
-                               booking.payment?.method || '';
-        
-        const patterns = [
-            /(\d+)\s*شهر/,
-            /(\d+)\s*شهور/,
-            /(\d+)\s*أقساط/
-        ];
-        
-        for (let pattern of patterns) {
-            const match = installmentText.match(pattern);
-            if (match) {
-                result.installmentMonths = parseInt(match[1]);
-                break;
+        // التحقق من الأقساط
+        else if (booking.payment.installmentDetails || 
+                 booking.payment.installmentHTML ||
+                 booking.payment.code?.startsWith('plan_')) {
+            
+            result.type = 'installment';
+            result.hasInstallments = true;
+            
+            // استخراج رقم الخطة من الكود
+            if (booking.payment.code) {
+                const match = booking.payment.code.match(/plan_(\d+)/);
+                if (match) {
+                    result.planNumber = parseInt(match[1]);
+                }
             }
+            
+            // استخراج عدد الشهور من النص
+            const installmentText = booking.payment.installmentDetails || 
+                                   booking.payment.installmentHTML || 
+                                   booking.payment.method || '';
+            
+            // البحث عن الرقم في النص
+            const monthsMatch = installmentText.match(/(\d+)\s*(شهر|شهور|أقساط|×)/);
+            if (monthsMatch) {
+                result.installmentMonths = parseInt(monthsMatch[1]);
+            }
+            
+            result.displayName = result.installmentMonths ? 
+                                `${result.installmentMonths} شهور` : 
+                                'أقساط';
         }
-        
-        result.displayName = result.installmentMonths ? 
-                            `${result.installmentMonths} شهور` : 
-                            'أقساط';
     }
     
-    console.log('📊 تحليل الخطة الحالية:', result);
+    console.log('تحليل الخطة الحالية:', result);
     return result;
+}
+        function extractStoredDiscounts(booking) {
+    const discounts = {
+        timeDiscount: 0,
+        timePercentage: 0,
+        couponDiscount: 0,
+        couponPercentage: 0,
+        couponCode: '',
+        couponType: 'percentage',
+        cashDiscountAmount: 0,
+        cashDiscountPercentage: 15 // النسبة الافتراضية
+    };
+    
+    // استخراج الخصومات من البيانات المخزنة
+    if (booking.discounts && Array.isArray(booking.discounts)) {
+        booking.discounts.forEach(discount => {
+            const amount = discount.amount || extractNumberFromArabicText(discount.value) || 0;
+            
+            if (discount.type === 'time') {
+                discounts.timeDiscount = amount;
+                // حساب النسبة المئوية للعرض الزمني
+                const basePrice = booking.pricing?.basePriceNumber || 7500;
+                if (basePrice > 0) {
+                    discounts.timePercentage = Math.round((amount / basePrice) * 100);
+                }
+            }
+            else if (discount.type === 'coupon') {
+                discounts.couponDiscount = amount;
+                // استخراج كود الكوبون من النص
+                const codeMatch = discount.label?.match(/\(([^)]+)\)/);
+                if (codeMatch) {
+                    discounts.couponCode = codeMatch[1];
+                }
+                // حساب نسبة الكوبون
+                const priceBeforeCoupon = (booking.pricing?.basePriceNumber || 7500) - discounts.timeDiscount;
+                if (priceBeforeCoupon > 0) {
+                    discounts.couponPercentage = Math.round((amount / priceBeforeCoupon) * 100);
+                }
+            }
+            else if (discount.type === 'cash') {
+                discounts.cashDiscountAmount = amount;
+                // حساب نسبة الخصم النقدي الفعلية
+                const priceAfterTime = (booking.pricing?.basePriceNumber || 7500) - discounts.timeDiscount;
+                if (priceAfterTime > 0) {
+                    discounts.cashDiscountPercentage = Math.round((amount / priceAfterTime) * 100);
+                }
+            }
+        });
+    }
+    
+    console.log('الخصومات المستخرجة:', discounts);
+    return discounts;
 }
 
 // دالة استخراج الخصومات المخزنة
@@ -4180,7 +4228,7 @@ async function openPaymentPlanEditor(bookingId) {
     // عرض معلومات الحجز الحالي
     displayCurrentBookingInfo(booking);
     
-    // عرض خطط الدفع بالمنطق الصحيح
+    // عرض خطط الدفع الصحيحة
     displayPaymentPlansCorrect(booking);
     
     modal.style.display = 'flex';
