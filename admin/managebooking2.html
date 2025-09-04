@@ -4046,63 +4046,107 @@ function extractStoredDiscounts(booking) {
     console.log('الخصومات الفعلية المستخرجة:', discounts);
     return discounts;
 }
-
-// الدالة الرئيسية لحساب السعر بالمنطق الصحيح
-function displayPaymentPlansCorrect(booking) {
-    const container = document.getElementById('paymentPlansContainer');
+        // الدالة الرئيسية لحساب السعر بالمنطق الصحيح
+function calculatePriceCorrectly(basePrice, planType, months, storedDiscounts) {
+    let price = basePrice;
+    let appliedDiscounts = [];
+    let detailedBreakdown = [];
     
-    const currentPlan = analyzeCurrentPlan(booking);
-    const storedDiscounts = extractStoredDiscounts(booking);
-    const basePrice = currentPlan.basePrice;
-    
-    // إذا كانت الخطة الحالية نقدية، نحتاج حساب خصومات الأقساط
-    let installmentDiscounts = {...storedDiscounts};
-    if (currentPlan.type === 'cash') {
-        // للأقساط: نفس الخصومات بدون الخصم النقدي
-        installmentDiscounts.cashDiscountAmount = 0;
-        installmentDiscounts.cashDiscountPercentage = 0;
+    // 1. تطبيق العرض الزمني أولاً (على الكل)
+    if (storedDiscounts.timeDiscount > 0 || storedDiscounts.timePercentage > 0) {
+        const timeDiscount = storedDiscounts.timeDiscount || 
+                            smartRound(price * storedDiscounts.timePercentage / 100);
+        price -= timeDiscount;
+        appliedDiscounts.push({
+            type: 'time',
+            amount: timeDiscount,
+            label: 'خصم العرض الزمني'
+        });
+        detailedBreakdown.push({
+            step: 'العرض الزمني',
+            discount: timeDiscount,
+            priceAfter: price
+        });
     }
     
-    // إذا كانت الخطة الحالية أقساط، نحتاج حساب الخصم النقدي للدفعة الواحدة
-    let cashDiscounts = {...storedDiscounts};
-    if (currentPlan.type === 'installment') {
-        // للدفع النقدي: نضيف الخصم النقدي
-        const priceAfterTime = basePrice - storedDiscounts.timeDiscount;
-        cashDiscounts.cashDiscountAmount = smartRound(priceAfterTime * 0.15);
-        cashDiscounts.cashDiscountPercentage = 15;
-        // نعيد حساب الكوبون بعد الخصم النقدي
-        const priceAfterCash = priceAfterTime - cashDiscounts.cashDiscountAmount;
-        if (storedDiscounts.couponPercentage > 0) {
-            cashDiscounts.couponDiscount = smartRound(priceAfterCash * storedDiscounts.couponPercentage / 100);
+    // 2. خصم الدفع النقدي (للدفع الكامل فقط - قبل الكوبون)
+    let cashDiscountAmount = 0;
+    if (planType === 'cash') {
+        // الخصم النقدي يُحسب من السعر بعد العرض الزمني مباشرة
+        cashDiscountAmount = smartRound(price * storedDiscounts.cashDiscountPercentage / 100);
+        price -= cashDiscountAmount;
+        appliedDiscounts.push({
+            type: 'cash',
+            amount: cashDiscountAmount,
+            label: `خصم الدفع النقدي (${storedDiscounts.cashDiscountPercentage}%)`
+        });
+        detailedBreakdown.push({
+            step: 'الخصم النقدي',
+            discount: cashDiscountAmount,
+            priceAfter: price
+        });
+    }
+    
+    // 3. تطبيق الكوبون أخيراً (بعد كل الخصومات)
+    if (storedDiscounts.couponDiscount > 0 || storedDiscounts.couponCode) {
+        let couponAmount = 0;
+        
+        if (storedDiscounts.couponType === 'percentage' && storedDiscounts.couponPercentage > 0) {
+            // كوبون بالنسبة المئوية من السعر الحالي
+            couponAmount = smartRound(price * storedDiscounts.couponPercentage / 100);
+        } else if (storedDiscounts.couponType === 'fixed') {
+            // كوبون بمبلغ ثابت
+            couponAmount = Math.min(storedDiscounts.couponAmount || storedDiscounts.couponDiscount, price);
+        } else if (storedDiscounts.couponDiscount > 0) {
+            // استخدم المبلغ المحفوظ
+            couponAmount = storedDiscounts.couponDiscount;
         }
+        
+        price -= couponAmount;
+        appliedDiscounts.push({
+            type: 'coupon',
+            amount: couponAmount,
+            label: storedDiscounts.couponCode ? 
+                   `كود الخصم (${storedDiscounts.couponCode})` : 
+                   'كود الخصم'
+        });
+        detailedBreakdown.push({
+            step: 'الكوبون',
+            discount: couponAmount,
+            priceAfter: price
+        });
     }
     
-    container.innerHTML = `
-        <h3 style="color: #1F2937; margin-bottom: 20px;">
-            <i class="fas fa-credit-card"></i> اختر خطة الدفع الجديدة:
-        </h3>
-        <div id="plansGrid"></div>
-    `;
+    // التقريب النهائي
+    price = smartRound(price);
     
-    const plansGrid = document.getElementById('plansGrid');
+    // حساب الأقساط إن وجدت
+    let installmentDetails = null;
+    if (planType === 'installment' && months > 0) {
+        const firstPaymentPercent = months <= 3 ? 40 : 30;
+        const firstPayment = smartRound(price * firstPaymentPercent / 100);
+        const remaining = price - firstPayment;
+        const monthlyAmount = smartRound(remaining / (months - 1));
+        
+        installmentDetails = {
+            total: price,
+            firstPayment: firstPayment,
+            monthlyAmount: monthlyAmount,
+            months: months,
+            description: `${firstPayment.toLocaleString('ar-EG')} ج.م مقدم + ${months-1} × ${monthlyAmount.toLocaleString('ar-EG')} ج.م`
+        };
+    }
     
-    // خطة الدفع النقدي
-    const cashCalc = calculatePriceCorrectly(basePrice, 'cash', 0, cashDiscounts);
-    const cashDiv = createPlanCard('cash', cashCalc, currentPlan, 'دفعة واحدة كاملة', cashDiscounts);
-    plansGrid.appendChild(cashDiv);
-    
-    // خطط الأقساط المتاحة
-    const availablePlans = [
-        { months: 3, id: 'plan_3' },
-        { months: 6, id: 'plan_6' }
-    ];
-    
-    availablePlans.forEach(plan => {
-        const installmentCalc = calculatePriceCorrectly(basePrice, 'installment', plan.months, installmentDiscounts);
-        const planDiv = createPlanCard(plan.id, installmentCalc, currentPlan, `${plan.months} شهور`, installmentDiscounts);
-        plansGrid.appendChild(planDiv);
-    });
+    return {
+        finalPrice: price,
+        appliedDiscounts: appliedDiscounts,
+        installmentDetails: installmentDetails,
+        breakdown: detailedBreakdown,
+        totalSavings: basePrice - price
+    };
 }
+
+
 // دالة فتح محرر خطة الدفع
 async function openPaymentPlanEditor(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
