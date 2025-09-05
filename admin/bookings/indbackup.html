@@ -1,0 +1,1953 @@
+
+        <button class="btn btn-custom" onclick="assignCustomCourse('${studentId}')">
+    <i class="fas fa-magic"></i> دورة إضافية
+</button>
+                
+    `}
+    <!-- أزرار عامة -->
+    <button class="btn btn-secondary" onclick="viewFullDetails('${studentId}')">
+        <i class="fas fa-info-circle"></i> كل التفاصيل
+    </button>
+    ${hasAccount ? `
+    <button class="btn" style="background: linear-gradient(135deg, ${levelColor}, ${levelColor}DD); color: white;"
+            onclick="manageJourneySystem('${studentId}')">
+        <i class="fas fa-seedling"></i> بذور الارتواء
+    </button>
+` : ''}
+    
+<button class="btn" style="background: linear-gradient(135deg, #FFD700, #F59E0B); color: white;"
+        onclick="manageWalletSystem('${studentId}')">
+    <i class="fas fa-wallet"></i> المحفظة
+</button>
+
+    ${customer.whatsapp ? `
+        <button class="btn btn-whatsapp" onclick="smartMessaging('${studentId}')">
+    <i class="fab fa-whatsapp"></i> مركز المراسلة
+</button>
+    ` : ''}
+
+  // دالة تخصيص دورة إضافية مخصصة
+async function assignCustomCourse(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student) {
+        Swal.fire('خطأ', 'لم يتم العثور على الطالب', 'error');
+        return;
+    }
+    
+    // التحقق من وجود حساب
+    if (!student.userId) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'لا يوجد حساب',
+            text: 'يجب إنشاء حساب أولاً',
+            showCancelButton: true,
+            confirmButtonText: 'إنشاء حساب',
+            cancelButtonText: 'إلغاء'
+        });
+        
+        if (result.isConfirmed) {
+            await createAccount(studentId);
+        }
+        return;
+    }
+    
+    // تحميل الدورات والعروض
+    Swal.fire({
+        title: 'جاري التحميل...',
+        text: 'يتم جلب الدورات والعروض المتاحة',
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        willOpen: () => { Swal.showLoading(); }
+    });
+    
+    await loadCoursesWithOffers();
+    
+    // عرض واجهة اختيار الدورة
+    const { value: selectedCourse } = await Swal.fire({
+        title: '🎨 تخصيص دورة إضافية',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 60vh; overflow-y: auto;">
+                
+                <!-- معلومات الطالب -->
+                <div style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); 
+                            color: white; padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h4 style="margin: 0;">${student.customer?.name}</h4>
+                    <p style="margin: 5px 0; opacity: 0.9;">
+                        ${student.customer?.whatsapp} | ${student.customer?.email || 'لا يوجد بريد'}
+                    </p>
+                </div>
+                
+                <!-- قائمة الدورات -->
+                <div style="margin-bottom: 20px;">
+                    <h4 style="color: #1F2937; margin-bottom: 15px;">
+                        <i class="fas fa-book"></i> اختر الدورة
+                    </h4>
+                    <select id="courseSelect" class="swal2-input" 
+                            onchange="updateCourseOffers()" 
+                            style="width: 100%; padding: 12px;">
+                        <option value="">-- اختر دورة --</option>
+                        ${coursesWithOffers.map(course => `
+                            <option value="${course.id}" 
+                                    data-price="${course.price}"
+                                    data-sale="${course.salePrice}">
+                                ${course.title} - ${course.price} ج.م
+                                ${course.salePrice ? `(مخفض: ${course.salePrice} ج.م)` : ''}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+                
+                <!-- منطقة العروض -->
+                <div id="offersArea" style="display: none;">
+                    <!-- ستملأ ديناميكياً -->
+                </div>
+                
+                <!-- حاسبة السعر -->
+                <div id="priceCalculator" style="display: none;">
+                    <!-- ستملأ ديناميكياً -->
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCancelButton: true,
+        confirmButtonText: 'تخصيص الدورة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#8B5CF6',
+        didOpen: () => {
+            // إضافة الدوال للنافذة
+            window.updateCourseOffers = function() {
+                const select = document.getElementById('courseSelect');
+                const courseId = select.value;
+                
+                if (!courseId) {
+                    document.getElementById('offersArea').style.display = 'none';
+                    document.getElementById('priceCalculator').style.display = 'none';
+                    return;
+                }
+                
+                const course = coursesWithOffers.find(c => c.id === courseId);
+                if (!course) return;
+                
+                // عرض العروض المتاحة
+                showCourseOffers(course);
+            };
+            
+            window.showCourseOffers = function(course) {
+                const offersArea = document.getElementById('offersArea');
+                const priceCalc = document.getElementById('priceCalculator');
+                
+                offersArea.style.display = 'block';
+                priceCalc.style.display = 'block';
+                
+                // بناء HTML العروض
+                let offersHTML = `
+                    <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-tags"></i> العروض المتاحة
+                        </h4>
+                `;
+                
+                // العروض الزمنية
+                if (course.discounts && course.discounts.length > 0) {
+                    offersHTML += `
+                        <div style="margin-bottom: 15px;">
+                            <h5 style="color: #6B7280;">عروض زمنية:</h5>
+                            ${course.discounts.map((d, idx) => `
+                                <label style="display: block; margin: 5px 0;">
+                                    <input type="checkbox" id="discount_${idx}" 
+                                           value="${d.percentage}"
+                                           onchange="calculateFinalPrice()">
+                                    ${d.name} - خصم ${d.percentage}%
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                
+                // خصم نقدي
+                if (course.cashDiscount && course.cashDiscount.enabled) {
+                    offersHTML += `
+                        <div style="margin-bottom: 15px;">
+                            <label>
+                                <input type="checkbox" id="cashDiscount" 
+                                       value="${course.cashDiscount.percentage}"
+                                       onchange="calculateFinalPrice()">
+                                خصم الدفع النقدي ${course.cashDiscount.percentage}%
+                            </label>
+                        </div>
+                    `;
+                }
+                
+                // الأقساط
+                if (course.paymentPlans && course.paymentPlans.length > 0) {
+                    offersHTML += `
+                        <div style="margin-bottom: 15px;">
+                            <h5 style="color: #6B7280;">خطط الأقساط:</h5>
+                            <select id="installmentPlan" class="swal2-input" 
+                                    onchange="calculateFinalPrice()"
+                                    style="width: 100%;">
+                                <option value="">دفع كامل</option>
+                                ${course.paymentPlans.map(plan => `
+                                    <option value="${plan.installments}">
+                                        ${plan.name} - ${plan.installments} أقساط
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                    `;
+                }
+                
+                offersHTML += '</div>';
+                offersArea.innerHTML = offersHTML;
+                
+                // حاسبة السعر
+                priceCalc.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #10B981, #059669); 
+                                color: white; padding: 20px; border-radius: 12px;">
+                        <h4 style="margin: 0 0 15px 0;">
+                            <i class="fas fa-calculator"></i> حساب السعر
+                        </h4>
+                        <div id="priceDetails">
+                            <div>السعر الأصلي: ${course.price} ج.م</div>
+                        </div>
+                    </div>
+                `;
+                  
+                // إضافة دالة الحساب
+                window.calculateFinalPrice = function() {
+                    let price = course.price;
+                    let totalDiscount = 0;
+                    let details = [`السعر الأصلي: ${price} ج.م`];
+                    
+                    // حساب الخصومات
+                    const discountInputs = document.querySelectorAll('[id^="discount_"]:checked');
+                    discountInputs.forEach(input => {
+                        const discount = parseFloat(input.value);
+                        const amount = price * (discount / 100);
+                        totalDiscount += amount;
+                        details.push(`خصم: -${amount.toFixed(0)} ج.م`);
+                    });
+                    
+                    // خصم نقدي
+                    const cashInput = document.getElementById('cashDiscount');
+                    if (cashInput && cashInput.checked) {
+                        const amount = price * (parseFloat(cashInput.value) / 100);
+                        totalDiscount += amount;
+                        details.push(`خصم نقدي: -${amount.toFixed(0)} ج.م`);
+                    }
+                    
+                    const finalPrice = price - totalDiscount;
+                    details.push(`<strong>السعر النهائي: ${finalPrice.toFixed(0)} ج.م</strong>`);
+                    
+                    document.getElementById('priceDetails').innerHTML = details.join('<br>');
+                };
+            };
+        },
+        preConfirm: () => {
+            const courseId = document.getElementById('courseSelect').value;
+            if (!courseId) {
+                Swal.showValidationMessage('يجب اختيار دورة');
+                return false;
+            }
+            
+            const course = coursesWithOffers.find(c => c.id === courseId);
+            
+            // جمع العروض المختارة
+            const selectedOffers = {
+                discounts: [],
+                cashDiscount: false,
+                installmentPlan: null
+            };
+            
+            // الخصومات
+            document.querySelectorAll('[id^="discount_"]:checked').forEach(input => {
+                selectedOffers.discounts.push(parseFloat(input.value));
+            });
+            
+            // خصم نقدي
+            const cashInput = document.getElementById('cashDiscount');
+            if (cashInput && cashInput.checked) {
+                selectedOffers.cashDiscount = parseFloat(cashInput.value);
+            }
+            
+            // الأقساط
+            const installmentSelect = document.getElementById('installmentPlan');
+            if (installmentSelect && installmentSelect.value) {
+                selectedOffers.installmentPlan = installmentSelect.value;
+            }
+            
+            return {
+                course: course,
+                offers: selectedOffers,
+                student: student
+            };
+        }
+    });
+    
+    if (!selectedCourse) return;
+    
+    // حفظ التخصيص
+    await saveCustomAssignment(selectedCourse);
+}
+
+window.assignCustomCourse = assignCustomCourse;
+
+
+
+     // عرض التفاصيل الكاملة
+        // عرض التفاصيل الكاملة المطورة
+// عرض التفاصيل الكاملة المطورة بالكامل
+function viewFullDetails(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    
+    if (!student) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات الطالب', 'error');
+        return;
+    }
+    
+    const customer = student.customer || {};
+    const pricing = student.pricing || {};
+    const discounts = student.discounts || [];
+    const payment = student.payment || {};
+    const progress = student.progress || {};
+    const completeness = student.dataCompleteness?.percentage || 0;
+    const paymentInfo = student.paymentInfo || {};
+    
+    // تحديد مستوى الطالب
+    let studentLevel = stageInfo.title;
+let levelColor = stageInfo.color;
+let levelIcon = stageInfo.icon;
+    
+   
+    
+    Swal.fire({
+        title: '📋 التفاصيل الكاملة للطالب',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto; padding: 20px;">
+                
+                <!-- رأس البطاقة المطور -->
+                <div style="background: linear-gradient(135deg, ${levelColor}, ${levelColor}DD); 
+                            padding: 25px; border-radius: 20px; margin-bottom: 25px; 
+                            color: white; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 20px;">
+                            <div style="width: 80px; height: 80px; background: rgba(255,255,255,0.2); 
+                                        border-radius: 50%; display: flex; align-items: center; 
+                                        justify-content: center; font-size: 2rem;">
+                                <i class="fas ${levelIcon}"></i>
+                            </div>
+                            <div>
+                                <h2 style="margin: 0; font-size: 1.8rem;">${customer.name || 'غير محدد'}</h2>
+                                <p style="margin: 5px 0; opacity: 0.9;">
+                                    ${customer.title ? `${customer.title} • ` : ''}
+                                    ${customer.age ? `${customer.age} سنة • ` : ''}
+                                    ${customer.job || ''}
+                                </p>
+                                <div style="margin-top: 10px;">
+                                    <span style="background: rgba(255,255,255,0.3); padding: 5px 15px; 
+                                                 border-radius: 20px; font-size: 0.9rem;">
+                                        ${studentLevel}
+                                    </span>
+                                    ${student.accountCreated ? `
+                                        <span style="background: rgba(255,255,255,0.3); padding: 5px 15px; 
+                                                     border-radius: 20px; font-size: 0.9rem; margin-right: 10px;">
+                                            <i class="fas fa-check-circle"></i> حساب مفعل
+                                        </span>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 0.9rem; opacity: 0.8;">اكتمال البيانات</div>
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${completeness}%
+                            </div>
+                            <div style="width: 80px; height: 8px; background: rgba(255,255,255,0.3); 
+                                        border-radius: 4px; overflow: hidden; margin-top: 10px;">
+                                <div style="width: ${completeness}%; height: 100%; 
+                                            background: white; transition: width 0.5s;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- تبويبات التفاصيل -->
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #E5E7EB; 
+                            padding-bottom: 10px;">
+                    <button onclick="showDetailTab('personal')" class="detail-tab active" 
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   font-weight: bold; color: #3B82F6; border-bottom: 3px solid #3B82F6;">
+                        <i class="fas fa-user"></i> الشخصية
+                    </button>
+                    <button onclick="showDetailTab('financial')" class="detail-tab"
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   color: #6B7280;">
+                        <i class="fas fa-dollar-sign"></i> المالية
+                    </button>
+                    <button onclick="showDetailTab('course')" class="detail-tab"
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   color: #6B7280;">
+                        <i class="fas fa-book"></i> الدورة
+                    </button>
+                    <button onclick="showDetailTab('system')" class="detail-tab"
+                            style="background: none; border: none; padding: 10px 20px; cursor: pointer; 
+                                   color: #6B7280;">
+                        <i class="fas fa-cog"></i> النظام
+                    </button>
+                </div>
+                
+                <!-- محتوى التبويبات -->
+                <div id="detail-content">
+                    <!-- التبويب الشخصي -->
+                    <div id="personal-tab" class="tab-content">
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                            <div style="background: white; border: 1px solid #E5E7EB; 
+                                        padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                    <i class="fas fa-id-card"></i> البيانات الأساسية
+                                </h4>
+                                <div style="display: grid; gap: 10px;">
+                                    <div><strong>الاسم:</strong> ${customer.name || 'غير محدد'}</div>
+                                    <div><strong>العنوان:</strong> ${customer.title || 'غير محدد'}</div>
+                                    <div><strong>العمر:</strong> ${customer.age || 'غير محدد'} سنة</div>
+                                    <div><strong>النوع:</strong> ${customer.gender || 'غير محدد'}</div>
+                                    <div><strong>الوظيفة:</strong> ${customer.job || 'غير محدد'}</div>
+                                </div>
+                            </div>
+                            
+                            <div style="background: white; border: 1px solid #E5E7EB; 
+                                        padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                    <i class="fas fa-phone"></i> معلومات الاتصال
+                                </h4>
+                                <div style="display: grid; gap: 10px;">
+                                    <div><strong>الواتساب:</strong> ${customer.whatsapp || 'غير محدد'}</div>
+                                    <div><strong>البريد:</strong> ${customer.email || 'غير محدد'}</div>
+                                    <div><strong>الدولة:</strong> ${customer.country || 'غير محدد'}</div>
+                                    <div><strong>المدينة:</strong> ${customer.city || 'غير محدد'}</div>
+                                    <div><strong>المصدر:</strong> ${customer.source || 'غير محدد'}</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${customer.expectations || customer.applicationPlan || customer.notes || customer.experience ? `
+                            <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; 
+                                        margin-top: 20px;">
+                                <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                    <i class="fas fa-lightbulb"></i> التوقعات والخطط
+                                </h4>
+                                ${customer.expectations ? `
+                                    <div style="margin-bottom: 15px;">
+                                        <strong>التوقعات:</strong>
+                                        <p style="margin: 5px 0; color: #4B5563;">
+                                            ${customer.expectations}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${customer.applicationPlan ? `
+                                    <div style="margin-bottom: 15px;">
+                                        <strong>خطة التطبيق:</strong>
+                                        <p style="margin: 5px 0; color: #4B5563;">
+                                            ${customer.applicationPlan}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${customer.notes ? `
+                                    <div style="margin-bottom: 15px;">
+                                        <strong>الملاحظات:</strong>
+                                        <p style="margin: 5px 0; color: #4B5563;">
+                                            ${customer.notes}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${customer.experience ? `
+                                    <div>
+                                        <strong>الخبرة السابقة:</strong>
+                                        <p style="margin: 5px 0; color: #4B5563;">
+                                            ${customer.experience}
+                                        </p>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <!-- أزرار الإجراءات -->
+                <div style="display: flex; gap: 15px; margin-top: 25px; padding-top: 20px; 
+                            border-top: 2px solid #E5E7EB;">
+                    <button onclick="window.print()" 
+                            style="background: #6B7280; color: white; border: none; 
+                                   padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-print"></i> طباعة
+                    </button>
+                    <button onclick="exportStudentData('${studentId}')" 
+                            style="background: #3B82F6; color: white; border: none; 
+                                   padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-download"></i> تصدير
+                    </button>
+                    ${customer.whatsapp ? `
+                        <button onclick="smartMessaging('${studentId}')" 
+                                style="background: #25D366; color: white; border: none; 
+                                       padding: 12px 24px; border-radius: 8px; cursor: pointer;">
+                            <i class="fab fa-whatsapp"></i> مراسلة
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `,
+        width: '1000px',
+        showCloseButton: true,
+        showConfirmButton: false,
+        didOpen: () => {
+            window.showDetailTab = (tab) => {
+                // إخفاء كل التبويبات
+                const tabs = ['personal', 'financial', 'course', 'system'];
+                tabs.forEach(t => {
+                    const tabBtn = document.querySelector(`.detail-tab:nth-child(${tabs.indexOf(t) + 1})`);
+                    if (tabBtn) {
+                        tabBtn.style.color = '#6B7280';
+                        tabBtn.style.borderBottom = 'none';
+                    }
+                });
+                
+                // إظهار التبويب المحدد
+                const activeBtn = document.querySelector(`.detail-tab:nth-child(${tabs.indexOf(tab) + 1})`);
+                if (activeBtn) {
+                    activeBtn.style.color = '#3B82F6';
+                    activeBtn.style.borderBottom = '3px solid #3B82F6';
+                }
+                
+                // تحديث المحتوى حسب التبويب
+                let content = '';
+                
+                switch(tab) {
+                    case 'financial':
+                        content = `
+                            <div style="display: grid; gap: 20px;">
+                                <!-- الأسعار والخصومات -->
+                                <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                                            padding: 20px; border-radius: 12px;">
+                                    <h4 style="color: #92400E; margin: 0 0 15px 0;">
+                                        <i class="fas fa-tags"></i> التسعير والخصومات
+                                    </h4>
+                                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); 
+                                                gap: 15px;">
+                                        <div style="background: white; padding: 15px; border-radius: 8px; 
+                                                    text-align: center;">
+                                            <div style="color: #6B7280;">السعر الأصلي</div>
+                                            <div style="font-size: 1.3rem; font-weight: bold; 
+                                                        text-decoration: line-through; color: #9CA3AF;">
+                                                ${pricing.basePrice || '0 ج.م'}
+                                            </div>
+                                        </div>
+                                        <div style="background: #DCFCE7; padding: 15px; border-radius: 8px; 
+                                                    text-align: center;">
+                                            <div style="color: #065F46;">السعر النهائي</div>
+                                            <div style="font-size: 1.5rem; font-weight: bold; color: #10B981;">
+                                                ${pricing.finalPrice || '0 ج.م'}
+                                            </div>
+                                        </div>
+                                        <div style="background: #FEE2E2; padding: 15px; border-radius: 8px; 
+                                                    text-align: center;">
+                                            <div style="color: #991B1B;">التوفير</div>
+                                            <div style="font-size: 1.3rem; font-weight: bold; color: #DC2626;">
+                                                ${student.totalSavingsText || '0 ج.م'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- حالة الدفع -->
+                                <div style="background: white; border: 2px solid #E5E7EB; 
+                                            padding: 20px; border-radius: 12px;">
+                                    <h4 style="color: #1F2937; margin: 0 0 15px 0;">
+                                        <i class="fas fa-credit-card"></i> حالة الدفع
+                                    </h4>
+                                    ${paymentInfo.isInstallment ? `
+                                        <!-- نظام الأقساط -->
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); 
+                                                    gap: 15px;">
+                                            <div>
+                                                <strong>نوع الدفع:</strong> أقساط
+                                            </div>
+                                            <div>
+                                                <strong>عدد الأقساط:</strong> ${paymentInfo.totalInstallments}
+                                            </div>
+                                            <div>
+                                                <strong>المدفوع:</strong> 
+                                                <span style="color: #10B981; font-weight: bold;">
+                                                    ${(paymentInfo.paidAmount || 0).toLocaleString('ar-EG')} ج.م
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <strong>المتبقي:</strong> 
+                                                <span style="color: #F59E0B; font-weight: bold;">
+                                                    ${(paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <strong>الأقساط المدفوعة:</strong> ${paymentInfo.paidInstallments || 0}
+                                            </div>
+                                            <div>
+                                                <strong>القسط القادم:</strong> 
+                                                ${paymentInfo.nextDueDate ? 
+                                                    new Date(paymentInfo.nextDueDate).toLocaleDateString('ar-EG') : 
+                                                    'غير محدد'}
+                                            </div>
+                                        </div>
+                                    ` : `
+                                        <!-- دفع كامل -->
+                                        <div style="text-align: center; padding: 30px;">
+                                            ${student.paymentConfirmed ? `
+                                                <i class="fas fa-check-circle" 
+                                                   style="color: #10B981; font-size: 3rem;"></i>
+                                                <p style="color: #065F46; font-size: 1.2rem; 
+                                                          font-weight: bold; margin: 15px 0;">
+                                                    الدفع مؤكد بالكامل
+                                                </p>
+                                            ` : `
+                                                <i class="fas fa-clock" 
+                                                   style="color: #F59E0B; font-size: 3rem;"></i>
+                                                <p style="color: #92400E; font-size: 1.2rem; 
+                                                          font-weight: bold; margin: 15px 0;">
+                                                    بانتظار تأكيد الدفع
+                                                </p>
+                                            `}
+                                        </div>
+                                    `}
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'course':
+                        content = `
+                            <div style="background: white; padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #1F2937; margin: 0 0 20px 0;">
+                                    <i class="fas fa-graduation-cap"></i> معلومات الدورة
+                                </h4>
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                                    <div>
+                                        <strong>اسم الدورة:</strong> ${student.courseName || 'غير محدد'}
+                                    </div>
+                                    <div>
+                                        <strong>المستوى:</strong> ${customer.experience || 'مبتدئ'}
+                                    </div>
+                                    ${student.activeOffer ? `
+                                        <div>
+                                            <strong>العرض النشط:</strong> 
+                                            <span style="background: #F59E0B; color: white; 
+                                                         padding: 3px 10px; border-radius: 15px;">
+                                                ${student.activeOffer.name}
+                                            </span>
+                                        </div>
+                                    ` : ''}
+                                    ${student.coupon ? `
+                                        <div>
+                                            <strong>الكوبون:</strong> ${student.coupon.code}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                
+                                ${discounts.length > 0 ? `
+                                    <div style="margin-top: 20px;">
+                                        <strong>الخصومات المطبقة:</strong>
+                                        <div style="display: grid; gap: 10px; margin-top: 10px;">
+                                            ${discounts.map(d => `
+                                                <div style="display: flex; justify-content: space-between; 
+                                                            padding: 10px; background: #F9FAFB; 
+                                                            border-radius: 8px;">
+                                                    <span>${d.label}</span>
+                                                    <strong style="color: #DC2626;">${d.value}</strong>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'system':
+                        content = `
+                            <div style="background: #F9FAFB; padding: 20px; border-radius: 12px;">
+                                <h4 style="color: #4B5563; margin: 0 0 20px 0;">
+                                    <i class="fas fa-database"></i> معلومات النظام
+                                </h4>
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                                    <div>
+                                        <strong>معرف الحجز:</strong> 
+                                        <code style="background: white; padding: 3px 8px; 
+                                                     border-radius: 4px;">
+                                            ${student.originalBookingId || student.id}
+                                        </code>
+                                    </div>
+                                    <div>
+                                        <strong>معرف المستخدم:</strong> 
+                                        <code style="background: white; padding: 3px 8px; 
+                                                     border-radius: 4px;">
+                                            ${student.userId || 'لم ينشأ بعد'}
+                                        </code>
+                                    </div>
+                                    <div>
+                                        <strong>تاريخ التحويل:</strong> 
+                                        ${new Date(student.transferredAt).toLocaleString('ar-EG')}
+                                    </div>
+                                    <div>
+                                        <strong>حالة الحساب:</strong> 
+                                        ${student.accountCreated ? 
+                                            '<span style="color: #10B981;">✓ منشأ</span>' : 
+                                            '<span style="color: #F59E0B;">بانتظار الإنشاء</span>'}
+                                    </div>
+                                </div>
+                                
+                                <!-- شريط التقدم -->
+                                <div style="margin-top: 20px;">
+                                    <strong>التقدم العام:</strong>
+                                    <div style="display: grid; gap: 10px; margin-top: 10px;">
+                                        <div>
+                                            <div style="display: flex; justify-content: space-between; 
+                                                        margin-bottom: 5px;">
+                                                <span>إنشاء الحساب</span>
+                                                <span>${progress.accountSetup || 0}%</span>
+                                            </div>
+                                            <div style="height: 8px; background: #E5E7EB; 
+                                                        border-radius: 4px; overflow: hidden;">
+                                                <div style="height: 100%; width: ${progress.accountSetup || 0}%; 
+                                                            background: #3B82F6;"></div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div style="display: flex; justify-content: space-between; 
+                                                        margin-bottom: 5px;">
+                                                <span>تخصيص الدورة</span>
+                                                <span>${progress.courseAssignment || 0}%</span>
+                                            </div>
+                                            <div style="height: 8px; background: #E5E7EB; 
+                                                        border-radius: 4px; overflow: hidden;">
+                                                <div style="height: 100%; width: ${progress.courseAssignment || 0}%; 
+                                                            background: #8B5CF6;"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                }
+                
+                document.getElementById('detail-content').innerHTML = content;
+            };
+        }
+    });
+}
+
+window.viewFullDetails = viewFullDetails;
+
+
+// دالة عرض تفاصيل المستخدم الكاملة
+async function viewUserFullStructure(studentId) {
+    try {
+        const student = allStudents.find(s => s.id === studentId);
+        if (!student || !student.userId) {
+            Swal.fire('تنبيه', 'لا يوجد حساب مُنشأ لهذا الطالب', 'info');
+            return;
+        }
+        
+        const userDoc = await db.collection('users').doc(student.userId).get();
+        if (!userDoc.exists) {
+            Swal.fire('خطأ', 'لم يتم العثور على بيانات المستخدم', 'error');
+            return;
+        }
+        
+        const userData = userDoc.data();
+        
+        // حساب الإجماليات
+        const totalEnrollments = userData.enrollments?.length || 0;
+        const activeEnrollments = userData.enrollments?.filter(e => 
+            new Date(e.endDate) > new Date()
+        ).length || 0;
+        
+        Swal.fire({
+            title: '📊 البنية الكاملة للمستخدم',
+            html: `
+                <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                    
+                    <!-- المعلومات الأساسية -->
+                    <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #0369A1; margin-bottom: 15px;">
+                            <i class="fas fa-user"></i> المعلومات الشخصية
+                        </h4>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                            <div><strong>الاسم:</strong> ${userData.personalInfo?.name}</div>
+                            <div><strong>البريد:</strong> ${userData.personalInfo?.email}</div>
+                            <div><strong>الواتساب:</strong> ${userData.personalInfo?.whatsapp}</div>
+                            <div><strong>المرحلة:</strong> ${userData.accountStatus?.journeyTitle || 'ملبي النداء'}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- الإجماليات المالية -->
+                    <div style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
+                                padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #065F46; margin-bottom: 15px;">
+                            <i class="fas fa-chart-line"></i> الإجماليات المالية
+                        </h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); 
+                                    gap: 15px; text-align: center;">
+                            <div style="background: white; padding: 15px; border-radius: 10px;">
+                                <div style="color: #10B981; font-size: 1.5rem; font-weight: bold;">
+                                    ${userData.financial?.totalPaid?.toLocaleString('ar-EG') || 0} ج.م
+                                </div>
+                                <div style="color: #6B7280;">إجمالي المدفوع</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 10px;">
+                                <div style="color: #F59E0B; font-size: 1.5rem; font-weight: bold;">
+                                    ${userData.financial?.totalDue?.toLocaleString('ar-EG') || 0} ج.م
+                                </div>
+                                <div style="color: #6B7280;">إجمالي المستحق</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 10px;">
+                                <div style="color: #EF4444; font-size: 1.5rem; font-weight: bold;">
+                                    ${userData.financial?.totalSavings?.toLocaleString('ar-EG') || 0} ج.م
+                                </div>
+                                <div style="color: #6B7280;">إجمالي التوفير</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- الدورات المسجلة -->
+                    <div style="background: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #1F2937; margin-bottom: 15px;">
+                            <i class="fas fa-graduation-cap"></i> 
+                            الدورات المسجلة (${totalEnrollments} دورة - ${activeEnrollments} نشطة)
+                        </h4>
+                        ${userData.enrollments?.length > 0 ? userData.enrollments.map(enrollment => `
+                            <div style="background: ${new Date(enrollment.endDate) > new Date() ? '#F0FDF4' : '#FEF3C7'}; 
+                                        padding: 15px; border-radius: 10px; margin-bottom: 10px;
+                                        border-right: 4px solid ${new Date(enrollment.endDate) > new Date() ? '#10B981' : '#F59E0B'};">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <strong>${enrollment.title}</strong>
+                                        <div style="color: #6B7280; font-size: 0.9rem; margin-top: 5px;">
+                                            ${new Date(enrollment.startDate).toLocaleDateString('ar-EG')} - 
+                                            ${new Date(enrollment.endDate).toLocaleDateString('ar-EG')}
+                                        </div>
+                                    </div>
+                                    <div style="text-align: left;">
+                                        <div style="font-weight: bold; color: #1F2937;">
+                                            ${enrollment.pricing?.finalPrice || 0} ج.م
+                                        </div>
+                                        <div style="color: ${enrollment.payment?.status === 'paid' ? '#10B981' : '#F59E0B'}; 
+                                                    font-size: 0.9rem;">
+                                            ${enrollment.payment?.status === 'paid' ? 'مدفوع' : 
+                                              enrollment.payment?.status === 'partial' ? 'دفع جزئي' : 'غير مدفوع'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('') : '<p style="color: #6B7280;">لا توجد دورات مسجلة</p>'}
+                    </div>
+                    
+                    <!-- معلومات النظام -->
+                    <div style="background: #F9FAFB; padding: 15px; border-radius: 10px;">
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.9rem;">
+                            <div><strong>معرف المستخدم:</strong> ${userData.id}</div>
+                            <div><strong>تاريخ الإنشاء:</strong> ${new Date(userData.timestamps?.createdAt).toLocaleDateString('ar-EG')}</div>
+                            <div><strong>آخر تحديث:</strong> ${new Date(userData.timestamps?.updatedAt).toLocaleDateString('ar-EG')}</div>
+                            <div><strong>النقاط:</strong> ${userData.unifiedPoints?.balance || 0}</div>
+                        </div>
+                    </div>
+                </div>
+            `,
+            width: '900px',
+            showCloseButton: true,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('خطأ في عرض البنية:', error);
+        Swal.fire('خطأ', 'حدث خطأ في عرض البيانات', 'error');
+    }
+}
+window.viewUserFullStructure = viewUserFullStructure;
+// ==================== 🌟 نظام إدارة رحلة منظور الفؤاد (المبسط) ====================
+
+async function manageJourneySystem(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) return;
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    const userData = userDoc.data();
+    
+    const journeyPoints = userData.journeyPoints?.balance || 0;
+    const journeyHistory = userData.journeyPoints?.history || [];
+    const walletPoints = userData.walletPoints?.balance || 0;
+    
+    const currentStage = userData.accountStatus?.journeyStage || 1;
+    const stageInfo = FouadJourneySystem.stages[currentStage];
+    
+    // ترتيب سجل الرحلة فقط من الأحدث للأقدم
+    const sortedHistory = [...journeyHistory].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    
+    await Swal.fire({
+        title: '🌱 بذور الارتواء - سجل نقاط الرحلة',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- المرحلة الحالية -->
+                <div style="background: linear-gradient(135deg, ${stageInfo.color}, ${stageInfo.color}DD); 
+                            color: white; padding: 20px; border-radius: 20px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3 style="margin: 0;">${stageInfo.name}</h3>
+                            <div style="font-size: 1.2rem; opacity: 0.9;">${stageInfo.title}</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 3rem; font-weight: bold;">
+                                ${journeyPoints}
+                            </div>
+                            <div>نقطة ارتواء</div>
+                            <div style="font-size: 1.5rem; margin-top: 10px; opacity: 0.8;">
+                                (${walletPoints} نقطة محفظة)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- أزرار الإدارة -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button onclick="showAddPointsDialog('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-plus-circle"></i> إضافة نقاط
+                    </button>
+                    <button onclick="showDeductPointsDialog('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #EF4444, #DC2626); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-minus-circle"></i> خصم نقاط
+                    </button>
+                </div>
+                
+                <!-- السجل التفصيلي -->
+                <div style="background: white; border: 2px solid #E5E7EB; 
+                            border-radius: 15px; padding: 20px;">
+                    <h4 style="color: #1F2937; margin: 0 0 20px 0;">
+                        <i class="fas fa-history"></i> سجل معاملات الرحلة (${sortedHistory.length} معاملة)
+                    </h4>
+                    
+                    ${sortedHistory.length > 0 ? `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${sortedHistory.map((entry, index) => `
+                                <div style="border-bottom: 1px solid #E5E7EB; padding: 15px 0; 
+                                            ${index === sortedHistory.length - 1 ? 'border-bottom: none;' : ''}">
+                                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                                        <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                                <span style="background: ${entry.amount > 0 ? '#10B981' : '#EF4444'}; 
+                                                             color: white; padding: 2px 8px; border-radius: 12px; 
+                                                             font-size: 0.85rem; font-weight: bold;">
+                                                    ${entry.amount > 0 ? '+' : ''}${entry.amount}
+                                                </span>
+                                                <span style="font-weight: bold; color: #1F2937;">
+                                                    ${entry.reason}
+                                                </span>
+                                            </div>
+                                            <div style="color: #6B7280; font-size: 0.9rem; margin: 5px 0;">
+                                                ${entry.description}
+                                            </div>
+                                            <div style="color: #9CA3AF; font-size: 0.85rem;">
+                                                <i class="fas fa-clock"></i> 
+                                                ${new Date(entry.timestamp).toLocaleString('ar-EG')}
+                                            </div>
+                                        </div>
+                                        <button onclick="deletePointsEntry('${student.userId}', '${entry.timestamp}')" 
+                                                style="background: #FEE2E2; color: #991B1B; border: none; 
+                                                       padding: 5px 10px; border-radius: 5px; cursor: pointer;
+                                                       font-size: 0.8rem;">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="text-align: center; color: #6B7280; padding: 40px;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                            <p>لا توجد معاملات مسجلة بعد</p>
+                        </div>
+                    `}
+                </div>
+                
+                <!-- إحصائيات سريعة -->
+                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px; margin-top: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
+                        <div>
+                            <div style="color: #10B981; font-size: 1.2rem; font-weight: bold;">
+                                ${sortedHistory.filter(e => e.amount > 0).reduce((sum, e) => sum + e.amount, 0)}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">نقاط مكتسبة</div>
+                        </div>
+                        <div>
+                            <div style="color: #EF4444; font-size: 1.2rem; font-weight: bold;">
+                                ${Math.abs(sortedHistory.filter(e => e.amount < 0).reduce((sum, e) => sum + e.amount, 0))}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">نقاط مخصومة</div>
+                        </div>
+                        <div>
+                            <div style="color: #3B82F6; font-size: 1.2rem; font-weight: bold;">
+                                ${sortedHistory.length}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">إجمالي المعاملات</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+        // نظام إدارة المحفظة
+async function manageWalletSystem(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.userId) {
+        Swal.fire('تنبيه', 'يجب إنشاء حساب أولاً', 'warning');
+        return;
+    }
+    
+    const userDoc = await db.collection('users').doc(student.userId).get();
+    if (!userDoc.exists) {
+        Swal.fire('خطأ', 'لم يتم العثور على بيانات المستخدم', 'error');
+        return;
+    }
+    
+    const userData = userDoc.data();
+    
+    // التحقق من وجود نظام المحفظة
+    if (!userData.walletPoints) {
+        // إنشاء نظام المحفظة إذا لم يكن موجوداً
+        await db.collection('users').doc(student.userId).update({
+            walletPoints: {
+                balance: 0,
+                used: 0,
+                lifetime: 0,
+                history: [],
+                lastUpdated: new Date().toISOString(),
+                conversionRate: 0.1,
+                minRedemption: 100
+            }
+        });
+        userData.walletPoints = {
+            balance: 0,
+            used: 0,
+            lifetime: 0,
+            history: []
+        };
+    }
+    
+    const walletData = userData.walletPoints;
+    const conversionRate = walletData.conversionRate || 0.1;
+    const cashValue = Math.floor(walletData.balance * conversionRate);
+    
+    // ترتيب السجل
+    const sortedHistory = [...(walletData.history || [])].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    
+    await Swal.fire({
+        title: '💰 محفظة النقاط',
+        html: `
+            <div style="text-align: right; direction: rtl; max-height: 70vh; overflow-y: auto;">
+                
+                <!-- الرصيد الحالي -->
+                <div style="background: linear-gradient(135deg, #FFD700, #F59E0B); 
+                            color: white; padding: 25px; border-radius: 20px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center;">
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${walletData.balance}
+                            </div>
+                            <div style="opacity: 0.9;">نقطة متاحة</div>
+                        </div>
+                        <div style="border-left: 2px solid rgba(255,255,255,0.3); 
+                                    border-right: 2px solid rgba(255,255,255,0.3);">
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${cashValue} ج.م
+                            </div>
+                            <div style="opacity: 0.9;">قيمة نقدية</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: bold;">
+                                ${walletData.used || 0}
+                            </div>
+                            <div style="opacity: 0.9;">نقطة مستخدمة</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- أزرار الإدارة -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button onclick="showAddWalletPointsDialog('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #10B981, #059669); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-plus-circle"></i> إضافة نقاط
+                    </button>
+                    <button onclick="showDeductWalletPointsDialog('${student.userId}')" 
+                            style="background: linear-gradient(135deg, #EF4444, #DC2626); 
+                                   color: white; border: none; padding: 15px; 
+                                   border-radius: 10px; cursor: pointer; font-size: 1rem;">
+                        <i class="fas fa-minus-circle"></i> خصم نقاط
+                    </button>
+                </div>
+                
+                <!-- جدول التحويل -->
+                <div style="background: white; border: 2px solid #FFD700; 
+                            border-radius: 15px; padding: 20px; margin-bottom: 20px;">
+                    <h4 style="color: #F59E0B; margin: 0 0 15px 0;">
+                        <i class="fas fa-exchange-alt"></i> معدل التحويل
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="color: #92400E; font-weight: bold;">100 نقطة</div>
+                            <div style="color: #DC2626; font-size: 1.2rem;">= 10 ج.م</div>
+                        </div>
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="color: #92400E; font-weight: bold;">500 نقطة</div>
+                            <div style="color: #DC2626; font-size: 1.2rem;">= 50 ج.م</div>
+                        </div>
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="color: #92400E; font-weight: bold;">1000 نقطة</div>
+                            <div style="color: #DC2626; font-size: 1.2rem;">= 100 ج.م</div>
+                        </div>
+                        <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="color: #92400E; font-weight: bold;">5000 نقطة</div>
+                            <div style="color: #DC2626; font-size: 1.2rem;">= 500 ج.م</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- السجل التفصيلي -->
+                <div style="background: white; border: 2px solid #E5E7EB; 
+                            border-radius: 15px; padding: 20px;">
+                    <h4 style="color: #1F2937; margin: 0 0 20px 0;">
+                        <i class="fas fa-history"></i> سجل المعاملات (${sortedHistory.length} معاملة)
+                    </h4>
+                    
+                    ${sortedHistory.length > 0 ? `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${sortedHistory.map((entry, index) => `
+                                <div style="border-bottom: 1px solid #E5E7EB; padding: 15px 0; 
+                                            ${index === sortedHistory.length - 1 ? 'border-bottom: none;' : ''}">
+                                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                                        <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                                <span style="background: ${entry.amount > 0 ? '#10B981' : '#EF4444'}; 
+                                                             color: white; padding: 2px 8px; border-radius: 12px; 
+                                                             font-size: 0.85rem; font-weight: bold;">
+                                                    ${entry.amount > 0 ? '+' : ''}${entry.amount}
+                                                </span>
+                                                <span style="font-weight: bold; color: #1F2937;">
+                                                    ${entry.reason}
+                                                </span>
+                                            </div>
+                                            <div style="color: #6B7280; font-size: 0.9rem; margin: 5px 0;">
+                                                ${entry.description}
+                                            </div>
+                                            <div style="color: #9CA3AF; font-size: 0.85rem;">
+                                                <i class="fas fa-clock"></i> 
+                                                ${new Date(entry.timestamp).toLocaleString('ar-EG')}
+                                            </div>
+                                        </div>
+                                        <button onclick="deleteWalletEntry('${student.userId}', '${entry.timestamp}')" 
+                                                style="background: #FEE2E2; color: #991B1B; border: none; 
+                                                       padding: 5px 10px; border-radius: 5px; cursor: pointer;
+                                                       font-size: 0.8rem;">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="text-align: center; color: #6B7280; padding: 40px;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                            <p>لا توجد معاملات مسجلة بعد</p>
+                        </div>
+                    `}
+                </div>
+                
+                <!-- إحصائيات سريعة -->
+                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px; margin-top: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
+                        <div>
+                            <div style="color: #10B981; font-size: 1.2rem; font-weight: bold;">
+                                ${sortedHistory.filter(e => e.amount > 0).reduce((sum, e) => sum + e.amount, 0)}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">نقاط مكتسبة</div>
+                        </div>
+                        <div>
+                            <div style="color: #EF4444; font-size: 1.2rem; font-weight: bold;">
+                                ${Math.abs(sortedHistory.filter(e => e.amount < 0).reduce((sum, e) => sum + e.amount, 0))}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">نقاط مستخدمة</div>
+                        </div>
+                        <div>
+                            <div style="color: #3B82F6; font-size: 1.2rem; font-weight: bold;">
+                                ${walletData.lifetime || 0}
+                            </div>
+                            <div style="color: #6B7280; font-size: 0.85rem;">إجمالي مدى الحياة</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `,
+        width: '800px',
+        showCloseButton: true,
+        showConfirmButton: false
+    });
+}
+
+// دوال إدارة نقاط المحفظة
+async function showAddWalletPointsDialog(userId) {
+    // أولاً نسأل عن النظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'wallet': 'نقاط المحفظة فقط',
+            'journey': 'نقاط الارتواء فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
+    const { value: pointsData } = await Swal.fire({
+        title: `➕ إضافة نقاط ${system === 'wallet' ? 'المحفظة' : system === 'journey' ? 'الارتواء' : 'للنظامين'}`,
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        عدد النقاط
+                    </label>
+                    <input type="number" id="pointsAmount" class="swal2-input" 
+                           placeholder="100" value="100" min="1"
+                           style="width: 100%;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        السبب
+                    </label>
+                    <select id="pointsReason" class="swal2-input" style="width: 100%;">
+                        <option value="مكافأة إدارية">مكافأة إدارية</option>
+                        <option value="تعويض">تعويض</option>
+                        <option value="إضافة يدوية">إضافة يدوية</option>
+                        <option value="عرض خاص">عرض خاص</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        الوصف
+                    </label>
+                    <textarea id="pointsDescription" class="swal2-textarea" 
+                              placeholder="تفاصيل إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إضافة النقاط',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = document.getElementById('pointsAmount').value;
+            const reason = document.getElementById('pointsReason').value;
+            const description = document.getElementById('pointsDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description || 'نقاط إضافية',
+                system: system
+            };
+        }
+    });
+    
+    if (pointsData) {
+        let success = false;
+        let systemText = '';
+        
+        if (pointsData.system === 'wallet') {
+            success = await addWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (محفظة فقط)', 
+                pointsData.description
+            );
+            systemText = 'للمحفظة';
+        } else if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (رحلة ارتواء فقط)', 
+                pointsData.description
+            );
+            systemText = 'للرحلة';
+        } else {
+            success = await addDualPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            systemText = 'للنظامين';
+        }
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم إضافة النقاط',
+                text: `تم إضافة ${pointsData.amount} نقطة ${systemText}`,
+                confirmButtonColor: '#10B981'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
+
+async function showDeductWalletPointsDialog(userId) {
+    // أولاً نسأل عن النظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'wallet': 'نقاط المحفظة فقط',
+            'journey': 'نقاط الارتواء فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
+    const { value: pointsData } = await Swal.fire({
+        title: `➖ خصم نقاط من ${system === 'wallet' ? 'المحفظة' : system === 'journey' ? 'الارتواء' : 'النظامين'}`,
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #DC2626;">
+                        عدد النقاط المخصومة
+                    </label>
+                    <input type="number" id="deductAmount" class="swal2-input" 
+                           placeholder="50" value="50" min="1"
+                           style="width: 100%; border-color: #DC2626;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        سبب الخصم
+                    </label>
+                    <select id="deductReason" class="swal2-input" style="width: 100%;">
+                        <option value="استبدال بخصم">استبدال بخصم</option>
+                        <option value="تصحيح خطأ">تصحيح خطأ</option>
+                        <option value="إلغاء مكافأة">إلغاء مكافأة</option>
+                        <option value="مخالفة">مخالفة</option>
+                        <option value="أخرى">أخرى</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        التفاصيل
+                    </label>
+                    <textarea id="deductDescription" class="swal2-textarea" 
+                              placeholder="سبب الخصم بالتفصيل..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الخصم',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626',
+        preConfirm: () => {
+            const amount = document.getElementById('deductAmount').value;
+            const reason = document.getElementById('deductReason').value;
+            const description = document.getElementById('deductDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            if (!description) {
+                Swal.showValidationMessage('يجب إدخال سبب الخصم');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description,
+                system: system
+            };
+        }
+    });
+    
+    if (pointsData) {
+        let success = false;
+        let systemText = '';
+        
+        if (pointsData.system === 'wallet') {
+            success = await useWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (خصم محفظة فقط)', 
+                pointsData.description
+            );
+            systemText = 'من المحفظة';
+        } else if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(
+                userId, 
+                -pointsData.amount, 
+                pointsData.reason + ' (خصم رحلة ارتواء فقط)', 
+                pointsData.description
+            );
+            systemText = 'من الرحلة';
+        } else {
+            // خصم من النظامين
+            const success1 = await useWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            const success2 = await addJourneyPoints(
+                userId, 
+                -pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            success = success1 && success2;
+            systemText = 'من النظامين';
+        }
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم خصم النقاط',
+                text: `تم خصم ${pointsData.amount} نقطة ${systemText}`,
+                confirmButtonColor: '#DC2626'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
+async function deleteWalletEntry(userId, timestamp) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل تريد حذف هذه المعاملة من سجل المحفظة؟ سيتم تعديل الرصيد تلقائياً',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            const userRef = db.collection('users').doc(userId);
+            const userDoc = await userRef.get();
+            const userData = userDoc.data();
+            
+            const history = userData.walletPoints?.history || [];
+            const entryToDelete = history.find(e => e.timestamp === timestamp);
+            
+            if (entryToDelete) {
+                const newHistory = history.filter(e => e.timestamp !== timestamp);
+                const newBalance = (userData.walletPoints?.balance || 0) - entryToDelete.amount;
+                
+                await userRef.update({
+                    'walletPoints.balance': newBalance,
+                    'walletPoints.history': newHistory,
+                    'walletPoints.lastUpdated': new Date().toISOString()
+                });
+                
+                Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
+                setTimeout(() => location.reload(), 1500);
+            }
+        } catch (error) {
+            console.error('خطأ في حذف المعاملة:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف المعاملة', 'error');
+        }
+    }
+}
+
+// دالة إضافة نقاط للمحفظة فقط
+async function addWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance + amount,
+            'walletPoints.lifetime': (userData.walletPoints?.lifetime || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'addition'
+            })
+        });
+        
+        console.log(`✅ تم إضافة ${amount} نقطة للمحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة نقاط المحفظة:', error);
+        return false;
+    }
+}
+
+// إضافة الدوال للـ window
+window.manageWalletSystem = manageWalletSystem;
+window.showAddWalletPointsDialog = showAddWalletPointsDialog;
+window.showDeductWalletPointsDialog = showDeductWalletPointsDialog;
+window.deleteWalletEntry = deleteWalletEntry;
+window.addWalletPoints = addWalletPoints;
+
+
+        // دالة عرض نافذة خصم النقاط
+async function showDeductPointsDialog(userId) {
+    // أولاً نسأل من أي نظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'journey': 'نقاط الارتواء (الرحلة)',
+            'wallet': 'نقاط المحفظة',
+            'both': 'كلا النظامين'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
+    const { value: pointsData } = await Swal.fire({
+        title: `➖ خصم نقاط من ${system === 'journey' ? 'الرحلة' : system === 'wallet' ? 'المحفظة' : 'النظامين'}`,
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #DC2626;">
+                        عدد النقاط المخصومة
+                    </label>
+                    <input type="number" id="deductAmount" class="swal2-input" 
+                           placeholder="50" value="50" min="1"
+                           style="width: 100%; border-color: #DC2626;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        سبب الخصم
+                    </label>
+                    <select id="deductReason" class="swal2-input" style="width: 100%;">
+                        <option value="مخالفة">مخالفة</option>
+                        <option value="تصحيح خطأ">تصحيح خطأ</option>
+                        <option value="إلغاء مكافأة">إلغاء مكافأة</option>
+                        <option value="استبدال نقاط">استبدال نقاط</option>
+                        <option value="أخرى">أخرى</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        التفاصيل
+                    </label>
+                    <textarea id="deductDescription" class="swal2-textarea" 
+                              placeholder="سبب الخصم بالتفصيل..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الخصم',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626',
+        preConfirm: () => {
+            const amount = document.getElementById('deductAmount').value;
+            const reason = document.getElementById('deductReason').value;
+            const description = document.getElementById('deductDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            if (!description) {
+                Swal.showValidationMessage('يجب إدخال سبب الخصم');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description,
+                system: system
+            };
+        }
+    });
+    
+    if (pointsData) {
+        let success = false;
+        
+        if (pointsData.system === 'journey') {
+            // خصم من الرحلة فقط
+            success = await addJourneyPoints(userId, -pointsData.amount, pointsData.reason, pointsData.description);
+        } else if (pointsData.system === 'wallet') {
+            // خصم من المحفظة فقط
+            success = await useWalletPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        } else {
+            // خصم من النظامين
+            success = await addDualPoints(userId, -pointsData.amount, pointsData.reason, pointsData.description);
+        }
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم خصم النقاط',
+                text: `تم خصم ${pointsData.amount} نقطة من ${pointsData.system === 'journey' ? 'الرحلة' : pointsData.system === 'wallet' ? 'المحفظة' : 'النظامين'}`,
+                confirmButtonColor: '#DC2626'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
+
+        async function addJourneyPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.journeyPoints?.balance || 0;
+        
+        await userRef.update({
+            'journeyPoints.balance': currentBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            })
+        });
+        
+        console.log(`تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة رحلة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في تعديل نقاط الرحلة:', error);
+        return false;
+    }
+}
+
+window.addJourneyPoints = addJourneyPoints;
+
+        // دالة حذف معاملة من السجل
+async function deletePointsEntry(userId, timestamp) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل تريد حذف هذه المعاملة من سجل الرحلة؟ سيتم تعديل الرصيد تلقائياً',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#DC2626'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            const userRef = db.collection('users').doc(userId);
+            const userDoc = await userRef.get();
+            const userData = userDoc.data();
+            
+            // جلب سجل نقاط الرحلة
+            const history = userData.journeyPoints?.history || [];
+            const entryToDelete = history.find(e => e.timestamp === timestamp);
+            
+            if (entryToDelete) {
+                // حذف المعاملة من السجل
+                const newHistory = history.filter(e => e.timestamp !== timestamp);
+                // تعديل الرصيد
+                const newBalance = (userData.journeyPoints?.balance || 0) - entryToDelete.amount;
+                
+                await userRef.update({
+                    'journeyPoints.balance': newBalance,
+                    'journeyPoints.history': newHistory,
+                    'journeyPoints.lastUpdated': new Date().toISOString()
+                });
+                
+                // إذا كانت المعاملة من النظامين، احذف من المحفظة أيضاً
+                if (entryToDelete.reason.includes('(النظامين)')) {
+                    const walletHistory = userData.walletPoints?.history || [];
+                    const walletEntry = walletHistory.find(e => 
+                        e.timestamp === timestamp || 
+                        (Math.abs(new Date(e.timestamp) - new Date(timestamp)) < 1000)
+                    );
+                    
+                    if (walletEntry) {
+                        const newWalletHistory = walletHistory.filter(e => e.timestamp !== walletEntry.timestamp);
+                        const newWalletBalance = (userData.walletPoints?.balance || 0) - walletEntry.amount;
+                        
+                        await userRef.update({
+                            'walletPoints.balance': newWalletBalance,
+                            'walletPoints.history': newWalletHistory,
+                            'walletPoints.lastUpdated': new Date().toISOString()
+                        });
+                    }
+                }
+                
+                Swal.fire('تم الحذف', 'تم حذف المعاملة وتعديل الرصيد', 'success');
+                setTimeout(() => location.reload(), 1500);
+            }
+        } catch (error) {
+            console.error('خطأ في حذف المعاملة:', error);
+            Swal.fire('خطأ', 'حدث خطأ في حذف المعاملة', 'error');
+        }
+    }
+}
+        
+// دالة واحدة موحدة لإضافة النقاط
+// نظام نقاط الارتواء الموحد
+     
+
+        // دالة إضافة النقاط المزدوجة - للنظامين معاً
+async function addDualPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentJourneyBalance = userData.journeyPoints?.balance || 0;
+        const currentWalletBalance = userData.walletPoints?.balance || 0;
+        
+        // تحديد التسمية الصحيحة بناءً على السبب
+        let reasonLabel = reason;
+        if (!reason.includes('(')) {
+            reasonLabel = reason + ' (النظامين)';
+        }
+        
+        const updates = {
+            // تحديث نقاط الارتواء
+            'journeyPoints.balance': currentJourneyBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reasonLabel,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            }),
+            
+            // تحديث نقاط المحفظة
+            'walletPoints.balance': currentWalletBalance + amount,
+            'walletPoints.lifetime': amount > 0 ? 
+                (userData.walletPoints?.lifetime || 0) + amount : 
+                userData.walletPoints?.lifetime || 0,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reasonLabel,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'wallet'
+            })
+        };
+        
+        await userRef.update(updates);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة النقاط المزدوجة:', error);
+        return false;
+    }
+}
+
+// دالة استخدام نقاط المحفظة فقط
+async function useWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        if (currentBalance < amount) {
+            console.error('الرصيد غير كافي');
+            return false;
+        }
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance - amount,
+            'walletPoints.used': (userData.walletPoints?.used || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: -amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'redemption'
+            })
+        });
+        
+        console.log(`✅ تم استخدام ${amount} نقطة من المحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في استخدام نقاط المحفظة:', error);
+        return false;
+    }
+}
+
+        // دالة عرض نافذة إضافة النقاط
+async function showAddPointsDialog(userId) {
+    // أولاً نسأل أي نظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'journey': 'نقاط الارتواء (الرحلة) فقط',
+            'wallet': 'نقاط المحفظة فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
+    const { value: pointsData } = await Swal.fire({
+        title: `➕ إضافة نقاط ${system === 'journey' ? 'الرحلة' : system === 'wallet' ? 'المحفظة' : 'للنظامين'}`,
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        عدد النقاط
+                    </label>
+                    <input type="number" id="pointsAmount" class="swal2-input" 
+                           placeholder="100" value="100" min="1"
+                           style="width: 100%;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        السبب
+                    </label>
+                    <select id="pointsReason" class="swal2-input" style="width: 100%;">
+                        <option value="مكافأة إدارية">مكافأة إدارية</option>
+                        <option value="نشاط متميز">نشاط متميز</option>
+                        <option value="إحالة ناجحة">إحالة ناجحة</option>
+                        <option value="تعويض">تعويض</option>
+                        <option value="عرض خاص">عرض خاص</option>
+                        <option value="أخرى">أخرى</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        الوصف
+                    </label>
+                    <textarea id="pointsDescription" class="swal2-textarea" 
+                              placeholder="تفاصيل إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إضافة النقاط',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = document.getElementById('pointsAmount').value;
+            const reason = document.getElementById('pointsReason').value;
+            const description = document.getElementById('pointsDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description || 'نقاط إضافية',
+                system: system
+            };
+        }
+    });
+    
+    if (pointsData) {
+        let success = false;
+        
+        if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        } else if (pointsData.system === 'wallet') {
+            success = await addWalletPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        } else {
+            success = await addDualPoints(userId, pointsData.amount, pointsData.reason, pointsData.description);
+        }
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم إضافة النقاط',
+                text: `تم إضافة ${pointsData.amount} نقطة ${pointsData.system === 'journey' ? 'للرحلة' : pointsData.system === 'wallet' ? 'للمحفظة' : 'للنظامين'}`,
+                confirmButtonColor: '#10B981'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
