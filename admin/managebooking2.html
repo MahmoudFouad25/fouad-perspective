@@ -2940,7 +2940,6 @@ ${getPaymentMethods(booking).map(m => '• ' + getPaymentMethodText(m)).join('\n
      // دالة تحديد الحجز كمدفوع (مطورة للأقساط)
 async function markAsPaid(bookingId) {
         // منع التنفيذ إذا ألغى المستخدم
-    let proceedWithPayment = false;
 
     // جلب بيانات الحجز أولاً
     const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
@@ -3423,10 +3422,10 @@ document.getElementById('remainingInstallments').parentElement.appendChild(insta
     }
 }
 
-        // دالة تأكيد الدفع مع الأتمتة الكاملة
+// دالة تأكيد الدفع مع الأتمتة الكاملة
 async function markAsPaidWithAutomation(bookingId) {
     try {
-        // جلب بيانات الحجز
+        // جلب بيانات الحجز للتحقق من الحالة
         const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
         if (!bookingDoc.exists) {
             Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
@@ -3435,22 +3434,40 @@ async function markAsPaidWithAutomation(bookingId) {
         
         const booking = { id: bookingDoc.id, ...bookingDoc.data() };
         
-        // استدعاء دالة تسجيل الدفع الأصلية أولاً
-        await markAsPaid(bookingId);
-        
-        // إذا كان الحجز متصل بالتليجرام
-        if (booking.telegramChatId && booking.telegramConnected) {
-            // إرسال إشعار للعميل على التليجرام
-            await sendTelegramPaymentConfirmation(booking);
+        // التحقق: هل الدفع مسجل بالفعل؟
+        if (booking.status !== 'paid') {
+            // إذا لم يكن مسجلاً، استدعي markAsPaid أولاً
+            await markAsPaid(bookingId);
             
-            // الانتظار قليلاً ثم بدء التحويل التلقائي
+            // أعد التحقق بعد استدعاء markAsPaid
+            const recheckDoc = await db.collection('tempBookings').doc(bookingId).get();
+            if (!recheckDoc.exists || recheckDoc.data().status !== 'paid') {
+                console.log('❌ المستخدم ألغى تسجيل الدفع - لن تتم الأتمتة');
+                return; // خروج إذا ألغى المستخدم
+            }
+            
+            // حدث البيانات بعد التسجيل الناجح
+            const updatedBooking = { id: recheckDoc.id, ...recheckDoc.data() };
+            
+            // إرسال إشعار للتليجرام بالبيانات المحدثة
+            if (updatedBooking.telegramChatId && updatedBooking.telegramConnected) {
+                await sendTelegramPaymentConfirmation(updatedBooking);
+            }
+            
+            // بدء التحويل التلقائي
             setTimeout(async () => {
                 console.log('🚀 بدء التحويل التلقائي...');
                 await autoTransferToSpecialized(bookingId);
             }, 2000);
+            
         } else {
-            // إذا لم يكن متصل بالتليجرام، فقط نقل عادي
+            // الدفع مسجل مسبقاً، فقط أرسل الإشعار وابدأ التحويل
+            if (booking.telegramChatId && booking.telegramConnected) {
+                await sendTelegramPaymentConfirmation(booking);
+            }
+            
             setTimeout(async () => {
+                console.log('🚀 بدء التحويل التلقائي...');
                 await autoTransferToSpecialized(bookingId);
             }, 2000);
         }
@@ -3462,33 +3479,51 @@ async function markAsPaidWithAutomation(bookingId) {
 }
 
 // دالة إرسال تأكيد الدفع للتليجرام
+// دالة إرسال تأكيد الدفع للتليجرام - محدثة لقراءة البيانات الصحيحة
 async function sendTelegramPaymentConfirmation(booking) {
     try {
-        const customerName = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
-        const courseName = booking.courseName || 'الدورة';
-        const isInstallment = booking.paymentDetails?.type === 'installment';
+        // إعادة جلب البيانات المحدثة من Firebase
+        const updatedDoc = await db.collection('tempBookings').doc(booking.id).get();
+        if (!updatedDoc.exists) {
+            console.error('❌ الحجز غير موجود');
+            return;
+        }
         
-        let message = `
-🎉 *مبروك يا ${customerName}!*
+        const updatedBooking = updatedDoc.data();
+        const customerName = updatedBooking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+        const courseName = updatedBooking.courseName || 'الدورة';
+        const isInstallment = updatedBooking.paymentDetails?.type === 'installment';
+        
+        let message = '';
+        
+        if (isInstallment) {
+            // رسالة للأقساط
+            const paidAmount = updatedBooking.paymentDetails?.paidAmount || 0;
+            const remainingAmount = updatedBooking.paymentDetails?.remainingAmount || 0;
+            const totalInstallments = updatedBooking.paymentDetails?.totalInstallments || 0;
+            const paidInstallments = updatedBooking.paymentDetails?.paidInstallments || 1;
+            const remainingInstallments = totalInstallments - paidInstallments;
+            const paymentMethod = updatedBooking.paymentMethod || 'غير محدد';
+            
+            message = `
+🎉 *رائع يا ${customerName}!*
 
-تم تأكيد دفعتك بنجاح ✅
+تم تأكيد استلام القسط الأول بنجاح ✅
 
 ━━━━━━━━━━━━━━━━━━
 📚 الدورة: *${courseName}*
-💰 المبلغ المدفوع: *${booking.paymentDetails?.paidAmount || booking.pricing?.finalPrice || '0'} ج.م*
-`;
 
-        if (isInstallment) {
-            const remaining = booking.paymentDetails?.remainingAmount || 0;
-            const nextDue = booking.paymentDetails?.nextDueDate;
-            
-            message += `
-💳 المتبقي: *${remaining} ج.م*
-📅 القسط القادم: ${nextDue ? new Date(nextDue).toLocaleDateString('ar-EG') : 'الشهر القادم'}
-`;
-        }
+💰 *تفاصيل الدفعة:*
+- المبلغ المستلم: *${paidAmount.toLocaleString('ar-EG')} ج.م*
+- طريقة الدفع: ${paymentMethod}
+- تاريخ الدفع: ${new Date().toLocaleDateString('ar-EG')}
 
-        message += `
+📊 *حالة الأقساط:*
+- الأقساط المدفوعة: ${paidInstallments} من ${totalInstallments}
+- المتبقي: *${remainingAmount.toLocaleString('ar-EG')} ج.م*
+- عدد الأقساط المتبقية: ${remainingInstallments} أقساط
+
+📅 القسط القادم: الشهر القادم
 ━━━━━━━━━━━━━━━━━━
 
 ⏳ *ماذا يحدث الآن؟*
@@ -3496,22 +3531,54 @@ async function sendTelegramPaymentConfirmation(booking) {
 - تخصيص الدورة لك
 - تجهيز المواد التعليمية
 
-🚀 ستصلك بيانات الدخول خلال دقائق قليلة...
+🚀 ستصلك بيانات الدخول خلال دقائق...
 
 شكراً لثقتك في منظور الفؤاد 💚
-        `;
+            `;
+        } else {
+            // رسالة للدفع الكامل
+            const paidAmount = updatedBooking.paymentDetails?.paidAmount || 
+                              updatedBooking.paymentDetails?.totalAmount || 
+                              updatedBooking.pricing?.finalPrice || '0';
+            const paymentMethod = updatedBooking.paymentMethod || 'غير محدد';
+            
+            message = `
+🎉 *مبروك يا ${customerName}!*
+
+تم تأكيد دفعتك الكاملة بنجاح ✅
+
+━━━━━━━━━━━━━━━━━━
+📚 الدورة: *${courseName}*
+
+💰 *تفاصيل الدفع:*
+- المبلغ المدفوع: *${paidAmount} ج.م*
+- طريقة الدفع: ${paymentMethod}
+- الحالة: مدفوع بالكامل ✅
+
+━━━━━━━━━━━━━━━━━━
+
+⏳ *ماذا يحدث الآن؟*
+- جاري إنشاء حسابك الشخصي
+- تخصيص الدورة لك
+- تجهيز المواد التعليمية
+
+🚀 ستصلك بيانات الدخول خلال دقائق...
+
+شكراً لثقتك في منظور الفؤاد 💚
+            `;
+        }
         
         const response = await fetch('http://localhost:3000/send-message-to-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                chatId: booking.telegramChatId,
+                chatId: booking.telegramChatId || updatedBooking.telegramChatId,
                 message: message
             })
         });
         
         if (response.ok) {
-            console.log('✅ تم إرسال تأكيد الدفع للتليجرام');
+            console.log('✅ تم إرسال تأكيد الدفع الصحيح للتليجرام');
         }
         
     } catch (error) {
