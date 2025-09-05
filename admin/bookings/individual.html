@@ -4498,88 +4498,115 @@ window.addEventListener('message', async (event) => {
 });
 
 // التحقق التلقائي عند تحميل الصفحة - مرة واحدة فقط
+// تعديل دالة DOMContentLoaded
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('📄 تحميل صفحة الحجوزات الفردية...');
+    console.log('🔄 تحميل صفحة الحجوزات الفردية...');
     
-    // قراءة المعاملات من URL
     const urlParams = new URLSearchParams(window.location.search);
     const action = urlParams.get('action');
     const bookingId = urlParams.get('id');
     const fromSource = urlParams.get('from');
     
-    console.log('🔍 معاملات URL:', {
-        action: action,
-        bookingId: bookingId,
-        fromSource: fromSource,
-        processed: automationProcessed
-    });
-    
-    // إذا كان هناك طلب أتمتة ولم يتم معالجته بعد
-    if (action === 'auto' && bookingId && !automationProcessed) {
-        console.log('🤖 بدء الأتمتة الفورية للحجز:', bookingId);
+    // إذا فيه ID محدد - عالج طلب واحد
+    if (action === 'auto' && bookingId) {
+        console.log('🤖 معالجة طلب واحد:', bookingId);
         
-        automationProcessed = true; // وضع علامة أنه تمت المعالجة
-        
-        // عرض رسالة تحميل
         Swal.fire({
-            title: '⚡ الأتمتة السريعة',
-            html: `
-                <div style="text-align: center;">
-                    <div class="loading-spinner" style="margin: 20px auto;"></div>
-                    <p>جاري معالجة الحجز ${bookingId}</p>
-                    <p style="color: #6B7280; font-size: 0.9rem;">
-                        المصدر: ${fromSource === 'telegram' ? 'تليجرام' : 'النظام'}
-                    </p>
-                </div>
-            `,
+            title: '⚡ معالجة الطلب',
+            html: `<div class="loading-spinner"></div>`,
             allowOutsideClick: false,
-            showConfirmButton: false,
-            willOpen: () => { Swal.showLoading(); }
+            showConfirmButton: false
         });
         
-        // تنفيذ الأتمتة مرة واحدة فقط
         try {
             const result = await autoCreateAccountAndAssignCourse(bookingId, fromSource === 'telegram');
             
             if (result && result.success) {
                 await Swal.fire({
                     icon: 'success',
-                    title: '✅ تمت العملية بنجاح!',
-                    html: `
-                        <div>
-                            <p>✅ تم إنشاء الحساب</p>
-                            <p>✅ تم تخصيص الدورة</p>
-                            ${fromSource === 'telegram' ? '<p>✅ تم إرسال البيانات للتليجرام</p>' : ''}
-                        </div>
-                    `,
-                    timer: 3000,
-                    timerProgressBar: true,
+                    title: 'تمت المعالجة بنجاح',
+                    timer: 2000,
                     showConfirmButton: false
                 });
-                
-                // تحميل البيانات بعد النجاح
-                if (typeof loadStudents === 'function') {
-                    await loadStudents();
-                }
             } else {
-                throw new Error(result?.error || 'فشلت العملية');
+                throw new Error(result?.error || 'فشلت المعالجة');
             }
         } catch (error) {
-            console.error('خطأ في الأتمتة:', error);
             await Swal.fire({
                 icon: 'error',
-                title: 'خطأ في الأتمتة',
-                text: error.message,
-                confirmButtonColor: '#EF4444'
+                title: 'خطأ',
+                text: error.message
             });
-        } finally {
-            automationProcessed = false; // إعادة تعيين العلامة
         }
-    } else if (!action || action !== 'auto') {
-        // تحميل البيانات العادي إذا لم يكن هناك أتمتة
-        if (typeof loadStudents === 'function') {
-            await loadStudents();
-        }
+        
+    } 
+    // إذا مفيش ID - اسأل عن معالجة الكل
+    else if (!bookingId) {
+        console.log('🔍 فحص الطلبات المعلقة...');
+        
+        // انتظر تحميل Firebase
+        const waitForFirebase = setInterval(async () => {
+            if (typeof db !== 'undefined') {
+                clearInterval(waitForFirebase);
+                
+                // فحص الطلبات المعلقة
+                const snapshot = await db.collection('individualStudents')
+                    .where('accountCreated', '==', false)
+                    .where('paymentConfirmed', '==', true)
+                    .limit(1)
+                    .get();
+                
+                if (!snapshot.empty) {
+                    // إضافة زر في أعلى الصفحة
+                    setTimeout(() => {
+                        const header = document.querySelector('.header-content');
+                        if (header && !document.getElementById('auto-process-btn')) {
+                            const autoBtn = document.createElement('button');
+                            autoBtn.id = 'auto-process-btn';
+                            autoBtn.innerHTML = `
+                                <i class="fas fa-robot"></i> 
+                                معالجة الطلبات المعلقة
+                                <span style="background: #EF4444; color: white; 
+                                             padding: 2px 8px; border-radius: 10px; 
+                                             margin-right: 10px;">جديد</span>
+                            `;
+                            autoBtn.style.cssText = `
+                                background: linear-gradient(135deg, #3B82F6, #10B981);
+                                color: white;
+                                border: none;
+                                padding: 10px 20px;
+                                border-radius: 10px;
+                                cursor: pointer;
+                                font-weight: bold;
+                                animation: pulse 2s infinite;
+                            `;
+                            autoBtn.onclick = processAllPendingBookings;
+                            header.appendChild(autoBtn);
+                        }
+                    }, 1000);
+                    
+                    // سؤال تلقائي عند فتح الصفحة
+                    const result = await Swal.fire({
+                        icon: 'info',
+                        title: 'يوجد طلبات معلقة',
+                        text: 'هل تريد معالجة جميع الطلبات المعلقة الآن؟',
+                        showCancelButton: true,
+                        confirmButtonText: 'نعم، عالج الكل',
+                        cancelButtonText: 'لاحقاً',
+                        confirmButtonColor: '#10B981'
+                    });
+                    
+                    if (result.isConfirmed) {
+                        await processAllPendingBookings();
+                    }
+                }
+            }
+        }, 500);
+    }
+    
+    // تحميل البيانات العادي
+    if (typeof loadStudents === 'function') {
+        await loadStudents();
     }
 });
 
@@ -6556,117 +6583,7 @@ async function processAllPendingBookings() {
     }
 }
 
-// تعديل دالة DOMContentLoaded
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🔄 تحميل صفحة الحجوزات الفردية...');
-    
-    const urlParams = new URLSearchParams(window.location.search);
-    const action = urlParams.get('action');
-    const bookingId = urlParams.get('id');
-    const fromSource = urlParams.get('from');
-    
-    // إذا فيه ID محدد - عالج طلب واحد
-    if (action === 'auto' && bookingId) {
-        console.log('🤖 معالجة طلب واحد:', bookingId);
-        
-        Swal.fire({
-            title: '⚡ معالجة الطلب',
-            html: `<div class="loading-spinner"></div>`,
-            allowOutsideClick: false,
-            showConfirmButton: false
-        });
-        
-        try {
-            const result = await autoCreateAccountAndAssignCourse(bookingId, fromSource === 'telegram');
-            
-            if (result && result.success) {
-                await Swal.fire({
-                    icon: 'success',
-                    title: 'تمت المعالجة بنجاح',
-                    timer: 2000,
-                    showConfirmButton: false
-                });
-            } else {
-                throw new Error(result?.error || 'فشلت المعالجة');
-            }
-        } catch (error) {
-            await Swal.fire({
-                icon: 'error',
-                title: 'خطأ',
-                text: error.message
-            });
-        }
-        
-    } 
-    // إذا مفيش ID - اسأل عن معالجة الكل
-    else if (!bookingId) {
-        console.log('🔍 فحص الطلبات المعلقة...');
-        
-        // انتظر تحميل Firebase
-        const waitForFirebase = setInterval(async () => {
-            if (typeof db !== 'undefined') {
-                clearInterval(waitForFirebase);
-                
-                // فحص الطلبات المعلقة
-                const snapshot = await db.collection('individualStudents')
-                    .where('accountCreated', '==', false)
-                    .where('paymentConfirmed', '==', true)
-                    .limit(1)
-                    .get();
-                
-                if (!snapshot.empty) {
-                    // إضافة زر في أعلى الصفحة
-                    setTimeout(() => {
-                        const header = document.querySelector('.header-content');
-                        if (header && !document.getElementById('auto-process-btn')) {
-                            const autoBtn = document.createElement('button');
-                            autoBtn.id = 'auto-process-btn';
-                            autoBtn.innerHTML = `
-                                <i class="fas fa-robot"></i> 
-                                معالجة الطلبات المعلقة
-                                <span style="background: #EF4444; color: white; 
-                                             padding: 2px 8px; border-radius: 10px; 
-                                             margin-right: 10px;">جديد</span>
-                            `;
-                            autoBtn.style.cssText = `
-                                background: linear-gradient(135deg, #3B82F6, #10B981);
-                                color: white;
-                                border: none;
-                                padding: 10px 20px;
-                                border-radius: 10px;
-                                cursor: pointer;
-                                font-weight: bold;
-                                animation: pulse 2s infinite;
-                            `;
-                            autoBtn.onclick = processAllPendingBookings;
-                            header.appendChild(autoBtn);
-                        }
-                    }, 1000);
-                    
-                    // سؤال تلقائي عند فتح الصفحة
-                    const result = await Swal.fire({
-                        icon: 'info',
-                        title: 'يوجد طلبات معلقة',
-                        text: 'هل تريد معالجة جميع الطلبات المعلقة الآن؟',
-                        showCancelButton: true,
-                        confirmButtonText: 'نعم، عالج الكل',
-                        cancelButtonText: 'لاحقاً',
-                        confirmButtonColor: '#10B981'
-                    });
-                    
-                    if (result.isConfirmed) {
-                        await processAllPendingBookings();
-                    }
-                }
-            }
-        }, 500);
-    }
-    
-    // تحميل البيانات العادي
-    if (typeof loadStudents === 'function') {
-        await loadStudents();
-    }
-});
+
 
 // إضافة للـ window
 window.processAllPendingBookings = processAllPendingBookings;
