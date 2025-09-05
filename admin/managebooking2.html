@@ -3450,7 +3450,7 @@ document.getElementById('remainingInstallments').parentElement.appendChild(insta
 // دالة تأكيد الدفع مع الأتمتة الكاملة
 async function markAsPaidWithAutomation(bookingId) {
     try {
-        // جلب بيانات الحجز للتحقق من الحالة
+        // جلب بيانات الحجز
         const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
         if (!bookingDoc.exists) {
             Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
@@ -3461,46 +3461,42 @@ async function markAsPaidWithAutomation(bookingId) {
         
         // التحقق: هل الدفع مسجل بالفعل؟
         if (booking.status !== 'paid') {
-            // إذا لم يكن مسجلاً، استدعي markAsPaid أولاً
-            await markAsPaid(bookingId);
-            
-            // أعد التحقق بعد استدعاء markAsPaid
-            const recheckDoc = await db.collection('tempBookings').doc(bookingId).get();
-            if (!recheckDoc.exists || recheckDoc.data().status !== 'paid') {
-                console.log('❌ المستخدم ألغى تسجيل الدفع - لن تتم الأتمتة');
-                return; // خروج إذا ألغى المستخدم
-            }
-            
-            // حدث البيانات بعد التسجيل الناجح
-            const updatedBooking = { id: recheckDoc.id, ...recheckDoc.data() };
-            
-            // إرسال إشعار للتليجرام بالبيانات المحدثة
-            if (updatedBooking.telegramChatId && updatedBooking.telegramConnected) {
-                await sendTelegramPaymentConfirmation(updatedBooking);
-            }
-            
-            // بدء التحويل التلقائي
-            setTimeout(async () => {
-                console.log('🚀 بدء التحويل التلقائي...');
-                await autoTransferToSpecialized(bookingId);
-            }, 2000);
-            
-        } else {
-            // الدفع مسجل مسبقاً، فقط أرسل الإشعار وابدأ التحويل
-            if (booking.telegramChatId && booking.telegramConnected) {
-                await sendTelegramPaymentConfirmation(booking);
-            }
-            
-            setTimeout(async () => {
-                console.log('🚀 بدء التحويل التلقائي...');
-                await autoTransferToSpecialized(bookingId);
-            }, 2000);
+            // تسجيل الدفع بدون إرسال رسائل
+            await markAsPaidSilent(bookingId); // دالة جديدة بدون رسائل
         }
+        
+        // إرسال رسالة واحدة فقط للتأكيد
+        if (booking.telegramChatId && booking.telegramConnected) {
+            await sendTelegramPaymentConfirmation(booking);
+        }
+        
+        // بدء التحويل التلقائي بدون رسائل إضافية
+        setTimeout(async () => {
+            console.log('🚀 بدء التحويل التلقائي...');
+            await autoTransferToSpecializedSilent(bookingId); // نسخة صامتة
+        }, 2000);
         
     } catch (error) {
         console.error('❌ خطأ في تأكيد الدفع مع الأتمتة:', error);
         Swal.fire('خطأ!', 'حدث خطأ في العملية', 'error');
     }
+}
+
+        // دالة تسجيل الدفع بدون إرسال رسائل
+async function markAsPaidSilent(bookingId) {
+    const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+    if (!bookingDoc.exists) return;
+    
+    const booking = bookingDoc.data();
+    const totalAmount = booking.pricing?.finalPriceNumber || 0;
+    
+    await db.collection('tempBookings').doc(bookingId).update({
+        status: 'paid',
+        paidAt: new Date().toISOString(),
+        paymentConfirmed: true,
+        paymentConfirmedAt: new Date().toISOString(),
+        paymentConfirmedBy: 'auto-telegram'
+    });
 }
 
 // دالة إرسال تأكيد الدفع للتليجرام - محدثة للأتمتة الكاملة
