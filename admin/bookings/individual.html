@@ -6370,59 +6370,299 @@ window.deletePointsEntry = deletePointsEntry;
 // 
 // سيتم نقل باقي الوظائف المالية لصفحة منفصلة
 // ==================== ======================== ====================
-        // دالة أتمتة فورية يمكن استدعاؤها من أي مكان
-window.instantAutomation = async function(bookingId, fromTelegram = false) {
-    console.log('⚡ بدء الأتمتة الفورية للحجز:', bookingId);
+// ==================== 🤖 نظام الأتمتة الذكية الشاملة ====================
+
+// دالة معالجة كل الطلبات المعلقة
+async function processAllPendingBookings() {
+    console.log('🚀 بدء معالجة جميع الطلبات المعلقة...');
     
     try {
-        // تأكد من وجود Firebase
-        if (!firebase || !db) {
-            console.error('Firebase غير جاهز');
-            setTimeout(() => window.instantAutomation(bookingId, fromTelegram), 1000);
+        // جلب كل الطلبات التي تحتاج معالجة
+        const snapshot = await db.collection('individualStudents')
+            .where('accountCreated', '==', false)
+            .where('paymentConfirmed', '==', true)
+            .get();
+        
+        if (snapshot.empty) {
+            Swal.fire({
+                icon: 'info',
+                title: 'لا توجد طلبات معلقة',
+                text: 'جميع الطلبات تم معالجتها بالفعل',
+                confirmButtonColor: '#3B82F6'
+            });
             return;
         }
         
-        const result = await autoCreateAccountAndAssignCourse(bookingId, fromTelegram);
+        const pendingCount = snapshot.size;
         
-        if (result && result.success) {
-            console.log('✅ الأتمتة نجحت:', result);
+        // سؤال التأكيد
+        const result = await Swal.fire({
+            icon: 'question',
+            title: `يوجد ${pendingCount} طلب معلق`,
+            html: `
+                <div style="text-align: right;">
+                    <p>هل تريد معالجة جميع الطلبات تلقائياً؟</p>
+                    <p style="color: #6B7280; font-size: 0.9rem; margin-top: 10px;">
+                        سيتم إنشاء الحسابات وتخصيص الدورات وإرسال البيانات
+                    </p>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: '✅ نعم، عالج الكل',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        // عرض شريط التقدم
+        let processed = 0;
+        let succeeded = 0;
+        let failed = 0;
+        
+        Swal.fire({
+            title: 'جاري المعالجة...',
+            html: `
+                <div style="text-align: center;">
+                    <div class="loading-spinner" style="margin: 20px auto;"></div>
+                    <div id="progress-info">
+                        <p>معالجة الطلب <span id="current">1</span> من ${pendingCount}</p>
+                        <div style="background: #E5E7EB; height: 20px; border-radius: 10px; margin: 20px 0;">
+                            <div id="progress-bar" style="background: linear-gradient(135deg, #3B82F6, #10B981); 
+                                                         height: 100%; border-radius: 10px; width: 0%; 
+                                                         transition: width 0.3s;"></div>
+                        </div>
+                        <p style="color: #10B981;">✅ نجح: <span id="success-count">0</span></p>
+                        <p style="color: #EF4444;">❌ فشل: <span id="fail-count">0</span></p>
+                    </div>
+                </div>
+            `,
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+        
+        // معالجة كل طلب
+        for (const doc of snapshot.docs) {
+            processed++;
+            const studentData = doc.data();
+            const studentId = doc.id;
             
-            // إرسال رسالة نجاح للبوت إذا من التليجرام
-            if (fromTelegram && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'AUTOMATION_SUCCESS',
-                    bookingId: bookingId,
-                    userId: result.userId,
-                    accountData: result.accountData
-                }, '*');
+            // تحديث واجهة التقدم
+            document.getElementById('current').textContent = processed;
+            document.getElementById('progress-bar').style.width = `${(processed / pendingCount) * 100}%`;
+            
+            console.log(`📋 معالجة الطلب ${processed}/${pendingCount}: ${studentData.customer?.name}`);
+            
+            try {
+                // تحديد المصدر
+                const fromTelegram = studentData.source === 'telegram' || 
+                                   studentData.telegramChatId ? true : false;
+                
+                // تنفيذ الأتمتة
+                const result = await autoCreateAccountAndAssignCourse(studentId, fromTelegram);
+                
+                if (result && result.success) {
+                    succeeded++;
+                    document.getElementById('success-count').textContent = succeeded;
+                    console.log(`✅ نجح: ${studentData.customer?.name}`);
+                    
+                    // تسجيل النجاح
+                    await db.collection('individualStudents').doc(studentId).update({
+                        automationProcessed: true,
+                        automationProcessedAt: new Date().toISOString(),
+                        automationStatus: 'success'
+                    });
+                } else {
+                    failed++;
+                    document.getElementById('fail-count').textContent = failed;
+                    console.error(`❌ فشل: ${studentData.customer?.name}`, result?.error);
+                    
+                    // تسجيل الفشل
+                    await db.collection('individualStudents').doc(studentId).update({
+                        automationProcessed: true,
+                        automationProcessedAt: new Date().toISOString(),
+                        automationStatus: 'failed',
+                        automationError: result?.error || 'Unknown error'
+                    });
+                }
+                
+                // تأخير صغير بين الطلبات
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+            } catch (error) {
+                failed++;
+                document.getElementById('fail-count').textContent = failed;
+                console.error(`❌ خطأ في معالجة ${studentId}:`, error);
             }
-        } else {
-            console.error('❌ فشلت الأتمتة:', result);
         }
         
-        return result;
-    } catch (error) {
-        console.error('خطأ في الأتمتة الفورية:', error);
-        return { success: false, error: error.message };
-    }
-};
-
-// تشغيل فوري إذا جاء من URL
-(function checkForInstantAutomation() {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('action') === 'auto' && urlParams.get('id')) {
-        const bookingId = urlParams.get('id');
-        const fromTelegram = urlParams.get('from') === 'telegram';
+        // عرض النتائج النهائية
+        await Swal.fire({
+            icon: succeeded > 0 ? 'success' : 'error',
+            title: 'انتهت المعالجة',
+            html: `
+                <div style="text-align: center;">
+                    <h3>📊 النتائج النهائية</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0;">
+                        <div style="background: #F0F9FF; padding: 15px; border-radius: 10px;">
+                            <div style="color: #0369A1; font-size: 2rem; font-weight: bold;">
+                                ${pendingCount}
+                            </div>
+                            <div style="color: #6B7280;">إجمالي الطلبات</div>
+                        </div>
+                        <div style="background: #F0FDF4; padding: 15px; border-radius: 10px;">
+                            <div style="color: #10B981; font-size: 2rem; font-weight: bold;">
+                                ${succeeded}
+                            </div>
+                            <div style="color: #6B7280;">نجح</div>
+                        </div>
+                        <div style="background: #FEF2F2; padding: 15px; border-radius: 10px;">
+                            <div style="color: #EF4444; font-size: 2rem; font-weight: bold;">
+                                ${failed}
+                            </div>
+                            <div style="color: #6B7280;">فشل</div>
+                        </div>
+                    </div>
+                    <p style="color: #6B7280;">معدل النجاح: ${Math.round((succeeded/pendingCount)*100)}%</p>
+                </div>
+            `,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#3B82F6'
+        });
         
-        // انتظر تحميل Firebase ثم نفذ
-        const waitForFirebase = setInterval(() => {
+        // تحديث الصفحة
+        if (typeof loadStudents === 'function') {
+            await loadStudents();
+        }
+        
+    } catch (error) {
+        console.error('خطأ في معالجة الطلبات:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ في معالجة الطلبات: ' + error.message,
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+// تعديل دالة DOMContentLoaded
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('🔄 تحميل صفحة الحجوزات الفردية...');
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const action = urlParams.get('action');
+    const bookingId = urlParams.get('id');
+    const fromSource = urlParams.get('from');
+    
+    // إذا فيه ID محدد - عالج طلب واحد
+    if (action === 'auto' && bookingId) {
+        console.log('🤖 معالجة طلب واحد:', bookingId);
+        
+        Swal.fire({
+            title: '⚡ معالجة الطلب',
+            html: `<div class="loading-spinner"></div>`,
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+        
+        try {
+            const result = await autoCreateAccountAndAssignCourse(bookingId, fromSource === 'telegram');
+            
+            if (result && result.success) {
+                await Swal.fire({
+                    icon: 'success',
+                    title: 'تمت المعالجة بنجاح',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+            } else {
+                throw new Error(result?.error || 'فشلت المعالجة');
+            }
+        } catch (error) {
+            await Swal.fire({
+                icon: 'error',
+                title: 'خطأ',
+                text: error.message
+            });
+        }
+        
+    } 
+    // إذا مفيش ID - اسأل عن معالجة الكل
+    else if (!bookingId) {
+        console.log('🔍 فحص الطلبات المعلقة...');
+        
+        // انتظر تحميل Firebase
+        const waitForFirebase = setInterval(async () => {
             if (typeof db !== 'undefined') {
                 clearInterval(waitForFirebase);
-                window.instantAutomation(bookingId, fromTelegram);
+                
+                // فحص الطلبات المعلقة
+                const snapshot = await db.collection('individualStudents')
+                    .where('accountCreated', '==', false)
+                    .where('paymentConfirmed', '==', true)
+                    .limit(1)
+                    .get();
+                
+                if (!snapshot.empty) {
+                    // إضافة زر في أعلى الصفحة
+                    setTimeout(() => {
+                        const header = document.querySelector('.header-content');
+                        if (header && !document.getElementById('auto-process-btn')) {
+                            const autoBtn = document.createElement('button');
+                            autoBtn.id = 'auto-process-btn';
+                            autoBtn.innerHTML = `
+                                <i class="fas fa-robot"></i> 
+                                معالجة الطلبات المعلقة
+                                <span style="background: #EF4444; color: white; 
+                                             padding: 2px 8px; border-radius: 10px; 
+                                             margin-right: 10px;">جديد</span>
+                            `;
+                            autoBtn.style.cssText = `
+                                background: linear-gradient(135deg, #3B82F6, #10B981);
+                                color: white;
+                                border: none;
+                                padding: 10px 20px;
+                                border-radius: 10px;
+                                cursor: pointer;
+                                font-weight: bold;
+                                animation: pulse 2s infinite;
+                            `;
+                            autoBtn.onclick = processAllPendingBookings;
+                            header.appendChild(autoBtn);
+                        }
+                    }, 1000);
+                    
+                    // سؤال تلقائي عند فتح الصفحة
+                    const result = await Swal.fire({
+                        icon: 'info',
+                        title: 'يوجد طلبات معلقة',
+                        text: 'هل تريد معالجة جميع الطلبات المعلقة الآن؟',
+                        showCancelButton: true,
+                        confirmButtonText: 'نعم، عالج الكل',
+                        cancelButtonText: 'لاحقاً',
+                        confirmButtonColor: '#10B981'
+                    });
+                    
+                    if (result.isConfirmed) {
+                        await processAllPendingBookings();
+                    }
+                }
             }
-        }, 100);
+        }, 500);
     }
-})();
+    
+    // تحميل البيانات العادي
+    if (typeof loadStudents === 'function') {
+        await loadStudents();
+    }
+});
+
+// إضافة للـ window
+window.processAllPendingBookings = processAllPendingBookings;
+
+console.log('✅ نظام الأتمتة الشاملة جاهز');
+        
     </script>
 </body>
 </html>
