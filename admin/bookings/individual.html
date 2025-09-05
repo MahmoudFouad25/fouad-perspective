@@ -4463,8 +4463,14 @@ window.addEventListener('message', async (event) => {
 });
 
 // التحقق التلقائي عند تحميل الصفحة
-window.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('📄 تحميل صفحة الحجوزات الفردية...');
+    
+    // انتظار تحميل البيانات أولاً
+    if (typeof loadStudents === 'function') {
+        await loadStudents();
+        console.log('✅ تم تحميل بيانات الطلاب');
+    }
     
     // قراءة المعاملات من URL
     const urlParams = new URLSearchParams(window.location.search);
@@ -4494,17 +4500,17 @@ window.addEventListener('DOMContentLoaded', async () => {
                     <p style="color: #6B7280; font-size: 0.9rem;">
                         ID: ${bookingId}
                     </p>
-                    <div style="background: #F0F9FF; padding: 15px; border-radius: 10px; margin-top: 20px;">
+                    <div id="automationProgress" style="background: #F0F9FF; padding: 15px; border-radius: 10px; margin-top: 20px;">
                         <p style="margin: 5px 0; color: #0369A1;">
                             <i class="fas fa-check-circle"></i> جلب البيانات
                         </p>
-                        <p style="margin: 5px 0; color: #6B7280;">
+                        <p id="step2" style="margin: 5px 0; color: #6B7280;">
                             <i class="fas fa-spinner fa-spin"></i> إنشاء الحساب
                         </p>
-                        <p style="margin: 5px 0; color: #6B7280;">
+                        <p id="step3" style="margin: 5px 0; color: #6B7280;">
                             <i class="fas fa-clock"></i> تخصيص الدورة
                         </p>
-                        <p style="margin: 5px 0; color: #6B7280;">
+                        <p id="step4" style="margin: 5px 0; color: #6B7280;">
                             <i class="fas fa-clock"></i> إرسال البيانات
                         </p>
                     </div>
@@ -4514,17 +4520,39 @@ window.addEventListener('DOMContentLoaded', async () => {
             showConfirmButton: false
         });
         
-        // تأخير بسيط للتأكد من تحميل كل شيء
+        // تأخير للتأكد من تحميل كل شيء
         setTimeout(async () => {
             try {
+                console.log('🚀 بدء الأتمتة للحجز:', bookingId);
+                
+                // تحديث واجهة المستخدم
+                const updateStep = (stepNum, success = true) => {
+                    const stepEl = document.getElementById(`step${stepNum}`);
+                    if (stepEl) {
+                        stepEl.style.color = success ? '#0369A1' : '#EF4444';
+                        stepEl.innerHTML = stepEl.innerHTML.replace(
+                            'fa-spinner fa-spin',
+                            success ? 'fa-check-circle' : 'fa-times-circle'
+                        );
+                    }
+                };
+                
                 // بدء عملية الأتمتة
+                console.log('📞 استدعاء دالة الأتمتة...');
                 const result = await autoCreateAccountAndAssignCourse(
                     bookingId, 
                     fromSource === 'telegram'
                 );
                 
-                if (result.success) {
-                    // تحديث رسالة النجاح
+                console.log('📊 نتيجة الأتمتة:', result);
+                
+                if (result && result.success) {
+                    // تحديث الخطوات
+                    updateStep(2, true);
+                    updateStep(3, true);
+                    updateStep(4, true);
+                    
+                    // رسالة النجاح
                     await Swal.fire({
                         icon: 'success',
                         title: '✅ اكتملت الأتمتة بنجاح!',
@@ -4567,26 +4595,31 @@ window.addEventListener('DOMContentLoaded', async () => {
                         confirmButtonColor: '#10B981'
                     });
                     
-                    // تحديث الصفحة بعد 3 ثواني
+                    // تحديث البيانات
                     setTimeout(() => {
                         if (typeof loadStudents === 'function') {
                             loadStudents();
                         }
-                    }, 3000);
+                    }, 2000);
                     
                 } else {
                     // رسالة خطأ
+                    updateStep(2, false);
+                    
                     await Swal.fire({
                         icon: 'error',
                         title: 'فشلت الأتمتة',
                         html: `
                             <div style="text-align: center;">
                                 <p style="color: #991B1B; margin-bottom: 15px;">
-                                    ${result.error || 'حدث خطأ غير متوقع'}
+                                    ${result?.error || 'حدث خطأ في إنشاء الحساب'}
+                                </p>
+                                <p style="color: #6B7280; font-size: 0.9rem; margin-top: 10px;">
+                                    تحقق من Console لمزيد من التفاصيل
                                 </p>
                                 <button onclick="location.reload()" 
                                         style="background: #EF4444; color: white; border: none; 
-                                               padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                                               padding: 10px 20px; border-radius: 8px; cursor: pointer; margin-top: 15px;">
                                     <i class="fas fa-redo"></i> إعادة المحاولة
                                 </button>
                             </div>
@@ -4601,12 +4634,19 @@ window.addEventListener('DOMContentLoaded', async () => {
                 await Swal.fire({
                     icon: 'error',
                     title: 'خطأ في الأتمتة',
-                    text: error.message || 'حدث خطأ غير متوقع',
+                    html: `
+                        <div style="text-align: center;">
+                            <p style="color: #991B1B;">${error.message}</p>
+                            <p style="color: #6B7280; font-size: 0.9rem; margin-top: 10px;">
+                                راجع Console للتفاصيل
+                            </p>
+                        </div>
+                    `,
                     confirmButtonColor: '#EF4444'
                 });
             }
             
-        }, 2000); // انتظار ثانيتين للتأكد من تحميل كل شيء
+        }, 3000); // انتظار 3 ثواني للتأكد من تحميل البيانات
     }
 });
 
