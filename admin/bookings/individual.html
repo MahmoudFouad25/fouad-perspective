@@ -4047,6 +4047,404 @@ await loadStudents();
 }
 
 window.assignCourseToStudent = assignCourseToStudent;
+        // ==================== 🤖 نظام الأتمتة الذكي ====================
+// دالة إنشاء الحساب التلقائي للحجوزات المؤكدة
+async function autoCreateAccountAndAssignCourse(studentId, fromTelegram = false) {
+    try {
+        console.log('🤖 بدء الأتمتة للطالب:', studentId);
+        
+        // البحث عن الطالب
+        let student = allStudents.find(s => s.id === studentId);
+        
+        // إذا لم نجد الطالب في البيانات المحلية، نجلبه من Firebase
+        if (!student) {
+            console.log('📥 جلب بيانات الطالب من Firebase...');
+            const studentDoc = await db.collection('individualStudents').doc(studentId).get();
+            
+            if (!studentDoc.exists) {
+                throw new Error('لم يتم العثور على بيانات الطالب');
+            }
+            
+            student = {
+                id: studentDoc.id,
+                ...studentDoc.data()
+            };
+        }
+        
+        // التحقق من عدم وجود حساب مسبق
+        if (student.accountCreated === true) {
+            console.log('✅ الحساب موجود بالفعل');
+            
+            // إذا الحساب موجود، نتحقق من تخصيص الدورة
+            if (!student.courseAssigned && student.courseName) {
+                console.log('📚 تخصيص الدورة للحساب الموجود...');
+                await autoAssignCourse(studentId, student.userId);
+            }
+            
+            return {
+                success: true,
+                accountExisted: true,
+                userId: student.userId
+            };
+        }
+        
+        console.log('🆕 إنشاء حساب جديد...');
+        
+        // إنشاء بيانات الحساب التلقائية
+        const autoAccountData = {
+            slug: UserStructure.generateUniqueSlug(student.customer?.name || 'user'),
+            email: student.customer?.email || `user${Date.now()}@fouad.academy`,
+            password: UserStructure.generateStrongPassword(),
+            journeyStage: 1
+        };
+        
+        // التحقق من عدم تكرار المعرف
+        let slugAttempts = 0;
+        let slugIsUnique = false;
+        
+        while (!slugIsUnique && slugAttempts < 5) {
+            const existingDoc = await db.collection('users').doc(autoAccountData.slug).get();
+            if (!existingDoc.exists) {
+                slugIsUnique = true;
+            } else {
+                autoAccountData.slug = UserStructure.generateUniqueSlug(student.customer?.name || 'user');
+                slugAttempts++;
+            }
+        }
+        
+        if (!slugIsUnique) {
+            throw new Error('فشل في توليد معرف فريد للحساب');
+        }
+        
+        // إنشاء بنية المستخدم المتكاملة
+        const newUser = UserStructure.createNewUser(student);
+        newUser.id = autoAccountData.slug;
+        newUser.personalInfo.email = autoAccountData.email;
+        newUser.auth.tempPassword = btoa(autoAccountData.password);
+        newUser.accountStatus.journeyStage = 1;
+        newUser.accountStatus.journeyTitle = 'ملبي النداء';
+        
+        // نظام النقاط الموحد مع نقاط ترحيبية
+        newUser.unifiedPoints = {
+            balance: 50, // نقاط ترحيبية
+            history: [{
+                amount: 50,
+                type: 'add',
+                reason: 'إنشاء حساب جديد',
+                description: 'نقاط ترحيبية عند الانضمام لمنظور الفؤاد',
+                date: new Date().toISOString(),
+                category: 'welcome'
+            }],
+            lastUpdated: new Date().toISOString()
+        };
+        
+        // إضافة البيانات المالية الأولية
+        if (student.paymentInfo?.isInstallment) {
+            newUser.financial.totalPaid = student.paymentInfo.paidAmount || 0;
+        } else if (student.paymentConfirmed) {
+            newUser.financial.totalPaid = student.pricing?.finalPriceNumber || 0;
+        }
+        
+        // إضافة معلومات المصدر
+        newUser.metadata = {
+            ...newUser.metadata,
+            source: fromTelegram ? 'telegram-automation' : 'admin-automation',
+            automatedCreation: true,
+            createdAt: new Date().toISOString()
+        };
+        
+        // حفظ في Firebase
+        await db.collection('users').doc(autoAccountData.slug).set(newUser);
+        console.log('✅ تم حفظ المستخدم في Firebase');
+        
+        // تحديث individualStudents
+        await db.collection('individualStudents').doc(studentId).update({
+            accountCreated: true,
+            accountCreatedAt: new Date().toISOString(),
+            accountStatus: 'active',
+            userId: autoAccountData.slug,
+            userEmail: autoAccountData.email,
+            accountPassword: autoAccountData.password, // للإرسال عبر التليجرام
+            automationCompleted: {
+                accountCreation: true,
+                timestamp: new Date().toISOString()
+            },
+            progress: {
+                accountSetup: 100,
+                courseAssignment: 0,
+                firstPayment: student.paymentConfirmed ? 100 : 0,
+                welcomeMessage: 0,
+                totalProgress: 50
+            }
+        });
+        
+        console.log('✅ تم تحديث بيانات الطالب');
+        
+        // تخصيص الدورة تلقائياً إذا كان هناك دورة
+        if (student.courseName) {
+            console.log('📚 بدء تخصيص الدورة...');
+            await autoAssignCourse(studentId, autoAccountData.slug);
+        }
+        
+        // إذا كان من التليجرام، أرسل البيانات
+        if (fromTelegram && student.telegramChatId) {
+            console.log('📱 إرسال البيانات للتليجرام...');
+            await sendAccountDetailsToTelegram(student, autoAccountData);
+        }
+        
+        // تحديث البيانات المحلية إذا كانت الصفحة مفتوحة
+        if (typeof allStudents !== 'undefined') {
+            const studentIndex = allStudents.findIndex(s => s.id === studentId);
+            if (studentIndex !== -1) {
+                allStudents[studentIndex] = {
+                    ...allStudents[studentIndex],
+                    accountCreated: true,
+                    accountStatus: 'active',
+                    userId: autoAccountData.slug,
+                    userEmail: autoAccountData.email
+                };
+            }
+        }
+        
+        // تحديث العرض إذا كانت الدوال موجودة
+        if (typeof filterByTab === 'function') {
+            filterByTab(currentFilter || 'all');
+        }
+        if (typeof updateStatistics === 'function') {
+            updateStatistics();
+        }
+        
+        console.log('✅ اكتملت العملية بنجاح');
+        
+        return {
+            success: true,
+            accountData: autoAccountData,
+            userId: autoAccountData.slug
+        };
+        
+    } catch (error) {
+        console.error('❌ خطأ في إنشاء الحساب التلقائي:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// دالة تخصيص الدورة التلقائي
+async function autoAssignCourse(studentId, userId) {
+    try {
+        console.log('📚 بدء تخصيص الدورة التلقائي...');
+        
+        // جلب بيانات الطالب
+        const studentDoc = await db.collection('individualStudents').doc(studentId).get();
+        if (!studentDoc.exists) {
+            throw new Error('لم يتم العثور على بيانات الطالب');
+        }
+        
+        const student = {
+            id: studentDoc.id,
+            ...studentDoc.data()
+        };
+        
+        if (!student.courseName) {
+            console.log('⚠️ لا توجد دورة محددة للتخصيص');
+            return;
+        }
+        
+        // جلب بيانات المستخدم
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            throw new Error('لم يتم العثور على حساب المستخدم');
+        }
+        
+        const userData = userDoc.data();
+        const existingEnrollments = userData.enrollments || [];
+        
+        // التحقق من عدم وجود نفس الدورة
+        const courseExists = existingEnrollments.find(e => 
+            e.title === student.courseName && 
+            new Date(e.dates.endDate) > new Date()
+        );
+        
+        if (courseExists) {
+            console.log('⚠️ الدورة مخصصة بالفعل وما زالت نشطة');
+            return;
+        }
+        
+        // إنشاء enrollment
+        const enrollmentData = {
+            enrollmentType: 'new',
+            startDate: new Date().toISOString().split('T')[0],
+            endDate: (() => {
+                const end = new Date();
+                end.setMonth(end.getMonth() + 6); // 6 أشهر افتراضياً
+                return end.toISOString().split('T')[0];
+            })(),
+            duration: '6 شهر',
+            usePoints: false,
+            pointsToUse: 0,
+            notes: 'تخصيص تلقائي عبر نظام الأتمتة الذكي',
+            isRenewal: false,
+            automatedAssignment: true
+        };
+        
+        const newEnrollment = EnrollmentManager.createEnrollment(student, enrollmentData);
+        const updatedEnrollments = [...existingEnrollments, newEnrollment];
+        
+        // حساب الإجماليات المالية
+        const financialTotals = EnrollmentManager.calculateFinancialTotals(updatedEnrollments);
+        
+        // حساب النقاط من المبلغ المدفوع
+        let actualPaidAmount = 0;
+        let paymentDescription = '';
+        
+        if (student.paymentInfo?.isInstallment) {
+            actualPaidAmount = student.paymentInfo.paidAmount || 0;
+            const installmentNumber = student.paymentInfo.paidInstallments || 1;
+            paymentDescription = `القسط ${installmentNumber} = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
+        } else if (student.paymentConfirmed) {
+            actualPaidAmount = newEnrollment.pricing.finalPrice;
+            paymentDescription = `دفعة كاملة = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
+        }
+        
+        const coursePoints = Math.floor(actualPaidAmount / 10); // كل 10 جنيه = نقطة
+        
+        // تحديث النقاط
+        if (coursePoints > 0) {
+            const currentPoints = userData.unifiedPoints?.balance || 0;
+            const pointsHistory = userData.unifiedPoints?.history || [];
+            
+            pointsHistory.push({
+                amount: coursePoints,
+                type: 'add',
+                reason: `تخصيص دورة - ${student.courseName}`,
+                description: paymentDescription,
+                date: new Date().toISOString(),
+                category: 'course'
+            });
+            
+            // تحديث بيانات المستخدم
+            await db.collection('users').doc(userId).update({
+                enrollments: updatedEnrollments,
+                'financial.totalPaid': financialTotals.totalPaid,
+                'financial.totalDue': financialTotals.totalDue,
+                'financial.totalSavings': financialTotals.totalSavings,
+                'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,
+                'unifiedPoints.balance': currentPoints + coursePoints,
+                'unifiedPoints.history': pointsHistory,
+                'unifiedPoints.lastUpdated': new Date().toISOString(),
+                'timestamps.updatedAt': new Date().toISOString()
+            });
+        } else {
+            // تحديث بدون نقاط
+            await db.collection('users').doc(userId).update({
+                enrollments: updatedEnrollments,
+                'financial.totalPaid': financialTotals.totalPaid,
+                'financial.totalDue': financialTotals.totalDue,
+                'financial.totalSavings': financialTotals.totalSavings,
+                'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,
+                'timestamps.updatedAt': new Date().toISOString()
+            });
+        }
+        
+        // تحديث individualStudents
+        await db.collection('individualStudents').doc(studentId).update({
+            courseAssigned: true,
+            courseAssignedAt: new Date().toISOString(),
+            assignedCourseId: newEnrollment.courseId,
+            'automationCompleted.courseAssignment': true,
+            'progress.courseAssignment': 100,
+            'progress.totalProgress': 100
+        });
+        
+        console.log('✅ تم تخصيص الدورة تلقائياً بنجاح');
+        
+    } catch (error) {
+        console.error('❌ خطأ في تخصيص الدورة التلقائي:', error);
+    }
+}
+
+// دالة إرسال البيانات للتليجرام
+async function sendAccountDetailsToTelegram(student, accountData) {
+    try {
+        console.log('📱 إرسال بيانات الحساب للتليجرام...');
+        
+        const message = `
+🎓 *تم إنشاء حسابك بنجاح!*
+━━━━━━━━━━━━━━━━━━
+
+مرحباً ${student.customer?.name || 'عميلنا العزيز'} 🌟
+
+تم إنشاء حسابك في منظور الفؤاد وتخصيص الدورة بنجاح!
+
+📧 *البريد الإلكتروني:*
+\`${accountData.email}\`
+
+🔑 *كلمة المرور:*
+\`${accountData.password}\`
+
+🆔 *معرف الحساب:*
+\`${accountData.slug}\`
+
+━━━━━━━━━━━━━━━━━━
+📚 *الدورة المخصصة:*
+${student.courseName || 'سيتم تحديدها قريباً'}
+
+🎯 *المستوى:* ملبي النداء (المرحلة الأولى)
+💎 *نقاط الارتواء:* 50 نقطة ترحيبية
+
+━━━━━━━━━━━━━━━━━━
+🌐 *رابط الدخول المباشر:*
+https://fouad-perspective.web.app/login
+
+⚠️ *مهم جداً:*
+احفظ هذه البيانات في مكان آمن 🔐
+يمكنك تغيير كلمة المرور بعد أول دخول
+
+مع تحيات فريق منظور الفؤاد 💜
+        `.trim();
+        
+        const response = await fetch('http://localhost:3000/send-custom-message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chatId: student.telegramChatId,
+                message: message,
+                buttons: [
+                    [{ text: '🌐 دخول المنصة الآن', url: 'https://fouad-perspective.web.app/login' }],
+                    [{ text: '📚 عرض دورات أخرى', callback_data: 'show_courses' }],
+                    [{ text: '💬 الدعم الفني', callback_data: 'contact_support' }]
+                ]
+            })
+        });
+        
+        if (response.ok) {
+            console.log('✅ تم إرسال البيانات للتليجرام بنجاح');
+            
+            // تحديث حالة الإرسال
+            await db.collection('individualStudents').doc(student.id).update({
+                'automationCompleted.credentialsSent': true,
+                'automationCompleted.sentAt': new Date().toISOString()
+            });
+        } else {
+            console.error('⚠️ فشل إرسال البيانات للتليجرام');
+        }
+        
+    } catch (error) {
+        console.error('❌ خطأ في إرسال البيانات للتليجرام:', error);
+    }
+}
+
+// تعريض الدوال للاستخدام العام
+window.autoCreateAccountAndAssignCourse = autoCreateAccountAndAssignCourse;
+window.autoAssignCourse = autoAssignCourse;
+window.sendAccountDetailsToTelegram = sendAccountDetailsToTelegram;
+
+console.log('✅ تم تحميل نظام الأتمتة الذكي');
+        
         // ==================== 🔍 دوال المساعدة والعرض ====================
 
 // دالة عرض تفاصيل المستخدم الكاملة
@@ -5823,281 +6221,7 @@ window.deletePointsEntry = deletePointsEntry;
 // 
 // سيتم نقل باقي الوظائف المالية لصفحة منفصلة
 // ==================== ======================== ====================
-        <!-- أضف هذه الدالة في صفحة individual.html -->
-
-// دالة إنشاء الحساب التلقائي للحجوزات من التليجرام
-async function autoCreateAccountAndAssignCourse(studentId) {
-    try {
-        console.log('🤖 بدء الأتمتة للطالب:', studentId);
         
-        const student = allStudents.find(s => s.id === studentId);
-        if (!student) {
-            throw new Error('لم يتم العثور على بيانات الطالب');
-        }
-        
-        // التحقق من عدم وجود حساب مسبق
-        if (student.accountCreated === true) {
-            console.log('الحساب موجود بالفعل');
-            return;
-        }
-        
-        // إنشاء بيانات الحساب التلقائية
-        const autoAccountData = {
-            slug: UserStructure.generateUniqueSlug(student.customer?.name),
-            email: student.customer?.email || `user${Date.now()}@fouad.academy`,
-            password: UserStructure.generateStrongPassword(),
-            journeyStage: 1
-        };
-        
-        // التحقق من عدم تكرار المعرف
-        const existingDoc = await db.collection('users').doc(autoAccountData.slug).get();
-        if (existingDoc.exists) {
-            // توليد معرف جديد
-            autoAccountData.slug = UserStructure.generateUniqueSlug(student.customer?.name);
-        }
-        
-        // إنشاء بنية المستخدم المتكاملة
-        const newUser = UserStructure.createNewUser(student);
-        newUser.id = autoAccountData.slug;
-        newUser.personalInfo.email = autoAccountData.email;
-        newUser.auth.tempPassword = btoa(autoAccountData.password);
-        newUser.accountStatus.journeyStage = 1;
-        newUser.accountStatus.journeyTitle = 'ملبي النداء';
-        
-        // نظام النقاط الموحد
-        newUser.unifiedPoints = {
-            balance: 50, // نقاط ترحيبية
-            history: [{
-                amount: 50,
-                type: 'add',
-                reason: 'إنشاء حساب جديد',
-                description: 'نقاط ترحيبية عند الانضمام لمنظور الفؤاد',
-                date: new Date().toISOString()
-            }],
-            lastUpdated: new Date().toISOString()
-        };
-        
-        // إضافة البيانات المالية
-        if (student.paymentInfo?.isInstallment) {
-            newUser.financial.totalPaid = student.paymentInfo.paidAmount || 0;
-        } else if (student.paymentConfirmed) {
-            newUser.financial.totalPaid = student.pricing?.finalPriceNumber || 0;
-        }
-        
-        // حفظ في Firebase
-        await db.collection('users').doc(autoAccountData.slug).set(newUser);
-        
-        // تحديث individualStudents
-        await db.collection('individualStudents').doc(studentId).update({
-            accountCreated: true,
-            accountCreatedAt: new Date().toISOString(),
-            accountStatus: 'active',
-            userId: autoAccountData.slug,
-            userEmail: autoAccountData.email,
-            accountPassword: autoAccountData.password, // للإرسال عبر التليجرام
-            progress: {
-                accountSetup: 100,
-                courseAssignment: 0,
-                firstPayment: student.paymentConfirmed ? 100 : 0,
-                welcomeMessage: 0,
-                totalProgress: 50
-            }
-        });
-        
-        console.log('✅ تم إنشاء الحساب تلقائياً');
-        
-        // تخصيص الدورة تلقائياً
-        if (student.courseName) {
-            await autoAssignCourse(studentId, autoAccountData.slug);
-        }
-        
-        // إرسال البيانات للتليجرام
-        if (student.telegramChatId) {
-            await sendAccountDetailsToTelegram(student, autoAccountData);
-        }
-        
-        // تحديث البيانات المحلية
-        const studentIndex = allStudents.findIndex(s => s.id === studentId);
-        if (studentIndex !== -1) {
-            allStudents[studentIndex].accountCreated = true;
-            allStudents[studentIndex].accountStatus = 'active';
-            allStudents[studentIndex].userId = autoAccountData.slug;
-            allStudents[studentIndex].userEmail = autoAccountData.email;
-        }
-        
-        // تحديث العرض
-        if (typeof filterByTab === 'function') {
-            filterByTab(currentFilter || 'all');
-        }
-        if (typeof updateStatistics === 'function') {
-            updateStatistics();
-        }
-        
-    } catch (error) {
-        console.error('خطأ في إنشاء الحساب التلقائي:', error);
-    }
-}
-
-// دالة تخصيص الدورة التلقائي
-async function autoAssignCourse(studentId, userId) {
-    try {
-        const student = allStudents.find(s => s.id === studentId);
-        if (!student || !student.courseName) return;
-        
-        // جلب بيانات المستخدم
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (!userDoc.exists) return;
-        
-        const userData = userDoc.data();
-        const existingEnrollments = userData.enrollments || [];
-        
-        // إنشاء enrollment
-        const enrollmentData = {
-            enrollmentType: 'new',
-            startDate: new Date().toISOString().split('T')[0],
-            endDate: (() => {
-                const end = new Date();
-                end.setMonth(end.getMonth() + 6);
-                return end.toISOString().split('T')[0];
-            })(),
-            duration: '6 شهر',
-            usePoints: false,
-            pointsToUse: 0,
-            notes: 'تخصيص تلقائي عبر نظام الأتمتة',
-            isRenewal: false
-        };
-        
-        const newEnrollment = EnrollmentManager.createEnrollment(student, enrollmentData);
-        const updatedEnrollments = [...existingEnrollments, newEnrollment];
-        
-        // حساب الإجماليات المالية
-        const financialTotals = EnrollmentManager.calculateFinancialTotals(updatedEnrollments);
-        
-        // حساب النقاط من المبلغ المدفوع
-        let actualPaidAmount = 0;
-        if (student.paymentInfo?.isInstallment) {
-            actualPaidAmount = student.paymentInfo.paidAmount || 0;
-        } else if (student.paymentConfirmed) {
-            actualPaidAmount = newEnrollment.pricing.finalPrice;
-        }
-        
-        const coursePoints = Math.floor(actualPaidAmount / 10);
-        
-        // إضافة النقاط
-        if (coursePoints > 0) {
-            const currentPoints = userData.unifiedPoints?.balance || 0;
-            const pointsHistory = userData.unifiedPoints?.history || [];
-            
-            pointsHistory.push({
-                amount: coursePoints,
-                type: 'add',
-                reason: `تخصيص دورة - ${student.courseName}`,
-                description: student.paymentInfo?.isInstallment ? 
-                    `القسط الأول = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م` :
-                    `دفعة كاملة = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`,
-                date: new Date().toISOString()
-            });
-            
-            await db.collection('users').doc(userId).update({
-                enrollments: updatedEnrollments,
-                'financial.totalPaid': financialTotals.totalPaid,
-                'financial.totalDue': financialTotals.totalDue,
-                'financial.totalSavings': financialTotals.totalSavings,
-                'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,
-                'unifiedPoints.balance': currentPoints + coursePoints,
-                'unifiedPoints.history': pointsHistory,
-                'unifiedPoints.lastUpdated': new Date().toISOString(),
-                'timestamps.updatedAt': new Date().toISOString()
-            });
-        } else {
-            await db.collection('users').doc(userId).update({
-                enrollments: updatedEnrollments,
-                'financial.totalPaid': financialTotals.totalPaid,
-                'financial.totalDue': financialTotals.totalDue,
-                'financial.totalSavings': financialTotals.totalSavings,
-                'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,
-                'timestamps.updatedAt': new Date().toISOString()
-            });
-        }
-        
-        // تحديث individualStudents
-        await db.collection('individualStudents').doc(studentId).update({
-            courseAssigned: true,
-            courseAssignedAt: new Date().toISOString(),
-            assignedCourseId: newEnrollment.courseId,
-            'progress.courseAssignment': 100,
-            'progress.totalProgress': 100
-        });
-        
-        console.log('✅ تم تخصيص الدورة تلقائياً');
-        
-    } catch (error) {
-        console.error('خطأ في تخصيص الدورة التلقائي:', error);
-    }
-}
-
-// دالة إرسال البيانات للتليجرام
-async function sendAccountDetailsToTelegram(student, accountData) {
-    try {
-        const response = await fetch('http://localhost:3000/send-custom-message', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                chatId: student.telegramChatId,
-                message: `
-🎓 *تم إنشاء حسابك بنجاح!*
-━━━━━━━━━━━━━━━━━━
-
-📧 *البريد الإلكتروني:*
-\`${accountData.email}\`
-
-🔑 *كلمة المرور:*
-\`${accountData.password}\`
-
-🆔 *معرف الحساب:*
-\`${accountData.slug}\`
-
-━━━━━━━━━━━━━━━━━━
-
-🌐 *رابط الدخول:*
-https://fouad-perspective.web.app/login
-
-📚 *الدورة المخصصة:*
-${student.courseName}
-
-احتفظ بهذه البيانات في مكان آمن 🔐
-                `,
-                buttons: [
-                    [{ text: '🌐 دخول المنصة', url: 'https://fouad-perspective.web.app/login' }],
-                    [{ text: '📚 دورات أخرى', callback_data: 'show_courses' }]
-                ]
-            })
-        });
-        
-        if (response.ok) {
-            console.log('✅ تم إرسال البيانات للتليجرام');
-        }
-    } catch (error) {
-        console.error('خطأ في إرسال البيانات للتليجرام:', error);
-    }
-}
-
-// استدعاء الدالة عند تحميل الصفحة للحجوزات الجديدة
-window.addEventListener('DOMContentLoaded', async () => {
-    // التحقق من وجود حجوزات تحتاج أتمتة
-    const urlParams = new URLSearchParams(window.location.search);
-    const action = urlParams.get('action');
-    const bookingId = urlParams.get('id');
-    
-    if (action === 'new' && bookingId) {
-        // حجز جديد من الأتمتة
-        setTimeout(() => {
-            autoCreateAccountAndAssignCourse(bookingId);
-        }, 2000);
-    }
-});
     </script>
 </body>
 </html>
