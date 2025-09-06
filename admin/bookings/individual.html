@@ -3625,7 +3625,7 @@ async function autoCreateAccountAndAssignCourse(studentId, fromTelegram = false)
         
         // إذا لم نجد الطالب في البيانات المحلية، نجلبه من Firebase
         if (!student) {
-            console.log('📥 جلب بيانات الطالب من Firebase...');
+            console.log('🔥 جلب بيانات الطالب من Firebase...');
             const studentDoc = await db.collection('individualStudents').doc(studentId).get();
             
             if (!studentDoc.exists) {
@@ -3638,53 +3638,51 @@ async function autoCreateAccountAndAssignCourse(studentId, fromTelegram = false)
             };
         }
         
-        // التحقق من عدم وجود حساب مسبق
-       // التحقق من وجود حساب مسبق
-if (student.accountCreated === true || student.userId) {
-    console.log('✅ الحساب موجود بالفعل');
-    
-    // التحقق من وجود معرف المستخدم
-    if (student.userId) {
-        // التأكد من وجود الحساب في Firebase
-        const userDoc = await db.collection('users').doc(student.userId).get();
-        
-        if (userDoc.exists) {
-            console.log('✅ تم التحقق من وجود الحساب في Firebase');
+        // التحقق من وجود حساب مسبق
+        if (student.accountCreated === true || student.userId) {
+            console.log('✅ الحساب موجود بالفعل');
             
-            // تخصيص الدورة فقط إذا لم تكن مخصصة
-            if (!student.courseAssigned && student.courseName) {
-                console.log('📚 تخصيص دورة جديدة للحساب الموجود...');
-                await autoAssignCourse(studentId, student.userId);
+            if (student.userId) {
+                const userDoc = await db.collection('users').doc(student.userId).get();
                 
-                // إرسال رسالة للتليجرام
-                if (fromTelegram && student.telegramChatId) {
-                    const message = `
+                if (userDoc.exists) {
+                    console.log('✅ تم التحقق من وجود الحساب في Firebase');
+                    
+                    // تخصيص الدورة فقط إذا لم تكن مخصصة
+                    if (!student.courseAssigned && student.courseName) {
+                        console.log('📚 تخصيص دورة جديدة للحساب الموجود...');
+                        await autoAssignCourse(studentId, student.userId);
+                        
+                        // إرسال رسالة للتليجرام
+                        if (fromTelegram && student.telegramChatId) {
+                            const message = `
 ✅ *تم تخصيص الدورة بنجاح!*
 
 تم إضافة دورة "${student.courseName}" لحسابك الموجود
 
-يمكنك الدخول بنفس بياناتك السابقة
-                    `;
+يمكنك الدخول بنفس بيانات دخولك السابقة
+                            `;
+                            
+                            await fetch('http://localhost:3000/send-message-to-chat', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    chatId: student.telegramChatId,
+                                    message: message
+                                })
+                            });
+                        }
+                    }
                     
-                    await fetch('http://localhost:3000/send-message-to-chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            chatId: student.telegramChatId,
-                            message: message
-                        })
-                    });
+                    return {
+                        success: true,
+                        accountExisted: true,
+                        userId: student.userId
+                    };
                 }
             }
-            
-            return {
-                success: true,
-                accountExisted: true,
-                userId: student.userId
-            };
         }
-    }
-}
+        
         console.log('🆕 إنشاء حساب جديد...');
         
         // إنشاء بيانات الحساب التلقائية
@@ -3721,20 +3719,6 @@ if (student.accountCreated === true || student.userId) {
         newUser.accountStatus.journeyStage = 1;
         newUser.accountStatus.journeyTitle = 'ملبي النداء';
         
-        // نظام النقاط الموحد مع نقاط ترحيبية
-        newUser.unifiedPoints = {
-            balance: 50, // نقاط ترحيبية
-            history: [{
-                amount: 50,
-                type: 'add',
-                reason: 'إنشاء حساب جديد',
-                description: 'نقاط ترحيبية عند الانضمام لمنظور الفؤاد',
-                date: new Date().toISOString(),
-                category: 'welcome'
-            }],
-            lastUpdated: new Date().toISOString()
-        };
-        
         // إضافة البيانات المالية الأولية
         if (student.paymentInfo?.isInstallment) {
             newUser.financial.totalPaid = student.paymentInfo.paidAmount || 0;
@@ -3761,7 +3745,7 @@ if (student.accountCreated === true || student.userId) {
             accountStatus: 'active',
             userId: autoAccountData.slug,
             userEmail: autoAccountData.email,
-            accountPassword: autoAccountData.password, // للإرسال عبر التليجرام
+            accountPassword: autoAccountData.password,
             automationCompleted: {
                 accountCreation: true,
                 timestamp: new Date().toISOString()
@@ -3776,6 +3760,15 @@ if (student.accountCreated === true || student.userId) {
         });
         
         console.log('✅ تم تحديث بيانات الطالب');
+        
+        // إضافة نقاط إنشاء الحساب
+        await addDualPoints(
+            autoAccountData.slug,
+            50,
+            'إنشاء حساب جديد (أتمتة)',
+            'نقاط ترحيبية عند الانضمام لمنظور الفؤاد'
+        );
+        console.log('✅ تم إضافة 50 نقطة ترحيبية');
         
         // تخصيص الدورة تلقائياً إذا كان هناك دورة
         if (student.courseName) {
