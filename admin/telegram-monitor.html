@@ -391,12 +391,17 @@
 <div class="messages-container" id="messagesContainer">
                         <!-- الرسائل ستظهر هنا -->
                     </div>
-                    <div class="input-area">
-                        <input type="text" id="messageInput" placeholder="اكتب رسالة للعميل...">
-                        <button onclick="sendAdminMessage()">
-                            <i class="fas fa-paper-plane"></i> إرسال
-                        </button>
-                    </div>
+                    <!-- في صفحة المراقبة، استبدل input-area بهذا -->
+<div class="input-area">
+    <input type="file" id="fileInput" style="display: none;" accept="image/*,audio/*,.pdf,.doc,.docx">
+    <button onclick="document.getElementById('fileInput').click()" style="background: #6366F1; margin-left: 5px; padding: 10px;">
+        <i class="fas fa-paperclip"></i>
+    </button>
+    <input type="text" id="messageInput" placeholder="اكتب رسالة للعميل...">
+    <button onclick="sendAdminMessage()">
+        <i class="fas fa-paper-plane"></i> إرسال
+    </button>
+</div>
                 </div>
             </div>
         </div>
@@ -747,27 +752,75 @@ async function resolveHelpRequest(chatId) {
         const chatData = chatsData[chatId];
         const studentName = chatData?.studentName || chatData?.userInfo?.firstName || 'المستخدم';
         
-        // تأكيد من المستخدم
-        const result = await Swal.fire({
+        // نافذة خيارات حل المشكلة
+        const { value: responseOption } = await Swal.fire({
             title: 'تأكيد حل المشكلة',
             text: `هل تم حل مشكلة ${studentName} فعلاً؟`,
             icon: 'question',
+            input: 'select',
+            inputLabel: 'اختر نوع الرد للعميل:',
+            inputOptions: {
+                'default_success': '✅ رد تلقائي: تم حل المشكلة بنجاح',
+                'default_login': '🔑 رد تلقائي: تم إرسال بيانات الدخول',
+                'default_account': '🎓 رد تلقائي: تم إنشاء الحساب',
+                'default_course': '📚 رد تلقائي: تم تخصيص الدورة',
+                'custom': '✏️ كتابة رسالة مخصصة'
+            },
+            inputValue: 'default_success',
             showCancelButton: true,
-            confirmButtonText: 'نعم، تم الحل',
+            confirmButtonText: 'إرسال وإنهاء',
             cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#22C55E'
+            confirmButtonColor: '#22C55E',
+            inputValidator: (value) => {
+                if (!value) {
+                    return 'يجب اختيار نوع الرد';
+                }
+            }
         });
         
-        if (!result.isConfirmed) return;
+        if (!responseOption) return;
         
-        // إزالة علامة المساعدة من telegramChats
+        let messageToSend = '';
+        
+        // إذا اختار رسالة مخصصة
+        if (responseOption === 'custom') {
+            const { value: customMessage } = await Swal.fire({
+                title: 'اكتب الرسالة المخصصة',
+                input: 'textarea',
+                inputLabel: `رسالة لـ ${studentName}:`,
+                inputPlaceholder: 'اكتب رسالتك هنا...',
+                showCancelButton: true,
+                confirmButtonText: 'إرسال',
+                cancelButtonText: 'رجوع',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length < 5) {
+                        return 'الرسالة قصيرة جداً';
+                    }
+                }
+            });
+            
+            if (!customMessage) return;
+            messageToSend = customMessage.trim();
+        } else {
+            // الرسائل التلقائية
+            const predefinedMessages = {
+                'default_success': '✅ تم حل مشكلتك بنجاح!\n\nشكراً لصبرك، ونتمنى لك تجربة ممتازة في المنصة.',
+                'default_login': '🔑 تم إرسال بيانات الدخول الخاصة بك.\n\nيمكنك الآن الدخول للمنصة والبدء في رحلتك التعليمية.',
+                'default_account': '🎓 تم إنشاء حسابك بنجاح وإرسال البيانات.\n\nمرحباً بك في منظور الفؤاد!',
+                'default_course': '📚 تم تخصيص الدورة لحسابك بنجاح.\n\nيمكنك الآن الوصول لجميع محتويات الدورة.'
+            };
+            messageToSend = predefinedMessages[responseOption];
+        }
+        
+        // إزالة علامة المساعدة
         await db.collection('telegramChats').doc(chatId).update({
             hasHelpRequest: false,
             helpResolvedAt: new Date(),
-            helpResolvedBy: 'admin'
+            helpResolvedBy: 'admin',
+            adminResponse: messageToSend
         });
         
-        // إزالة علامة المساعدة من individualStudents إذا كان طالب مسجل
+        // إزالة من individualStudents إذا كان طالب مسجل
         if (chatData?.isRegisteredStudent) {
             const studentSnapshot = await db.collection('individualStudents')
                 .where('telegramChatId', '==', chatId)
@@ -777,18 +830,20 @@ async function resolveHelpRequest(chatId) {
             if (!studentSnapshot.empty) {
                 await studentSnapshot.docs[0].ref.update({
                     needsHelp: false,
-                    helpResolvedAt: new Date().toISOString()
+                    helpResolvedAt: new Date().toISOString(),
+                    'automationWorkflow.helpModeActivated': false,
+                    'automationWorkflow.currentState': 'resolved'
                 });
             }
         }
         
-        // إرسال رسالة للعميل
+        // إرسال الرسالة للعميل
         await fetch('http://localhost:3000/send-message-to-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chatId: chatId,
-                message: '✅ تم حل مشكلتك بنجاح!\n\nشكراً لصبرك، ونتمنى لك تجربة ممتازة في المنصة.'
+                message: messageToSend
             })
         });
         
@@ -799,7 +854,7 @@ async function resolveHelpRequest(chatId) {
         Swal.fire({
             icon: 'success',
             title: 'تم الحل بنجاح',
-            text: `تم تسجيل حل مشكلة ${studentName}`,
+            text: `تم إرسال الرد وإغلاق طلب المساعدة`,
             timer: 2000,
             showConfirmButton: false
         });
@@ -813,7 +868,6 @@ async function resolveHelpRequest(chatId) {
         });
     }
 }
-
 let isSending = false; // متغير عام لمنع التكرار
         
 
