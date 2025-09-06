@@ -750,11 +750,7 @@
         let allStudents = [];
         let filteredStudents = [];
         let currentFilter = 'all';
-        let availableCourses = [];
-        let coursesWithOffers = [];
 let activeOffers = {};
-let customizationTemplates = [];
-let availablePaths = [];
 // ==================== 🗂️ البنية الجديدة المتكاملة للمستخدم ====================
 
   
@@ -1163,6 +1159,7 @@ const FouadJourneySystem = {
 // إضافة النظام للـ window
 window.FouadJourneySystem = FouadJourneySystem;
 
+        
 // ==================== 📚 نظام إدارة الدورات المتكامل ====================
 const EnrollmentManager = {
     // إنشاء تخصيص دورة جديد بالبنية الكاملة
@@ -1462,6 +1459,171 @@ enrollmentFormData: {
         return totals;
     }
 };
+
+        async function addJourneyPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.journeyPoints?.balance || 0;
+        
+        await userRef.update({
+            'journeyPoints.balance': currentBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            })
+        });
+        
+        console.log(`تم ${amount > 0 ? 'إضافة' : 'خصم'} ${Math.abs(amount)} نقطة رحلة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في تعديل نقاط الرحلة:', error);
+        return false;
+    }
+}
+
+window.addJourneyPoints = addJourneyPoints;
+
+        // دالة إضافة نقاط للمحفظة فقط
+async function addWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance + amount,
+            'walletPoints.lifetime': (userData.walletPoints?.lifetime || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'addition'
+            })
+        });
+        
+        console.log(`✅ تم إضافة ${amount} نقطة للمحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة نقاط المحفظة:', error);
+        return false;
+    }
+}
+       
+        window.addWalletPoints = addWalletPoints;
+         // دالة إضافة النقاط المزدوجة - للنظامين معاً
+async function addDualPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentJourneyBalance = userData.journeyPoints?.balance || 0;
+        const currentWalletBalance = userData.walletPoints?.balance || 0;
+        
+        // تحديد التسمية الصحيحة بناءً على السبب
+        let reasonLabel = reason;
+        if (!reason.includes('(')) {
+            reasonLabel = reason + ' (النظامين)';
+        }
+        
+        const updates = {
+            // تحديث نقاط الارتواء
+            'journeyPoints.balance': currentJourneyBalance + amount,
+            'journeyPoints.lifetime': amount > 0 ? 
+                (userData.journeyPoints?.lifetime || 0) + amount : 
+                userData.journeyPoints?.lifetime || 0,
+            'journeyPoints.lastUpdated': new Date().toISOString(),
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reasonLabel,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'journey'
+            }),
+            
+            // تحديث نقاط المحفظة
+            'walletPoints.balance': currentWalletBalance + amount,
+            'walletPoints.lifetime': amount > 0 ? 
+                (userData.walletPoints?.lifetime || 0) + amount : 
+                userData.walletPoints?.lifetime || 0,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: amount,
+                reason: reasonLabel,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'wallet'
+            })
+        };
+        
+        await userRef.update(updates);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في إضافة النقاط المزدوجة:', error);
+        return false;
+    }
+}
+
+// دالة استخدام نقاط المحفظة فقط
+async function useWalletPoints(userId, amount, reason, description) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) return false;
+        
+        const userData = userDoc.data();
+        const currentBalance = userData.walletPoints?.balance || 0;
+        
+        if (currentBalance < amount) {
+            console.error('الرصيد غير كافي');
+            return false;
+        }
+        
+        await userRef.update({
+            'walletPoints.balance': currentBalance - amount,
+            'walletPoints.used': (userData.walletPoints?.used || 0) + amount,
+            'walletPoints.lastUpdated': new Date().toISOString(),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion({
+                amount: -amount,
+                reason: reason,
+                description: description,
+                timestamp: new Date().toISOString(),
+                type: 'redemption'
+            })
+        });
+        
+        console.log(`✅ تم استخدام ${amount} نقطة من المحفظة`);
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في استخدام نقاط المحفظة:', error);
+        return false;
+    }
+}
         
           // التحقق من وجود طالب جديد محول
         function checkForNewTransfer() {
@@ -2474,136 +2636,7 @@ async function resendWelcome(studentId) {
     });
 }
 
-// ==================== جلب الدورات المتاحة ====================
-async function loadAvailableCourses() {
-    try {
-        const coursesSnapshot = await db.collection('courses').get();
-        availableCourses = [];
-        
-        coursesSnapshot.forEach(doc => {
-            const data = doc.data();
-            availableCourses.push({
-                id: doc.id,
-                type: 'course',
-                title: data.title || 'دورة غير محددة',
-                price: parseFloat(data.price) || 0,
-                instructor: data.instructor || '',
-                description: data.description || '',
-                thumbnail: data.thumbnail || '',
-                category: data.category || '',
-                level: data.level || 'beginner',
-                duration: data.duration || '',
-                studentsCount: data.studentsCount || 0
-            });
-        });
-        
-        const pathsSnapshot = await db.collection('paths').get();
-        availablePaths = [];
-        
-        pathsSnapshot.forEach(doc => {
-            const data = doc.data();
-            availablePaths.push({
-                id: doc.id,
-                type: 'path',
-                title: data.title || 'مسار غير محدد',
-                price: parseFloat(data.price) || 0,
-                instructor: data.instructor || '',
-                description: data.description || '',
-                thumbnail: data.thumbnail || '',
-                coursesCount: data.coursesCount || 0,
-                level: data.level || 'beginner'
-            });
-        });
-        
-        console.log('تم تحميل', availableCourses.length, 'دورة و', availablePaths.length, 'مسار');
-        
-    } catch (error) {
-        console.error('خطأ في جلب الدورات:', error);
-        availableCourses = [
-            {
-                id: 'malaz-alhayara-course',
-                type: 'course',
-                title: 'ملاذ الحيارى',
-                price: 7500,
-                instructor: 'د. محمود فؤاد',
-                level: 'intermediate'
-            },
-            {
-                id: 'enneagram-course',
-                type: 'course',
-                title: 'دورة الإنياجرام',
-                price: 5000,
-                instructor: 'د. محمود فؤاد',
-                level: 'beginner'
-            }
-        ];
-        
-        availablePaths = [
-            {
-                id: 'professional-path',
-                type: 'path',
-                title: 'المسار الاحترافي',
-                price: 15000,
-                coursesCount: 5,
-                level: 'advanced'
-            }
-        ];
-    }
-}
 
-// دالة جلب جميع الدورات مع عروضها من Firebase
-async function loadCoursesWithOffers() {
-    try {
-        console.log('🔄 جاري تحميل الدورات والعروض...');
-        
-        const coursesSnapshot = await db.collection('courses').get();
-        coursesWithOffers = [];
-        
-        for (const doc of coursesSnapshot.docs) {
-            const courseData = doc.data();
-            const course = {
-                id: doc.id,
-                title: courseData.title || 'دورة غير محددة',
-                price: parseFloat(courseData.price) || 0,
-                salePrice: parseFloat(courseData.salePrice) || 0,
-                currency: courseData.currency || 'EGP',
-                
-                // الخصومات الزمنية
-                discounts: courseData.discounts || [],
-                
-                // خصم الدفع النقدي
-                cashDiscount: courseData.cashDiscount || {
-                    enabled: false,
-                    percentage: 0
-                },
-                
-                // خطط الأقساط
-                paymentPlans: courseData.paymentPlans || [],
-                
-                // خصومات المجموعات
-                groupDiscounts: courseData.groupDiscounts || [],
-                
-                // الكوبونات
-                coupons: courseData.coupons || [],
-                
-                // المنح
-                grants: courseData.grants || {
-                    enabled: false,
-                    seats: 0
-                }
-            };
-            
-            coursesWithOffers.push(course);
-        }
-        
-        console.log('✅ تم تحميل', coursesWithOffers.length, 'دورة بعروضها');
-        return coursesWithOffers;
-        
-    } catch (error) {
-        console.error('خطأ في جلب الدورات:', error);
-        return [];
-    }
-}
 // ==================== 🚀 دالة إنشاء الحساب المتكاملة ====================
 async function createAccount(studentId) {
     try {
@@ -4210,224 +4243,7 @@ window.resendWelcome = resendWelcome;
 
   
 
-        // ==================== 📱 نظام المراسلة المتطور ====================
-
-async function smartMessaging(studentId) {
-    const student = allStudents.find(s => s.id === studentId);
-    if (!student || !student.customer?.whatsapp) {
-        Swal.fire('تنبيه', 'لا يوجد رقم واتساب لهذا الطالب', 'warning');
-        return;
-    }
-    
-    // جلب بيانات المستخدم إن وجدت
-    let userData = null;
-    if (student.userId) {
-        try {
-            const userDoc = await db.collection('users').doc(student.userId).get();
-            if (userDoc.exists) userData = userDoc.data();
-        } catch (error) {
-            console.error('خطأ في جلب بيانات المستخدم:', error);
-        }
-    }
-    
-    // قوالب الرسائل
-    const messageTemplates = {
-        welcome: {
-            title: '🎉 رسالة ترحيب',
-            icon: 'fa-hand-peace',
-            color: '#10B981',
-            template: `مرحباً ${student.customer.name} 👋
-
-نرحب بك في منظور الفؤاد! 🌟
-
-${student.courseName ? `✅ تم تسجيلك في: ${student.courseName}` : ''}
-${student.pricing?.finalPrice ? `💰 المبلغ: ${student.pricing.finalPrice}` : ''}
-
-للدعم والمساعدة:
-📱 واتساب: 01234567890
-📧 البريد: support@fouad-perspective.com
-
-نتمنى لك رحلة تعليمية ممتعة! 🚀`
-        },
-        
-        credentials: {
-            title: '🔐 بيانات الدخول',
-            icon: 'fa-key',
-            color: '#3B82F6',
-            template: userData ? `📚 بيانات دخولك لمنظور الفؤاد
-
-👤 الاسم: ${student.customer.name}
-📧 البريد: ${userData.personalInfo?.email || 'غير محدد'}
-🔑 كلمة المرور: ${userData.auth?.tempPassword ? atob(userData.auth.tempPassword) : '[اطلبها من الدعم]'}
-🆔 المعرف: ${userData.id || student.userId}
-
-🔗 رابط الدخول:
-https://mahmoudfouad25.github.io/fouad-perspective/login.html
-
-احتفظ بهذه البيانات في مكان آمن 🔐` : 'لم يتم إنشاء حساب بعد'
-        },
-        
-        paymentReminder: {
-            title: '💰 تذكير بالدفع',
-            icon: 'fa-bell',
-            color: '#F59E0B',
-            template: `تذكير بالمبالغ المستحقة 🔔
-
-السيد/ة ${student.customer.name}
-
-${student.paymentInfo?.isInstallment ? 
-`📊 تفاصيل الأقساط:
-- المتبقي: ${(student.paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
-- عدد الأقساط المتبقية: ${(student.paymentInfo.totalInstallments - student.paymentInfo.paidInstallments)} قسط
-${student.paymentInfo.nextDueDate ? `• القسط القادم: ${new Date(student.paymentInfo.nextDueDate).toLocaleDateString('ar-EG')}` : ''}` :
-`💳 المبلغ المطلوب: ${student.pricing?.finalPrice || '0 ج.م'}`}
-
-طرق الدفع المتاحة:
-✅ فودافون كاش: 01234567890
-✅ انستاباي: name@instapay
-✅ تحويل بنكي: حساب رقم 123456
-
-شكراً لتعاونك 🙏`
-        },
-        
-        courseDetails: {
-            title: '📚 تفاصيل الدورة',
-            icon: 'fa-graduation-cap',
-            color: '#9333EA',
-            template: `تفاصيل دورتك التعليمية 📚
-
-${student.customer.name} عزيزي/عزيزتي
-
-📘 الدورة: ${student.courseName || 'غير محدد'}
-💵 السعر: ${student.pricing?.finalPrice || '0 ج.م'}
-${student.totalSavings > 0 ? `🎁 وفرت: ${student.totalSavingsText}` : ''}
-${userData?.enrollments?.[0]?.dates?.startDate ? 
-`📅 تبدأ: ${new Date(userData.enrollments[0].dates.startDate).toLocaleDateString('ar-EG')}
-📅 تنتهي: ${new Date(userData.enrollments[0].dates.endDate).toLocaleDateString('ar-EG')}` : ''}
-
-للدخول للمنصة:
-https://fouad-perspective.web.app
-
-بالتوفيق! 🌟`
-        },
-        
-        installmentSchedule: {
-            title: '📅 جدول الأقساط',
-            icon: 'fa-calendar-alt',
-            color: '#06B6D4',
-            template: student.paymentInfo?.isInstallment ? 
-`جدول أقساط ${student.customer.name} 📅
-
-💰 إجمالي المبلغ: ${(student.paymentInfo.totalAmount || 0).toLocaleString('ar-EG')} ج.م
-✅ المدفوع: ${(student.paymentInfo.paidAmount || 0).toLocaleString('ar-EG')} ج.م
-⏳ المتبقي: ${(student.paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
-
-📊 الأقساط:
-${student.paymentInfo.installmentSchedule?.map((inst, idx) => 
-`${inst.status === 'paid' ? '✅' : '⏰'} القسط ${idx + 1}: ${inst.amount} ج.م - ${new Date(inst.dueDate).toLocaleDateString('ar-EG')} ${inst.status === 'paid' ? '(مدفوع)' : ''}`
-).join('\n') || 'لا توجد تفاصيل'}
-
-للاستفسار: 01234567890 📱` : 'لا يوجد نظام أقساط'
-        },
-        
-        achievement: {
-            title: '🏆 إنجاز',
-            icon: 'fa-trophy',
-            color: '#FFD700',
-            template: `تهانينا ${student.customer.name}! 🎊
-
-${userData?.loyaltyPoints?.tier ? 
-`🏅 وصلت لمستوى ${userData.loyaltyPoints.tier}
-⭐ رصيدك: ${userData.loyaltyPoints.balance} نقطة
-
-مميزاتك الجديدة:
-${userData.loyaltyPoints.tier === 'GOLD' ? '• خصم 15% على كل الدورات\n• دورتان مجانيتان كل 6 أشهر' :
-  userData.loyaltyPoints.tier === 'SILVER' ? '• خصم 10% على الدورات\n• دورة مجانية كل 6 أشهر' :
-  '• خصم 5% على الدورات'}` : 
-'مبروك انضمامك لعائلة منظور الفؤاد! 🌟'}
-
-استمر في التميز! 💪`
-        },
-        
-        custom: {
-            title: '✏️ رسالة مخصصة',
-            icon: 'fa-edit',
-            color: '#6B7280',
-            template: ''
-        }
-    };
-    
-    // عرض واجهة اختيار الرسالة
-    const { value: selectedType } = await Swal.fire({
-        title: '📱 مركز المراسلة الذكي',
-        html: `
-            <div style="text-align: right; direction: rtl;">
-                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
-                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
-                    <h4 style="color: #0369A1; margin: 0;">
-                        <i class="fas fa-user"></i> ${student.customer.name}
-                    </h4>
-                    <p style="margin: 5px 0; color: #64748B;">
-                        <i class="fab fa-whatsapp"></i> ${student.customer.whatsapp}
-                    </p>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
-                    ${Object.entries(messageTemplates).map(([key, template]) => `
-                        <button onclick="selectMessageTemplate('${key}')" 
-                                style="background: white; border: 2px solid ${template.color}; 
-                                       padding: 20px; border-radius: 12px; cursor: pointer;
-                                       transition: all 0.3s; text-align: center;"
-                                onmouseover="this.style.background='${template.color}'; this.style.color='white';"
-                                onmouseout="this.style.background='white'; this.style.color='inherit';">
-                            <i class="fas ${template.icon}" style="font-size: 2rem; margin-bottom: 10px;"></i>
-                            <div style="font-weight: bold;">${template.title}</div>
-                        </button>
-                    `).join('')}
-                </div>
-            </div>
-        `,
-        width: '700px',
-        showCloseButton: true,
-        showConfirmButton: false,
-        didOpen: () => {
-            window.selectMessageTemplate = async (type) => {
-                Swal.close();
-                
-                // عرض محرر الرسالة
-                const { value: finalMessage } = await Swal.fire({
-                    title: messageTemplates[type].title,
-                    input: 'textarea',
-                    inputValue: messageTemplates[type].template,
-                    inputAttributes: {
-                        style: 'height: 300px; text-align: right; direction: rtl; font-size: 1rem;'
-                    },
-                    showCancelButton: true,
-                    confirmButtonText: '📤 إرسال',
-                    cancelButtonText: 'إلغاء',
-                    confirmButtonColor: '#25D366',
-                    width: '600px'
-                });
-                
-                if (finalMessage) {
-                    const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(finalMessage)}`;
-                    window.open(whatsappUrl, '_blank');
-                    
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'تم فتح WhatsApp',
-                        text: 'الرسالة جاهزة للإرسال',
-                        timer: 2000,
-                        showConfirmButton: false
-                    });
-                }
-            };
-        }
-    });
-}
-
-// استبدل زر المراسلة القديم
-window.smartMessaging = smartMessaging;
+      
       
 
         // ==================== 🌟 نظام إدارة رحلة منظور الفؤاد ====================
@@ -4448,12 +4264,6 @@ async function sendWelcomeMessage(student) {
     console.log('رسالة ترحيب جاهزة للإرسال عبر WhatsApp');
 }
 
-// إضافة الدوال للـ window
-window.manageJourneySystem = manageJourneySystem;
-
-        window.showAddPointsDialog = showAddPointsDialog;
-        window.showDeductPointsDialog = showDeductPointsDialog;
-window.deletePointsEntry = deletePointsEntry;
      // ==================== 📝 ملاحظات التطوير ====================
 // الصفحة جاهزة لاستقبال:
 // 1. الحجوزات من الصفحة الرئيسية
