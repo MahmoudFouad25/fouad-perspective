@@ -416,12 +416,10 @@ const db = firebase.firestore();
         // تحميل قائمة المحادثات
 async function loadChats() {
     try {
-        console.log('🔄 جاري تحميل محادثات الطلاب المسجلين...');
+        console.log('🔄 جاري تحميل المحادثات...');
         
-        // جلب الطلاب المسجلين الذين لديهم telegramChatId
-        const studentsSnapshot = await db.collection('individualStudents')
-            .where('telegramChatId', '!=', null)
-            .orderBy('telegramChatId')
+        // جلب جميع المحادثات (المنطق الأصلي الصحيح)
+        const snapshot = await db.collection('telegramChats')
             .orderBy('lastActivity', 'desc')
             .limit(100)
             .get();
@@ -434,48 +432,66 @@ async function loadChats() {
         let helpRequests = 0;
         const today = new Date().setHours(0, 0, 0, 0);
         
-        console.log(`📊 عدد الطلاب المسجلين: ${studentsSnapshot.size}`);
+        // للتحقق من الطلاب المسجلين
+        const registeredStudentsMap = new Map();
         
-        for (const doc of studentsSnapshot.docs) {
-            const student = doc.data();
-            const studentId = doc.id;
-            const chatId = student.telegramChatId.toString();
+        // جلب الطلاب المسجلين بشكل منفصل
+        try {
+            const studentsSnapshot = await db.collection('individualStudents')
+                .where('telegramChatId', '!=', null)
+                .get();
             
-            // جلب بيانات المحادثة إن وجدت
-            let chatData = {};
-            try {
-                const chatDoc = await db.collection('telegramChats').doc(chatId).get();
-                if (chatDoc.exists) {
-                    chatData = chatDoc.data();
+            studentsSnapshot.forEach(doc => {
+                const student = doc.data();
+                if (student.telegramChatId) {
+                    registeredStudentsMap.set(student.telegramChatId.toString(), {
+                        id: doc.id,
+                        ...student
+                    });
                 }
-            } catch (error) {
-                console.log(`⚠️ لا توجد محادثة للطالب: ${student.customer?.name}`);
-            }
+            });
             
-            // دمج بيانات الطالب مع المحادثة
+            console.log(`📋 تم جلب ${registeredStudentsMap.size} طالب مسجل`);
+        } catch (error) {
+            console.error('خطأ في جلب الطلاب المسجلين:', error);
+        }
+        
+        console.log(`📊 عدد المحادثات: ${snapshot.size}`);
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const chatId = doc.id;
+            
+            // التحقق إذا كان طالب مسجل
+            const studentData = registeredStudentsMap.get(chatId);
+            const isRegisteredStudent = !!studentData;
+            
+            // دمج البيانات
             const combinedData = {
-                ...chatData,
-                studentId: studentId,
-                studentName: student.customer?.name || student.userEmail || 'طالب',
-                studentEmail: student.userEmail || student.customer?.email,
-                courseName: student.courseName || 'غير محدد',
-                accountCreated: student.accountCreated || false,
-                paymentConfirmed: student.paymentConfirmed || false,
-                isRegisteredStudent: true
+                ...data,
+                isRegisteredStudent,
+                ...(studentData && {
+                    studentId: studentData.id,
+                    studentName: studentData.customer?.name || studentData.userEmail,
+                    studentEmail: studentData.userEmail || studentData.customer?.email,
+                    courseName: studentData.courseName,
+                    accountCreated: studentData.accountCreated || false,
+                    paymentConfirmed: studentData.paymentConfirmed || false,
+                    needsHelp: studentData.needsHelp || false
+                })
             };
             
             chatsData[chatId] = combinedData;
             totalChats++;
             
             // عد طلبات المساعدة
-            if (combinedData.hasHelpRequest === true || student.needsHelp === true) {
+            if (combinedData.hasHelpRequest === true || combinedData.needsHelp === true) {
                 helpRequests++;
-                console.log(`🆘 طالب يحتاج مساعدة: ${combinedData.studentName}`);
+                console.log(`🆘 طلب مساعدة من: ${combinedData.studentName || combinedData.userInfo?.firstName || 'مستخدم'}`);
             }
             
             // حساب النشط اليوم
-            const lastActivity = combinedData.lastActivity || student.lastActivity;
-            if (lastActivity && lastActivity.toDate() > today) {
+            if (data.lastActivity && data.lastActivity.toDate() > today) {
                 activeToday++;
             }
             
@@ -484,50 +500,50 @@ async function loadChats() {
             chatItem.className = 'chat-item';
             chatItem.onclick = () => loadChat(chatId);
             
-            const name = combinedData.studentName;
-            const initial = name.charAt(0).toUpperCase();
-            const lastMessage = combinedData.lastMessage || `طالب: ${combinedData.courseName}`;
-            const time = lastActivity ? formatTime(lastActivity.toDate()) : '';
+            // تحديد الاسم والمعلومات
+            let displayName, userType, statusBadge, avatarColor, itemStyle = '';
             
-            // تحديد حالة الطالب
-            let statusBadge = '';
-            let itemStyle = '';
-            
-            if (combinedData.hasHelpRequest || student.needsHelp) {
-                statusBadge = `
-                    <div style="background: #EF4444; color: white; padding: 2px 6px; 
-                                border-radius: 12px; font-size: 10px; font-weight: bold; 
-                                margin-top: 3px; text-align: center;">
-                        🆘 يحتاج مساعدة
-                    </div>
-                `;
-                itemStyle = `
-                    border: 3px solid #EF4444 !important;
-                    background: linear-gradient(90deg, #FEF2F2 0%, #FFFFFF 100%) !important;
-                `;
-            } else if (!student.accountCreated) {
-                statusBadge = `
-                    <div style="background: #F59E0B; color: white; padding: 2px 6px; 
-                                border-radius: 12px; font-size: 10px; font-weight: bold; 
-                                margin-top: 3px; text-align: center;">
-                        ⏳ معلق
-                    </div>
-                `;
+            if (isRegisteredStudent) {
+                // طالب مسجل
+                displayName = combinedData.studentName;
+                userType = `طالب: ${combinedData.courseName || 'غير محدد'}`;
+                
+                if (combinedData.hasHelpRequest || combinedData.needsHelp) {
+                    statusBadge = '<div style="background: #EF4444; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; margin-top: 3px;">🆘 يحتاج مساعدة</div>';
+                    avatarColor = '#EF4444';
+                    itemStyle = 'border: 3px solid #EF4444 !important; background: linear-gradient(90deg, #FEF2F2 0%, #FFFFFF 100%) !important;';
+                } else if (!combinedData.accountCreated) {
+                    statusBadge = '<div style="background: #F59E0B; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; margin-top: 3px;">⏳ معلق</div>';
+                    avatarColor = '#F59E0B';
+                } else {
+                    statusBadge = '<div style="background: #10B981; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; margin-top: 3px;">✅ نشط</div>';
+                    avatarColor = '#10B981';
+                }
             } else {
-                statusBadge = `
-                    <div style="background: #10B981; color: white; padding: 2px 6px; 
-                                border-radius: 12px; font-size: 10px; font-weight: bold; 
-                                margin-top: 3px; text-align: center;">
-                        ✅ نشط
-                    </div>
-                `;
+                // مستخدم عادي (غير مسجل)
+                displayName = data.userInfo?.firstName || 'مستخدم';
+                userType = 'زائر (غير مسجل)';
+                
+                if (data.hasHelpRequest) {
+                    statusBadge = '<div style="background: #EF4444; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; margin-top: 3px;">🆘 يحتاج مساعدة</div>';
+                    avatarColor = '#EF4444';
+                    itemStyle = 'border: 3px solid #EF4444 !important; background: linear-gradient(90deg, #FEF2F2 0%, #FFFFFF 100%) !important;';
+                } else {
+                    statusBadge = '<div style="background: #6B7280; color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; margin-top: 3px;">👤 زائر</div>';
+                    avatarColor = '#6B7280';
+                }
             }
             
+            const initial = displayName.charAt(0).toUpperCase();
+            const lastMessage = data.lastMessage || userType;
+            const time = data.lastActivity ? formatTime(data.lastActivity.toDate()) : '';
+            
             chatItem.innerHTML = `
-                <div class="avatar" style="background: ${combinedData.hasHelpRequest || student.needsHelp ? '#EF4444' : 'linear-gradient(135deg, #667eea, #764ba2)'}">${initial}</div>
+                <div class="avatar" style="background: ${avatarColor}">${initial}</div>
                 <div class="info">
                     <div class="name" style="font-weight: bold;">
-                        ${name}
+                        ${displayName}
+                        ${isRegisteredStudent ? '<span style="color: #10B981; font-size: 12px;">📚</span>' : '<span style="color: #6B7280; font-size: 12px;">👤</span>'}
                     </div>
                     <div class="last-message" style="font-size: 12px; color: #666;">
                         ${lastMessage}
@@ -539,12 +555,12 @@ async function loadChats() {
                 </div>
             `;
 
-            if (combinedData.hasHelpRequest || student.needsHelp) {
+            if (itemStyle) {
                 chatItem.style.cssText = itemStyle;
             }
             
             chatsList.appendChild(chatItem);
-        }
+        });
         
         // تحديث الإحصائيات
         document.getElementById('totalChats').textContent = totalChats;
@@ -556,12 +572,12 @@ async function loadChats() {
             helpCountElement.parentElement.querySelector('div:last-child').textContent = 'طلبات مساعدة';
         }
         
-        console.log(`📈 الإحصائيات: ${totalChats} طالب، ${activeToday} نشط، ${helpRequests} يحتاج مساعدة`);
+        console.log(`📈 الإحصائيات: ${totalChats} محادثة، ${activeToday} نشط، ${helpRequests} يحتاج مساعدة`);
         
         await updateBookingStats();
         
     } catch (error) {
-        console.error('❌ خطأ في تحميل الطلاب:', error);
+        console.error('❌ خطأ في تحميل المحادثات:', error);
         document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
     }
 }
