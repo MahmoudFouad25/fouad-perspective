@@ -1,3 +1,9 @@
+ let availableCourses = [];
+        let coursesWithOffers = [];
+let activeOffers = {};
+let customizationTemplates = [];
+let availablePaths = [];
+
 
         <button class="btn btn-custom" onclick="assignCustomCourse('${studentId}')">
     <i class="fas fa-magic"></i> دورة إضافية
@@ -1951,3 +1957,881 @@ async function showAddPointsDialog(userId) {
         }
     }
 }
+
+
+                      // ==================== 📱 نظام المراسلة المتطور ====================
+
+async function smartMessaging(studentId) {
+    const student = allStudents.find(s => s.id === studentId);
+    if (!student || !student.customer?.whatsapp) {
+        Swal.fire('تنبيه', 'لا يوجد رقم واتساب لهذا الطالب', 'warning');
+        return;
+    }
+    
+    // جلب بيانات المستخدم إن وجدت
+    let userData = null;
+    if (student.userId) {
+        try {
+            const userDoc = await db.collection('users').doc(student.userId).get();
+            if (userDoc.exists) userData = userDoc.data();
+        } catch (error) {
+            console.error('خطأ في جلب بيانات المستخدم:', error);
+        }
+    }
+    
+    // قوالب الرسائل
+    const messageTemplates = {
+        welcome: {
+            title: '🎉 رسالة ترحيب',
+            icon: 'fa-hand-peace',
+            color: '#10B981',
+            template: `مرحباً ${student.customer.name} 👋
+
+نرحب بك في منظور الفؤاد! 🌟
+
+${student.courseName ? `✅ تم تسجيلك في: ${student.courseName}` : ''}
+${student.pricing?.finalPrice ? `💰 المبلغ: ${student.pricing.finalPrice}` : ''}
+
+للدعم والمساعدة:
+📱 واتساب: 01234567890
+📧 البريد: support@fouad-perspective.com
+
+نتمنى لك رحلة تعليمية ممتعة! 🚀`
+        },
+        
+        credentials: {
+            title: '🔐 بيانات الدخول',
+            icon: 'fa-key',
+            color: '#3B82F6',
+            template: userData ? `📚 بيانات دخولك لمنظور الفؤاد
+
+👤 الاسم: ${student.customer.name}
+📧 البريد: ${userData.personalInfo?.email || 'غير محدد'}
+🔑 كلمة المرور: ${userData.auth?.tempPassword ? atob(userData.auth.tempPassword) : '[اطلبها من الدعم]'}
+🆔 المعرف: ${userData.id || student.userId}
+
+🔗 رابط الدخول:
+https://mahmoudfouad25.github.io/fouad-perspective/login.html
+
+احتفظ بهذه البيانات في مكان آمن 🔐` : 'لم يتم إنشاء حساب بعد'
+        },
+        
+        paymentReminder: {
+            title: '💰 تذكير بالدفع',
+            icon: 'fa-bell',
+            color: '#F59E0B',
+            template: `تذكير بالمبالغ المستحقة 🔔
+
+السيد/ة ${student.customer.name}
+
+${student.paymentInfo?.isInstallment ? 
+`📊 تفاصيل الأقساط:
+- المتبقي: ${(student.paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
+- عدد الأقساط المتبقية: ${(student.paymentInfo.totalInstallments - student.paymentInfo.paidInstallments)} قسط
+${student.paymentInfo.nextDueDate ? `• القسط القادم: ${new Date(student.paymentInfo.nextDueDate).toLocaleDateString('ar-EG')}` : ''}` :
+`💳 المبلغ المطلوب: ${student.pricing?.finalPrice || '0 ج.م'}`}
+
+طرق الدفع المتاحة:
+✅ فودافون كاش: 01234567890
+✅ انستاباي: name@instapay
+✅ تحويل بنكي: حساب رقم 123456
+
+شكراً لتعاونك 🙏`
+        },
+        
+        courseDetails: {
+            title: '📚 تفاصيل الدورة',
+            icon: 'fa-graduation-cap',
+            color: '#9333EA',
+            template: `تفاصيل دورتك التعليمية 📚
+
+${student.customer.name} عزيزي/عزيزتي
+
+📘 الدورة: ${student.courseName || 'غير محدد'}
+💵 السعر: ${student.pricing?.finalPrice || '0 ج.م'}
+${student.totalSavings > 0 ? `🎁 وفرت: ${student.totalSavingsText}` : ''}
+${userData?.enrollments?.[0]?.dates?.startDate ? 
+`📅 تبدأ: ${new Date(userData.enrollments[0].dates.startDate).toLocaleDateString('ar-EG')}
+📅 تنتهي: ${new Date(userData.enrollments[0].dates.endDate).toLocaleDateString('ar-EG')}` : ''}
+
+للدخول للمنصة:
+https://fouad-perspective.web.app
+
+بالتوفيق! 🌟`
+        },
+        
+        installmentSchedule: {
+            title: '📅 جدول الأقساط',
+            icon: 'fa-calendar-alt',
+            color: '#06B6D4',
+            template: student.paymentInfo?.isInstallment ? 
+`جدول أقساط ${student.customer.name} 📅
+
+💰 إجمالي المبلغ: ${(student.paymentInfo.totalAmount || 0).toLocaleString('ar-EG')} ج.م
+✅ المدفوع: ${(student.paymentInfo.paidAmount || 0).toLocaleString('ar-EG')} ج.م
+⏳ المتبقي: ${(student.paymentInfo.remainingAmount || 0).toLocaleString('ar-EG')} ج.م
+
+📊 الأقساط:
+${student.paymentInfo.installmentSchedule?.map((inst, idx) => 
+`${inst.status === 'paid' ? '✅' : '⏰'} القسط ${idx + 1}: ${inst.amount} ج.م - ${new Date(inst.dueDate).toLocaleDateString('ar-EG')} ${inst.status === 'paid' ? '(مدفوع)' : ''}`
+).join('\n') || 'لا توجد تفاصيل'}
+
+للاستفسار: 01234567890 📱` : 'لا يوجد نظام أقساط'
+        },
+        
+        achievement: {
+            title: '🏆 إنجاز',
+            icon: 'fa-trophy',
+            color: '#FFD700',
+            template: `تهانينا ${student.customer.name}! 🎊
+
+${userData?.loyaltyPoints?.tier ? 
+`🏅 وصلت لمستوى ${userData.loyaltyPoints.tier}
+⭐ رصيدك: ${userData.loyaltyPoints.balance} نقطة
+
+مميزاتك الجديدة:
+${userData.loyaltyPoints.tier === 'GOLD' ? '• خصم 15% على كل الدورات\n• دورتان مجانيتان كل 6 أشهر' :
+  userData.loyaltyPoints.tier === 'SILVER' ? '• خصم 10% على الدورات\n• دورة مجانية كل 6 أشهر' :
+  '• خصم 5% على الدورات'}` : 
+'مبروك انضمامك لعائلة منظور الفؤاد! 🌟'}
+
+استمر في التميز! 💪`
+        },
+        
+        custom: {
+            title: '✏️ رسالة مخصصة',
+            icon: 'fa-edit',
+            color: '#6B7280',
+            template: ''
+        }
+    };
+    
+    // عرض واجهة اختيار الرسالة
+    const { value: selectedType } = await Swal.fire({
+        title: '📱 مركز المراسلة الذكي',
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                            padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                    <h4 style="color: #0369A1; margin: 0;">
+                        <i class="fas fa-user"></i> ${student.customer.name}
+                    </h4>
+                    <p style="margin: 5px 0; color: #64748B;">
+                        <i class="fab fa-whatsapp"></i> ${student.customer.whatsapp}
+                    </p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                    ${Object.entries(messageTemplates).map(([key, template]) => `
+                        <button onclick="selectMessageTemplate('${key}')" 
+                                style="background: white; border: 2px solid ${template.color}; 
+                                       padding: 20px; border-radius: 12px; cursor: pointer;
+                                       transition: all 0.3s; text-align: center;"
+                                onmouseover="this.style.background='${template.color}'; this.style.color='white';"
+                                onmouseout="this.style.background='white'; this.style.color='inherit';">
+                            <i class="fas ${template.icon}" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                            <div style="font-weight: bold;">${template.title}</div>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `,
+        width: '700px',
+        showCloseButton: true,
+        showConfirmButton: false,
+        didOpen: () => {
+            window.selectMessageTemplate = async (type) => {
+                Swal.close();
+                
+                // عرض محرر الرسالة
+                const { value: finalMessage } = await Swal.fire({
+                    title: messageTemplates[type].title,
+                    input: 'textarea',
+                    inputValue: messageTemplates[type].template,
+                    inputAttributes: {
+                        style: 'height: 300px; text-align: right; direction: rtl; font-size: 1rem;'
+                    },
+                    showCancelButton: true,
+                    confirmButtonText: '📤 إرسال',
+                    cancelButtonText: 'إلغاء',
+                    confirmButtonColor: '#25D366',
+                    width: '600px'
+                });
+                
+                if (finalMessage) {
+                    const whatsappUrl = `https://wa.me/${student.customer.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(finalMessage)}`;
+                    window.open(whatsappUrl, '_blank');
+                    
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'تم فتح WhatsApp',
+                        text: 'الرسالة جاهزة للإرسال',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                }
+            };
+        }
+    });
+}
+
+// استبدل زر المراسلة القديم
+window.smartMessaging = smartMessaging;
+
+
+
+
+                    // ==================== جلب الدورات المتاحة ====================
+async function loadAvailableCourses() {
+    try {
+        const coursesSnapshot = await db.collection('courses').get();
+        availableCourses = [];
+        
+        coursesSnapshot.forEach(doc => {
+            const data = doc.data();
+            availableCourses.push({
+                id: doc.id,
+                type: 'course',
+                title: data.title || 'دورة غير محددة',
+                price: parseFloat(data.price) || 0,
+                instructor: data.instructor || '',
+                description: data.description || '',
+                thumbnail: data.thumbnail || '',
+                category: data.category || '',
+                level: data.level || 'beginner',
+                duration: data.duration || '',
+                studentsCount: data.studentsCount || 0
+            });
+        });
+        
+        const pathsSnapshot = await db.collection('paths').get();
+        availablePaths = [];
+        
+        pathsSnapshot.forEach(doc => {
+            const data = doc.data();
+            availablePaths.push({
+                id: doc.id,
+                type: 'path',
+                title: data.title || 'مسار غير محدد',
+                price: parseFloat(data.price) || 0,
+                instructor: data.instructor || '',
+                description: data.description || '',
+                thumbnail: data.thumbnail || '',
+                coursesCount: data.coursesCount || 0,
+                level: data.level || 'beginner'
+            });
+        });
+        
+        console.log('تم تحميل', availableCourses.length, 'دورة و', availablePaths.length, 'مسار');
+        
+    } catch (error) {
+        console.error('خطأ في جلب الدورات:', error);
+        availableCourses = [
+            {
+                id: 'malaz-alhayara-course',
+                type: 'course',
+                title: 'ملاذ الحيارى',
+                price: 7500,
+                instructor: 'د. محمود فؤاد',
+                level: 'intermediate'
+            },
+            {
+                id: 'enneagram-course',
+                type: 'course',
+                title: 'دورة الإنياجرام',
+                price: 5000,
+                instructor: 'د. محمود فؤاد',
+                level: 'beginner'
+            }
+        ];
+        
+        availablePaths = [
+            {
+                id: 'professional-path',
+                type: 'path',
+                title: 'المسار الاحترافي',
+                price: 15000,
+                coursesCount: 5,
+                level: 'advanced'
+            }
+        ];
+    }
+}
+
+// دالة جلب جميع الدورات مع عروضها من Firebase
+async function loadCoursesWithOffers() {
+    try {
+        console.log('🔄 جاري تحميل الدورات والعروض...');
+        
+        const coursesSnapshot = await db.collection('courses').get();
+        coursesWithOffers = [];
+        
+        for (const doc of coursesSnapshot.docs) {
+            const courseData = doc.data();
+            const course = {
+                id: doc.id,
+                title: courseData.title || 'دورة غير محددة',
+                price: parseFloat(courseData.price) || 0,
+                salePrice: parseFloat(courseData.salePrice) || 0,
+                currency: courseData.currency || 'EGP',
+                
+                // الخصومات الزمنية
+                discounts: courseData.discounts || [],
+                
+                // خصم الدفع النقدي
+                cashDiscount: courseData.cashDiscount || {
+                    enabled: false,
+                    percentage: 0
+                },
+                
+                // خطط الأقساط
+                paymentPlans: courseData.paymentPlans || [],
+                
+                // خصومات المجموعات
+                groupDiscounts: courseData.groupDiscounts || [],
+                
+                // الكوبونات
+                coupons: courseData.coupons || [],
+                
+                // المنح
+                grants: courseData.grants || {
+                    enabled: false,
+                    seats: 0
+                }
+            };
+            
+            coursesWithOffers.push(course);
+        }
+        
+        console.log('✅ تم تحميل', coursesWithOffers.length, 'دورة بعروضها');
+        return coursesWithOffers;
+        
+    } catch (error) {
+        console.error('خطأ في جلب الدورات:', error);
+        return [];
+    }
+}
+
+
+
+
+
+
+                            // نظام رتب منظور الفؤاد - البنية الجديدة
+// نظام رتب منظور الفؤاد - النسخة المرنة المفتوحة
+        // ==================== 🌟 نظام نقاط الارتواء الموحد ====================
+// جميع النقاط في النظام هي "نقاط ارتواء"
+// النقاط تُجمع من: الدفعات، إنشاء الحسابات، تخصيص الدورات
+// المستخدم يبدأ من المرحلة الأولى ويجمع النقاط
+// الترقية للمراحل التالية ستُحدد لاحقاً من قبل الإدارة
+// ==================== ================================ ====================
+const FouadJourneySystem = {
+    // المراحل السبع (أسماء ومعلومات فقط - بدون متطلبات)
+    stages: {
+        1: {
+            id: 'nidaa',
+            name: 'النداء',
+            title: 'ملبي النداء',
+            color: '#8B4513',
+            icon: 'ملبي النداء',
+            description: 'مرحلة الاستيقاظ والبداية',
+            benefits: ['دخول المنظومة', 'محتوى أساسي', 'مجتمع المبتدئين']
+        },
+        2: {
+            id: 'liqaa',
+            name: 'اللقاء',
+            title: 'واصل الطريق',
+            color: '#228B22',
+            icon: 'fa-handshake',
+            description: 'الخروج من العزلة وبناء روابط',
+            benefits: ['مجموعات خاصة', 'جلسات جماعية', 'شريك مساءلة']
+        },
+        3: {
+            id: 'binaa',
+            name: 'البناء',
+            title: 'باني الأساس',
+            color: '#4682B4',
+            icon: 'fa-hammer',
+            description: 'فهم البنية النفسية الداخلية',
+            benefits: ['محتوى متقدم', 'أدوات تحليل', 'مرشد شخصي']
+        },
+        4: {
+            id: 'intimaa',
+            name: 'الانتماء',
+            title: 'متجذر الهوية',
+            color: '#9370DB',
+            icon: 'fa-tree',
+            description: 'التجذر في الجوهر الفطري',
+            benefits: ['برامج خاصة', 'دورات حصرية', 'مجتمع النخبة']
+        },
+        5: {
+            id: 'namaa',
+            name: 'النماء',
+            title: 'مثمر الخير',
+            color: '#FFD700',
+            icon: 'fa-star',
+            description: 'التوسع والازدهار',
+            benefits: ['شراكة في المحتوى', 'قيادة مجموعات', 'عمولات خاصة']
+        },
+        6: {
+            id: 'nubalaa',
+            name: 'النبلاء',
+            title: 'نبيل القصد',
+            color: '#FF6347',
+            icon: 'fa-crown',
+            description: 'العيش من النبالة الفطرية',
+            benefits: ['قيادة مشاريع', 'صناعة محتوى', 'نسبة من الأرباح']
+        },
+        7: {
+            id: 'ihyaa',
+            name: 'الإحياء',
+            title: 'محيي الأرواح',
+            color: '#800080',
+            icon: 'fa-fire',
+            description: 'إيقاظ الجواهر النائمة',
+            benefits: ['شريك كامل', 'تدريب المدربين', 'إرث دائم']
+        }
+    },
+    
+    // دالة بسيطة - الكل يبدأ من المرحلة 1 فقط
+    calculateStage: function(totalPoints) {
+        // مؤقتاً - الكل في المرحلة الأولى
+        // يمكنك تغيير هذا لاحقاً عندما تحدد العتبات
+        return 1;
+    },
+    
+    // حساب التقدم (اختياري - يمكن تفعيله لاحقاً)
+    calculateProgress: function(totalPoints) {
+        // حالياً يعرض فقط عدد النقاط المجمعة
+        return totalPoints;
+    }
+};
+
+// إضافة النظام للـ window
+window.FouadJourneySystem = FouadJourneySystem;
+
+                    // ==================== 📚 نظام إدارة الدورات المتكامل ====================
+const EnrollmentManager = {
+    // إنشاء تخصيص دورة جديد بالبنية الكاملة
+    createEnrollment: function(studentData, courseSettings) {
+        const now = new Date().toISOString();
+        const enrollmentId = `enrollment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        return {
+            // المعرفات
+            id: enrollmentId,
+            courseId: studentData.courseId || `course-${Date.now()}`,
+            title: studentData.courseName || 'دورة غير محددة',
+            type: studentData.journey?.type || 'individual',
+            enrollmentType: courseSettings.enrollmentType || 'new', // new, renewal, repeat
+            previousEnrollmentId: courseSettings.previousEnrollmentId || null,
+            
+            // التواريخ والصلاحية
+            dates: {
+                enrolledAt: now,
+                startDate: courseSettings.startDate,
+                endDate: courseSettings.endDate,
+                lastAccessedAt: null,
+                completedAt: null,
+                expiredAt: null,
+                renewedAt: courseSettings.isRenewal ? now : null
+            },
+            
+            // معلومات الدورة
+            courseInfo: {
+                instructor: studentData.instructor || 'كوتش محمود فؤاد',
+                category: studentData.category || 'تطوير شخصي',
+                level: studentData.experience || 'beginner',
+                duration: courseSettings.duration || '6 أشهر',
+                totalLessons: 0,
+                completedLessons: 0,
+                progress: 0
+            },
+            
+            // البيانات المالية التفصيلية للدورة
+            pricing: {
+                originalPrice: studentData.pricing?.basePriceNumber || 0,
+                finalPrice: studentData.pricing?.finalPriceNumber || 0,
+                currency: 'EGP',
+                
+                // الخصومات المطبقة على هذه الدورة
+                discounts: this.processDiscounts(studentData),
+                totalDiscountAmount: studentData.totalSavings || 0,
+                totalDiscountPercentage: this.calculateDiscountPercentage(studentData),
+                
+                // العروض والكوبونات
+                activeOffer: studentData.activeOffer ? {
+                    id: studentData.activeOffer.id || `offer-${Date.now()}`,
+                    name: studentData.activeOffer.name,
+                    discount: studentData.activeOffer.discount,
+                    validUntil: studentData.activeOffer.validUntil || null
+                } : null,
+                
+                coupon: studentData.coupon ? {
+                    code: studentData.coupon.code,
+                    value: studentData.coupon.value || 0,
+                    type: studentData.coupon.type || 'fixed',
+                    usedAt: now
+                } : null
+            },
+            
+            // حالة الدفع التفصيلية
+            payment: {
+                method: this.determinePaymentMethod(studentData),
+                status: this.determinePaymentStatus(studentData),
+                
+                // المبالغ
+                totalAmount: studentData.pricing?.finalPriceNumber || 0,
+                paidAmount: this.calculatePaidAmount(studentData),
+                remainingAmount: this.calculateRemainingAmount(studentData),
+                
+                // تواريخ الدفع
+                firstPaymentDate: studentData.paymentConfirmed ? now : null,
+                lastPaymentDate: null,
+                fullyPaidDate: null,
+                
+                // نظام الأقساط إن وجد
+                installments: this.createInstallmentSystem(studentData),
+                
+                // معلومات الدفع
+                paymentDetails: {
+                    reference: studentData.paymentReference || null,
+                    method: studentData.paymentMethod || null,
+                    gateway: null,
+                    transactionId: null,
+                    receipt: null
+                }
+            },
+            
+            // التقدم والإنجاز
+            progress: {
+                overallProgress: 0,
+                lessonsProgress: 0,
+                assignmentsProgress: 0,
+                quizzesProgress: 0,
+                
+                milestones: [],
+                certificates: [],
+                badges: []
+            },
+            
+            // البيانات الإضافية
+            metadata: {
+                originalBookingId: studentData.originalBookingId || studentData.id,
+                transferredFrom: 'individual-students',
+                notes: courseSettings.notes || '',
+                tags: [],
+                customFields: {}
+            },
+
+            // حفظ بيانات الاستمارة الخاصة بهذه الدورة
+// حفظ بيانات الاستمارة الأصلية مع هذه الدورة
+// حفظ بيانات الاستمارة الأصلية
+enrollmentFormData: {
+    expectations: studentData.customer?.expectations || '',
+    applicationPlan: studentData.customer?.applicationPlan || '',
+    experience: studentData.customer?.experience || '',
+    source: studentData.customer?.source || '',
+    notes: studentData.customer?.notes || '',
+
+    submittedAt: new Date().toISOString()
+},
+            
+            // الحالة
+            status: {
+                current: 'active', // active, paused, completed, cancelled, expired
+                isActive: true,
+                isPaused: false,
+                isExpired: false,
+                reason: null,
+                updatedAt: now
+            }
+        };
+    },
+    
+    // معالجة الخصومات
+    processDiscounts: function(studentData) {
+        const discounts = [];
+        
+        if (studentData.discounts && Array.isArray(studentData.discounts)) {
+            studentData.discounts.forEach(discount => {
+                discounts.push({
+                    id: `discount-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                    type: discount.type,
+                    label: discount.label,
+                    amount: discount.amount || 0,
+                    percentage: discount.percentage || 0,
+                    appliedAt: new Date().toISOString()
+                });
+            });
+        }
+        
+        return discounts;
+    },
+    
+    // حساب نسبة الخصم
+    calculateDiscountPercentage: function(studentData) {
+        const original = studentData.pricing?.basePriceNumber || 0;
+        const final = studentData.pricing?.finalPriceNumber || 0;
+        
+        if (original === 0) return 0;
+        return Math.round(((original - final) / original) * 100);
+    },
+    
+    // تحديد طريقة الدفع
+    determinePaymentMethod: function(studentData) {
+        if (studentData.paymentInfo?.isInstallment) {
+            const months = studentData.paymentInfo.totalInstallments || 3;
+            return `installment-${months}months`;
+        }
+        return studentData.paymentMethod || 'cash';
+    },
+    
+    // حساب المدفوع
+    calculatePaidAmount: function(studentData) {
+        // للأقساط
+        if (studentData.paymentInfo?.isInstallment) {
+            return studentData.paymentInfo.paidAmount || 0;
+        }
+        
+        // للدفع الكامل
+        if (studentData.paymentConfirmed || studentData.paymentInfo?.fullyPaid) {
+            return studentData.pricing?.finalPriceNumber || 0;
+        }
+        
+        return 0;
+    },
+    
+    // حساب المتبقي
+    calculateRemainingAmount: function(studentData) {
+        const total = studentData.pricing?.finalPriceNumber || 0;
+        const paid = this.calculatePaidAmount(studentData);
+        return Math.max(0, total - paid);
+    },
+    
+    // تحديد حالة الدفع
+    determinePaymentStatus: function(studentData) {
+        if (studentData.paymentConfirmed || studentData.paymentInfo?.fullyPaid) {
+            return 'paid';
+        }
+        if (studentData.paymentInfo?.paidAmount > 0) {
+            return 'partial';
+        }
+        return 'pending';
+    },
+    
+    // إنشاء نظام الأقساط
+    createInstallmentSystem: function(studentData) {
+        if (!studentData.paymentInfo?.isInstallment) return null;
+        
+        const installments = {
+            type: 'monthly',
+            totalInstallments: studentData.paymentInfo.totalInstallments || 3,
+            paidInstallments: studentData.paymentInfo.paidInstallments || 0,
+            
+            // قيمة كل قسط
+            installmentAmount: Math.ceil(
+                (studentData.pricing?.finalPriceNumber || 0) / 
+                (studentData.paymentInfo.totalInstallments || 1)
+            ),
+            
+            // التواريخ
+            nextDueDate: studentData.paymentInfo.nextDueDate || null,
+            lastPaidDate: null,
+            
+            // الجدول التفصيلي
+            schedule: this.generateInstallmentSchedule(studentData),
+            
+            // الإعدادات
+            settings: {
+                gracePeriodDays: 7,
+                lateFeePercentage: 5,
+                autoReminder: true,
+                reminderDaysBefore: 3
+            }
+        };
+        
+        return installments;
+    },
+    
+    // توليد جدول الأقساط
+    generateInstallmentSchedule: function(studentData) {
+        const schedule = [];
+        
+        if (studentData.paymentInfo?.installmentSchedule) {
+            studentData.paymentInfo.installmentSchedule.forEach((inst, index) => {
+                schedule.push({
+                    installmentNumber: inst.installmentNumber || index + 1,
+                    amount: inst.amount,
+                    dueDate: inst.dueDate,
+                    
+                    status: inst.status || 'pending',
+                    paidDate: inst.status === 'paid' ? inst.paidDate || null : null,
+                    paidAmount: inst.status === 'paid' ? inst.amount : 0,
+                    
+                    paymentMethod: inst.paymentMethod || null,
+                    reference: inst.reference || null,
+                    
+                    isLate: false,
+                    lateFees: 0,
+                    notes: inst.notes || ''
+                });
+            });
+        }
+        
+        return schedule;
+    },
+    
+    // حساب الإجماليات من الدورات
+    calculateFinancialTotals: function(enrollments) {
+        let totals = {
+            totalPaid: 0,
+            totalDue: 0,
+            totalSavings: 0,
+            totalOriginalPrice: 0,
+            activeCourses: 0,
+            completedCourses: 0
+        };
+        
+        enrollments.forEach(enrollment => {
+            totals.totalPaid += enrollment.payment.paidAmount || 0;
+            totals.totalDue += enrollment.payment.remainingAmount || 0;
+            totals.totalSavings += enrollment.pricing.totalDiscountAmount || 0;
+            totals.totalOriginalPrice += enrollment.pricing.originalPrice || 0;
+            
+            if (enrollment.status.current === 'active') {
+                totals.activeCourses++;
+            } else if (enrollment.status.current === 'completed') {
+                totals.completedCourses++;
+            }
+        });
+        
+        return totals;
+    }
+};
+
+                    window.manageJourneySystem = manageJourneySystem;
+// إضافة الدوال للـ window
+
+        window.showAddPointsDialog = showAddPointsDialog;
+        window.showDeductPointsDialog = showDeductPointsDialog;
+window.deletePointsEntry = deletePointsEntry;
+
+                     // دوال إدارة نقاط المحفظة
+async function showAddWalletPointsDialog(userId) {
+    // أولاً نسأل عن النظام
+    const { value: system } = await Swal.fire({
+        title: 'اختر النظام',
+        input: 'select',
+        inputOptions: {
+            'wallet': 'نقاط المحفظة فقط',
+            'journey': 'نقاط الارتواء فقط',
+            'both': 'كلا النظامين معاً'
+        },
+        inputPlaceholder: 'اختر النظام',
+        showCancelButton: true,
+        confirmButtonText: 'التالي',
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (!system) return;
+    
+    const { value: pointsData } = await Swal.fire({
+        title: `➕ إضافة نقاط ${system === 'wallet' ? 'المحفظة' : system === 'journey' ? 'الارتواء' : 'للنظامين'}`,
+        html: `
+            <div style="text-align: right; direction: rtl;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        عدد النقاط
+                    </label>
+                    <input type="number" id="pointsAmount" class="swal2-input" 
+                           placeholder="100" value="100" min="1"
+                           style="width: 100%;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        السبب
+                    </label>
+                    <select id="pointsReason" class="swal2-input" style="width: 100%;">
+                        <option value="مكافأة إدارية">مكافأة إدارية</option>
+                        <option value="تعويض">تعويض</option>
+                        <option value="إضافة يدوية">إضافة يدوية</option>
+                        <option value="عرض خاص">عرض خاص</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">
+                        الوصف
+                    </label>
+                    <textarea id="pointsDescription" class="swal2-textarea" 
+                              placeholder="تفاصيل إضافية..."
+                              style="width: 100%; height: 80px;"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'إضافة النقاط',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        preConfirm: () => {
+            const amount = document.getElementById('pointsAmount').value;
+            const reason = document.getElementById('pointsReason').value;
+            const description = document.getElementById('pointsDescription').value;
+            
+            if (!amount || amount <= 0) {
+                Swal.showValidationMessage('يجب إدخال عدد نقاط صحيح');
+                return false;
+            }
+            
+            return {
+                amount: parseInt(amount),
+                reason: reason,
+                description: description || 'نقاط إضافية',
+                system: system
+            };
+        }
+    });
+    
+    if (pointsData) {
+        let success = false;
+        let systemText = '';
+        
+        if (pointsData.system === 'wallet') {
+            success = await addWalletPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (محفظة فقط)', 
+                pointsData.description
+            );
+            systemText = 'للمحفظة';
+        } else if (pointsData.system === 'journey') {
+            success = await addJourneyPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (رحلة ارتواء فقط)', 
+                pointsData.description
+            );
+            systemText = 'للرحلة';
+        } else {
+            success = await addDualPoints(
+                userId, 
+                pointsData.amount, 
+                pointsData.reason + ' (النظامين)', 
+                pointsData.description
+            );
+            systemText = 'للنظامين';
+        }
+        
+        if (success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم إضافة النقاط',
+                text: `تم إضافة ${pointsData.amount} نقطة ${systemText}`,
+                confirmButtonColor: '#10B981'
+            });
+            
+            setTimeout(() => location.reload(), 1500);
+        }
+    }
+}
+                    
