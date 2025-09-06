@@ -416,9 +416,11 @@ const db = firebase.firestore();
         // تحميل قائمة المحادثات
 async function loadChats() {
     try {
+        console.log('🔄 جاري تحميل المحادثات...');
+        
         const snapshot = await db.collection('telegramChats')
             .orderBy('lastActivity', 'desc')
-            .limit(50)
+            .limit(100)
             .get();
         
         const chatsList = document.getElementById('chatsList');
@@ -426,7 +428,10 @@ async function loadChats() {
         
         let totalChats = 0;
         let activeToday = 0;
+        let helpRequests = 0;
         const today = new Date().setHours(0, 0, 0, 0);
+        
+        console.log(`📊 عدد المحادثات المسترجعة: ${snapshot.size}`);
         
         snapshot.forEach(doc => {
             const data = doc.data();
@@ -434,6 +439,17 @@ async function loadChats() {
             chatsData[chatId] = data;
             
             totalChats++;
+            
+            // عد طلبات المساعدة - مع تسجيل تفصيلي
+            if (data.hasHelpRequest === true) {
+                helpRequests++;
+                console.log(`🆘 طلب مساعدة موجود في Chat: ${chatId}`);
+                console.log(`📋 بيانات الطلب:`, {
+                    studentName: data.studentName,
+                    helpType: data.helpRequestType,
+                    time: data.helpRequestTime
+                });
+            }
             
             // حساب النشط اليوم
             if (data.lastActivity && data.lastActivity.toDate() > today) {
@@ -445,47 +461,80 @@ async function loadChats() {
             chatItem.className = 'chat-item';
             chatItem.onclick = () => loadChat(chatId);
             
-            const name = data.userInfo?.firstName || 'مستخدم';
+            const name = data.studentName || data.userInfo?.firstName || 'مستخدم';
             const initial = name.charAt(0).toUpperCase();
             const lastMessage = data.lastMessage || 'لا توجد رسائل';
             const time = data.lastActivity ? formatTime(data.lastActivity.toDate()) : '';
             
+            // تطبيق تمييز قوي للمساعدة
+            let helpIndicator = '';
+            let extraClass = '';
+            let itemStyle = '';
+            
+            if (data.hasHelpRequest === true) {
+                helpIndicator = `
+                    <div style="background: #EF4444; color: white; padding: 2px 6px; 
+                                border-radius: 12px; font-size: 10px; font-weight: bold; 
+                                margin-top: 3px; text-align: center; animation: pulse 2s infinite;">
+                        🆘 يحتاج مساعدة
+                    </div>
+                `;
+                extraClass = 'urgent-help-chat';
+                itemStyle = `
+                    border: 3px solid #EF4444 !important;
+                    background: linear-gradient(90deg, #FEF2F2 0%, #FFFFFF 100%) !important;
+                    box-shadow: 0 0 15px rgba(239, 68, 68, 0.3) !important;
+                `;
+            }
+            
             chatItem.innerHTML = `
-                <div class="avatar">${initial}</div>
+                <div class="avatar" style="background: ${data.hasHelpRequest ? '#EF4444' : 'linear-gradient(135deg, #667eea, #764ba2)'}">${initial}</div>
                 <div class="info">
-                    <div class="name">
+                    <div class="name" style="font-weight: ${data.hasHelpRequest ? 'bold' : 'normal'}; color: ${data.hasHelpRequest ? '#EF4444' : '#333'}">
                         ${name}
-                        ${data.hasHelpRequest ? '<span style="background: #EF4444; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; margin-right: 5px;">يحتاج مساعدة</span>' : ''}
+                        ${data.hasHelpRequest ? '<span style="color: #EF4444; margin-right: 5px;">🔥</span>' : ''}
                     </div>
                     <div class="last-message">${lastMessage}</div>
                 </div>
                 <div>
                     <div class="time">${time}</div>
-                    ${data.hasHelpRequest ? '<div style="color: #EF4444; font-size: 11px;">🆘 دخول</div>' : ''}
+                    ${helpIndicator}
                 </div>
             `;
 
-            // أضف تمييز للمحادثات التي تحتاج مساعدة
             if (data.hasHelpRequest) {
-                chatItem.style.borderRight = '3px solid #EF4444';
-                chatItem.style.background = '#FEF2F2';
+                chatItem.style.cssText = itemStyle;
+                chatItem.classList.add(extraClass);
             }
             
             chatsList.appendChild(chatItem);
         });
         
-        // تحديث الإحصائيات
+        // تحديث الإحصائيات مع تأكيد
         document.getElementById('totalChats').textContent = totalChats;
         document.getElementById('activeToday').textContent = activeToday;
         
-        // حساب الحجوزات
+        // تحديث عداد المساعدة
+        const helpCountElement = document.getElementById('pendingBookings');
+        if (helpCountElement) {
+            helpCountElement.textContent = helpRequests;
+            helpCountElement.parentElement.querySelector('div:last-child').textContent = 'طلبات مساعدة';
+            
+            // إضافة تنبيه صوتي إذا كان هناك طلبات جديدة
+            if (helpRequests > 0) {
+                console.log(`🔔 يوجد ${helpRequests} طلب مساعدة نشط`);
+            }
+        }
+        
+        console.log(`📈 الإحصائيات النهائية: إجمالي ${totalChats}, نشط اليوم ${activeToday}, طلبات مساعدة ${helpRequests}`);
+        
         await updateBookingStats();
         
     } catch (error) {
-        console.error('خطأ في تحميل المحادثات:', error);
+        console.error('❌ خطأ في تحميل المحادثات:', error);
         document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
     }
-}  
+}
 
 // استبدل دالة loadChat بالكامل بهذا الكود:
 // تحميل محادثة معينة
