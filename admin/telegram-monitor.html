@@ -416,9 +416,12 @@ const db = firebase.firestore();
         // تحميل قائمة المحادثات
 async function loadChats() {
     try {
-        console.log('🔄 جاري تحميل المحادثات...');
+        console.log('🔄 جاري تحميل محادثات الطلاب المسجلين...');
         
-        const snapshot = await db.collection('telegramChats')
+        // جلب الطلاب المسجلين الذين لديهم telegramChatId
+        const studentsSnapshot = await db.collection('individualStudents')
+            .where('telegramChatId', '!=', null)
+            .orderBy('telegramChatId')
             .orderBy('lastActivity', 'desc')
             .limit(100)
             .get();
@@ -431,28 +434,48 @@ async function loadChats() {
         let helpRequests = 0;
         const today = new Date().setHours(0, 0, 0, 0);
         
-        console.log(`📊 عدد المحادثات المسترجعة: ${snapshot.size}`);
+        console.log(`📊 عدد الطلاب المسجلين: ${studentsSnapshot.size}`);
         
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const chatId = doc.id;
-            chatsData[chatId] = data;
+        for (const doc of studentsSnapshot.docs) {
+            const student = doc.data();
+            const studentId = doc.id;
+            const chatId = student.telegramChatId.toString();
             
+            // جلب بيانات المحادثة إن وجدت
+            let chatData = {};
+            try {
+                const chatDoc = await db.collection('telegramChats').doc(chatId).get();
+                if (chatDoc.exists) {
+                    chatData = chatDoc.data();
+                }
+            } catch (error) {
+                console.log(`⚠️ لا توجد محادثة للطالب: ${student.customer?.name}`);
+            }
+            
+            // دمج بيانات الطالب مع المحادثة
+            const combinedData = {
+                ...chatData,
+                studentId: studentId,
+                studentName: student.customer?.name || student.userEmail || 'طالب',
+                studentEmail: student.userEmail || student.customer?.email,
+                courseName: student.courseName || 'غير محدد',
+                accountCreated: student.accountCreated || false,
+                paymentConfirmed: student.paymentConfirmed || false,
+                isRegisteredStudent: true
+            };
+            
+            chatsData[chatId] = combinedData;
             totalChats++;
             
-            // عد طلبات المساعدة - مع تسجيل تفصيلي
-            if (data.hasHelpRequest === true) {
+            // عد طلبات المساعدة
+            if (combinedData.hasHelpRequest === true || student.needsHelp === true) {
                 helpRequests++;
-                console.log(`🆘 طلب مساعدة موجود في Chat: ${chatId}`);
-                console.log(`📋 بيانات الطلب:`, {
-                    studentName: data.studentName,
-                    helpType: data.helpRequestType,
-                    time: data.helpRequestTime
-                });
+                console.log(`🆘 طالب يحتاج مساعدة: ${combinedData.studentName}`);
             }
             
             // حساب النشط اليوم
-            if (data.lastActivity && data.lastActivity.toDate() > today) {
+            const lastActivity = combinedData.lastActivity || student.lastActivity;
+            if (lastActivity && lastActivity.toDate() > today) {
                 activeToday++;
             }
             
@@ -461,77 +484,84 @@ async function loadChats() {
             chatItem.className = 'chat-item';
             chatItem.onclick = () => loadChat(chatId);
             
-            const name = data.studentName || data.userInfo?.firstName || 'مستخدم';
+            const name = combinedData.studentName;
             const initial = name.charAt(0).toUpperCase();
-            const lastMessage = data.lastMessage || 'لا توجد رسائل';
-            const time = data.lastActivity ? formatTime(data.lastActivity.toDate()) : '';
+            const lastMessage = combinedData.lastMessage || `طالب: ${combinedData.courseName}`;
+            const time = lastActivity ? formatTime(lastActivity.toDate()) : '';
             
-            // تطبيق تمييز قوي للمساعدة
-            let helpIndicator = '';
-            let extraClass = '';
+            // تحديد حالة الطالب
+            let statusBadge = '';
             let itemStyle = '';
             
-            if (data.hasHelpRequest === true) {
-                helpIndicator = `
+            if (combinedData.hasHelpRequest || student.needsHelp) {
+                statusBadge = `
                     <div style="background: #EF4444; color: white; padding: 2px 6px; 
                                 border-radius: 12px; font-size: 10px; font-weight: bold; 
-                                margin-top: 3px; text-align: center; animation: pulse 2s infinite;">
+                                margin-top: 3px; text-align: center;">
                         🆘 يحتاج مساعدة
                     </div>
                 `;
-                extraClass = 'urgent-help-chat';
                 itemStyle = `
                     border: 3px solid #EF4444 !important;
                     background: linear-gradient(90deg, #FEF2F2 0%, #FFFFFF 100%) !important;
-                    box-shadow: 0 0 15px rgba(239, 68, 68, 0.3) !important;
+                `;
+            } else if (!student.accountCreated) {
+                statusBadge = `
+                    <div style="background: #F59E0B; color: white; padding: 2px 6px; 
+                                border-radius: 12px; font-size: 10px; font-weight: bold; 
+                                margin-top: 3px; text-align: center;">
+                        ⏳ معلق
+                    </div>
+                `;
+            } else {
+                statusBadge = `
+                    <div style="background: #10B981; color: white; padding: 2px 6px; 
+                                border-radius: 12px; font-size: 10px; font-weight: bold; 
+                                margin-top: 3px; text-align: center;">
+                        ✅ نشط
+                    </div>
                 `;
             }
             
             chatItem.innerHTML = `
-                <div class="avatar" style="background: ${data.hasHelpRequest ? '#EF4444' : 'linear-gradient(135deg, #667eea, #764ba2)'}">${initial}</div>
+                <div class="avatar" style="background: ${combinedData.hasHelpRequest || student.needsHelp ? '#EF4444' : 'linear-gradient(135deg, #667eea, #764ba2)'}">${initial}</div>
                 <div class="info">
-                    <div class="name" style="font-weight: ${data.hasHelpRequest ? 'bold' : 'normal'}; color: ${data.hasHelpRequest ? '#EF4444' : '#333'}">
+                    <div class="name" style="font-weight: bold;">
                         ${name}
-                        ${data.hasHelpRequest ? '<span style="color: #EF4444; margin-right: 5px;">🔥</span>' : ''}
                     </div>
-                    <div class="last-message">${lastMessage}</div>
+                    <div class="last-message" style="font-size: 12px; color: #666;">
+                        ${lastMessage}
+                    </div>
                 </div>
                 <div>
                     <div class="time">${time}</div>
-                    ${helpIndicator}
+                    ${statusBadge}
                 </div>
             `;
 
-            if (data.hasHelpRequest) {
+            if (combinedData.hasHelpRequest || student.needsHelp) {
                 chatItem.style.cssText = itemStyle;
-                chatItem.classList.add(extraClass);
             }
             
             chatsList.appendChild(chatItem);
-        });
+        }
         
-        // تحديث الإحصائيات مع تأكيد
+        // تحديث الإحصائيات
         document.getElementById('totalChats').textContent = totalChats;
         document.getElementById('activeToday').textContent = activeToday;
         
-        // تحديث عداد المساعدة
         const helpCountElement = document.getElementById('pendingBookings');
         if (helpCountElement) {
             helpCountElement.textContent = helpRequests;
             helpCountElement.parentElement.querySelector('div:last-child').textContent = 'طلبات مساعدة';
-            
-            // إضافة تنبيه صوتي إذا كان هناك طلبات جديدة
-            if (helpRequests > 0) {
-                console.log(`🔔 يوجد ${helpRequests} طلب مساعدة نشط`);
-            }
         }
         
-        console.log(`📈 الإحصائيات النهائية: إجمالي ${totalChats}, نشط اليوم ${activeToday}, طلبات مساعدة ${helpRequests}`);
+        console.log(`📈 الإحصائيات: ${totalChats} طالب، ${activeToday} نشط، ${helpRequests} يحتاج مساعدة`);
         
         await updateBookingStats();
         
     } catch (error) {
-        console.error('❌ خطأ في تحميل المحادثات:', error);
+        console.error('❌ خطأ في تحميل الطلاب:', error);
         document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
     }
 }
@@ -651,13 +681,13 @@ async function loadChat(chatId) {
         // أضف دالة حل المشكلة
 async function resolveHelpRequest(chatId) {
     try {
-        // إزالة علامة المساعدة
+        // إزالة علامة المساعدة من telegramChats
         await db.collection('telegramChats').doc(chatId).update({
             hasHelpRequest: false,
             helpResolvedAt: new Date()
         });
         
-        // البحث عن الطالب وتحديثه
+        // إزالة علامة المساعدة من individualStudents
         const studentSnapshot = await db.collection('individualStudents')
             .where('telegramChatId', '==', chatId)
             .limit(1)
@@ -670,7 +700,7 @@ async function resolveHelpRequest(chatId) {
             });
         }
         
-        // إرسال رسالة للعميل
+        // إرسال رسالة للطالب
         await fetch('http://localhost:3000/send-message-to-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -682,7 +712,6 @@ async function resolveHelpRequest(chatId) {
         
         // تحديث العرض
         loadChats();
-        loadChat(chatId);
         
         alert('✅ تم تسجيل حل المشكلة');
     } catch (error) {
@@ -690,7 +719,6 @@ async function resolveHelpRequest(chatId) {
         alert('حدث خطأ');
     }
 }
-
 
 let isSending = false; // متغير عام لمنع التكرار
         
