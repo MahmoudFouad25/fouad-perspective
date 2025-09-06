@@ -485,8 +485,7 @@ async function loadChats() {
         console.error('خطأ في تحميل المحادثات:', error);
         document.getElementById('chatsList').innerHTML = '<div class="empty-state">خطأ في التحميل</div>';
     }
-}
-       
+}  
 
 // استبدل دالة loadChat بالكامل بهذا الكود:
 // تحميل محادثة معينة
@@ -511,9 +510,22 @@ async function loadChat(chatId) {
     // عرض معلومات المحادثة
     const chatData = chatsData[chatId];
     document.getElementById('chatName').textContent = chatData?.userInfo?.firstName || 'مستخدم';
-    document.getElementById('chatInfo').textContent = `Chat ID: ${chatId}`;
     
-    // *** تفعيل حقل الإدخال ***
+    // إضافة زر حل المشكلة إذا كان هناك طلب مساعدة
+    let chatInfoContent = `Chat ID: ${chatId}`;
+    if (chatData?.hasHelpRequest) {
+        chatInfoContent += `
+        <button onclick="resolveHelpRequest('${chatId}')" 
+                style="background: #22C55E; color: white; border: none; 
+                       padding: 5px 10px; border-radius: 5px; margin-right: 10px; 
+                       cursor: pointer; font-size: 12px;">
+            <i class="fas fa-check"></i> تم حل المشكلة
+        </button>
+        `;
+    }
+    document.getElementById('chatInfo').innerHTML = chatInfoContent;
+    
+    // تفعيل حقل الإدخال
     const messageInput = document.getElementById('messageInput');
     const sendButton = document.querySelector('.input-area button');
     
@@ -587,7 +599,52 @@ async function loadChat(chatId) {
         });
 }
 
+        // أضف دالة حل المشكلة
+async function resolveHelpRequest(chatId) {
+    try {
+        // إزالة علامة المساعدة
+        await db.collection('telegramChats').doc(chatId).update({
+            hasHelpRequest: false,
+            helpResolvedAt: new Date()
+        });
+        
+        // البحث عن الطالب وتحديثه
+        const studentSnapshot = await db.collection('individualStudents')
+            .where('telegramChatId', '==', chatId)
+            .limit(1)
+            .get();
+        
+        if (!studentSnapshot.empty) {
+            await studentSnapshot.docs[0].ref.update({
+                needsHelp: false,
+                helpResolvedAt: new Date().toISOString()
+            });
+        }
+        
+        // إرسال رسالة للعميل
+        await fetch('http://localhost:3000/send-message-to-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: chatId,
+                message: '✅ تم حل مشكلتك بنجاح!\n\nنتمنى لك تجربة ممتازة في المنصة.'
+            })
+        });
+        
+        // تحديث العرض
+        loadChats();
+        loadChat(chatId);
+        
+        alert('✅ تم تسجيل حل المشكلة');
+    } catch (error) {
+        console.error('خطأ:', error);
+        alert('حدث خطأ');
+    }
+}
+
+
 let isSending = false; // متغير عام لمنع التكرار
+        
 
 async function sendAdminMessage() {
    // منع الإرسال المتكرر
