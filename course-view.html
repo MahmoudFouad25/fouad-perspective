@@ -1783,7 +1783,21 @@ let userBadges = [];
 let lessonPoints = {};
 let courseTotalPoints = 0;
 let earnedLessonPoints = [];
-
+// متغيرات نظام النقاط التفصيلي
+let detailedPointsSystem = {
+    achievement: 0,
+    bonus: 0,
+    participation: 0,
+    speed: 0,
+    totalEarned: 0
+};
+let courseContentDetails = {};
+let modulesPointsBreakdown = {};
+let userStreakDays = 0;
+let lastActivityDate = null;
+let courseBadges = [];
+let potentialBadges = [];
+let moduleCompletionBadges = {};
          // Get Course ID from URL
     function getCourseIdFromURL() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -1927,11 +1941,13 @@ await loadLessonPoints();
 async function loadLessonPoints() {
     lessonPoints = {};
     courseTotalPoints = 0;
+    courseContentDetails = {};
     
-    console.log('🔍 بدء تحميل نقاط الدروس...');
+    console.log('🔍 بدء تحميل نظام النقاط التفصيلي...');
     console.log('📚 عدد الدروس:', allLessons.length);
     
     try {
+        // جمع معرفات المحتوى
         const contentIds = [];
         allLessons.forEach(lesson => {
             if (lesson.libraryContentId) {
@@ -1940,16 +1956,34 @@ async function loadLessonPoints() {
             }
         });
         
+        // جلب تفاصيل كل محتوى
         for (const contentId of contentIds) {
             try {
                 const contentDoc = await db.collection('courseContentLibrary').doc(contentId).get();
                 if (contentDoc.exists) {
                     const contentData = contentDoc.data();
-                    if (contentData.pointsSystem && contentData.pointsSystem.totalPossible) {
-                        const points = contentData.pointsSystem.totalPossible;
+                    
+                    // حفظ كل تفاصيل نظام النقاط
+                    if (contentData.pointsSystem) {
+                        courseContentDetails[contentId] = {
+                            name: contentData.name,
+                            type: contentData.type,
+                            pointsSystem: contentData.pointsSystem,
+                            linkedBadges: contentData.linkedBadges || [],
+                            duration: contentData.duration || 0
+                        };
+                        
+                        const points = contentData.pointsSystem.totalPossible || 0;
                         lessonPoints[contentId] = points;
                         courseTotalPoints += points;
-                        console.log(`💰 ${contentData.name}: ${points} نقطة`);
+                        
+                        console.log(`💰 ${contentData.name}:`, {
+                            'إنجاز': contentData.pointsSystem.achievement || 0,
+                            'مكافأة': contentData.pointsSystem.bonus || 0,
+                            'مشاركة': contentData.pointsSystem.participation || 0,
+                            'سرعة': contentData.pointsSystem.speed || 0,
+                            'إجمالي': points
+                        });
                     }
                 }
             } catch (error) {
@@ -1957,19 +1991,118 @@ async function loadLessonPoints() {
             }
         }
         
+        // حساب نقاط الوحدات
+        calculateModulesPoints();
+        
+        // تحميل الشارات المتاحة
+        await loadAvailableBadges();
+        
         console.log('📊 إجمالي نقاط الدورة:', courseTotalPoints);
+        console.log('🏆 عدد الشارات المتاحة:', potentialBadges.length);
+        
         updatePointsDisplay();
-        updateLessonsWithPoints();
+        updateLessonsWithDetailedPoints();
         
     } catch (error) {
         console.error('خطأ في تحميل النقاط:', error);
     }
 }
 
+       // حساب نقاط الوحدات
+function calculateModulesPoints() {
+    modulesPointsBreakdown = {};
+    
+    allModules.forEach((module, moduleIndex) => {
+        let modulePoints = {
+            total: 0,
+            earned: 0,
+            lessons: []
+        };
+        
+        const moduleLessons = allLessons.filter(lesson => 
+            lesson.moduleIndex === moduleIndex
+        );
+        
+        moduleLessons.forEach(lesson => {
+            if (lesson.libraryContentId && lessonPoints[lesson.libraryContentId]) {
+                const points = lessonPoints[lesson.libraryContentId];
+                modulePoints.total += points;
+                
+                if (userProgress.completedLessons?.includes(lesson.globalIndex)) {
+                    modulePoints.earned += points;
+                }
+                
+                modulePoints.lessons.push({
+                    title: lesson.title,
+                    points: points,
+                    completed: userProgress.completedLessons?.includes(lesson.globalIndex)
+                });
+            }
+        });
+        
+        modulesPointsBreakdown[module.title] = modulePoints;
+    });
+}
+
+// تحميل الشارات المتاحة
+async function loadAvailableBadges() {
+    try {
+        const badgesSnapshot = await db.collection('badges').get();
+        potentialBadges = [];
+        courseBadges = [];
+        
+        badgesSnapshot.forEach(doc => {
+            const badge = { id: doc.id, ...doc.data() };
+            potentialBadges.push(badge);
+            
+            // فلترة الشارات المرتبطة بالدورة
+            if (badge.conditions?.courseId === courseId || 
+                badge.conditions?.linkedContent === 'any_lesson') {
+                courseBadges.push(badge);
+            }
+        });
+        
+        console.log('🏅 شارات الدورة المتاحة:', courseBadges.length);
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الشارات:', error);
+    }
+}
+
+// حساب النقاط التفصيلية المكتسبة
+function calculateEarnedDetailedPoints() {
+    detailedPointsSystem = {
+        achievement: 0,
+        bonus: 0,
+        participation: 0,
+        speed: 0,
+        totalEarned: 0
+    };
+    
+    userProgress.completedLessons?.forEach(lessonIndex => {
+        const lesson = allLessons[lessonIndex];
+        if (lesson?.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
+            const contentPoints = courseContentDetails[lesson.libraryContentId].pointsSystem;
+            
+            detailedPointsSystem.achievement += contentPoints.achievement || 0;
+            detailedPointsSystem.bonus += contentPoints.bonus || 0;
+            detailedPointsSystem.participation += contentPoints.participation || 0;
+            detailedPointsSystem.speed += contentPoints.speed || 0;
+            detailedPointsSystem.totalEarned += contentPoints.totalPossible || 0;
+        }
+    });
+    
+    return detailedPointsSystem;
+}
+       
+
        // عرض النقاط والشارات في الواجهة
 function updatePointsDisplay() {
     const statsCard = document.querySelector('.course-stats-card');
     if (!statsCard) return;
+    
+    // حساب النقاط التفصيلية
+    calculateEarnedDetailedPoints();
     
     const oldDisplay = document.getElementById('pointsSystemDisplay');
     if (oldDisplay) oldDisplay.remove();
@@ -1977,77 +2110,267 @@ function updatePointsDisplay() {
     const pointsHTML = `
         <div id="pointsSystemDisplay" style="
             margin-top: 20px;
-            padding: 20px;
-            background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 165, 0, 0.05));
-            border-radius: 15px;
-            border: 2px solid var(--gold-primary);
+            background: linear-gradient(135deg, rgba(30, 58, 95, 0.4), rgba(10, 22, 40, 0.6));
+            border-radius: 20px;
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            overflow: hidden;
         ">
+            <!-- شريط علوي متحرك -->
             <div style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 15px;
-                padding: 12px;
-                background: linear-gradient(135deg, #FFD700, #FFA500);
-                border-radius: 10px;
-            ">
-                <div style="color: var(--dark-bg); font-weight: 600;">
-                    <i class="fas fa-route"></i> نقاط الرحلة
-                </div>
-                <div style="color: var(--dark-bg); font-size: 1.8rem; font-weight: 700;">
-                    ${userJourneyPoints.toLocaleString()}
-                </div>
-            </div>
+                background: linear-gradient(90deg, #FFD700, #FFA500, #FF6347, #FFA500, #FFD700);
+                background-size: 200% 100%;
+                animation: gradient-flow 3s linear infinite;
+                height: 4px;
+            "></div>
             
-            <div style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 15px;
-                padding: 12px;
-                background: linear-gradient(135deg, #22C55E, #10B981);
-                border-radius: 10px;
-            ">
-                <div style="color: white; font-weight: 600;">
-                    <i class="fas fa-wallet"></i> نقاط المحفظة
-                </div>
-                <div style="color: white; font-size: 1.8rem; font-weight: 700;">
-                    ${userWalletPoints.toLocaleString()}
-                </div>
-            </div>
-            
-            ${courseTotalPoints > 0 ? `
-                <div style="
-                    padding: 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border-radius: 10px;
-                    border: 1px solid rgba(255, 215, 0, 0.3);
-                ">
-                    <div style="color: var(--gold-light); font-size: 0.9rem; margin-bottom: 8px;">
-                        <i class="fas fa-trophy"></i> نقاط متاحة في هذه الدورة
+            <!-- محتوى النقاط -->
+            <div style="padding: 20px;">
+                <!-- نقاط الرحلة والمحفظة -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <div style="
+                        background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 165, 0, 0.05));
+                        padding: 15px;
+                        border-radius: 15px;
+                        border: 1px solid rgba(255, 215, 0, 0.3);
+                        text-align: center;
+                    ">
+                        <div style="color: var(--gold-light); font-size: 0.9rem; margin-bottom: 8px;">
+                            <i class="fas fa-route"></i> رحلة الارتواء
+                        </div>
+                        <div style="
+                            color: var(--gold-primary);
+                            font-size: 2rem;
+                            font-weight: 700;
+                            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+                        ">
+                            ${userJourneyPoints.toLocaleString()}
+                        </div>
                     </div>
-                    <div style="color: var(--gold-primary); font-size: 1.5rem; font-weight: 700; text-align: center;">
-                        ${courseTotalPoints} نقطة
+                    
+                    <div style="
+                        background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.05));
+                        padding: 15px;
+                        border-radius: 15px;
+                        border: 1px solid rgba(34, 197, 94, 0.3);
+                        text-align: center;
+                    ">
+                        <div style="color: #86efac; font-size: 0.9rem; margin-bottom: 8px;">
+                            <i class="fas fa-wallet"></i> المحفظة
+                        </div>
+                        <div style="
+                            color: #22c55e;
+                            font-size: 2rem;
+                            font-weight: 700;
+                            text-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+                        ">
+                            ${userWalletPoints.toLocaleString()}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- نقاط الدورة التفصيلية -->
+                ${courseTotalPoints > 0 ? `
+                    <div style="
+                        background: rgba(255, 255, 255, 0.03);
+                        padding: 20px;
+                        border-radius: 15px;
+                        border: 1px solid rgba(255, 215, 0, 0.2);
+                        margin-bottom: 20px;
+                    ">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            margin-bottom: 15px;
+                        ">
+                            <h4 style="color: var(--gold-primary); margin: 0;">
+                                <i class="fas fa-trophy"></i> نقاط هذه الدورة
+                            </h4>
+                            <div style="
+                                background: linear-gradient(135deg, #FFD700, #FFA500);
+                                color: var(--dark-bg);
+                                padding: 5px 15px;
+                                border-radius: 20px;
+                                font-weight: 700;
+                            ">
+                                ${detailedPointsSystem.totalEarned} / ${courseTotalPoints}
+                            </div>
+                        </div>
+                        
+                        <!-- شريط التقدم في النقاط -->
+                        <div style="
+                            background: rgba(255, 255, 255, 0.05);
+                            height: 10px;
+                            border-radius: 5px;
+                            overflow: hidden;
+                            margin-bottom: 15px;
+                        ">
+                            <div style="
+                                width: ${(detailedPointsSystem.totalEarned / courseTotalPoints * 100)}%;
+                                height: 100%;
+                                background: linear-gradient(90deg, #FFD700, #FFA500);
+                                transition: width 0.5s ease;
+                            "></div>
+                        </div>
+                        
+                        <!-- تفاصيل النقاط -->
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                            ${detailedPointsSystem.achievement > 0 ? `
+                                <div style="
+                                    background: rgba(255, 215, 0, 0.05);
+                                    padding: 10px;
+                                    border-radius: 10px;
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                ">
+                                    <span style="color: rgba(255, 255, 255, 0.7);">
+                                        <i class="fas fa-star"></i> إنجاز
+                                    </span>
+                                    <span style="color: var(--gold-primary); font-weight: 600;">
+                                        ${detailedPointsSystem.achievement}
+                                    </span>
+                                </div>
+                            ` : ''}
+                            
+                            ${detailedPointsSystem.bonus > 0 ? `
+                                <div style="
+                                    background: rgba(147, 51, 234, 0.05);
+                                    padding: 10px;
+                                    border-radius: 10px;
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                ">
+                                    <span style="color: rgba(255, 255, 255, 0.7);">
+                                        <i class="fas fa-gift"></i> مكافأة
+                                    </span>
+                                    <span style="color: #a78bfa; font-weight: 600;">
+                                        ${detailedPointsSystem.bonus}
+                                    </span>
+                                </div>
+                            ` : ''}
+                            
+                            ${detailedPointsSystem.participation > 0 ? `
+                                <div style="
+                                    background: rgba(59, 130, 246, 0.05);
+                                    padding: 10px;
+                                    border-radius: 10px;
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                ">
+                                    <span style="color: rgba(255, 255, 255, 0.7);">
+                                        <i class="fas fa-users"></i> مشاركة
+                                    </span>
+                                    <span style="color: #60a5fa; font-weight: 600;">
+                                        ${detailedPointsSystem.participation}
+                                    </span>
+                                </div>
+                            ` : ''}
+                            
+                            ${detailedPointsSystem.speed > 0 ? `
+                                <div style="
+                                    background: rgba(239, 68, 68, 0.05);
+                                    padding: 10px;
+                                    border-radius: 10px;
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                ">
+                                    <span style="color: rgba(255, 255, 255, 0.7);">
+                                        <i class="fas fa-bolt"></i> سرعة
+                                    </span>
+                                    <span style="color: #f87171; font-weight: 600;">
+                                        ${detailedPointsSystem.speed}
+                                    </span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <!-- الشارات -->
+                ${renderBadgesSection()}
+            </div>
+        </div>
+    `;
+    
+    statsCard.insertAdjacentHTML('beforeend', pointsHTML);
+}
+
+// دالة عرض قسم الشارات
+function renderBadgesSection() {
+    const earnedBadges = userBadges.filter(badge => 
+        courseBadges.some(cb => cb.id === badge.id)
+    );
+    
+    const availableBadges = courseBadges.filter(badge => 
+        !userBadges.some(ub => ub.id === badge.id)
+    );
+    
+    return `
+        <div style="
+            background: rgba(255, 255, 255, 0.03);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 215, 0, 0.2);
+        ">
+            <h4 style="color: var(--gold-primary); margin: 0 0 15px 0;">
+                <i class="fas fa-medal"></i> الشارات والإنجازات
+            </h4>
+            
+            ${earnedBadges.length > 0 ? `
+                <div style="margin-bottom: 15px;">
+                    <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin-bottom: 10px;">
+                        شاراتك المكتسبة (${earnedBadges.length})
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        ${earnedBadges.map(badge => `
+                            <div style="
+                                background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 165, 0, 0.1));
+                                border: 2px solid var(--gold-primary);
+                                border-radius: 12px;
+                                padding: 10px;
+                                cursor: pointer;
+                                transition: transform 0.3s;
+                                text-align: center;
+                            " 
+                            onmouseover="this.style.transform='scale(1.1)'"
+                            onmouseout="this.style.transform='scale(1)'"
+                            title="${badge.name}">
+                                <div style="font-size: 2rem;">${badge.icon}</div>
+                                <div style="font-size: 0.7rem; color: var(--gold-light); margin-top: 5px;">
+                                    ${badge.name}
+                                </div>
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
             ` : ''}
             
-            ${userBadges.length > 0 ? `
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255, 215, 0, 0.2);">
-                    <div style="color: var(--gold-light); font-size: 0.9rem; margin-bottom: 10px;">
-                        <i class="fas fa-medal"></i> شاراتك (${userBadges.length})
+            ${availableBadges.length > 0 ? `
+                <div>
+                    <div style="color: rgba(255, 255, 255, 0.5); font-size: 0.9rem; margin-bottom: 10px;">
+                        شارات متاحة (${availableBadges.length})
                     </div>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        ${userBadges.map(badge => `
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        ${availableBadges.map(badge => `
                             <div style="
-                                background: rgba(255, 215, 0, 0.1);
-                                border: 1px solid var(--gold-primary);
-                                border-radius: 8px;
-                                padding: 6px 10px;
-                                font-size: 1.2rem;
-                                cursor: pointer;
-                            " title="${badge.name}">
-                                ${badge.icon}
+                                background: rgba(255, 255, 255, 0.02);
+                                border: 1px dashed rgba(255, 255, 255, 0.2);
+                                border-radius: 12px;
+                                padding: 10px;
+                                opacity: 0.5;
+                                text-align: center;
+                                position: relative;
+                            " title="${badge.name} - ${badge.conditions?.description || 'أكمل المتطلبات للحصول عليها'}">
+                                <div style="font-size: 2rem; filter: grayscale(100%);">
+                                    ${badge.icon}
+                                </div>
+                                <div style="font-size: 0.7rem; color: rgba(255, 255, 255, 0.4); margin-top: 5px;">
+                                    ???
+                                </div>
                             </div>
                         `).join('')}
                     </div>
@@ -2055,8 +2378,6 @@ function updatePointsDisplay() {
             ` : ''}
         </div>
     `;
-    
-    statsCard.insertAdjacentHTML('beforeend', pointsHTML);
 }
 
 
