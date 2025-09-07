@@ -1401,6 +1401,24 @@
             border-radius: 30px !important;
             padding: 0.8rem 2rem !important;
         }
+        /* أنيميشن النقاط */
+@keyframes pointsPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+@keyframes pointsGlow {
+    0%, 100% { box-shadow: 0 0 5px rgba(255, 215, 0, 0.5); }
+    50% { box-shadow: 0 0 20px rgba(255, 215, 0, 0.8); }
+}
+
+.points-earned-animation {
+    animation: pointsPulse 0.6s ease-out;
+}
+
+#pointsSystemDisplay {
+    animation: pointsGlow 3s infinite;
+}
     </style>
 </head>
 <body>
@@ -1906,7 +1924,11 @@ console.log('🏅 الشارات:', userBadges);
 
 // استخراج النقاط من الدروس
 await loadLessonPoints();
-
+// استرجاع النقاط المكتسبة سابقاً
+const savedPoints = localStorage.getItem(`course_${courseId}_earned_points`);
+if (savedPoints) {
+    earnedLessonPoints = JSON.parse(savedPoints);
+}
             // عرض البيانات
             displayCourseData();
             displayUserProgress();
@@ -2444,7 +2466,28 @@ function renderModuleLessons(lessons) {
            await saveLastViewedLesson(lessonIndex);
            
            document.getElementById('lessonTitleModal').textContent = lesson.title || `الدرس ${lessonIndex + 1}`;
-           
+           // عرض النقاط المتاحة في الدرس
+const lessonPointsValue = lesson.libraryContentId && lessonPoints[lesson.libraryContentId] ? 
+    lessonPoints[lesson.libraryContentId] : 0;
+
+if (lessonPointsValue > 0) {
+    const titleElement = document.getElementById('lessonTitleModal');
+    titleElement.innerHTML = `
+        ${titleElement.textContent}
+        <span style="
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            color: var(--dark-bg);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-right: 15px;
+            display: inline-block;
+        ">
+            <i class="fas fa-trophy"></i> ${lessonPointsValue} نقطة
+        </span>
+    `;
+}
            // عرض مؤشر التقدم
            const progressIndicator = document.getElementById('lessonProgressIndicator');
            const progressText = document.getElementById('lessonProgressText');
@@ -2839,106 +2882,148 @@ function renderModuleLessons(lessons) {
            currentLessonIndex = null;
        }
 
-       // Mark Lesson as Completed
-       async function markLessonCompleted(lessonIndex) {
-           try {
-               const completedLessons = userProgress.completedLessons || [];
-               
-               if (!completedLessons.includes(lessonIndex)) {
-                   completedLessons.push(lessonIndex);
-                   
-                   const totalLessons = allLessons.length;
-                   const newPercentage = totalLessons > 0 ? (completedLessons.length / totalLessons) * 100 : 0;
-                   
-                   const updatedProgress = {
-                       ...userProgress,
-                       completedLessons,
-                       percentage: newPercentage,
-                       lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-                   };
-// حساب النقاط المستحقة
-let pointsToAward = 0;
-const lesson = allLessons[lessonIndex];
-if (lesson.libraryContentId && lessonPoints[lesson.libraryContentId]) {
-    pointsToAward = lessonPoints[lesson.libraryContentId];
-}
+     // Mark Lesson as Completed
+async function markLessonCompleted(lessonIndex) {
+    try {
+        const completedLessons = userProgress.completedLessons || [];
+        
+        if (!completedLessons.includes(lessonIndex)) {
+            completedLessons.push(lessonIndex);
+            
+            const totalLessons = allLessons.length;
+            const newPercentage = totalLessons > 0 ? (completedLessons.length / totalLessons) * 100 : 0;
+            
+            const updatedProgress = {
+                ...userProgress,
+                completedLessons,
+                percentage: newPercentage,
+                lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+            };
 
-// إضافة النقاط للمستخدم
-if (pointsToAward > 0) {
-    const newJourneyPoints = userJourneyPoints + pointsToAward;
-    const newWalletPoints = userWalletPoints + pointsToAward;
-    
-    updatedProgress.pointsEarned = pointsToAward;
-    
-    // سنضيف النقاط في نفس التحديث
-}
-                  // تحديث واحد للنقاط والتقدم
-const updateData = {
-    [`progress.${courseId}`]: updatedProgress
-};
+            // حساب النقاط المستحقة
+            let pointsToAward = 0;
+            const lesson = allLessons[lessonIndex];
+            if (lesson.libraryContentId && lessonPoints[lesson.libraryContentId]) {
+                pointsToAward = lessonPoints[lesson.libraryContentId];
+            }
 
+            // إضافة النقاط للمستخدم
+            if (pointsToAward > 0) {
+                const newJourneyPoints = userJourneyPoints + pointsToAward;
+                const newWalletPoints = userWalletPoints + pointsToAward;
+                
+                updatedProgress.pointsEarned = pointsToAward;
+                
+                // سنضيف النقاط في نفس التحديث
+            }
+
+            // تحديث واحد للنقاط والتقدم
+            const updateData = {
+                [`progress.${courseId}`]: updatedProgress
+            };
+
+            if (pointsToAward > 0) {
+                updateData['journeyPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
+                updateData['journeyPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
+                updateData['walletPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
+                updateData['walletPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
+                
+                // إضافة للتاريخ
+                const pointsHistory = {
+                    amount: pointsToAward,
+                    timestamp: new Date().toISOString(),
+                    type: 'journey',
+                    reason: `إكمال درس: ${lesson.title}`,
+                    description: `حصلت على ${pointsToAward} نقطة`
+                };
+                
+                updateData['journeyPoints.history'] = firebase.firestore.FieldValue.arrayUnion(pointsHistory);
+                updateData['walletPoints.history'] = firebase.firestore.FieldValue.arrayUnion({
+                    ...pointsHistory,
+                    type: 'wallet'
+                });
+            }
+
+            await db.collection('users').doc(userId).update(updateData);
+
+            // تحديث المتغيرات المحلية
+            if (pointsToAward > 0) {
+                userJourneyPoints += pointsToAward;
+                userWalletPoints += pointsToAward;
+                updatePointsDisplay();
+            }
+
+            userProgress = updatedProgress;
+            
+            displayUserProgress();
+            displayModulesAndLessons();
+            updateNavigationButtons();
+            updateContinueButton();
+            
+            // Check milestones
+            checkMilestones(newPercentage);
+
+            // إشعار مخصص حسب النقاط
+            let swalConfig = {
+                icon: 'success',
+                title: 'أحسنت!',
+                confirmButtonColor: 'var(--gold-primary)',
+                timer: 2000,
+                timerProgressBar: true
+            };
+
+            if (pointsToAward > 0) {
+                swalConfig.title = '🎉 رائع! حصلت على نقاط';
+                swalConfig.html = `
+                    <div style="text-align: center;">
+                        <div style="font-size: 3rem; margin: 20px 0;">
+                            <span style="color: #FFD700;">+${pointsToAward}</span>
+                            <span style="font-size: 2rem;"> نقطة</span>
+                        </div>
+                        <div style="color: #6b7280; margin-top: 10px;">
+                            تم إضافتها لرصيدك
+                        </div>
+                        <div style="display: flex; justify-content: center; gap: 20px; margin-top: 20px;">
+                            <div style="background: linear-gradient(135deg, #FFD700, #FFA500); padding: 10px 20px; border-radius: 10px; color: #000;">
+                                <div style="font-size: 0.9rem;">رحلة الارتواء</div>
+                                <div style="font-size: 1.3rem; font-weight: bold;">${userJourneyPoints}</div>
+                            </div>
+                            <div style="background: linear-gradient(135deg, #22C55E, #10B981); padding: 10px 20px; border-radius: 10px; color: white;">
+                                <div style="font-size: 0.9rem;">المحفظة</div>
+                                <div style="font-size: 1.3rem; font-weight: bold;">${userWalletPoints}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                swalConfig.timer = 3000;
+            } else {
+                swalConfig.text = 'تم إكمال الدرس بنجاح';
+            }
+
+            Swal.fire(swalConfig);
+        }
+
+    } catch (error) {
+        console.error('خطأ في حفظ التقدم:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'فشل في حفظ التقدم',
+            confirmButtonColor: 'var(--gold-primary)'
+        });
+    }
+    // حفظ سجل النقاط المكتسبة محلياً
 if (pointsToAward > 0) {
-    updateData['journeyPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
-    updateData['journeyPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
-    updateData['walletPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
-    updateData['walletPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
-    
-    // إضافة للتاريخ
-    const pointsHistory = {
-        amount: pointsToAward,
-        timestamp: new Date().toISOString(),
-        type: 'journey',
-        reason: `إكمال درس: ${lesson.title}`,
-        description: `حصلت على ${pointsToAward} نقطة`
-    };
-    
-    updateData['journeyPoints.history'] = firebase.firestore.FieldValue.arrayUnion(pointsHistory);
-    updateData['walletPoints.history'] = firebase.firestore.FieldValue.arrayUnion({
-        ...pointsHistory,
-        type: 'wallet'
+    earnedLessonPoints.push({
+        lessonIndex: lessonIndex,
+        points: pointsToAward,
+        date: new Date().toISOString()
     });
+    
+    // حفظ في localStorage للاحتفاظ بها
+    localStorage.setItem(`course_${courseId}_earned_points`, JSON.stringify(earnedLessonPoints));
 }
-
-await db.collection('users').doc(userId).update(updateData);
-
-// تحديث المتغيرات المحلية
-if (pointsToAward > 0) {
-    userJourneyPoints += pointsToAward;
-    userWalletPoints += pointsToAward;
-    updatePointsDisplay();
 }
-
-                   userProgress = updatedProgress;
-                   
-                   displayUserProgress();
-                   displayModulesAndLessons();
-                   updateNavigationButtons();
-                   updateContinueButton();
-                   
-                   // Check milestones
-                   checkMilestones(newPercentage);
-
-                   Swal.fire({
-                       icon: 'success',
-                       title: 'أحسنت!',
-                       text: 'تم إكمال الدرس بنجاح',
-                       confirmButtonColor: 'var(--gold-primary)',
-                       timer: 2000,
-                       timerProgressBar: true
-                   });
-               }
-
-           } catch (error) {
-               console.error('خطأ في حفظ التقدم:', error);
-               Swal.fire({
-                   icon: 'error',
-                   title: 'خطأ',
-                   text: 'فشل في حفظ التقدم',
-                   confirmButtonColor: 'var(--gold-primary)'
-               });
-           }
-       }
-
        // Check Milestones
        function checkMilestones(newPercentage) {
            const milestones = [25, 50, 75, 100];
