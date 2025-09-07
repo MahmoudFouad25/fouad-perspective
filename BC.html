@@ -490,6 +490,20 @@ window.db = db;
 window.addEventListener('DOMContentLoaded', function() {
     console.log('✅ Firebase جاهز للاستخدام');
     console.log('✅ قاعدة البيانات متصلة:', window.db ? 'نعم' : 'لا');
+    
+    // التحقق من وجود كود في URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const codeFromUrl = urlParams.get('code');
+    
+    if (codeFromUrl) {
+        // وضع الكود في حقل البحث
+        document.getElementById('searchInput').value = codeFromUrl.toUpperCase();
+        
+        // تنفيذ البحث تلقائياً بعد ثانية
+        setTimeout(() => {
+            searchBooking();
+        }, 1000);
+    }
 });
         // متغيرات عامة
         let currentBooking = null;
@@ -1063,99 +1077,135 @@ window.addEventListener('DOMContentLoaded', function() {
         }
         
         // دالة تطبيق التغييرات في Firebase
-        async function applyPlanChange(booking, newPlan) {
-            const updateData = {
-                lastUpdated: new Date().toISOString(),
-                planChangedAt: new Date().toISOString(),
-                planChangedBy: 'customer'
+     async function applyPlanChange(booking, newPlan) {
+    try {
+        // تحديد الخطة القديمة
+        const oldPlan = booking.payment?.code === 'cash' ? 'cash' : 'installment';
+        
+        const updateData = {
+            lastUpdated: new Date().toISOString(),
+            planChangedAt: new Date().toISOString(),
+            planChangedBy: 'customer',
+            planChangeMethod: 'telegram_page'
+        };
+        
+        // تحديث pricing
+        updateData['pricing.finalPrice'] = `${newPlan.calculation.finalPrice.toLocaleString('ar-EG')} ج.م`;
+        updateData['pricing.finalPriceNumber'] = newPlan.calculation.finalPrice;
+        
+        // تحديث الخصومات
+        updateData.discounts = newPlan.calculation.appliedDiscounts.map(d => ({
+            type: d.type,
+            label: d.label,
+            value: `-${d.amount.toLocaleString('ar-EG')} ج.م`,
+            amount: d.amount
+        }));
+        
+        // تحديث payment
+        if (newPlan.type === 'cash') {
+            updateData.payment = {
+                code: 'cash',
+                method: 'دفعة واحدة',
+                installmentDetails: null,
+                installmentHTML: null
             };
             
-            // تحديث pricing
-            updateData['pricing.finalPrice'] = `${newPlan.calculation.finalPrice.toLocaleString('ar-EG')} ج.م`;
-            updateData['pricing.finalPriceNumber'] = newPlan.calculation.finalPrice;
+            updateData.paymentDetails = {
+                type: 'cash',
+                totalAmount: newPlan.calculation.finalPrice,
+                paidAmount: 0,
+                remainingAmount: newPlan.calculation.finalPrice,
+                fullyPaid: false
+            };
+        } else {
+            const details = newPlan.calculation.installmentDetails;
+            const months = details.months;
             
-            // تحديث الخصومات
-            updateData.discounts = newPlan.calculation.appliedDiscounts.map(d => ({
-                type: d.type,
-                label: d.label,
-                value: `-${d.amount.toLocaleString('ar-EG')} ج.م`,
-                amount: d.amount
-            }));
+            updateData.payment = {
+                code: newPlan.id,
+                method: `${months} شهور`,
+                installmentDetails: details.description,
+                installmentHTML: details.description
+            };
             
-            // تحديث payment
-            if (newPlan.type === 'cash') {
-                updateData.payment = {
-                    code: 'cash',
-                    method: 'دفعة واحدة',
-                    installmentDetails: null,
-                    installmentHTML: null
-                };
+            // إنشاء جدول الأقساط
+            const installmentSchedule = [];
+            const today = new Date();
+            
+            // الدفعة الأولى
+            installmentSchedule.push({
+                installmentNumber: 0,
+                amount: details.firstPayment,
+                dueDate: today.toISOString(),
+                status: 'pending'
+            });
+            
+            // الأقساط الشهرية
+            for (let i = 1; i < details.months; i++) {
+                const dueDate = new Date(today);
+                dueDate.setMonth(dueDate.getMonth() + i);
                 
-                updateData.paymentDetails = {
-                    type: 'cash',
-                    totalAmount: newPlan.calculation.finalPrice,
-                    paidAmount: 0,
-                    remainingAmount: newPlan.calculation.finalPrice,
-                    fullyPaid: false
-                };
-            } else {
-                const details = newPlan.calculation.installmentDetails;
-                const months = details.months;
-                
-                updateData.payment = {
-                    code: newPlan.id,
-                    method: `${months} شهور`,
-                    installmentDetails: details.description,
-                    installmentHTML: details.description
-                };
-                
-                // إنشاء جدول الأقساط
-                const installmentSchedule = [];
-                const today = new Date();
-                
-                // الدفعة الأولى
                 installmentSchedule.push({
-                    installmentNumber: 0,
-                    amount: details.firstPayment,
-                    dueDate: today.toISOString(),
+                    installmentNumber: i,
+                    amount: details.monthlyAmount,
+                    dueDate: dueDate.toISOString(),
                     status: 'pending'
                 });
-                
-                // الأقساط الشهرية
-                for (let i = 1; i < details.months; i++) {
-                    const dueDate = new Date(today);
-                    dueDate.setMonth(dueDate.getMonth() + i);
-                    
-                    installmentSchedule.push({
-                        installmentNumber: i,
-                        amount: details.monthlyAmount,
-                        dueDate: dueDate.toISOString(),
-                        status: 'pending'
-                    });
-                }
-                
-                updateData.paymentDetails = {
-                    type: 'installment',
-                    totalAmount: details.total,
-                    firstPayment: details.firstPayment,
-                    monthlyAmount: details.monthlyAmount,
-                    totalInstallments: details.months,
-                    paidInstallments: 0,
-                    remainingAmount: details.total,
-                    fullyPaid: false,
-                    installmentSchedule: installmentSchedule
-                };
             }
             
-            // حساب التوفير الإجمالي
-            updateData.totalSavings = newPlan.calculation.totalSavings;
-            updateData.totalSavingsText = `${updateData.totalSavings.toLocaleString('ar-EG')} ج.م`;
-            
-            // تحديث في Firebase
-            await db.collection('tempBookings').doc(booking.id).update(updateData);
-            
-            return true;
+            updateData.paymentDetails = {
+                type: 'installment',
+                totalAmount: details.total,
+                firstPayment: details.firstPayment,
+                monthlyAmount: details.monthlyAmount,
+                totalInstallments: details.months,
+                paidInstallments: 0,
+                remainingAmount: details.total,
+                fullyPaid: false,
+                installmentSchedule: installmentSchedule
+            };
         }
+        
+        // حساب التوفير الإجمالي
+        updateData.totalSavings = newPlan.calculation.totalSavings;
+        updateData.totalSavingsText = `${updateData.totalSavings.toLocaleString('ar-EG')} ج.م`;
+        
+        // تحديث في Firebase
+        await db.collection('tempBookings').doc(booking.id).update(updateData);
+        
+        // إرسال إشعار للتليجرام إذا كان متصلاً
+        if (booking.telegramChatId) {
+            try {
+                const response = await fetch('http://localhost:3000/plan-change-notification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        bookingId: booking.id,
+                        telegramChatId: booking.telegramChatId,
+                        oldPlan: oldPlan,
+                        newPlan: newPlan.id,
+                        newAmount: `${newPlan.calculation.finalPrice.toLocaleString('ar-EG')} ج.م`
+                    })
+                });
+                
+                const result = await response.json();
+                if (!result.success) {
+                    console.log('تعذر إرسال الإشعار للتليجرام');
+                }
+            } catch (error) {
+                console.log('خطأ في إرسال الإشعار:', error);
+            }
+        }
+        
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في تطبيق التغييرات:', error);
+        throw error;
+    }
+}
         
         // دالة إعادة تعيين النموذج
         function resetForm() {
