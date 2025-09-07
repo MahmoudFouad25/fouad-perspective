@@ -2312,6 +2312,38 @@ function calculateModulesPoints() {
     });
 }
 
+       // دالة تحديث شامل لنقاط الوحدات في العرض
+function refreshModulesPointsInView() {
+    // إعادة حساب نقاط الوحدات
+    calculateModulesPoints();
+    
+    // تحديث كل وحدة في العرض
+    document.querySelectorAll('.module-item').forEach((moduleElement, index) => {
+        const module = allModules[index];
+        if (module && modulesPointsBreakdown[module.title]) {
+            const pointsData = modulesPointsBreakdown[module.title];
+            
+            // البحث عن عنصر النقاط أو إنشاؤه
+            let pointsDisplay = moduleElement.querySelector('.module-points-display');
+            
+            if (pointsDisplay) {
+                // تحديث القيمة
+                const pointsText = pointsDisplay.querySelector('span:last-child');
+                if (pointsText) {
+                    pointsText.textContent = `${pointsData.earned} / ${pointsData.total}`;
+                    
+                    // إضافة تأثير بصري للتحديث
+                    pointsDisplay.style.transform = 'scale(1.1)';
+                    pointsDisplay.style.transition = 'transform 0.3s';
+                    setTimeout(() => {
+                        pointsDisplay.style.transform = 'scale(1)';
+                    }, 300);
+                }
+            }
+        }
+    });
+}
+
 // تحميل الشارات المتاحة
 async function loadAvailableBadges() {
     try {
@@ -3619,27 +3651,43 @@ async function markLessonCompleted(lessonIndex) {
             }
             
             // إضافة الشارات المكتسبة
-            if (earnedBadges && earnedBadges.length > 0) {
-                console.log('💾 حفظ الشارات الجديدة:', earnedBadges);
+          // إضافة الشارات المكتسبة
+if (earnedBadges && earnedBadges.length > 0) {
+    console.log('💾 حفظ الشارات الجديدة:', earnedBadges);
+    
+    // حفظ كل شارة مع التحقق من عدم التكرار
+    for (const newBadge of earnedBadges) {
+        try {
+            // جلب البيانات الحالية للتأكد
+            const userRef = await db.collection('users').doc(userId).get();
+            const currentUserData = userRef.data();
+            const currentUserBadges = currentUserData.badges || [];
+            
+            // التحقق من عدم وجود الشارة
+            if (!currentUserBadges.some(b => b.id === newBadge.id)) {
+                // إضافة الشارة
+                await db.collection('users').doc(userId).update({
+                    badges: firebase.firestore.FieldValue.arrayUnion(newBadge)
+                });
                 
-                // إضافة كل شارة بشكل منفصل للتأكد من عدم التكرار
-                for (const newBadge of earnedBadges) {
-                    // التحقق مرة أخرى من عدم وجود الشارة
-                    const userRef = await db.collection('users').doc(userId).get();
-                    const currentUserBadges = userRef.data().badges || [];
-                    
-                    if (!currentUserBadges.some(b => b.id === newBadge.id)) {
-                        await db.collection('users').doc(userId).update({
-                            badges: firebase.firestore.FieldValue.arrayUnion(newBadge)
-                        });
-                        
-                        // تحديث المتغير المحلي
-                        userBadges.push(newBadge);
-                        
-                        console.log('✅ تم إضافة شارة:', newBadge.name);
-                    }
+                // تحديث المتغير المحلي
+                userBadges.push(newBadge);
+                
+                // تحديث عداد المنح في collection الشارات
+                if (newBadge.id && !newBadge.id.includes('_')) {
+                    // شارة من Firebase
+                    await db.collection('badges').doc(newBadge.id).update({
+                        timesAwarded: firebase.firestore.FieldValue.increment(1)
+                    });
                 }
+                
+                console.log('✅ تم إضافة شارة:', newBadge.name);
             }
+        } catch (error) {
+            console.error('خطأ في إضافة الشارة:', error);
+        }
+    }
+}
             
             // حفظ باقي البيانات في Firebase (بدون الشارات لأنها تمت إضافتها بالأعلى)
             await db.collection('users').doc(userId).update(updateData);
@@ -3692,19 +3740,25 @@ async function markLessonCompleted(lessonIndex) {
 }
 
        // فحص الشارات المستحقة للدرس
+// فحص الشارات المستحقة للدرس - نسخة محسنة
 async function checkLessonBadges(lesson, completedCount) {
     const earnedBadges = [];
     const currentDate = new Date().toISOString();
     
     try {
+        console.log('🔍 بدء فحص الشارات للدرس:', lesson.title);
+        
         // 1. جلب كل الشارات من Firebase
-        const badgesSnapshot = await db.collection('badges').get();
+        const badgesSnapshot = await db.collection('badges')
+            .where('isActive', '==', true)
+            .get();
+        
         const allBadges = [];
         badgesSnapshot.forEach(doc => {
             allBadges.push({ id: doc.id, ...doc.data() });
         });
         
-        console.log('🔍 فحص الشارات المتاحة:', allBadges.length);
+        console.log('📊 عدد الشارات النشطة:', allBadges.length);
         
         // 2. فحص الشارات المرتبطة بالمحتوى المحدد
         if (lesson.libraryContentId) {
@@ -3736,7 +3790,40 @@ async function checkLessonBadges(lesson, completedCount) {
             }
         }
         
-        // 3. فحص شارات النقاط
+        // 3. فحص شارات المحتوى العامة
+        for (const badge of allBadges) {
+            if (badge.type === 'content' && 
+                badge.conditions && 
+                !userBadges.some(ub => ub.id === badge.id) &&
+                !earnedBadges.some(eb => eb.id === badge.id)) {
+                
+                let shouldAward = false;
+                
+                // فحص الشروط حسب نوع الربط
+                if (badge.conditions.linkType === 'any_lesson') {
+                    // أي درس
+                    shouldAward = true;
+                } else if (badge.conditions.linkType === 'specific_lesson' && 
+                          badge.conditions.specificContentId === lesson.libraryContentId) {
+                    // درس محدد
+                    shouldAward = true;
+                }
+                
+                if (shouldAward) {
+                    earnedBadges.push({
+                        id: badge.id,
+                        name: badge.name,
+                        icon: badge.icon,
+                        awardedDate: currentDate,
+                        type: 'content',
+                        reason: badge.description || 'إكمال محتوى'
+                    });
+                    console.log('✅ شارة محتوى عامة مكتسبة:', badge.name);
+                }
+            }
+        }
+        
+        // 4. فحص شارات النقاط
         const currentTotalPoints = userJourneyPoints + 
             (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId] ? 
              courseContentDetails[lesson.libraryContentId].pointsSystem.totalPossible : 0);
@@ -3761,30 +3848,35 @@ async function checkLessonBadges(lesson, completedCount) {
             }
         }
         
-        // 4. فحص شارات التقدم في الدورة
+        // 5. فحص شارات التقدم
         const progressPercentage = (completedCount / allLessons.length) * 100;
         
-        for (const badge of allBadges) {
-            if (badge.type === 'progress' && 
-                badge.conditions && 
-                badge.conditions.progressPercentage &&
-                badge.conditions.progressPercentage <= progressPercentage &&
-                !userBadges.some(ub => ub.id === badge.id) &&
-                !earnedBadges.some(eb => eb.id === badge.id)) {
+        // شارات مدمجة للتقدم
+        const progressMilestones = [
+            { percentage: 25, id: 'progress_25', name: 'ربع الطريق', icon: '🌙' },
+            { percentage: 50, id: 'progress_50', name: 'نصف الرحلة', icon: '⭐' },
+            { percentage: 75, id: 'progress_75', name: 'شارف على النهاية', icon: '🌟' },
+            { percentage: 100, id: 'progress_100', name: 'بطل الدورة', icon: '👑' }
+        ];
+        
+        for (const milestone of progressMilestones) {
+            if (progressPercentage >= milestone.percentage && 
+                !userBadges.some(ub => ub.id === milestone.id) &&
+                !earnedBadges.some(eb => eb.id === milestone.id)) {
                 
                 earnedBadges.push({
-                    id: badge.id,
-                    name: badge.name,
-                    icon: badge.icon,
+                    id: milestone.id,
+                    name: milestone.name,
+                    icon: milestone.icon,
                     awardedDate: currentDate,
                     type: 'progress',
-                    reason: `إكمال ${badge.conditions.progressPercentage}% من الدورة`
+                    reason: `إكمال ${milestone.percentage}% من الدورة`
                 });
-                console.log('✅ شارة تقدم مكتسبة:', badge.name);
+                console.log('✅ شارة تقدم مكتسبة:', milestone.name);
             }
         }
         
-        // 5. فحص شارات عدد الدروس
+        // 6. فحص شارات عدد الدروس
         const lessonMilestones = [
             { count: 1, id: 'first_lesson', name: 'البداية القوية', icon: '🚀' },
             { count: 5, id: 'five_lessons', name: 'المثابر', icon: '💪' },
@@ -4530,6 +4622,7 @@ function renderModulesProgress() {
        });
 
        // دالة التحديث الشامل للصفحة
+// دالة التحديث الشامل للصفحة
 async function refreshAllUIElements() {
     console.log('🔄 بدء التحديث الشامل...');
     
@@ -4541,16 +4634,19 @@ async function refreshAllUIElements() {
         // 2. تحديث العرض الأساسي
         displayUserProgress();
         
-        // 3. تحديث نقاط الوحدات في العرض
-        updateModulesPointsDisplay();
+        // 3. إعادة عرض الوحدات والدروس
+        displayModulesAndLessons();
         
-        // 4. تحديث عرض النقاط الرئيسي
+        // 4. تحديث نقاط الوحدات
+        refreshModulesPointsInView();
+        
+        // 5. تحديث عرض النقاط الرئيسي
         updatePointsDisplay();
         
-        // 5. تحديث لوحة النقاط
+        // 6. تحديث لوحة النقاط
         renderPointsDashboard();
         
-        // 6. تحديث الأزرار
+        // 7. تحديث الأزرار
         updateNavigationButtons();
         updateContinueButton();
         
