@@ -2106,6 +2106,9 @@ let moduleCompletionBadges = {};
 
     // Load All Required Data - نسخة محدثة
     async function loadAllData() {
+        // استخراج الشارات الحالية للمستخدم
+userBadges = userData.badges || [];
+console.log('🏅 شارات المستخدم الحالية:', userBadges);
         try {
             console.log('📋 تحميل بيانات الدورة:', courseId);
             console.log('👤 معرف المستخدم:', userId);
@@ -3958,168 +3961,126 @@ async function checkLessonBadges(lesson, completedCount) {
     const currentDate = new Date().toISOString();
     
     try {
-        console.log('🔍 بدء فحص الشارات للدرس:', lesson.title);
+        console.log('🔍 فحص الشارات للدرس:', lesson.title);
+        console.log('📝 معرف المحتوى:', lesson.libraryContentId);
         
-        // 1. جلب كل الشارات من Firebase
-        const badgesSnapshot = await db.collection('badges')
-            .where('isActive', '==', true)
-            .get();
+        // جلب كل الشارات من Firebase
+        const badgesSnapshot = await db.collection('badges').get();
         
-        const allBadges = [];
-        badgesSnapshot.forEach(doc => {
-            allBadges.push({ id: doc.id, ...doc.data() });
-        });
+        console.log('📊 عدد الشارات في Firebase:', badgesSnapshot.size);
         
-        console.log('📊 عدد الشارات النشطة:', allBadges.length);
+        // فحص كل شارة
+        for (const doc of badgesSnapshot.docs) {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // تحقق من عدم حصول المستخدم على الشارة
+            if (userBadges.some(ub => ub.id === badge.id)) {
+                continue;
+            }
+            
+            let shouldAward = false;
+            
+            // فحص شارات المحتوى
+            if (badge.type === 'content' && badge.conditions) {
+                if (badge.conditions.linkType === 'specific_lesson' && 
+                    badge.conditions.specificContentId === lesson.libraryContentId) {
+                    shouldAward = true;
+                    console.log('✅ شارة محتوى محدد:', badge.name);
+                } else if (badge.conditions.linkType === 'any_lesson') {
+                    shouldAward = true;
+                    console.log('✅ شارة أي درس:', badge.name);
+                } else if (badge.conditions.linkType === 'specific_module') {
+                    // فحص الوحدة
+                    const moduleId = lesson.moduleId;
+                    if (badge.conditions.specificModuleId === moduleId) {
+                        shouldAward = true;
+                        console.log('✅ شارة وحدة:', badge.name);
+                    }
+                }
+            }
+            
+            // فحص شارات النقاط
+            else if (badge.type === 'points' && badge.conditions && badge.conditions.requiredPoints) {
+                const currentPoints = userJourneyPoints + 
+                    (lesson.libraryContentId && lessonPoints[lesson.libraryContentId] ? 
+                     lessonPoints[lesson.libraryContentId] : 0);
+                
+                if (currentPoints >= badge.conditions.requiredPoints) {
+                    shouldAward = true;
+                    console.log('✅ شارة نقاط:', badge.name);
+                }
+            }
+            
+            // فحص شارات الحضور
+            else if (badge.type === 'attendance' && badge.conditions) {
+                // يمكن إضافة منطق الحضور هنا
+            }
+            
+            // فحص شارات الانتظام
+            else if (badge.type === 'streak' && badge.conditions && badge.conditions.streakDays) {
+                const userStreak = userData.currentStreak || 0;
+                if (userStreak >= badge.conditions.streakDays) {
+                    shouldAward = true;
+                    console.log('✅ شارة انتظام:', badge.name);
+                }
+            }
+            
+            // فحص الشارات المخصصة
+            else if (badge.type === 'custom' && badge.conditions) {
+                if (badge.conditions.evaluationType === 'auto') {
+                    // منطق تلقائي مخصص
+                }
+            }
+            
+            if (shouldAward) {
+                earnedBadges.push({
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon || '🏅',
+                    awardedDate: currentDate,
+                    type: badge.type,
+                    reason: badge.description || `من درس: ${lesson.title}`
+                });
+            }
+        }
         
-        // 2. فحص الشارات المرتبطة بالمحتوى المحدد
+        // فحص الشارات المرتبطة بالمحتوى من المكتبة
         if (lesson.libraryContentId) {
-            // جلب بيانات المحتوى من المكتبة
             const contentDoc = await db.collection('courseContentLibrary')
                 .doc(lesson.libraryContentId).get();
             
             if (contentDoc.exists) {
                 const contentData = contentDoc.data();
-                const linkedBadgeIds = contentData.linkedBadges || [];
-                
-                console.log('🎯 شارات مرتبطة بالمحتوى:', linkedBadgeIds);
-                
-                // فحص كل شارة مرتبطة
-                for (const badgeId of linkedBadgeIds) {
-                    const badge = allBadges.find(b => b.id === badgeId);
-                    if (badge && !userBadges.some(ub => ub.id === badgeId)) {
-                        earnedBadges.push({
-                            id: badge.id,
-                            name: badge.name,
-                            icon: badge.icon,
-                            awardedDate: currentDate,
-                            type: 'content',
-                            reason: `إكمال: ${lesson.title}`
-                        });
-                        console.log('✅ شارة محتوى مكتسبة:', badge.name);
+                if (contentData.linkedBadges && contentData.linkedBadges.length > 0) {
+                    console.log('🔗 شارات مرتبطة بالمحتوى:', contentData.linkedBadges);
+                    
+                    for (const badgeId of contentData.linkedBadges) {
+                        if (!userBadges.some(ub => ub.id === badgeId)) {
+                            const badgeDoc = await db.collection('badges').doc(badgeId).get();
+                            if (badgeDoc.exists) {
+                                const badgeData = badgeDoc.data();
+                                earnedBadges.push({
+                                    id: badgeId,
+                                    name: badgeData.name,
+                                    icon: badgeData.icon || '🏅',
+                                    awardedDate: currentDate,
+                                    type: badgeData.type,
+                                    reason: badgeData.description || `من محتوى: ${contentData.name}`
+                                });
+                                console.log('✅ شارة من المحتوى:', badgeData.name);
+                            }
+                        }
                     }
                 }
             }
         }
         
-        // 3. فحص شارات المحتوى العامة
-        for (const badge of allBadges) {
-            if (badge.type === 'content' && 
-                badge.conditions && 
-                !userBadges.some(ub => ub.id === badge.id) &&
-                !earnedBadges.some(eb => eb.id === badge.id)) {
-                
-                let shouldAward = false;
-                
-                // فحص الشروط حسب نوع الربط
-                if (badge.conditions.linkType === 'any_lesson') {
-                    // أي درس
-                    shouldAward = true;
-                } else if (badge.conditions.linkType === 'specific_lesson' && 
-                          badge.conditions.specificContentId === lesson.libraryContentId) {
-                    // درس محدد
-                    shouldAward = true;
-                }
-                
-                if (shouldAward) {
-                    earnedBadges.push({
-                        id: badge.id,
-                        name: badge.name,
-                        icon: badge.icon,
-                        awardedDate: currentDate,
-                        type: 'content',
-                        reason: badge.description || 'إكمال محتوى'
-                    });
-                    console.log('✅ شارة محتوى عامة مكتسبة:', badge.name);
-                }
-            }
-        }
-        
-        // 4. فحص شارات النقاط
-        const currentTotalPoints = userJourneyPoints + 
-            (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId] ? 
-             courseContentDetails[lesson.libraryContentId].pointsSystem.totalPossible : 0);
-        
-        for (const badge of allBadges) {
-            if (badge.type === 'points' && 
-                badge.conditions && 
-                badge.conditions.requiredPoints && 
-                badge.conditions.requiredPoints <= currentTotalPoints &&
-                !userBadges.some(ub => ub.id === badge.id) &&
-                !earnedBadges.some(eb => eb.id === badge.id)) {
-                
-                earnedBadges.push({
-                    id: badge.id,
-                    name: badge.name,
-                    icon: badge.icon,
-                    awardedDate: currentDate,
-                    type: 'points',
-                    reason: `الوصول إلى ${badge.conditions.requiredPoints} نقطة`
-                });
-                console.log('✅ شارة نقاط مكتسبة:', badge.name);
-            }
-        }
-        
-        // 5. فحص شارات التقدم
-        const progressPercentage = (completedCount / allLessons.length) * 100;
-        
-        // شارات مدمجة للتقدم
-        const progressMilestones = [
-            { percentage: 25, id: 'progress_25', name: 'ربع الطريق', icon: '🌙' },
-            { percentage: 50, id: 'progress_50', name: 'نصف الرحلة', icon: '⭐' },
-            { percentage: 75, id: 'progress_75', name: 'شارف على النهاية', icon: '🌟' },
-            { percentage: 100, id: 'progress_100', name: 'بطل الدورة', icon: '👑' }
-        ];
-        
-        for (const milestone of progressMilestones) {
-            if (progressPercentage >= milestone.percentage && 
-                !userBadges.some(ub => ub.id === milestone.id) &&
-                !earnedBadges.some(eb => eb.id === milestone.id)) {
-                
-                earnedBadges.push({
-                    id: milestone.id,
-                    name: milestone.name,
-                    icon: milestone.icon,
-                    awardedDate: currentDate,
-                    type: 'progress',
-                    reason: `إكمال ${milestone.percentage}% من الدورة`
-                });
-                console.log('✅ شارة تقدم مكتسبة:', milestone.name);
-            }
-        }
-        
-        // 6. فحص شارات عدد الدروس
-        const lessonMilestones = [
-            { count: 1, id: 'first_lesson', name: 'البداية القوية', icon: '🚀' },
-            { count: 5, id: 'five_lessons', name: 'المثابر', icon: '💪' },
-            { count: 10, id: 'ten_lessons', name: 'المتميز', icon: '⭐' },
-            { count: 15, id: 'fifteen_lessons', name: 'النجم', icon: '🌟' },
-            { count: 20, id: 'twenty_lessons', name: 'البطل', icon: '🏆' }
-        ];
-        
-        for (const milestone of lessonMilestones) {
-            if (completedCount === milestone.count && 
-                !userBadges.some(ub => ub.id === milestone.id) &&
-                !earnedBadges.some(eb => eb.id === milestone.id)) {
-                
-                earnedBadges.push({
-                    id: milestone.id,
-                    name: milestone.name,
-                    icon: milestone.icon,
-                    awardedDate: currentDate,
-                    type: 'milestone',
-                    reason: `إكمال ${milestone.count} ${milestone.count === 1 ? 'درس' : 'دروس'}`
-                });
-                console.log('✅ شارة إنجاز مكتسبة:', milestone.name);
-            }
-        }
-        
-        console.log('📊 إجمالي الشارات المكتسبة:', earnedBadges.length);
+        console.log('📊 الشارات المستحقة:', earnedBadges.length);
         return earnedBadges;
         
     } catch (error) {
         console.error('❌ خطأ في فحص الشارات:', error);
-        return earnedBadges;
+        return [];
     }
 }
 
