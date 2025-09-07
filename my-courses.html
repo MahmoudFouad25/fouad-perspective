@@ -1108,87 +1108,98 @@
                 showError('حدث خطأ في تحميل البيانات');
             }
         }
+        // التحقق من وجود دورات
+function checkCoursesAvailability() {
+    if (!userData.enrollments || userData.enrollments.length === 0) {
+        const coursesGrid = document.getElementById('coursesGrid');
+        coursesGrid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <i class="fas fa-heart empty-icon"></i>
+                <h3 class="empty-title">مرحباً بك في رحلتك التحويلية</h3>
+                <p class="empty-description">
+                    لم يتم تخصيص أي دورات لك بعد. 
+                    تواصل مع الإدارة لبدء رحلتك في منظور الفؤاد.
+                </p>
+                <button class="btn btn-primary" onclick="window.location.href='./dashboard.html'">
+                    <i class="fas fa-home"></i> العودة للوحة التحكم
+                </button>
+            </div>
+        `;
+        return false;
+    }
+    return true;
+}
 
         // تهيئة الصفحة
-        async function initializePage() {
-            await loadAllCourses();
-            updateStatistics();
-            updateTabCounts();
-            updateHeroBanner();
-            renderCourses();
-            setupSearch();
-        }
+       async function initializePage() {
+    if (checkCoursesAvailability()) {
+        await loadAllCourses();
+        updateStatistics();
+        updateTabCounts();
+        updateHeroBanner();
+        renderCourses();
+        setupSearch();
+    }
+}
 
         // تحميل جميع الدورات
         async function loadAllCourses() {
-            try {
-                console.log('📚 تحميل الدورات...');
-                
-                // جلب السجلات المالية
-                const financialRecordsSnapshot = await db.collection('users')
-                    .doc(userId)
-                    .collection('financialRecords')
-                    .get();
-                
-                allCourses = [];
-                
-                for (const doc of financialRecordsSnapshot.docs) {
-                    const record = doc.data();
-                    const courseId = doc.id;
-                    
-                    // جلب بيانات الدورة من مجموعة courses
-                    let courseDetails = null;
-                    try {
-                        const courseDoc = await db.collection('courses').doc(courseId).get();
-                        if (courseDoc.exists) {
-                            courseDetails = courseDoc.data();
-                        }
-                    } catch (error) {
-                        console.error('خطأ في جلب بيانات الدورة:', courseId, error);
-                    }
-                    
-                    // تحديد الحالة بناءً على التقدم والدفع
-                    let status;
-                    const learningProgress = userData.progress?.[courseId]?.percentage || 0;
-                    
-                    if (learningProgress >= 100) {
-                        status = 'completed';
-                    } else if (record.summary?.status === 'active' || learningProgress > 0) {
-                        status = 'active';
-                    } else {
-                        status = 'pending';
-                    }
-                    
-                    allCourses.push({
-                        id: courseId,
-                        title: record.courseTitle || courseDetails?.title || 'رحلة غير معنونة',
-                        type: record.courseType || 'course',
-                        status: status,
-                        createdAt: record.createdAt?.toDate() || new Date(),
-                        
-                        // التقدم
-                        learningProgress: learningProgress,
-                        completedLessons: userData.progress?.[courseId]?.completedLessons || [],
-                        lastActivity: userData.progress?.[courseId]?.lastActivity || null,
-                        
-                        // معلومات إضافية من تفاصيل الدورة
-                        description: courseDetails?.description || 'استكشف رحلة تحويلية جديدة في منظور الفؤاد',
-                        instructor: courseDetails?.instructorName || 'كوتش محمود فؤاد',
-                        duration: courseDetails?.totalDuration || 0,
-                        lessonsCount: courseDetails?.totalLessons || 0,
-                        objectives: courseDetails?.objectives || [],
-                        thumbnail: courseDetails?.thumbnailUrl || null
-                    });
-                }
-                
-                filteredCourses = [...allCourses];
-                console.log('✅ تم تحميل', allCourses.length, 'دورة');
-                
-            } catch (error) {
-                console.error('خطأ في تحميل الدورات:', error);
-                showError('حدث خطأ في تحميل الدورات');
+    try {
+        console.log('📚 تحميل الدورات...');
+        
+        // الحصول على الدورات من enrollments في بيانات المستخدم
+        const enrollments = userData.enrollments || userData.courses || [];
+        
+        allCourses = [];
+        
+        enrollments.forEach(enrollment => {
+            // تحديد الحالة بناءً على التقدم
+            const learningProgress = enrollment.courseInfo?.progress || enrollment.progress || 0;
+            let status;
+            
+            if (learningProgress >= 100) {
+                status = 'completed';
+            } else if (learningProgress > 0 || enrollment.status?.current === 'active') {
+                status = 'active';
+            } else {
+                status = 'pending';
             }
-        }
+            
+            // استخراج معرف الدورة الحقيقي
+            const actualCourseId = enrollment.courseId || enrollment.courseInfo?.id || enrollment.id;
+            
+            allCourses.push({
+                id: actualCourseId, // المعرف الحقيقي للدورة
+                enrollmentId: enrollment.id, // معرف التسجيل
+                title: enrollment.title || 'رحلة غير معنونة',
+                type: enrollment.type || 'course',
+                status: status,
+                createdAt: enrollment.enrolledAt || new Date(),
+                
+                // التقدم
+                learningProgress: learningProgress,
+                completedLessons: enrollment.completedLessons || [],
+                lastActivity: enrollment.lastActivity || null,
+                
+                // معلومات إضافية
+                description: enrollment.description || 'استكشف رحلة تحويلية جديدة في منظور الفؤاد',
+                instructor: enrollment.instructorName || 'كوتش محمود فؤاد',
+                duration: enrollment.duration || 0,
+                lessonsCount: enrollment.lessonsCount || enrollment.modules?.reduce((total, module) => 
+                    total + (module.lessons?.length || 0), 0) || 0,
+                objectives: enrollment.objectives || [],
+                thumbnail: enrollment.thumbnailUrl || enrollment.thumbnail || null
+            });
+        });
+        
+        filteredCourses = [...allCourses];
+        console.log('✅ تم تحميل', allCourses.length, 'دورة');
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الدورات:', error);
+        showError('حدث خطأ في تحميل الدورات');
+    }
+}
 
         // تحديث الإحصائيات
         function updateStatistics() {
@@ -1203,20 +1214,33 @@
 
         // تحديث البانر العلوي
         function updateHeroBanner() {
-            // حساب الأيام المتتالية (مؤقت - يمكن تطويره لاحقاً)
-            const streakDays = Math.floor(Math.random() * 30) + 1;
-            document.getElementById('streakDays').textContent = streakDays;
-            
-            // عدد الإنجازات
-            const achievements = allCourses.filter(c => c.status === 'completed').length * 3;
-            document.getElementById('achievementsCount').textContent = achievements;
-            
-            // إجمالي ساعات التعلم
-            const totalMinutes = userData.totalWatchTime || 0;
-            const totalHours = Math.floor(totalMinutes / 60);
-            document.getElementById('totalHours').textContent = totalHours;
+    // حساب الأيام المتتالية من آخر نشاط
+    let streakDays = 1;
+    const lastLogin = userData.lastLogin || userData.timestamps?.lastLogin;
+    if (lastLogin) {
+        const lastDate = new Date(lastLogin);
+        const today = new Date();
+        const diffTime = Math.abs(today - lastDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        streakDays = diffDays <= 1 ? (userData.streakDays || 1) + 1 : 1;
+    }
+    document.getElementById('streakDays').textContent = streakDays;
+    
+    // عدد الإنجازات من الشارات
+    const achievements = (userData.badges || userData.achievements || []).length;
+    document.getElementById('achievementsCount').textContent = achievements;
+    
+    // إجمالي ساعات التعلم الحقيقية
+    let totalMinutes = 0;
+    allCourses.forEach(course => {
+        if (course.completedLessons && course.completedLessons.length > 0) {
+            // حساب الوقت من الدروس المكتملة
+            totalMinutes += course.completedLessons.length * 10; // تقدير 10 دقائق لكل درس
         }
-
+    });
+    const totalHours = Math.floor(totalMinutes / 60);
+    document.getElementById('totalHours').textContent = totalHours;
+}
         // تحديث عدادات التبويبات
         function updateTabCounts() {
             const all = allCourses.length;
@@ -1300,9 +1324,12 @@
             }
 
             // آخر نشاط
-            let lastActivityText = 'لم تبدأ بعد';
-            if (course.lastActivity) {
-                const daysAgo = Math.floor((new Date() - course.lastActivity.toDate()) / (1000 * 60 * 60 * 24));
+           // آخر نشاط
+let lastActivityText = 'لم تبدأ بعد';
+if (course.lastActivity) {
+    // التحقق من نوع البيانات
+    const activityDate = course.lastActivity.toDate ? course.lastActivity.toDate() : new Date(course.lastActivity);
+    const daysAgo = Math.floor((new Date() - activityDate) / (1000 * 60 * 60 * 24));
                 if (daysAgo === 0) {
                     lastActivityText = 'اليوم';
                 } else if (daysAgo === 1) {
@@ -1481,13 +1508,14 @@
         }
 
         // فتح المحتوى
-        function openContent(contentId, contentType) {
-            if (contentType === 'bundle') {
-                window.location.href = `./bundle-view.html?id=${contentId}`;
-            } else {
-                window.location.href = `./course-view.html?id=${contentId}`;
-            }
-        }
+       function openContent(courseId, contentType) {
+    // استخدام معرف الدورة الحقيقي وليس معرف التسجيل
+    if (contentType === 'bundle') {
+        window.location.href = `./bundle-view.html?id=${courseId}`;
+    } else {
+        window.location.href = `./course-view.html?id=${courseId}`;
+    }
+}
 
         // عرض تفاصيل المحتوى
         async function showDetails(courseId) {
