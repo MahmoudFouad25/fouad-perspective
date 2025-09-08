@@ -2366,7 +2366,7 @@
         });
 
         // تحميل بيانات المستخدم - نفس الكود القديم مع تحسينات بصرية
-        async function loadUserData() {
+async function loadUserData() {
     try {
         console.log('📋 تحميل بيانات المستخدم:', userId);
         
@@ -2392,25 +2392,36 @@
             updatePaymentsSection();
             updateAchievementsShowcase();
             
-            // تحميل باقي البيانات
-            await initializeDashboardUpdated();
-            // عرض الدورات مع البث المباشر
-// تحديث قسم الدورات المطور
-// عرض الكورسات المخصصة
-showUserCourses();
+            // تحميل باقي البيانات - استخدم الدالة الموجودة
+            if (typeof initializeDashboard === 'function') {
+                await initializeDashboard();
+            } else {
+                // إذا لم تكن موجودة، استدعي الدوال الأساسية مباشرة
+                await Promise.all([
+                    loadStatistics(),
+                    loadRecentActivity(),
+                    displayCoursesWithLiveStatus() // الدالة الجديدة للبث المباشر
+                ]);
+                
+                // محاولة تهيئة المخطط إذا كان موجوداً
+                if (typeof initializeLearningChart === 'function') {
+                    initializeLearningChart();
+                }
+            }
             
             // تفعيل التحديثات الفورية
             setupRealtimeListeners();
             
         } else {
-            console.error('⌠بيانات المستخدم غير موجودة');
+            console.error('❌ بيانات المستخدم غير موجودة');
             showErrorState();
         }
     } catch (error) {
-        console.error('⌠خطأ في تحميل بيانات المستخدم:', error);
+        console.error('❌ خطأ في تحميل بيانات المستخدم:', error);
         showErrorState();
     }
 }
+
 
         // حساب التقدم الإجمالي
 // حساب التقدم الإجمالي المطور
@@ -4034,13 +4045,11 @@ async function displayCoursesWithLiveStatus() {
 // دالة جلب جميع الجلسات المباشرة
 async function fetchAllLiveSessions() {
     try {
-        const now = new Date();
         const sessions = [];
         
-        // جلب الجلسات النشطة والمجدولة
+        // طريقة 1: جلب الجلسات بدون ترتيب (لتجنب الحاجة لـ index)
         const sessionsSnapshot = await db.collection('liveSessions')
             .where('status', 'in', ['scheduled', 'active'])
-            .orderBy('date')
             .get();
         
         sessionsSnapshot.forEach(doc => {
@@ -4048,12 +4057,46 @@ async function fetchAllLiveSessions() {
             sessions.push(session);
         });
         
+        // ترتيب الجلسات يدوياً بعد الجلب
+        sessions.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time}`);
+            const dateB = new Date(`${b.date}T${b.time}`);
+            return dateA - dateB;
+        });
+        
         return sessions;
+        
     } catch (error) {
         console.error('خطأ في جلب الجلسات:', error);
-        return [];
+        
+        // طريقة بديلة: جلب كل الجلسات وفلترتها يدوياً
+        try {
+            const allSessionsSnapshot = await db.collection('liveSessions').get();
+            const sessions = [];
+            
+            allSessionsSnapshot.forEach(doc => {
+                const session = { id: doc.id, ...doc.data() };
+                if (session.status === 'scheduled' || session.status === 'active') {
+                    sessions.push(session);
+                }
+            });
+            
+            // ترتيب حسب التاريخ
+            sessions.sort((a, b) => {
+                const dateA = new Date(`${a.date}T${a.time}`);
+                const dateB = new Date(`${b.date}T${b.time}`);
+                return dateA - dateB;
+            });
+            
+            return sessions;
+            
+        } catch (fallbackError) {
+            console.error('خطأ في الطريقة البديلة:', fallbackError);
+            return [];
+        }
     }
 }
+
 
 // دالة إنشاء بطاقة الدورة مع معلومات البث
 function createCourseCardWithLive(enrollment, sessions) {
