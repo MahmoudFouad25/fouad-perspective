@@ -3706,31 +3706,138 @@ async function checkLessonBadges(lesson, completedCount) {
         
         console.log('🔍 فحص الشارات المتاحة:', allBadges.length);
         
-        // 2. فحص الشارات المرتبطة بالمحتوى المحدد
-        if (lesson.libraryContentId) {
-            // جلب بيانات المحتوى من المكتبة
-            const contentDoc = await db.collection('courseContentLibrary')
-                .doc(lesson.libraryContentId).get();
+        // 2. فحص شارات المحتوى (الأنواع المختلفة)
+        for (const badge of allBadges) {
+            if (userBadges.some(ub => ub.id === badge.id)) continue;
             
-            if (contentDoc.exists) {
-                const contentData = contentDoc.data();
-                const linkedBadgeIds = contentData.linkedBadges || [];
+            if (badge.type === 'content' && badge.conditions) {
+                const linkType = badge.conditions.linkType;
                 
-                console.log('🎯 شارات مرتبطة بالمحتوى:', linkedBadgeIds);
-                
-                // فحص كل شارة مرتبطة
-                for (const badgeId of linkedBadgeIds) {
-                    const badge = allBadges.find(b => b.id === badgeId);
-                    if (badge && !userBadges.some(ub => ub.id === badgeId)) {
+                // شارة أي درس
+                if (linkType === 'any_lesson') {
+                    earnedBadges.push({
+                        id: badge.id,
+                        name: badge.name,
+                        icon: badge.icon,
+                        awardedDate: currentDate,
+                        type: 'content',
+                        reason: `إكمال درس: ${lesson.title}`
+                    });
+                    console.log('✅ شارة أي درس:', badge.name);
+                }
+                // شارة درس محدد
+                else if (linkType === 'specific_lesson' && 
+                         badge.conditions.specificContentId === lesson.libraryContentId) {
+                    earnedBadges.push({
+                        id: badge.id,
+                        name: badge.name,
+                        icon: badge.icon,
+                        awardedDate: currentDate,
+                        type: 'content',
+                        reason: `إكمال الدرس: ${lesson.title}`
+                    });
+                    console.log('✅ شارة درس محدد:', badge.name);
+                }
+                // شارة وحدة محددة - بالمطابقة بالاسم
+                else if (linkType === 'specific_module' && badge.conditions.specificModuleId) {
+                    try {
+                        const moduleDoc = await db.collection('contentModules')
+                            .doc(badge.conditions.specificModuleId).get();
+                        
+                        if (moduleDoc.exists) {
+                            const targetModuleName = moduleDoc.data().name;
+                            const currentModuleName = lesson.moduleName;
+                            
+                            if (targetModuleName && currentModuleName && 
+                                targetModuleName.trim() === currentModuleName.trim()) {
+                                
+                                const moduleLessons = allLessons.filter(l => 
+                                    l.moduleIndex === lesson.moduleIndex
+                                );
+                                const completedInModule = moduleLessons.filter(l =>
+                                    userProgress.completedLessons?.includes(l.globalIndex)
+                                ).length + 1;
+                                
+                                if (completedInModule >= moduleLessons.length) {
+                                    earnedBadges.push({
+                                        id: badge.id,
+                                        name: badge.name,
+                                        icon: badge.icon,
+                                        awardedDate: currentDate,
+                                        type: 'content',
+                                        reason: `إكمال وحدة: ${currentModuleName}`
+                                    });
+                                    console.log('✅ شارة وحدة محددة:', badge.name);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('خطأ في فحص وحدة محددة:', error);
+                    }
+                }
+                // شارة أي وحدة
+                else if (linkType === 'any_module') {
+                    const moduleLessons = allLessons.filter(l => 
+                        l.moduleIndex === lesson.moduleIndex
+                    );
+                    const completedInModule = moduleLessons.filter(l =>
+                        userProgress.completedLessons?.includes(l.globalIndex)
+                    ).length + 1;
+                    
+                    if (completedInModule >= moduleLessons.length) {
                         earnedBadges.push({
                             id: badge.id,
                             name: badge.name,
                             icon: badge.icon,
                             awardedDate: currentDate,
                             type: 'content',
-                            reason: `إكمال: ${lesson.title}`
+                            reason: `إكمال وحدة: ${lesson.moduleName}`
                         });
-                        console.log('✅ شارة محتوى مكتسبة:', badge.name);
+                        console.log('✅ شارة أي وحدة:', badge.name);
+                    }
+                }
+                // شارة قالب/دورة محددة - بالمطابقة بالاسم
+                else if (linkType === 'specific_template' && badge.conditions.specificTemplateId) {
+                    try {
+                        const templateDoc = await db.collection('courseTemplates')
+                            .doc(badge.conditions.specificTemplateId).get();
+                        
+                        if (templateDoc.exists) {
+                            const targetTemplateName = templateDoc.data().name;
+                            const currentCourseName = courseData.title;
+                            
+                            if (targetTemplateName && currentCourseName &&
+                                targetTemplateName.trim() === currentCourseName.trim()) {
+                                
+                                if (completedCount >= allLessons.length) {
+                                    earnedBadges.push({
+                                        id: badge.id,
+                                        name: badge.name,
+                                        icon: badge.icon,
+                                        awardedDate: currentDate,
+                                        type: 'content',
+                                        reason: `إكمال دورة: ${currentCourseName}`
+                                    });
+                                    console.log('✅ شارة دورة محددة:', badge.name);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('خطأ في فحص قالب محدد:', error);
+                    }
+                }
+                // شارة أي قالب/دورة
+                else if (linkType === 'any_template') {
+                    if (completedCount >= allLessons.length) {
+                        earnedBadges.push({
+                            id: badge.id,
+                            name: badge.name,
+                            icon: badge.icon,
+                            awardedDate: currentDate,
+                            type: 'content',
+                            reason: `إكمال الدورة بالكامل`
+                        });
+                        console.log('✅ شارة أي دورة:', badge.name);
                     }
                 }
             }
@@ -3818,7 +3925,6 @@ async function checkLessonBadges(lesson, completedCount) {
         return earnedBadges;
     }
 }
-
 // عرض إشعار الإكمال المخصص
 // عرض إشعار الإكمال المخصص
 function showCompletionNotification(pointsDetail, earnedBadges, lessonTitle) {
