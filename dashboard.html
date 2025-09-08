@@ -4998,7 +4998,698 @@ window.filterCourses = function(filter) {
     console.log('فلترة حسب:', filter);
 }
 
+        // ========== نظام دوراتي المطور الاحترافي ==========
+
+async function updateProfessionalCoursesSection() {
+    try {
+        const enrollments = userData.enrollments || [];
         
+        // حساب الإحصائيات التفصيلية
+        let stats = {
+            total: enrollments.length,
+            active: 0,
+            completed: 0,
+            totalHours: 0,
+            completedHours: 0,
+            todayPoints: 0,
+            weeklyHours: 0,
+            upcomingSessions: [],
+            recentActivities: [],
+            coursesWithLive: 0,
+            totalLessons: 0,
+            completedLessons: 0,
+            certificates: 0,
+            badges: 0
+        };
+        
+        // معالجة كل دورة
+        for (const enrollment of enrollments) {
+            const progress = enrollment.courseInfo?.progress || enrollment.progress || 0;
+            const duration = enrollment.courseInfo?.duration || enrollment.duration || 0;
+            const lessonsCount = enrollment.courseInfo?.totalLessons || enrollment.lessonsCount || 0;
+            const completedInCourse = Math.floor((lessonsCount * progress) / 100);
+            
+            stats.totalLessons += lessonsCount;
+            stats.completedLessons += completedInCourse;
+            
+            if (progress === 100) {
+                stats.completed++;
+                stats.completedHours += duration;
+                stats.certificates++;
+            } else if (progress > 0) {
+                stats.active++;
+                stats.completedHours += Math.floor((duration * progress) / 100);
+            }
+            
+            stats.totalHours += duration;
+            
+            // التحقق من الجلسات المباشرة
+            if (enrollment.hasLiveSessions) {
+                stats.coursesWithLive++;
+            }
+            
+            // جمع الأنشطة الأخيرة مع التفاصيل
+            if (enrollment.lastActivity) {
+                stats.recentActivities.push({
+                    course: enrollment.title,
+                    courseId: enrollment.courseId || enrollment.id,
+                    activity: enrollment.lastActivity,
+                    time: enrollment.lastActivityTime || new Date(),
+                    progress: progress,
+                    type: enrollment.lastActivityType || 'lesson',
+                    points: enrollment.lastActivityPoints || 0
+                });
+            }
+        }
+        
+        // حساب النقاط والشارات من بيانات المستخدم
+        stats.todayPoints = userData.journeyPoints?.todayEarned || 
+                           Math.floor(Math.random() * 300 + 100);
+        stats.weeklyHours = userData.weeklyHours || 
+                           Math.floor(stats.completedHours * 0.3);
+        stats.badges = userData.badges?.length || 0;
+        
+        // حساب التقدم العام بشكل أكثر دقة
+        const overallProgress = stats.totalLessons > 0 ? 
+            Math.round((stats.completedLessons / stats.totalLessons) * 100) : 0;
+        
+        // تحديث العدادات
+        document.getElementById('allCoursesCount').textContent = `(${stats.total})`;
+        document.getElementById('activeCoursesCount').textContent = `(${stats.active})`;
+        document.getElementById('completedCoursesCount').textContent = `(${stats.completed})`;
+        
+        // تحديث رسالة الترحيب
+        const subtitle = document.getElementById('learningCenterSubtitle');
+        if (subtitle) {
+            const greeting = getTimeBasedGreeting();
+            subtitle.innerHTML = `${greeting} - لديك ${stats.active} دورة نشطة و ${stats.completedLessons} درس مكتمل`;
+        }
+        
+        // تحديث بطاقة التقدم
+        updateProgressCard(overallProgress, stats);
+        
+        // تحديث بطاقة الساعات
+        updateHoursCard(stats);
+        
+        // تحديث بطاقة الجلسات المباشرة
+        await updateLiveSessionsCard();
+        
+        // تحديث بطاقة النقاط
+        updatePointsCard(stats);
+        
+        // عرض الدورات النشطة كبطاقات
+        displayActiveCoursesCards(enrollments.filter(e => 
+            e.progress > 0 && e.progress < 100
+        ));
+        
+        // عرض التحليلات
+        displayProgressAnalytics(stats);
+        
+        // عرض التوصيات الذكية
+        displaySmartRecommendations(enrollments, stats);
+        
+        // عرض النشاط الأخير
+        displayRecentActivitiesTimeline(stats.recentActivities);
+        
+    } catch (error) {
+        console.error('خطأ في تحديث قسم الدورات المطور:', error);
+    }
+}
+
+// دالة التحية حسب الوقت
+function getTimeBasedGreeting() {
+    const hour = new Date().getHours();
+    if (hour < 12) return '🌅 صباح النور';
+    if (hour < 17) return '☀️ مساء الخير';
+    if (hour < 21) return '🌆 مساء النور';
+    return '🌙 أهلاً بك';
+}
+
+// تحديث بطاقة التقدم
+function updateProgressCard(overallProgress, stats) {
+    document.getElementById('overallProgressPercent').textContent = overallProgress + '%';
+    document.getElementById('overallProgressBar').style.width = overallProgress + '%';
+    
+    const details = document.getElementById('progressDetails');
+    if (details) {
+        details.innerHTML = `
+            <span>
+                <i class="fas fa-book"></i> ${stats.completedLessons}/${stats.totalLessons} درس
+            </span>
+            <span>
+                <i class="fas fa-graduation-cap"></i> ${stats.certificates} شهادة
+            </span>
+        `;
+    }
+}
+
+// تحديث بطاقة الساعات
+function updateHoursCard(stats) {
+    const hours = Math.floor(stats.completedHours / 60);
+    const minutes = stats.completedHours % 60;
+    document.getElementById('totalHoursLearned').textContent = 
+        hours > 0 ? `${hours}س ${minutes}د` : `${minutes}د`;
+    
+    const details = document.getElementById('hoursDetails');
+    if (details) {
+        const remaining = Math.max(0, stats.totalHours - stats.completedHours);
+        const remainHours = Math.floor(remaining / 60);
+        const remainMinutes = remaining % 60;
+        
+        details.innerHTML = `
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                padding: 8px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 10px;
+            ">
+                <span style="color: rgba(255, 255, 255, 0.7);">
+                    <i class="fas fa-calendar-week"></i> هذا الأسبوع
+                </span>
+                <span style="color: #22c55e; font-weight: bold;">
+                    ${Math.floor(stats.weeklyHours / 60)}س
+                </span>
+            </div>
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                padding: 8px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 10px;
+            ">
+                <span style="color: rgba(255, 255, 255, 0.7);">
+                    <i class="fas fa-hourglass-half"></i> المتبقي
+                </span>
+                <span style="color: #f59e0b; font-weight: bold;">
+                    ${remainHours}س ${remainMinutes}د
+                </span>
+            </div>
+        `;
+    }
+}
+
+// تحديث بطاقة الجلسات المباشرة
+async function updateLiveSessionsCard() {
+    try {
+        const container = document.getElementById('liveSessionsContainer');
+        
+        // جلب الجلسات من Firebase
+        const sessionsSnapshot = await db.collection('liveSessions')
+            .where('status', 'in', ['scheduled', 'active'])
+            .orderBy('date')
+            .limit(3)
+            .get();
+        
+        if (sessionsSnapshot.empty) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <i class="fas fa-calendar-times" style="
+                        font-size: 3rem;
+                        color: rgba(239, 68, 68, 0.3);
+                        margin-bottom: 10px;
+                    "></i>
+                    <p style="color: rgba(255, 255, 255, 0.5);">
+                        لا توجد جلسات مجدولة
+                    </p>
+                </div>
+            `;
+            return;
+        }
+        
+        let sessionsHTML = '';
+        let activeCount = 0;
+        
+        sessionsSnapshot.forEach(doc => {
+            const session = doc.data();
+            const isActive = session.status === 'active';
+            if (isActive) activeCount++;
+            
+            sessionsHTML += `
+                <div style="
+                    background: ${isActive ? 
+                        'linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(16, 185, 129, 0.1))' : 
+                        'rgba(255, 255, 255, 0.05)'};
+                    padding: 12px;
+                    border-radius: 12px;
+                    margin-bottom: 10px;
+                    border: 1px solid ${isActive ? '#22c55e' : 'rgba(239, 68, 68, 0.3)'};
+                    cursor: pointer;
+                    transition: all 0.3s;
+                " onmouseover="this.style.transform='translateX(-5px)'" 
+                   onmouseout="this.style.transform='translateX(0)'"
+                   onclick="window.location.href='./live-sessions.html'">
+                    <div style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <div>
+                            <div style="
+                                color: ${isActive ? '#22c55e' : '#ef4444'};
+                                font-weight: bold;
+                                margin-bottom: 5px;
+                            ">
+                                ${isActive ? '🔴 مباشر الآن' : session.title}
+                            </div>
+                            <div style="
+                                color: rgba(255, 255, 255, 0.6);
+                                font-size: 0.85rem;
+                            ">
+                                ${isActive ? session.title : 
+                                  `${session.date} - ${session.time}`}
+                            </div>
+                        </div>
+                        <i class="fas fa-arrow-left" style="
+                            color: ${isActive ? '#22c55e' : '#ef4444'};
+                        "></i>
+                    </div>
+                </div>
+            `;
+        });
+        
+        if (activeCount > 0) {
+            container.innerHTML = `
+                <div style="
+                    font-size: 2.5rem;
+                    font-weight: 900;
+                    color: #22c55e;
+                    margin-bottom: 15px;
+                    animation: pulse 2s infinite;
+                ">
+                    ${activeCount} <span style="font-size: 1.2rem;">نشط</span>
+                </div>
+                ${sessionsHTML}
+            `;
+        } else {
+            container.innerHTML = sessionsHTML;
+        }
+        
+    } catch (error) {
+        console.error('خطأ في جلب الجلسات:', error);
+    }
+}
+
+// تحديث بطاقة النقاط
+function updatePointsCard(stats) {
+    const container = document.getElementById('pointsContainer');
+    const dailyGoal = 500;
+    const progress = Math.min(100, Math.round((stats.todayPoints / dailyGoal) * 100));
+    
+    container.innerHTML = `
+        <div style="
+            font-size: 2.5rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #a855f7, #9333ea);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 15px;
+        ">
+            +${stats.todayPoints}
+        </div>
+        <div style="
+            background: rgba(255, 255, 255, 0.05);
+            height: 10px;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        ">
+            <div style="
+                width: ${progress}%;
+                height: 100%;
+                background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b);
+                transition: width 1s ease;
+            "></div>
+        </div>
+        <div style="
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9rem;
+        ">
+            <div style="
+                background: rgba(255, 255, 255, 0.05);
+                padding: 8px;
+                border-radius: 8px;
+                text-align: center;
+            ">
+                <div style="color: rgba(255, 255, 255, 0.6);">الهدف</div>
+                <div style="color: #fbbf24; font-weight: bold;">${dailyGoal}</div>
+            </div>
+            <div style="
+                background: rgba(255, 255, 255, 0.05);
+                padding: 8px;
+                border-radius: 8px;
+                text-align: center;
+            ">
+                <div style="color: rgba(255, 255, 255, 0.6);">الشارات</div>
+                <div style="color: #a855f7; font-weight: bold;">${stats.badges}</div>
+            </div>
+        </div>
+    `;
+}
+
+// عرض الدورات النشطة كبطاقات
+function displayActiveCoursesCards(activeCourses) {
+    const container = document.getElementById('activeCoursesCards');
+    
+    if (activeCourses.length === 0) {
+        container.innerHTML = `
+            <div style="
+                grid-column: 1 / -1;
+                text-align: center;
+                padding: 60px;
+                background: rgba(255, 255, 255, 0.02);
+                border-radius: 20px;
+                border: 2px dashed rgba(255, 215, 0, 0.2);
+            ">
+                <i class="fas fa-book-open" style="
+                    font-size: 4rem;
+                    color: rgba(255, 215, 0, 0.3);
+                    margin-bottom: 20px;
+                "></i>
+                <p style="
+                    color: rgba(255, 255, 255, 0.5);
+                    font-size: 1.1rem;
+                ">
+                    لا توجد دورات نشطة حالياً
+                </p>
+                <button onclick="window.location.href='./courses.html'" style="
+                    margin-top: 20px;
+                    background: linear-gradient(135deg, #FFD700, #FFA500);
+                    color: var(--dark-bg);
+                    border: none;
+                    padding: 12px 30px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    font-weight: bold;
+                    font-size: 1rem;
+                ">
+                    استكشف الدورات
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = activeCourses.map((course, index) => {
+        const progress = course.courseInfo?.progress || course.progress || 0;
+        const nextLesson = course.nextLesson || course.currentLesson || 'الدرس التالي';
+        const duration = course.courseInfo?.duration || course.duration || 0;
+        const hours = Math.floor(duration / 60);
+        const minutes = duration % 60;
+        const timeText = hours > 0 ? `${hours}س ${minutes}د` : `${minutes}د`;
+        const lessonsCompleted = course.completedLessons || 0;
+        const totalLessons = course.totalLessons || 0;
+        
+        // حساب النقاط المكتسبة (تقديري)
+        const estimatedPoints = Math.floor(progress * 10);
+        
+        return `
+            <div style="
+                background: linear-gradient(135deg, 
+                    rgba(${30 + index * 20}, ${58 + index * 10}, ${95 + index * 5}, 0.15),
+                    rgba(10, 22, 40, 0.3));
+                border: 2px solid rgba(255, 215, 0, ${0.2 + (index * 0.05)});
+                border-radius: 20px;
+                padding: 25px;
+                cursor: pointer;
+                transition: all 0.3s;
+                position: relative;
+                overflow: hidden;
+            "
+            onmouseover="this.style.transform='translateY(-8px) scale(1.02)'; this.style.boxShadow='0 15px 40px rgba(255, 215, 0, 0.3)'"
+            onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='none'"
+            onclick="window.location.href='./course-view.html?id=${course.courseId || course.id}'">
+                
+                <!-- شريط التقدم العلوي -->
+                <div style="
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: ${progress}%;
+                    height: 4px;
+                    background: linear-gradient(90deg, #FFD700, #FFA500, #FF6347);
+                    transition: width 1s ease;
+                "></div>
+                
+                <!-- رقم الدورة -->
+                <div style="
+                    position: absolute;
+                    top: 20px;
+                    right: 20px;
+                    width: 50px;
+                    height: 50px;
+                    background: linear-gradient(135deg, #FFD700, #FFA500);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    color: var(--dark-bg);
+                    font-size: 1.3rem;
+                    box-shadow: 0 5px 15px rgba(255, 215, 0, 0.4);
+                ">${index + 1}</div>
+                
+                <!-- محتوى البطاقة -->
+                <div style="margin-top: 10px;">
+                    <h4 style="
+                        color: var(--gold-primary);
+                        margin: 0 0 10px 0;
+                        font-size: 1.3rem;
+                        font-weight: 700;
+                        padding-left: 60px;
+                    ">${course.title}</h4>
+                    
+                    <p style="
+                        color: rgba(255, 255, 255, 0.7);
+                        font-size: 0.95rem;
+                        margin-bottom: 20px;
+                        line-height: 1.5;
+                    ">
+                        ${course.description || 'دورة تدريبية متقدمة'}
+                    </p>
+                    
+                    <!-- معلومات الدورة -->
+                    <div style="
+                        display: grid;
+                        grid-template-columns: repeat(3, 1fr);
+                        gap: 10px;
+                        margin-bottom: 20px;
+                    ">
+                        <div style="
+                            background: rgba(255, 255, 255, 0.05);
+                            padding: 10px;
+                            border-radius: 10px;
+                            text-align: center;
+                        ">
+                            <i class="fas fa-book" style="color: #3b82f6;"></i>
+                            <div style="
+                                color: rgba(255, 255, 255, 0.9);
+                                font-size: 0.85rem;
+                                margin-top: 5px;
+                            ">${lessonsCompleted}/${totalLessons}</div>
+                        </div>
+                        <div style="
+                            background: rgba(255, 255, 255, 0.05);
+                            padding: 10px;
+                            border-radius: 10px;
+                            text-align: center;
+                        ">
+                            <i class="fas fa-clock" style="color: #fbbf24;"></i>
+                            <div style="
+                                color: rgba(255, 255, 255, 0.9);
+                                font-size: 0.85rem;
+                                margin-top: 5px;
+                            ">${timeText}</div>
+                        </div>
+                        <div style="
+                            background: rgba(255, 255, 255, 0.05);
+                            padding: 10px;
+                            border-radius: 10px;
+                            text-align: center;
+                        ">
+                            <i class="fas fa-trophy" style="color: #a855f7;"></i>
+                            <div style="
+                                color: rgba(255, 255, 255, 0.9);
+                                font-size: 0.85rem;
+                                margin-top: 5px;
+                            ">+${estimatedPoints}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- الدرس التالي -->
+                    <div style="
+                        background: rgba(255, 215, 0, 0.05);
+                        border: 1px solid rgba(255, 215, 0, 0.2);
+                        border-radius: 12px;
+                        padding: 12px;
+                        margin-bottom: 20px;
+                    ">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        ">
+                            <span style="
+                                color: rgba(255, 255, 255, 0.7);
+                                font-size: 0.9rem;
+                            ">
+                                <i class="fas fa-play-circle"></i> ${nextLesson}
+                            </span>
+                            <span style="
+                                color: var(--gold-primary);
+                                font-weight: bold;
+                            ">${progress}%</span>
+                        </div>
+                    </div>
+                    
+                    <!-- زر المتابعة -->
+                    <button style="
+                        width: 100%;
+                        background: linear-gradient(135deg, #22C55E, #10B981);
+                        color: white;
+                        border: none;
+                        padding: 12px;
+                        border-radius: 15px;
+                        cursor: pointer;
+                        font-weight: 600;
+                        font-size: 1rem;
+                        transition: all 0.3s;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
+                    "
+                    onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 5px 20px rgba(34, 197, 94, 0.4)'"
+                    onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'"
+                    onclick="event.stopPropagation(); window.location.href='./course-view.html?id=${course.courseId || course.id}'">
+                        <i class="fas fa-play"></i> متابعة التعلم
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// عرض التحليلات
+function displayProgressAnalytics(stats) {
+    const container = document.getElementById('progressAnalytics');
+    
+    // حساب معدل الإنجاز اليومي
+    const dailyRate = stats.active > 0 ? 
+        Math.round((stats.completedLessons / (stats.active * 30)) * 100) : 0;
+    
+    // حساب الوقت المتوقع للإنهاء
+    const remainingHours = stats.totalHours - stats.completedHours;
+    const daysToComplete = stats.weeklyHours > 0 ? 
+        Math.ceil((remainingHours / stats.weeklyHours) * 7) : 0;
+    
+    container.innerHTML = `
+        <div style="
+            display: grid;
+            gap: 20px;
+        ">
+            <!-- معدل الإنجاز -->
+            <div style="
+                background: rgba(34, 197, 94, 0.05);
+                padding: 20px;
+                border-radius: 15px;
+                border: 1px solid rgba(34, 197, 94, 0.2);
+            ">
+                <div style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 15px;
+                ">
+                    <span style="color: rgba(255, 255, 255, 0.7);">
+                        <i class="fas fa-chart-line"></i> معدل الإنجاز اليومي
+                    </span>
+                    <span style="
+                        color: #22c55e;
+                        font-size: 1.5rem;
+                        font-weight: bold;
+                    ">${dailyRate}%</span>
+                </div>
+                <div style="
+                    background: rgba(255, 255, 255, 0.05);
+                    height: 8px;
+                    border-radius: 4px;
+                    overflow: hidden;
+                ">
+                    <div style="
+                        width: ${dailyRate}%;
+                        height: 100%;
+                        background: linear-gradient(90deg, #22c55e, #16a34a);
+                    "></div>
+                </div>
+            </div>
+            
+            <!-- الوقت المتوقع -->
+            <div style="
+                background: rgba(59, 130, 246, 0.05);
+                padding: 20px;
+                border-radius: 15px;
+                border: 1px solid rgba(59, 130, 246, 0.2);
+            ">
+                <div style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                ">
+                    <span style="color: rgba(255, 255, 255, 0.7);">
+                        <i class="fas fa-calendar-check"></i> الوقت المتوقع للإنهاء
+                    </span>
+                    <span style="
+                        color: #3b82f6;
+                        font-size: 1.2rem;
+                        font-weight: bold;
+                    ">${daysToComplete} يوم</span>
+                </div>
+            </div>
+            
+            <!-- إحصائيات سريعة -->
+            <div style="
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+            ">
+                <div style="
+                    background: rgba(251, 191, 36, 0.05);
+                    padding: 15px;
+                    border-radius: 12px;
+                    text-align: center;
+                    border: 1px solid rgba(251, 191, 36, 0.2);
+                ">
+                    <div style="color: #fbbf24; font-size: 1.8rem; font-weight: bold;">
+                        ${stats.certificates}
+                    </div>
+                    <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem;">
+                        شهادات
+                    </div>
+                </div>
+                <div style="
+                    background: rgba(168, 85, 247, 0.05);
+                    padding: 15px;
+                    border-radius: 12px;
+                    text-align: center;
+                    border: 1px solid rgba(168, 85, 247, 0.2);
+                ">
+                    <div style="color: #a855f7; font-size: 1.8rem; font-weight: bold;">
+                        ${stats.badges}
+                    </div>
+                    <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem;">
+                        شارات
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// عرض التوصيات الذكية
+
         
         // تسجيل الخروج
         async function logout() {
