@@ -750,15 +750,21 @@ async function checkLiveSessions() {
                         ` : ''}
                         
                         ${type === 'admin' ? `
-                            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
-                                <button class="btn btn-success" onclick="startSession('${session.id}')">
-                                    <i class="fas fa-play"></i> بدء
-                                </button>
-                                <button class="btn btn-danger" onclick="deleteSession('${session.id}')">
-                                    <i class="fas fa-trash"></i> حذف
-                                </button>
-                            </div>
-                        ` : ''}
+    <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        ${session.status === 'scheduled' ? `
+            <button class="btn btn-success" onclick="startSession('${session.id}')">
+                <i class="fas fa-play"></i> بدء
+            </button>
+        ` : session.status === 'active' ? `
+            <button class="btn" style="background: #f59e0b; color: white;" onclick="endSession('${session.id}')">
+                <i class="fas fa-stop"></i> إنهاء
+            </button>
+        ` : ''}
+        <button class="btn btn-danger" onclick="deleteSession('${session.id}')">
+            <i class="fas fa-trash"></i> حذف
+        </button>
+    </div>
+` : ''}
                     </div>
                 `;
             }).join('');
@@ -1051,56 +1057,65 @@ async function checkAttendanceBadges(courseId) {
     if (!userId) return;
     
     try {
-        // جلب بيانات حضور المستخدم
         const userDoc = await db.collection('users').doc(userId).get();
         const userData = userDoc.data();
         const courseAttendance = userData.attendance?.[courseId] || {};
         const attendanceCount = Object.keys(courseAttendance).length;
         
-        // جلب شارات الحضور
         const badgesSnapshot = await db.collection('badges')
             .where('type', '==', 'live_attendance')
             .get();
         
         const newBadges = [];
         const currentBadges = userData.badges || [];
+        let totalBadgePoints = 0;
         
         badgesSnapshot.forEach(doc => {
             const badge = { id: doc.id, ...doc.data() };
             
-            // تخطي إذا المستخدم حاصل عليها
             if (currentBadges.some(b => b.id === badge.id)) return;
+            
+            let shouldAward = false;
+            let reason = '';
             
             // فحص الشروط
             if (badge.conditions?.firstAttendance && attendanceCount === 1) {
+                shouldAward = true;
+                reason = 'حضور أول جلسة مباشرة';
+            } else if (badge.conditions?.sessionCount && attendanceCount >= badge.conditions.sessionCount) {
+                shouldAward = true;
+                reason = `حضور ${badge.conditions.sessionCount} جلسات`;
+            }
+            
+            if (shouldAward) {
+                const badgePoints = badge.points || 0;
+                totalBadgePoints += badgePoints;
+                
                 newBadges.push({
                     id: badge.id,
                     name: badge.name,
                     icon: badge.icon,
                     awardedDate: new Date().toISOString(),
                     type: 'attendance',
-                    reason: 'حضور أول جلسة مباشرة'
+                    reason: reason,
+                    points: badgePoints
                 });
-            } else if (badge.conditions?.sessionCount && 
-                      attendanceCount >= badge.conditions.sessionCount) {
-                newBadges.push({
-                    id: badge.id,
-                    name: badge.name,
-                    icon: badge.icon,
-                    awardedDate: new Date().toISOString(),
-                    type: 'attendance',
-                    reason: `حضور ${badge.conditions.sessionCount} جلسات`
+                
+                // تحديث عداد المنح
+                db.collection('badges').doc(doc.id).update({
+                    timesAwarded: firebase.firestore.FieldValue.increment(1)
                 });
             }
         });
         
-        // منح الشارات الجديدة
         if (newBadges.length > 0) {
+            // منح الشارات والنقاط
             await db.collection('users').doc(userId).update({
-                badges: [...currentBadges, ...newBadges]
+                badges: [...currentBadges, ...newBadges],
+                'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalBadgePoints),
+                'walletPoints.balance': firebase.firestore.FieldValue.increment(totalBadgePoints)
             });
             
-            // عرض إشعار الشارات
             showBadgeNotification(newBadges);
         }
         
@@ -1141,6 +1156,36 @@ function showBadgeNotification(badges) {
         loadSessions();
     } catch (error) {
         console.error('Error starting session:', error);
+    }
+}
+
+        async function endSession(sessionId) {
+    try {
+        await db.collection('liveSessions').doc(sessionId).update({
+            status: 'completed',
+            endedAt: new Date().toISOString()
+        });
+        
+        // منح نقاط إضافية لمن بقي للنهاية
+        const attendeesSnapshot = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').get();
+        
+        attendeesSnapshot.forEach(async (doc) => {
+            const attendee = doc.data();
+            if (attendee.userId) {
+                // نقاط البقاء الكامل
+                const bonusPoints = 30;
+                await db.collection('users').doc(attendee.userId).update({
+                    'journeyPoints.balance': firebase.firestore.FieldValue.increment(bonusPoints),
+                    'walletPoints.balance': firebase.firestore.FieldValue.increment(bonusPoints)
+                });
+            }
+        });
+        
+        Swal.fire('تم!', 'تم إنهاء الجلسة ومنح النقاط الإضافية', 'success');
+        loadSessions();
+    } catch (error) {
+        console.error('خطأ في إنهاء الجلسة:', error);
     }
 }
         
@@ -1319,9 +1364,30 @@ async function viewAttendanceBadges() {
                             <div>
                                 <strong>${badge.name}</strong>
                                 <div style="color: #a855f7; font-size: 0.9rem;">${condition}</div>
+                                ${badge.points ? `<div style="color: #fbbf24; font-size: 0.85rem;">🏆 ${badge.points} نقطة</div>` : ''}
                             </div>
                         </div>
-                        <div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="editBadge('${doc.id}')" style="
+                                background: #3b82f6;
+                                color: white;
+                                border: none;
+                                padding: 5px 10px;
+                                border-radius: 5px;
+                                cursor: pointer;
+                            ">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button onclick="deleteBadge('${doc.id}')" style="
+                                background: #ef4444;
+                                color: white;
+                                border: none;
+                                padding: 5px 10px;
+                                border-radius: 5px;
+                                cursor: pointer;
+                            ">
+                                <i class="fas fa-trash"></i>
+                            </button>
                             <span style="
                                 background: #22c55e;
                                 color: white;
@@ -1339,10 +1405,26 @@ async function viewAttendanceBadges() {
         
         html += '</div>';
         
+        // إضافة زر لعرض كل الشارات
+        html += `
+            <button onclick="loadAttendanceBadgesList()" style="
+                background: linear-gradient(135deg, #a855f7, #9333ea);
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 20px;
+                margin-top: 15px;
+                cursor: pointer;
+                width: 100%;
+            ">
+                <i class="fas fa-sync"></i> تحديث القائمة
+            </button>
+        `;
+        
         Swal.fire({
             title: '🏅 شارات الحضور المباشر',
             html: html,
-            width: '600px',
+            width: '700px',
             showConfirmButton: false,
             showCloseButton: true
         });
@@ -1350,6 +1432,83 @@ async function viewAttendanceBadges() {
     } catch (error) {
         console.error('خطأ في عرض الشارات:', error);
     }
+}
+
+        // حذف شارة
+async function deleteBadge(badgeId) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل أنت متأكد من حذف هذه الشارة؟',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#ef4444'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            await db.collection('badges').doc(badgeId).delete();
+            Swal.fire('تم!', 'تم حذف الشارة', 'success');
+            viewAttendanceBadges();
+        } catch (error) {
+            console.error('خطأ في الحذف:', error);
+        }
+    }
+}
+
+// تعديل شارة
+async function editBadge(badgeId) {
+    try {
+        const doc = await db.collection('badges').doc(badgeId).get();
+        const badge = doc.data();
+        
+        const { value: formValues } = await Swal.fire({
+            title: 'تعديل الشارة',
+            html: `
+                <input id="edit-name" class="swal2-input" value="${badge.name}" placeholder="اسم الشارة">
+                <select id="edit-icon" class="swal2-input">
+                    <option value="${badge.icon}">${badge.icon} (الحالي)</option>
+                    <option value="🌟">🌟 نجمة</option>
+                    <option value="🏆">🏆 كأس</option>
+                    <option value="🥇">🥇 ذهبية</option>
+                    <option value="🥈">🥈 فضية</option>
+                    <option value="🥉">🥉 برونزية</option>
+                    <option value="🔥">🔥 نار</option>
+                    <option value="⚡">⚡ برق</option>
+                    <option value="🎯">🎯 هدف</option>
+                </select>
+                <input id="edit-points" class="swal2-input" type="number" value="${badge.points || 0}" placeholder="النقاط">
+            `,
+            focusConfirm: false,
+            preConfirm: () => {
+                return {
+                    name: document.getElementById('edit-name').value,
+                    icon: document.getElementById('edit-icon').value,
+                    points: parseInt(document.getElementById('edit-points').value) || 0
+                }
+            }
+        });
+        
+        if (formValues) {
+            await db.collection('badges').doc(badgeId).update({
+                name: formValues.name,
+                icon: formValues.icon,
+                points: formValues.points,
+                lastModified: new Date().toISOString()
+            });
+            
+            Swal.fire('تم!', 'تم تحديث الشارة', 'success');
+            viewAttendanceBadges();
+        }
+    } catch (error) {
+        console.error('خطأ في التعديل:', error);
+    }
+}
+
+// تحديث قائمة الشارات
+async function loadAttendanceBadgesList() {
+    viewAttendanceBadges();
 }
 
         // جلب شارات الحضور
