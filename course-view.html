@@ -5658,10 +5658,17 @@ async function joinLiveSession(sessionId) {
 
 // تسجيل الحضور
 // تسجيل الحضور مع النقاط
+// تسجيل الحضور مع النقاط - نسخة مُصححة
 async function recordAttendance(sessionId) {
     try {
         // جلب بيانات الجلسة
         const sessionDoc = await db.collection('liveSessions').doc(sessionId).get();
+        
+        if (!sessionDoc.exists) {
+            console.error('الجلسة غير موجودة');
+            return;
+        }
+        
         const sessionData = sessionDoc.data();
         
         // التحقق من الحضور المسبق
@@ -5669,50 +5676,55 @@ async function recordAttendance(sessionId) {
             .collection('attendees').doc(userId).get();
         
         if (attendeeDoc.exists) {
-            Swal.fire('تنبيه', 'تم تسجيل حضورك مسبقاً', 'info');
+            console.log('الحضور مسجل مسبقاً');
             return;
         }
-        
-        const attendanceData = {
-            userId: userId,
-            userName: userData.personalInfo?.name || 'مستخدم',
-            joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            sessionId: sessionId,
-            courseId: courseId,
-            pointsEarned: 0
-        };
-        
-        // حفظ في subcollection للجلسة
-        await db.collection('liveSessions').doc(sessionId)
-            .collection('attendees').doc(userId).set(attendanceData);
         
         // حساب النقاط
         let totalPoints = sessionData.points?.attendance || 50;
         
         // مكافأة المبكرين (أول 10)
-        const attendeesCount = await db.collection('liveSessions').doc(sessionId)
+        const attendeesSnapshot = await db.collection('liveSessions').doc(sessionId)
             .collection('attendees').get();
         
-        if (attendeesCount.size <= 10) {
+        if (attendeesSnapshot.size < 10) {
             totalPoints += sessionData.points?.earlyBird || 20;
+            console.log('مكافأة مبكر! +', sessionData.points?.earlyBird || 20);
         }
         
-        // منح النقاط
-        await db.collection('users').doc(userId).update({
+        // حفظ الحضور
+        await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).set({
+                userId: userId,
+                userName: userData.personalInfo?.name || 'مستخدم',
+                joinedAt: new Date().toISOString(),
+                sessionId: sessionId,
+                courseId: courseId,
+                pointsEarned: totalPoints
+            });
+        
+        // تحديث نقاط المستخدم في Firebase
+        const userRef = db.collection('users').doc(userId);
+        
+        // جلب البيانات الحالية أولاً
+        const userDoc = await userRef.get();
+        const currentUserData = userDoc.data();
+        
+        const currentJourneyPoints = currentUserData.journeyPoints?.balance || 0;
+        const currentWalletPoints = currentUserData.walletPoints?.balance || 0;
+        
+        // التحديث
+        await userRef.update({
             [`attendance.${courseId}.${sessionId}`]: {
                 joinedAt: new Date().toISOString(),
                 status: 'active',
                 pointsEarned: totalPoints
             },
-            'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'journeyPoints.balance': currentJourneyPoints + totalPoints,
             'journeyPoints.lifetime': firebase.firestore.FieldValue.increment(totalPoints),
-            'walletPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'walletPoints.balance': currentWalletPoints + totalPoints,
             'walletPoints.lifetime': firebase.firestore.FieldValue.increment(totalPoints)
         });
-        
-        // تحديث المتغيرات المحلية
-        userJourneyPoints += totalPoints;
-        userWalletPoints += totalPoints;
         
         // إضافة للسجل
         const pointsHistory = {
@@ -5723,15 +5735,23 @@ async function recordAttendance(sessionId) {
             description: `حصلت على ${totalPoints} نقطة للحضور المباشر`
         };
         
-        await db.collection('users').doc(userId).update({
+        await userRef.update({
             'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory),
             'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
         });
         
-        console.log('✅ تم تسجيل الحضور ومنح النقاط');
+        // تحديث المتغيرات المحلية
+        userJourneyPoints = currentJourneyPoints + totalPoints;
+        userWalletPoints = currentWalletPoints + totalPoints;
+        
+        console.log('✅ تم منح', totalPoints, 'نقطة');
         
         // عرض النقاط المكتسبة
         showAttendancePoints(totalPoints);
+        
+        // تحديث العرض
+        updatePointsDisplay();
+        renderPointsDashboard();
         
         // فحص شارات الحضور
         setTimeout(() => {
