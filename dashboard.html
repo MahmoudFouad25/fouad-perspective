@@ -2187,6 +2187,7 @@
 </div>
 
     <!-- 6. قسم دوراتي المطور الاحترافي -->
+<!-- HTML Structure للقسم الجديد -->
 <div class="learning-path-section" style="margin: 40px 0;">
     <!-- رأس القسم -->
     <div style="
@@ -2224,8 +2225,57 @@
                     margin: 5px 0 0 0;
                     font-size: 0.95rem;
                 " id="activeLearningSubtitle">
-                    استمر في رحلتك التعليمية
+                    دوراتك المخصصة مع البث المباشر
                 </p>
+            </div>
+            
+            <!-- أزرار الفلترة -->
+            <div style="display: flex; gap: 10px;">
+                <button onclick="filterLiveCourses('all')" 
+                        class="filter-btn active" 
+                        data-filter="all"
+                        style="
+                            background: linear-gradient(135deg, #FFD700, #FFA500);
+                            color: var(--dark-bg);
+                            border: none;
+                            padding: 8px 20px;
+                            border-radius: 20px;
+                            cursor: pointer;
+                            font-weight: 600;
+                            transition: all 0.3s;
+                        ">
+                    <i class="fas fa-th"></i> الكل
+                </button>
+                <button onclick="filterLiveCourses('live')" 
+                        class="filter-btn" 
+                        data-filter="live"
+                        style="
+                            background: rgba(255, 255, 255, 0.05);
+                            color: white;
+                            border: 2px solid rgba(255, 255, 255, 0.2);
+                            padding: 8px 20px;
+                            border-radius: 20px;
+                            cursor: pointer;
+                            font-weight: 600;
+                            transition: all 0.3s;
+                        ">
+                    <i class="fas fa-broadcast-tower"></i> مع بث مباشر
+                </button>
+                <button onclick="filterLiveCourses('active')" 
+                        class="filter-btn" 
+                        data-filter="active"
+                        style="
+                            background: rgba(255, 255, 255, 0.05);
+                            color: white;
+                            border: 2px solid rgba(255, 255, 255, 0.2);
+                            padding: 8px 20px;
+                            border-radius: 20px;
+                            cursor: pointer;
+                            font-weight: 600;
+                            transition: all 0.3s;
+                        ">
+                    <i class="fas fa-play"></i> نشطة
+                </button>
             </div>
         </div>
     </div>
@@ -2239,10 +2289,15 @@
         border: 2px solid rgba(255, 215, 0, 0.2);
     ">
         <div id="activeCoursesWithLive">
-            <!-- سيتم ملؤها ديناميكياً -->
+            <!-- سيتم ملؤها ديناميكياً بواسطة JavaScript -->
+            <div style="text-align: center; padding: 40px;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: var(--gold-primary);"></i>
+                <p style="margin-top: 15px; color: rgba(255, 255, 255, 0.6);">جاري تحميل الدورات...</p>
+            </div>
         </div>
     </div>
 </div>
+
 
 
     <!-- 7. أزرار الإجراءات السريعة -->
@@ -3787,24 +3842,24 @@ function playNotificationSound() {
         }
 
         // تهيئة لوحة التحكم
-     async function initializeDashboard() {
+  async function initializeDashboardUpdated() {
     try {
-        console.log('🚀 تهيئة لوحة التحكم...');
+        console.log('🚀 تهيئة لوحة التحكم المحدثة...');
         
         await Promise.all([
             loadStatistics(),
             loadRecentActivity(),
-            initializeLearningChart()
+            initializeLearningChart(),
+            displayCoursesWithLiveStatus() // الدالة الجديدة
         ]);
         
-
         console.log('✅ تم تهيئة لوحة التحكم بنجاح');
         
     } catch (error) {
         console.error('❌ خطأ في تهيئة لوحة التحكم:', error);
-        showPartialErrorState();
     }
 }
+
 
         // تحميل الإحصائيات - نفس الكود القديم
         async function loadStatistics() {
@@ -3930,6 +3985,643 @@ async function loadCourses() {
             return `بدأت في ${enrollmentDate.toLocaleDateString('ar-SA')}`;
         }
 
+        // البث
+        // دالة جديدة لعرض الدورات مع حالة البث المباشر
+async function displayCoursesWithLiveStatus() {
+    try {
+        const enrollments = userData.enrollments || [];
+        
+        if (enrollments.length === 0) {
+            displayEmptyCoursesState();
+            return;
+        }
+        
+        // جلب جميع الجلسات المباشرة دفعة واحدة
+        const allLiveSessions = await fetchAllLiveSessions();
+        
+        // عرض الدورات مع معلومات البث
+        const container = document.getElementById('activeCoursesWithLive');
+        if (!container) {
+            console.log('عنصر activeCoursesWithLive غير موجود');
+            return;
+        }
+        
+        const coursesHTML = await Promise.all(enrollments.map(async (enrollment) => {
+            const courseId = enrollment.courseId || enrollment.id;
+            const courseSessions = allLiveSessions.filter(session => 
+                session.courseId === courseId
+            );
+            
+            return createCourseCardWithLive(enrollment, courseSessions);
+        }));
+        
+        container.innerHTML = `
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+                gap: 25px;
+            ">
+                ${coursesHTML.join('')}
+            </div>
+        `;
+        
+    } catch (error) {
+        console.error('خطأ في عرض الدورات مع البث:', error);
+        displayErrorState();
+    }
+}
+
+// دالة جلب جميع الجلسات المباشرة
+async function fetchAllLiveSessions() {
+    try {
+        const now = new Date();
+        const sessions = [];
+        
+        // جلب الجلسات النشطة والمجدولة
+        const sessionsSnapshot = await db.collection('liveSessions')
+            .where('status', 'in', ['scheduled', 'active'])
+            .orderBy('date')
+            .get();
+        
+        sessionsSnapshot.forEach(doc => {
+            const session = { id: doc.id, ...doc.data() };
+            sessions.push(session);
+        });
+        
+        return sessions;
+    } catch (error) {
+        console.error('خطأ في جلب الجلسات:', error);
+        return [];
+    }
+}
+
+// دالة إنشاء بطاقة الدورة مع معلومات البث
+function createCourseCardWithLive(enrollment, sessions) {
+    const courseId = enrollment.courseId || enrollment.id;
+    const progress = enrollment.progress || 0;
+    
+    // تحليل حالة الجلسات
+    const liveStatus = analyzeLiveStatus(sessions);
+    
+    return `
+        <div style="
+            background: linear-gradient(135deg, 
+                ${liveStatus.active ? 'rgba(34, 197, 94, 0.1)' : 'rgba(30, 58, 95, 0.15)'}, 
+                rgba(10, 22, 40, 0.3));
+            border: 2px solid ${liveStatus.active ? '#22c55e' : 
+                              liveStatus.upcoming ? '#fbbf24' : 
+                              'rgba(255, 215, 0, 0.2)'};
+            border-radius: 25px;
+            padding: 25px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s;
+            cursor: pointer;
+        "
+        onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 15px 40px rgba(255, 215, 0, 0.3)'"
+        onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'"
+        onclick="window.location.href='./course-view.html?id=${courseId}'">
+            
+            <!-- شريط التقدم العلوي -->
+            <div style="
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: ${progress}%;
+                height: 4px;
+                background: linear-gradient(90deg, #FFD700, #FFA500, #FF6347);
+            "></div>
+            
+            <!-- رأس البطاقة -->
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: start;
+                margin-bottom: 20px;
+            ">
+                <div style="flex: 1;">
+                    <h3 style="
+                        color: var(--gold-primary);
+                        margin: 0 0 8px 0;
+                        font-size: 1.3rem;
+                        font-weight: 700;
+                    ">
+                        ${enrollment.title || 'دورة غير معنونة'}
+                    </h3>
+                    <div style="
+                        color: rgba(255, 255, 255, 0.6);
+                        font-size: 0.9rem;
+                    ">
+                        <i class="fas fa-layer-group"></i> 
+                        ${enrollment.type === 'bundle' ? 'مسار تعليمي' : 'دورة مفردة'}
+                    </div>
+                </div>
+                
+                <!-- حالة الدورة -->
+                <div style="
+                    background: ${progress === 100 ? 
+                        'linear-gradient(135deg, #22c55e, #16a34a)' : 
+                        'linear-gradient(135deg, #3b82f6, #2563eb)'};
+                    color: white;
+                    padding: 6px 15px;
+                    border-radius: 20px;
+                    font-size: 0.85rem;
+                    font-weight: 600;
+                ">
+                    ${progress === 100 ? 'مكتملة' : 'نشطة'}
+                </div>
+            </div>
+            
+            <!-- قسم البث المباشر -->
+            ${createLiveSection(liveStatus, sessions)}
+            
+            <!-- معلومات التقدم -->
+            <div style="
+                margin-top: 20px;
+                padding-top: 20px;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+            ">
+                <div style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 10px;
+                ">
+                    <span style="color: rgba(255, 255, 255, 0.7);">التقدم</span>
+                    <span style="
+                        color: var(--gold-primary);
+                        font-weight: bold;
+                        font-size: 1.1rem;
+                    ">${progress}%</span>
+                </div>
+                <div style="
+                    background: rgba(255, 255, 255, 0.05);
+                    height: 8px;
+                    border-radius: 4px;
+                    overflow: hidden;
+                ">
+                    <div style="
+                        width: ${progress}%;
+                        height: 100%;
+                        background: linear-gradient(90deg, #FFD700, #FFA500);
+                        transition: width 1s ease;
+                    "></div>
+                </div>
+            </div>
+            
+            <!-- زر المتابعة -->
+            <button onclick="event.stopPropagation(); window.location.href='./course-view.html?id=${courseId}'" 
+                    style="
+                        width: 100%;
+                        margin-top: 20px;
+                        background: linear-gradient(135deg, #22C55E, #10B981);
+                        color: white;
+                        border: none;
+                        padding: 12px;
+                        border-radius: 15px;
+                        font-weight: bold;
+                        cursor: pointer;
+                        transition: all 0.3s;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
+                    "
+                    onmouseover="this.style.transform='scale(1.05)'"
+                    onmouseout="this.style.transform='scale(1)'"
+            >
+                <i class="fas fa-play"></i> متابعة التعلم
+            </button>
+        </div>
+    `;
+}
+
+// دالة تحليل حالة البث المباشر
+function analyzeLiveStatus(sessions) {
+    const now = new Date();
+    let activeSession = null;
+    let nearestSession = null;
+    let upcomingCount = 0;
+    
+    sessions.forEach(session => {
+        if (session.status === 'active') {
+            activeSession = session;
+        } else if (session.status === 'scheduled') {
+            const sessionDate = new Date(`${session.date}T${session.time}`);
+            const timeDiff = sessionDate - now;
+            
+            if (timeDiff > 0) {
+                upcomingCount++;
+                if (!nearestSession || timeDiff < (new Date(`${nearestSession.date}T${nearestSession.time}`) - now)) {
+                    nearestSession = session;
+                }
+            }
+        }
+    });
+    
+    return {
+        active: activeSession !== null,
+        activeSession: activeSession,
+        upcoming: nearestSession !== null,
+        nearestSession: nearestSession,
+        upcomingCount: upcomingCount,
+        totalSessions: sessions.length
+    };
+}
+
+// دالة إنشاء قسم البث المباشر في البطاقة
+function createLiveSection(liveStatus, sessions) {
+    // لا توجد جلسات
+    if (!liveStatus.active && !liveStatus.upcoming) {
+        return `
+            <div style="
+                background: rgba(255, 255, 255, 0.03);
+                padding: 15px;
+                border-radius: 12px;
+                text-align: center;
+                color: rgba(255, 255, 255, 0.5);
+            ">
+                <i class="fas fa-video-slash" style="margin-left: 8px;"></i>
+                لا توجد جلسات مباشرة مجدولة
+            </div>
+        `;
+    }
+    
+    // جلسة نشطة الآن
+    if (liveStatus.active) {
+        return `
+            <div style="
+                background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(16, 185, 129, 0.1));
+                border: 2px solid #22c55e;
+                padding: 15px;
+                border-radius: 12px;
+                animation: pulse 2s infinite;
+            ">
+                <div style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                ">
+                    <div>
+                        <div style="
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                            margin-bottom: 5px;
+                        ">
+                            <span style="
+                                width: 10px;
+                                height: 10px;
+                                background: #22c55e;
+                                border-radius: 50%;
+                                display: inline-block;
+                                animation: blink 1s infinite;
+                            "></span>
+                            <span style="
+                                color: #22c55e;
+                                font-weight: bold;
+                            ">جلسة مباشرة الآن!</span>
+                        </div>
+                        <div style="
+                            color: white;
+                            font-size: 0.9rem;
+                        ">${liveStatus.activeSession.title}</div>
+                    </div>
+                    <button onclick="event.stopPropagation(); joinSession('${liveStatus.activeSession.id}')" 
+                            style="
+                                background: #22c55e;
+                                color: white;
+                                border: none;
+                                padding: 8px 20px;
+                                border-radius: 20px;
+                                cursor: pointer;
+                                font-weight: 600;
+                                transition: all 0.3s;
+                            "
+                            onmouseover="this.style.background='#16a34a'"
+                            onmouseout="this.style.background='#22c55e'"
+                    >
+                        <i class="fas fa-video"></i> انضم
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    // جلسة قادمة
+    if (liveStatus.upcoming) {
+        const sessionDate = new Date(`${liveStatus.nearestSession.date}T${liveStatus.nearestSession.time}`);
+        const timeDiff = sessionDate - new Date();
+        const hours = Math.floor(timeDiff / (1000 * 60 * 60));
+        const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+        
+        return `
+            <div style="
+                background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.05));
+                border: 1px solid rgba(251, 191, 36, 0.3);
+                padding: 15px;
+                border-radius: 12px;
+            ">
+                <div style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                ">
+                    <div>
+                        <div style="
+                            color: #fbbf24;
+                            font-weight: 600;
+                            margin-bottom: 5px;
+                        ">
+                            <i class="fas fa-calendar-alt"></i> الجلسة القادمة
+                        </div>
+                        <div style="
+                            color: rgba(255, 255, 255, 0.8);
+                            font-size: 0.9rem;
+                        ">${liveStatus.nearestSession.title}</div>
+                    </div>
+                    <div style="
+                        background: rgba(0, 0, 0, 0.2);
+                        padding: 8px 15px;
+                        border-radius: 10px;
+                        color: #fbbf24;
+                        font-weight: bold;
+                    ">
+                        ${hours > 0 ? `${hours}س ` : ''}${minutes}د
+                    </div>
+                </div>
+                ${liveStatus.upcomingCount > 1 ? `
+                    <div style="
+                        margin-top: 10px;
+                        padding-top: 10px;
+                        border-top: 1px solid rgba(255, 255, 255, 0.1);
+                        color: rgba(255, 255, 255, 0.6);
+                        font-size: 0.85rem;
+                        text-align: center;
+                    ">
+                        و ${liveStatus.upcomingCount - 1} جلسات أخرى قادمة
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+}
+
+// دالة الانضمام للجلسة
+async function joinSession(sessionId) {
+    try {
+        // جلب بيانات الجلسة
+        const sessionDoc = await db.collection('liveSessions').doc(sessionId).get();
+        
+        if (!sessionDoc.exists) {
+            alert('الجلسة غير متاحة');
+            return;
+        }
+        
+        const sessionData = sessionDoc.data();
+        
+        // تسجيل الحضور
+        await recordSessionAttendance(sessionId, sessionData);
+        
+        // فتح رابط الجلسة
+        if (sessionData.zoomLink) {
+            window.open(sessionData.zoomLink, '_blank');
+        } else {
+            // الانتقال لصفحة الجلسات
+            window.location.href = `./live-sessions.html?session=${sessionId}`;
+        }
+        
+    } catch (error) {
+        console.error('خطأ في الانضمام للجلسة:', error);
+        alert('حدث خطأ في الانضمام للجلسة');
+    }
+}
+
+// دالة تسجيل الحضور
+async function recordSessionAttendance(sessionId, sessionData) {
+    try {
+        // التحقق من الحضور المسبق
+        const attendeeDoc = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).get();
+        
+        if (attendeeDoc.exists) {
+            console.log('الحضور مسجل مسبقاً');
+            return;
+        }
+        
+        // حساب النقاط
+        const points = sessionData.points?.attendance || 50;
+        
+        // تسجيل الحضور
+        await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).set({
+                userId: userId,
+                userName: userData.name || 'مستخدم',
+                joinedAt: new Date().toISOString(),
+                pointsEarned: points
+            });
+        
+        // تحديث نقاط المستخدم
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(points),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(points)
+        });
+        
+        console.log(`تم منح ${points} نقطة للحضور`);
+        
+    } catch (error) {
+        console.error('خطأ في تسجيل الحضور:', error);
+    }
+}
+
+// دالة عرض حالة فارغة
+function displayEmptyCoursesState() {
+    const container = document.getElementById('activeCoursesWithLive');
+    if (container) {
+        container.innerHTML = `
+            <div style="
+                text-align: center;
+                padding: 60px;
+                background: rgba(255, 255, 255, 0.02);
+                border-radius: 20px;
+                border: 2px dashed rgba(255, 215, 0, 0.2);
+            ">
+                <i class="fas fa-graduation-cap" style="
+                    font-size: 4rem;
+                    color: rgba(255, 215, 0, 0.3);
+                    margin-bottom: 20px;
+                "></i>
+                <p style="
+                    color: rgba(255, 255, 255, 0.5);
+                    font-size: 1.1rem;
+                ">لا توجد دورات مخصصة لك حالياً</p>
+                <p style="
+                    color: rgba(255, 255, 255, 0.4);
+                    font-size: 0.9rem;
+                    margin-top: 10px;
+                ">تواصل مع الإدارة لتخصيص المحتوى المناسب لك</p>
+            </div>
+        `;
+    }
+}
+
+// دالة عرض حالة الخطأ
+function displayErrorState() {
+    const container = document.getElementById('activeCoursesWithLive');
+    if (container) {
+        container.innerHTML = `
+            <div style="
+                text-align: center;
+                padding: 40px;
+                background: rgba(239, 68, 68, 0.05);
+                border-radius: 20px;
+                border: 2px solid rgba(239, 68, 68, 0.3);
+            ">
+                <i class="fas fa-exclamation-triangle" style="
+                    font-size: 3rem;
+                    color: #ef4444;
+                    margin-bottom: 15px;
+                "></i>
+                <p style="color: #ef4444;">حدث خطأ في تحميل البيانات</p>
+                <button onclick="displayCoursesWithLiveStatus()" style="
+                    margin-top: 15px;
+                    background: #ef4444;
+                    color: white;
+                    border: none;
+                    padding: 10px 25px;
+                    border-radius: 20px;
+                    cursor: pointer;
+                ">إعادة المحاولة</button>
+            </div>
+        `;
+    }
+}
+
+// الأنيميشن للنقطة الحية
+const liveStyle = document.createElement('style');
+liveStyle.textContent = `
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+    }
+`;
+document.head.appendChild(liveStyle);
+
+        // دالة الفلترة الجديدة
+window.filterLiveCourses = async function(filter) {
+    // تحديث الأزرار
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        if (btn.dataset.filter === filter) {
+            btn.style.background = 'linear-gradient(135deg, #FFD700, #FFA500)';
+            btn.style.color = 'var(--dark-bg)';
+            btn.style.border = 'none';
+            btn.classList.add('active');
+        } else {
+            btn.style.background = 'rgba(255, 255, 255, 0.05)';
+            btn.style.color = 'white';
+            btn.style.border = '2px solid rgba(255, 255, 255, 0.2)';
+            btn.classList.remove('active');
+        }
+    });
+    
+    // تطبيق الفلترة
+    if (filter === 'all') {
+        await displayCoursesWithLiveStatus();
+    } else if (filter === 'live') {
+        // عرض الدورات التي لديها جلسات مباشرة فقط
+        const enrollments = userData.enrollments || [];
+        const allSessions = await fetchAllLiveSessions();
+        
+        const coursesWithLive = enrollments.filter(enrollment => {
+            const courseId = enrollment.courseId || enrollment.id;
+            return allSessions.some(session => session.courseId === courseId);
+        });
+        
+        if (coursesWithLive.length === 0) {
+            document.getElementById('activeCoursesWithLive').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.5);">
+                    <i class="fas fa-video-slash" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                    <p>لا توجد دورات مع جلسات مباشرة حالياً</p>
+                </div>
+            `;
+        } else {
+            // عرض الدورات المفلترة
+            const container = document.getElementById('activeCoursesWithLive');
+            const coursesHTML = await Promise.all(coursesWithLive.map(async (enrollment) => {
+                const courseId = enrollment.courseId || enrollment.id;
+                const courseSessions = allSessions.filter(session => 
+                    session.courseId === courseId
+                );
+                return createCourseCardWithLive(enrollment, courseSessions);
+            }));
+            
+            container.innerHTML = `
+                <div style="
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+                    gap: 25px;
+                ">
+                    ${coursesHTML.join('')}
+                </div>
+            `;
+        }
+    } else if (filter === 'active') {
+        // عرض الدورات النشطة فقط
+        const enrollments = userData.enrollments || [];
+        const activeCourses = enrollments.filter(e => e.progress > 0 && e.progress < 100);
+        
+        if (activeCourses.length === 0) {
+            document.getElementById('activeCoursesWithLive').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.5);">
+                    <i class="fas fa-book-open" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                    <p>لا توجد دورات نشطة حالياً</p>
+                </div>
+            `;
+        } else {
+            const allSessions = await fetchAllLiveSessions();
+            const container = document.getElementById('activeCoursesWithLive');
+            const coursesHTML = await Promise.all(activeCourses.map(async (enrollment) => {
+                const courseId = enrollment.courseId || enrollment.id;
+                const courseSessions = allSessions.filter(session => 
+                    session.courseId === courseId
+                );
+                return createCourseCardWithLive(enrollment, courseSessions);
+            }));
+            
+            container.innerHTML = `
+                <div style="
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+                    gap: 25px;
+                ">
+                    ${coursesHTML.join('')}
+                </div>
+            `;
+        }
+    }
+}
+
+// استدعاء التحديث عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    // انتظار تحميل userData
+    setTimeout(() => {
+        if (typeof userData !== 'undefined' && userData) {
+            displayCoursesWithLiveStatus();
+        }
+    }, 1000);
+});
+
+
         // تحميل نظرة عامة على التقدم - نفس الكود القديم مع تحسينات
       async function loadProgressOverview() {
     const progressContainer = document.getElementById('progressContainer');
@@ -3994,6 +4686,8 @@ async function loadCourses() {
                 `;
             }
         }
+
+        
 
         // تحميل النشاط الأخير
      async function loadRecentActivity() {
