@@ -2590,14 +2590,42 @@ function updatePointsDisplay() {
 }
 
 // دالة عرض قسم الشارات
+// عرض قسم الشارات المحسن
 function renderBadgesSection() {
+    // فلترة الشارات الخاصة بالدورة الحالية
+    const courseBadgesFromFirebase = potentialBadges.filter(badge => {
+        if (badge.type === 'content' && badge.conditions) {
+            // شارات الدورة المحددة
+            if (badge.conditions.linkType === 'specific_template' && 
+                badge.conditions.specificTemplateId) {
+                return true;
+            }
+            // شارات عامة
+            if (['any_lesson', 'any_module', 'any_template'].includes(badge.conditions.linkType)) {
+                return true;
+            }
+            // شارات المحتوى المحدد في هذه الدورة
+            if (badge.conditions.specificContentId || badge.conditions.specificModuleId) {
+                return true;
+            }
+        }
+        // شارات النقاط والإنجاز
+        return badge.type === 'points' || badge.type === 'milestone' || badge.type === 'progress';
+    });
+    
     const earnedBadges = userBadges.filter(badge => 
-        courseBadges.some(cb => cb.id === badge.id)
+        courseBadgesFromFirebase.some(cb => cb.id === badge.id) ||
+        badge.type === 'milestone' // شارات المعالم
     );
     
-    const availableBadges = courseBadges.filter(badge => 
+    const availableBadges = courseBadgesFromFirebase.filter(badge => 
         !userBadges.some(ub => ub.id === badge.id)
     );
+    
+    // حساب معدل الإنجاز
+    const totalPossibleBadges = earnedBadges.length + availableBadges.length;
+    const completionRate = totalPossibleBadges > 0 ? 
+        Math.round((earnedBadges.length / totalPossibleBadges) * 100) : 0;
     
     return `
         <div style="
@@ -2606,64 +2634,201 @@ function renderBadgesSection() {
             border-radius: 15px;
             border: 1px solid rgba(255, 215, 0, 0.2);
         ">
-            <h4 style="color: var(--gold-primary); margin: 0 0 15px 0;">
-                <i class="fas fa-medal"></i> الشارات والإنجازات
-            </h4>
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 15px;
+            ">
+                <h4 style="color: var(--gold-primary); margin: 0;">
+                    <i class="fas fa-medal"></i> الشارات والإنجازات
+                </h4>
+                <div style="
+                    background: linear-gradient(135deg, #a855f7, #9333ea);
+                    color: white;
+                    padding: 5px 15px;
+                    border-radius: 20px;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                ">
+                    ${completionRate}% مكتمل
+                </div>
+            </div>
+            
+            <!-- شريط التقدم -->
+            <div style="
+                background: rgba(255, 255, 255, 0.05);
+                height: 8px;
+                border-radius: 4px;
+                margin-bottom: 20px;
+                overflow: hidden;
+            ">
+                <div style="
+                    width: ${completionRate}%;
+                    height: 100%;
+                    background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b);
+                    transition: width 0.5s ease;
+                    position: relative;
+                ">
+                    <div style="
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+                        animation: shimmer 2s infinite;
+                    "></div>
+                </div>
+            </div>
             
             ${earnedBadges.length > 0 ? `
-                <div style="margin-bottom: 15px;">
-                    <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin-bottom: 10px;">
-                        شاراتك المكتسبة (${earnedBadges.length})
+                <div style="margin-bottom: 20px;">
+                    <div style="
+                        color: rgba(255, 255, 255, 0.7);
+                        font-size: 0.9rem;
+                        margin-bottom: 10px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <span>شاراتك المكتسبة</span>
+                        <span style="
+                            background: rgba(34, 197, 94, 0.2);
+                            color: #22c55e;
+                            padding: 2px 10px;
+                            border-radius: 10px;
+                            font-size: 0.8rem;
+                        ">${earnedBadges.length} شارة</span>
                     </div>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        ${earnedBadges.map(badge => `
+                    <div style="
+                        display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+                        gap: 10px;
+                    ">
+                        ${earnedBadges.slice(0, 8).map(badge => `
                             <div style="
                                 background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 165, 0, 0.1));
                                 border: 2px solid var(--gold-primary);
                                 border-radius: 12px;
                                 padding: 10px;
                                 cursor: pointer;
-                                transition: transform 0.3s;
+                                transition: all 0.3s;
                                 text-align: center;
+                                position: relative;
                             " 
-                            onmouseover="this.style.transform='scale(1.1)'"
-                            onmouseout="this.style.transform='scale(1)'"
-                            title="${badge.name}">
-                                <div style="font-size: 2rem;">${badge.icon}</div>
-                                <div style="font-size: 0.7rem; color: var(--gold-light); margin-top: 5px;">
-                                    ${badge.name}
-                                </div>
+                            onmouseover="this.style.transform='scale(1.1) rotate(5deg)'; this.style.zIndex='10'"
+                            onmouseout="this.style.transform='scale(1) rotate(0deg)'; this.style.zIndex='1'"
+                            title="${badge.name} - ${badge.reason || 'شارة مكتسبة'}">
+                                <div style="font-size: 1.8rem;">${badge.icon}</div>
+                                <div style="
+                                    font-size: 0.65rem;
+                                    color: var(--gold-light);
+                                    margin-top: 5px;
+                                    white-space: nowrap;
+                                    overflow: hidden;
+                                    text-overflow: ellipsis;
+                                ">${badge.name}</div>
+                                ${badge.awardedDate ? `
+                                    <div style="
+                                        position: absolute;
+                                        top: -5px;
+                                        right: -5px;
+                                        background: #22c55e;
+                                        color: white;
+                                        font-size: 0.6rem;
+                                        padding: 2px 5px;
+                                        border-radius: 10px;
+                                    ">جديد</div>
+                                ` : ''}
                             </div>
                         `).join('')}
+                        ${earnedBadges.length > 8 ? `
+                            <div style="
+                                background: rgba(255, 255, 255, 0.05);
+                                border: 1px dashed rgba(255, 255, 255, 0.3);
+                                border-radius: 12px;
+                                padding: 10px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                cursor: pointer;
+                            " onclick="showAllBadges()">
+                                <span style="color: var(--gold-primary);">+${earnedBadges.length - 8}</span>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             ` : ''}
             
             ${availableBadges.length > 0 ? `
                 <div>
-                    <div style="color: rgba(255, 255, 255, 0.5); font-size: 0.9rem; margin-bottom: 10px;">
-                        شارات متاحة (${availableBadges.length})
+                    <div style="
+                        color: rgba(255, 255, 255, 0.5);
+                        font-size: 0.9rem;
+                        margin-bottom: 10px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <span>شارات متاحة للكسب</span>
+                        <span style="
+                            background: rgba(255, 165, 0, 0.2);
+                            color: #f59e0b;
+                            padding: 2px 10px;
+                            border-radius: 10px;
+                            font-size: 0.8rem;
+                        ">${availableBadges.length} متبقية</span>
                     </div>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        ${availableBadges.map(badge => `
-                            <div style="
-                                background: rgba(255, 255, 255, 0.02);
-                                border: 1px dashed rgba(255, 255, 255, 0.2);
-                                border-radius: 12px;
-                                padding: 10px;
-                                opacity: 0.5;
-                                text-align: center;
-                                position: relative;
-                            " title="${badge.name} - ${badge.conditions?.description || 'أكمل المتطلبات للحصول عليها'}">
-                                <div style="font-size: 2rem; filter: grayscale(100%);">
-                                    ${badge.icon}
+                    <div style="
+                        display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+                        gap: 10px;
+                    ">
+                        ${availableBadges.slice(0, 6).map(badge => {
+                            let hint = '';
+                            if (badge.type === 'points') {
+                                const remaining = badge.conditions.requiredPoints - userJourneyPoints;
+                                hint = `تحتاج ${remaining} نقطة`;
+                            } else if (badge.type === 'content') {
+                                hint = 'أكمل المحتوى المطلوب';
+                            }
+                            
+                            return `
+                                <div style="
+                                    background: rgba(255, 255, 255, 0.02);
+                                    border: 1px dashed rgba(255, 255, 255, 0.2);
+                                    border-radius: 12px;
+                                    padding: 10px;
+                                    opacity: 0.5;
+                                    text-align: center;
+                                    position: relative;
+                                    cursor: help;
+                                " title="${badge.name} - ${badge.conditions?.description || hint}">
+                                    <div style="
+                                        font-size: 1.8rem;
+                                        filter: grayscale(100%);
+                                    ">${badge.icon}</div>
+                                    <div style="
+                                        font-size: 0.65rem;
+                                        color: rgba(255, 255, 255, 0.4);
+                                        margin-top: 5px;
+                                    ">???</div>
                                 </div>
-                                <div style="font-size: 0.7rem; color: rgba(255, 255, 255, 0.4); margin-top: 5px;">
-                                    ???
-                                </div>
-                            </div>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </div>
+                </div>
+            ` : ''}
+            
+            ${earnedBadges.length === 0 && availableBadges.length === 0 ? `
+                <div style="
+                    text-align: center;
+                    padding: 30px;
+                    color: rgba(255, 255, 255, 0.5);
+                ">
+                    <i class="fas fa-medal" style="font-size: 3rem; margin-bottom: 10px;"></i>
+                    <p>لا توجد شارات متاحة حالياً</p>
                 </div>
             ` : ''}
         </div>
@@ -4783,6 +4948,74 @@ async function refreshAllUIElements() {
         console.error('❌ خطأ في التحديث:', error);
     }
 }
+
+       // عرض نافذة كل الشارات
+function showAllBadges() {
+    const earnedBadges = userBadges;
+    
+    let badgesHTML = `
+        <div style="
+            max-height: 70vh;
+            overflow-y: auto;
+            padding: 20px;
+        ">
+            <h3 style="
+                color: var(--gold-primary);
+                margin-bottom: 20px;
+                text-align: center;
+            ">
+                جميع شاراتك المكتسبة (${earnedBadges.length})
+            </h3>
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+            ">
+                ${earnedBadges.map(badge => `
+                    <div style="
+                        background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 165, 0, 0.05));
+                        border: 2px solid var(--gold-primary);
+                        border-radius: 15px;
+                        padding: 15px;
+                        text-align: center;
+                    ">
+                        <div style="font-size: 3rem;">${badge.icon}</div>
+                        <div style="
+                            font-weight: bold;
+                            color: var(--gold-primary);
+                            margin: 10px 0 5px;
+                        ">${badge.name}</div>
+                        <div style="
+                            font-size: 0.85rem;
+                            color: rgba(255, 255, 255, 0.7);
+                        ">${badge.reason || ''}</div>
+                        <div style="
+                            font-size: 0.75rem;
+                            color: rgba(255, 255, 255, 0.5);
+                            margin-top: 10px;
+                        ">
+                            ${new Date(badge.awardedDate).toLocaleDateString('ar-SA')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+    
+    Swal.fire({
+        html: badgesHTML,
+        width: '800px',
+        showConfirmButton: false,
+        showCloseButton: true,
+        background: 'var(--dark-lighter)',
+        customClass: {
+            popup: 'badges-popup'
+        }
+    });
+}
+
+// إضافة للـ window
+window.showAllBadges = showAllBadges;
    </script>
 </body>
 </html>
