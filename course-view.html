@@ -4130,6 +4130,130 @@ async function checkLessonBadges(lesson, completedCount) {
         return earnedBadges;
     }
 }
+
+       // فحص شارات الحضور المباشر
+async function checkAttendanceBadges(sessionId) {
+    const earnedBadges = [];
+    const currentDate = new Date().toISOString();
+    
+    try {
+        // جلب سجل حضور المستخدم
+        const userDoc = await db.collection('users').doc(userId).get();
+        const attendanceData = userDoc.data().attendance?.[courseId] || {};
+        
+        // عد الجلسات المحضورة
+        const attendedSessions = Object.keys(attendanceData).filter(id => 
+            attendanceData[id].status === 'completed'
+        );
+        const attendanceCount = attendedSessions.length;
+        
+        // جلب شارات الحضور
+        const badgesSnapshot = await db.collection('badges')
+            .where('type', '==', 'attendance')
+            .get();
+        
+        badgesSnapshot.forEach(doc => {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // تخطي إذا المستخدم حاصل عليها
+            if (userBadges.some(ub => ub.id === badge.id)) return;
+            
+            let shouldAward = false;
+            let reason = '';
+            
+            // فحص شروط الحضور
+            if (badge.conditions) {
+                // شارة أول حضور
+                if (badge.conditions.firstAttendance && attendanceCount === 1) {
+                    shouldAward = true;
+                    reason = 'حضور أول جلسة مباشرة';
+                }
+                // شارة عدد جلسات
+                else if (badge.conditions.sessionCount && 
+                         attendanceCount >= badge.conditions.sessionCount) {
+                    shouldAward = true;
+                    reason = `حضور ${badge.conditions.sessionCount} جلسات`;
+                }
+                // شارة الانتظام (جلسات متتالية)
+                else if (badge.conditions.consecutive) {
+                    const streak = calculateAttendanceStreak(attendedSessions);
+                    if (streak >= badge.conditions.consecutive) {
+                        shouldAward = true;
+                        reason = `حضور ${badge.conditions.consecutive} جلسات متتالية`;
+                    }
+                }
+            }
+            
+            if (shouldAward) {
+                earnedBadges.push({
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon,
+                    awardedDate: currentDate,
+                    type: 'attendance',
+                    reason: reason
+                });
+            }
+        });
+        
+        // حفظ الشارات الجديدة
+        if (earnedBadges.length > 0) {
+            const allBadges = [...userBadges, ...earnedBadges];
+            await db.collection('users').doc(userId).update({
+                badges: allBadges
+            });
+            
+            userBadges = allBadges;
+            showAttendanceBadgeNotification(earnedBadges);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في فحص شارات الحضور:', error);
+    }
+}
+
+// حساب سلسلة الحضور المتتالي
+function calculateAttendanceStreak(sessions) {
+    // منطق بسيط للحساب
+    return sessions.length; // مؤقتاً
+}
+
+// إشعار شارات الحضور
+function showAttendanceBadgeNotification(badges) {
+    let html = `
+        <div style="text-align: center;">
+            <h2 style="color: #ef4444; margin-bottom: 20px;">
+                🎯 شارات الحضور المباشر!
+            </h2>
+            <div style="display: grid; gap: 15px;">
+                ${badges.map(badge => `
+                    <div style="
+                        background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(220, 38, 38, 0.05));
+                        border: 2px solid #ef4444;
+                        padding: 20px;
+                        border-radius: 15px;
+                    ">
+                        <div style="font-size: 3rem;">${badge.icon}</div>
+                        <div style="color: white; font-weight: bold; margin: 10px 0;">
+                            ${badge.name}
+                        </div>
+                        <div style="color: #fca5a5; font-size: 0.9rem;">
+                            ${badge.reason}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+    
+    Swal.fire({
+        html: html,
+        showConfirmButton: true,
+        confirmButtonText: 'رائع!',
+        confirmButtonColor: '#ef4444',
+        background: 'var(--dark-lighter)'
+    });
+}
 // عرض إشعار الإكمال المخصص
 // عرض إشعار الإكمال المخصص
 function showCompletionNotification(pointsDetail, earnedBadges, lessonTitle) {
@@ -5533,33 +5657,135 @@ async function joinLiveSession(sessionId) {
 }
 
 // تسجيل الحضور
+// تسجيل الحضور مع النقاط
 async function recordAttendance(sessionId) {
     try {
+        // جلب بيانات الجلسة
+        const sessionDoc = await db.collection('liveSessions').doc(sessionId).get();
+        const sessionData = sessionDoc.data();
+        
+        // التحقق من الحضور المسبق
+        const attendeeDoc = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).get();
+        
+        if (attendeeDoc.exists) {
+            Swal.fire('تنبيه', 'تم تسجيل حضورك مسبقاً', 'info');
+            return;
+        }
+        
         const attendanceData = {
             userId: userId,
             userName: userData.personalInfo?.name || 'مستخدم',
             joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
             sessionId: sessionId,
-            courseId: courseId
+            courseId: courseId,
+            pointsEarned: 0
         };
         
         // حفظ في subcollection للجلسة
         await db.collection('liveSessions').doc(sessionId)
             .collection('attendees').doc(userId).set(attendanceData);
         
-        // تحديث سجل المستخدم
+        // حساب النقاط
+        let totalPoints = sessionData.points?.attendance || 50;
+        
+        // مكافأة المبكرين (أول 10)
+        const attendeesCount = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').get();
+        
+        if (attendeesCount.size <= 10) {
+            totalPoints += sessionData.points?.earlyBird || 20;
+        }
+        
+        // منح النقاط
         await db.collection('users').doc(userId).update({
             [`attendance.${courseId}.${sessionId}`]: {
                 joinedAt: new Date().toISOString(),
-                status: 'active'
-            }
+                status: 'active',
+                pointsEarned: totalPoints
+            },
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'journeyPoints.lifetime': firebase.firestore.FieldValue.increment(totalPoints),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'walletPoints.lifetime': firebase.firestore.FieldValue.increment(totalPoints)
         });
         
-        console.log('✅ تم تسجيل الحضور');
+        // تحديث المتغيرات المحلية
+        userJourneyPoints += totalPoints;
+        userWalletPoints += totalPoints;
+        
+        // إضافة للسجل
+        const pointsHistory = {
+            amount: totalPoints,
+            timestamp: new Date().toISOString(),
+            type: 'attendance',
+            reason: `حضور جلسة: ${sessionData.title}`,
+            description: `حصلت على ${totalPoints} نقطة للحضور المباشر`
+        };
+        
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
+        });
+        
+        console.log('✅ تم تسجيل الحضور ومنح النقاط');
+        
+        // عرض النقاط المكتسبة
+        showAttendancePoints(totalPoints);
+        
+        // فحص شارات الحضور
+        setTimeout(() => {
+            checkAttendanceBadges(sessionId);
+        }, 2000);
         
     } catch (error) {
         console.error('خطأ في تسجيل الحضور:', error);
     }
+}
+
+// عرض النقاط المكتسبة من الحضور
+function showAttendancePoints(points) {
+    // نقاط طائرة خاصة
+    const element = document.createElement('div');
+    element.style.cssText = `
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 4rem;
+        font-weight: bold;
+        color: #ef4444;
+        text-shadow: 0 0 20px rgba(239, 68, 68, 0.8);
+        z-index: 100000;
+        pointer-events: none;
+        animation: attendancePointsFly 3s ease-out forwards;
+    `;
+    element.textContent = `+${points} 🔴`;
+    
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes attendancePointsFly {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 0;
+            }
+            50% {
+                transform: translate(-50%, -50%) scale(1.5);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -300px) scale(1);
+                opacity: 0;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(element);
+    
+    setTimeout(() => {
+        element.remove();
+    }, 3000);
 }
 
 // عرض تفاصيل الجلسة
