@@ -681,10 +681,171 @@
         }
         
         // Check for active session
-        async function checkActiveSession() {
-            // Implementation for checking active sessions
-            console.log('Checking for active sessions...');
+async function checkActiveSession() {
+    try {
+        const now = new Date();
+        const snapshot = await db.collection('liveSessions')
+            .where('status', '==', 'live')
+            .get();
+        
+        const activeArea = document.getElementById('activeSessionArea');
+        
+        if (snapshot.empty) {
+            activeArea.innerHTML = '';
+            return;
         }
+        
+        // Display active session
+        snapshot.forEach(doc => {
+            const session = { id: doc.id, ...doc.data() };
+            displayActiveSession(session);
+        });
+        
+    } catch (error) {
+        console.error('Error checking active session:', error);
+    }
+}
+
+// Display active session with interaction
+function displayActiveSession(session) {
+    const activeArea = document.getElementById('activeSessionArea');
+    
+    activeArea.innerHTML = `
+        <div class="active-session">
+            <h2 style="color: #22c55e; margin-bottom: 1rem;">
+                🔴 جلسة مباشرة الآن!
+            </h2>
+            <h3 style="color: white; margin-bottom: 2rem;">${session.title}</h3>
+            
+            <div class="countdown" id="sessionTimer">00:00:00</div>
+            
+            <div class="interaction-buttons">
+                <button class="interaction-btn" onclick="sendInteraction('👍', 5, '${session.id}')">
+                    👍
+                </button>
+                <button class="interaction-btn" onclick="sendInteraction('❓', 10, '${session.id}')">
+                    ❓
+                </button>
+                <button class="interaction-btn" onclick="sendInteraction('💡', 15, '${session.id}')">
+                    💡
+                </button>
+                <button class="interaction-btn" onclick="sendInteraction('👏', 3, '${session.id}')">
+                    👏
+                </button>
+            </div>
+            
+            <div class="points-earned">
+                نقاطك في هذه الجلسة: <span id="sessionPoints">0</span>
+            </div>
+            
+            <button class="btn btn-primary" onclick="joinSession('${session.id}')">
+                <i class="fas fa-video"></i> فتح الزوم
+            </button>
+        </div>
+    `;
+    
+    // Start session timer
+    startSessionTimer(session.startedAt);
+}
+
+// Send interaction
+async function sendInteraction(emoji, points, sessionId) {
+    if (!userId) return;
+    
+    try {
+        // Disable button temporarily
+        event.target.disabled = true;
+        event.target.classList.add('clicked');
+        
+        // Record interaction
+        await db.collection('liveSessions').doc(sessionId)
+            .collection('interactions').add({
+                userId: userId,
+                emoji: emoji,
+                points: points,
+                timestamp: new Date().toISOString()
+            });
+        
+        // Update user points
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(points),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(points)
+        });
+        
+        // Update session points display
+        const sessionPointsEl = document.getElementById('sessionPoints');
+        const currentPoints = parseInt(sessionPointsEl.textContent) || 0;
+        sessionPointsEl.textContent = currentPoints + points;
+        
+        // Show points animation
+        showPointsAnimation(points);
+        
+        // Re-enable button after 5 seconds
+        setTimeout(() => {
+            event.target.disabled = false;
+            event.target.classList.remove('clicked');
+        }, 5000);
+        
+    } catch (error) {
+        console.error('Error sending interaction:', error);
+    }
+}
+
+// Show points animation
+function showPointsAnimation(points) {
+    const el = document.createElement('div');
+    el.style.cssText = `
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 3rem;
+        font-weight: bold;
+        color: #fbbf24;
+        z-index: 9999;
+        pointer-events: none;
+        animation: flyUp 2s ease-out forwards;
+    `;
+    el.textContent = `+${points}`;
+    
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes flyUp {
+            0% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -200px) scale(1.5);
+                opacity: 0;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(el);
+    
+    setTimeout(() => el.remove(), 2000);
+}
+
+// Start session timer
+function startSessionTimer(startTime) {
+    if (!startTime) return;
+    
+    const timerEl = document.getElementById('sessionTimer');
+    
+    setInterval(() => {
+        const start = new Date(startTime);
+        const now = new Date();
+        const diff = now - start;
+        
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        
+        timerEl.textContent = 
+            `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }, 1000);
+}
         
         // Join session
         async function joinSession(sessionId) {
@@ -706,22 +867,182 @@
         }
         
         // Record attendance
-        async function recordAttendance(sessionId) {
-            if (!userId) return;
-            
-            try {
-                await db.collection('liveSessions').doc(sessionId)
-                    .collection('attendees').doc(userId).set({
-                        userId: userId,
-                        joinedAt: new Date().toISOString(),
-                        userName: currentUser?.personalInfo?.name || 'مستخدم'
-                    });
-                
-                Swal.fire('تم!', 'تم تسجيل حضورك', 'success');
-            } catch (error) {
-                console.error('Error recording attendance:', error);
-            }
+       // Record attendance with points
+async function recordAttendance(sessionId) {
+    if (!userId) {
+        Swal.fire('تنبيه', 'يجب تسجيل الدخول أولاً', 'warning');
+        return;
+    }
+    
+    try {
+        // Get session data
+        const sessionDoc = await db.collection('liveSessions').doc(sessionId).get();
+        const sessionData = sessionDoc.data();
+        
+        // Check if already attended
+        const attendeeDoc = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).get();
+        
+        if (attendeeDoc.exists) {
+            Swal.fire('تنبيه', 'تم تسجيل حضورك مسبقاً', 'info');
+            return;
         }
+        
+        // Calculate points
+        let totalPoints = sessionData.points?.attendance || 50;
+        
+        // Check if early bird (first 10)
+        const attendeesSnapshot = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').get();
+        
+        if (attendeesSnapshot.size < 10) {
+            totalPoints += sessionData.points?.earlyBird || 20;
+        }
+        
+        // Record attendance
+        await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).set({
+                userId: userId,
+                userName: currentUser?.personalInfo?.name || 'مستخدم',
+                joinedAt: new Date().toISOString(),
+                pointsEarned: totalPoints,
+                sessionId: sessionId,
+                courseId: sessionData.courseId
+            });
+        
+        // Update user points
+        const userRef = db.collection('users').doc(userId);
+        await userRef.update({
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            [`attendance.${sessionData.courseId}.${sessionId}`]: {
+                joinedAt: new Date().toISOString(),
+                status: 'active',
+                pointsEarned: totalPoints
+            }
+        });
+        
+        // Add to points history
+        const pointsHistory = {
+            amount: totalPoints,
+            timestamp: new Date().toISOString(),
+            type: 'attendance',
+            reason: `حضور جلسة: ${sessionData.title}`,
+            description: `حصلت على ${totalPoints} نقطة للحضور المباشر`
+        };
+        
+        await userRef.update({
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
+        });
+        
+        // Show success with points
+        Swal.fire({
+            icon: 'success',
+            title: 'تم تسجيل حضورك!',
+            html: `
+                <div style="text-align: center;">
+                    <div style="font-size: 3rem; margin: 20px 0;">🎉</div>
+                    <p style="font-size: 1.5rem; color: #fbbf24;">
+                        حصلت على <strong>${totalPoints}</strong> نقطة!
+                    </p>
+                    ${attendeesSnapshot.size < 10 ? 
+                        '<p style="color: #a855f7;">🏃 مكافأة المبكرين!</p>' : ''}
+                </div>
+            `,
+            confirmButtonColor: '#22c55e'
+        });
+        
+        // Check for attendance badges
+        checkAttendanceBadges(sessionData.courseId);
+        
+    } catch (error) {
+        console.error('Error recording attendance:', error);
+        Swal.fire('خطأ', 'فشل تسجيل الحضور', 'error');
+    }
+}
+
+// Check attendance badges
+async function checkAttendanceBadges(courseId) {
+    if (!userId) return;
+    
+    try {
+        // Get user attendance count for this course
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        const courseAttendance = userData.attendance?.[courseId] || {};
+        const attendanceCount = Object.keys(courseAttendance).length;
+        
+        // Get attendance badges
+        const badgesSnapshot = await db.collection('badges')
+            .where('type', '==', 'attendance')
+            .get();
+        
+        const newBadges = [];
+        const currentBadges = userData.badges || [];
+        
+        badgesSnapshot.forEach(doc => {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // Skip if already has this badge
+            if (currentBadges.some(b => b.id === badge.id)) return;
+            
+            // Check conditions
+            if (badge.conditions?.firstAttendance && attendanceCount === 1) {
+                newBadges.push({
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon,
+                    awardedDate: new Date().toISOString(),
+                    type: 'attendance',
+                    reason: 'حضور أول جلسة مباشرة'
+                });
+            } else if (badge.conditions?.sessionCount && 
+                      attendanceCount >= badge.conditions.sessionCount) {
+                newBadges.push({
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon,
+                    awardedDate: new Date().toISOString(),
+                    type: 'attendance',
+                    reason: `حضور ${badge.conditions.sessionCount} جلسات`
+                });
+            }
+        });
+        
+        // Award new badges
+        if (newBadges.length > 0) {
+            await db.collection('users').doc(userId).update({
+                badges: [...currentBadges, ...newBadges]
+            });
+            
+            // Show badge notification
+            showBadgeNotification(newBadges);
+        }
+        
+    } catch (error) {
+        console.error('Error checking attendance badges:', error);
+    }
+}
+
+// Show badge notification
+function showBadgeNotification(badges) {
+    const badgesHTML = badges.map(badge => `
+        <div style="display: inline-block; margin: 10px; text-align: center;">
+            <div style="font-size: 3rem;">${badge.icon}</div>
+            <div style="font-weight: bold; margin-top: 10px;">${badge.name}</div>
+            <div style="font-size: 0.9rem; color: #999;">${badge.reason}</div>
+        </div>
+    `).join('');
+    
+    Swal.fire({
+        title: '🏆 شارات جديدة!',
+        html: badgesHTML,
+        icon: 'success',
+        confirmButtonText: 'رائع!',
+        confirmButtonColor: '#10b981'
+    });
+}
         
         // Admin functions
         async function startSession(sessionId) {
