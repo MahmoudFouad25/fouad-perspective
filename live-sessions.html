@@ -1276,31 +1276,187 @@ async function recordAttendance(sessionId) {
             'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
         });
         
-        // عرض رسالة النجاح
+        // فحص الشارات - هنا المشكلة كانت
+        const earnedBadges = await checkAndAwardAttendanceBadges(sessionId, sessionData);
+        
+        // عرض رسالة النجاح مع الشارات
+        let messageHTML = `
+            <div style="text-align: center;">
+                <div style="font-size: 3rem; margin: 20px 0;">🎉</div>
+                <p style="font-size: 1.5rem; color: #fbbf24;">
+                    حصلت على <strong>${totalPoints}</strong> نقطة!
+                </p>
+                ${attendeesSnapshot.size < 10 ? 
+                    '<p style="color: #a855f7;">🏃 مكافأة المبكرين!</p>' : ''}
+        `;
+        
+        if (earnedBadges && earnedBadges.length > 0) {
+            messageHTML += `
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2);">
+                    <h3 style="color: #a855f7; margin-bottom: 15px;">🏆 شارات جديدة!</h3>
+                    <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+            `;
+            
+            earnedBadges.forEach(badge => {
+                messageHTML += `
+                    <div style="text-align: center;">
+                        <div style="font-size: 2.5rem;">${badge.icon}</div>
+                        <div style="font-weight: bold; margin-top: 5px;">${badge.name}</div>
+                        ${badge.points > 0 ? `<div style="color: #fbbf24; font-size: 0.9rem;">+${badge.points} نقطة</div>` : ''}
+                    </div>
+                `;
+            });
+            
+            messageHTML += '</div></div>';
+        }
+        
+        messageHTML += '</div>';
+        
         Swal.fire({
             icon: 'success',
             title: 'تم تسجيل حضورك!',
-            html: `
-                <div style="text-align: center;">
-                    <div style="font-size: 3rem; margin: 20px 0;">🎉</div>
-                    <p style="font-size: 1.5rem; color: #fbbf24;">
-                        حصلت على <strong>${totalPoints}</strong> نقطة!
-                    </p>
-                    ${attendeesSnapshot.size < 10 ? 
-                        '<p style="color: #a855f7;">🏃 مكافأة المبكرين!</p>' : ''}
-                </div>
-            `,
+            html: messageHTML,
             confirmButtonColor: '#22c55e'
         });
-        
-        // فحص الشارات
-        checkAttendanceBadges(sessionData.courseId);
         
     } catch (error) {
         console.error('خطأ في تسجيل الحضور:', error);
         Swal.fire('خطأ', 'فشل تسجيل الحضور', 'error');
     }
 }
+
+        async function checkAndAwardAttendanceBadges(sessionId, sessionData) {
+    if (!userId) return [];
+    
+    try {
+        // جلب بيانات المستخدم
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        const currentBadges = userData.badges || [];
+        
+        // جلب سجل الحضور الكامل للمستخدم
+        const attendanceHistory = [];
+        const sessionsSnapshot = await db.collection('liveSessions')
+            .where('courseId', '==', sessionData.courseId)
+            .get();
+        
+        for (let doc of sessionsSnapshot.docs) {
+            const attendeeDoc = await doc.ref.collection('attendees').doc(userId).get();
+            if (attendeeDoc.exists) {
+                attendanceHistory.push({
+                    sessionId: doc.id,
+                    data: attendeeDoc.data()
+                });
+            }
+        }
+        
+        const attendanceCount = attendanceHistory.length;
+        
+        // جلب الشارات النشطة
+        const badgesSnapshot = await db.collection('badges')
+            .where('type', '==', 'live_attendance')
+            .where('isActive', '==', true)
+            .get();
+        
+        const newBadges = [];
+        let totalBadgePoints = 0;
+        
+        for (let doc of badgesSnapshot.docs) {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // تخطي إذا كان المستخدم يملك الشارة
+            if (currentBadges.some(b => b.id === badge.id)) continue;
+            
+            let shouldAward = false;
+            let reason = '';
+            
+            // فحص الشروط
+            if (badge.subType === 'attendance_any' && attendanceCount >= 1) {
+                shouldAward = true;
+                reason = 'حضور جلسة مباشرة';
+            } else if (badge.subType === 'attendance_first' && attendanceCount === 1) {
+                shouldAward = true;
+                reason = 'أول حضور في المنصة';
+            } else if (badge.subType === 'attendance_count' && 
+                      attendanceCount >= (badge.conditions?.sessionCount || 5)) {
+                shouldAward = true;
+                reason = `حضور ${badge.conditions.sessionCount} جلسات`;
+            } else if (badge.subType === 'early_bird') {
+                // فحص الترتيب
+                const attendeesSnapshot = await db.collection('liveSessions').doc(sessionId)
+                    .collection('attendees').orderBy('joinedAt').get();
+                
+                let userOrder = 0;
+                let index = 1;
+                attendeesSnapshot.forEach(doc => {
+                    if (doc.id === userId) userOrder = index;
+                    index++;
+                });
+                
+                if (userOrder > 0 && userOrder <= (badge.conditions?.earlyBird || 10)) {
+                    shouldAward = true;
+                    reason = `من أوائل ${badge.conditions.earlyBird} حاضرين`;
+                }
+            }
+            
+            if (shouldAward) {
+                const badgePoints = badge.points || 0;
+                totalBadgePoints += badgePoints;
+                
+                newBadges.push({
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon,
+                    awardedDate: new Date().toISOString(),
+                    type: 'live_attendance',
+                    reason: reason,
+                    points: badgePoints
+                });
+                
+                // تحديث عداد المنح
+                await db.collection('badges').doc(doc.id).update({
+                    timesAwarded: firebase.firestore.FieldValue.increment(1)
+                });
+            }
+        }
+        
+        if (newBadges.length > 0) {
+            // إضافة الشارات للمستخدم
+            await db.collection('users').doc(userId).update({
+                badges: firebase.firestore.FieldValue.arrayUnion(...newBadges)
+            });
+            
+            // إضافة النقاط الإضافية من الشارات
+            if (totalBadgePoints > 0) {
+                await db.collection('users').doc(userId).update({
+                    'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalBadgePoints),
+                    'walletPoints.balance': firebase.firestore.FieldValue.increment(totalBadgePoints)
+                });
+                
+                // إضافة للسجل
+                const badgePointsHistory = {
+                    amount: totalBadgePoints,
+                    timestamp: new Date().toISOString(),
+                    type: 'badge_reward',
+                    reason: `نقاط الشارات الجديدة`,
+                    description: `حصلت على ${totalBadgePoints} نقطة من ${newBadges.length} شارة جديدة`
+                };
+                
+                await db.collection('users').doc(userId).update({
+                    'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(badgePointsHistory),
+                    'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(badgePointsHistory)
+                });
+            }
+        }
+        
+        return newBadges;
+        
+    } catch (error) {
+        console.error('خطأ في فحص الشارات:', error);
+        return [];
+    }
+}
+        
 
 // Check attendance badges
 async function checkAttendanceBadges(sessionData) {
@@ -1445,7 +1601,7 @@ function showBadgeNotification(badges) {
 
         
         // Admin functions
-       async function startSession(sessionId) {
+      async function startSession(sessionId) {
     try {
         await db.collection('liveSessions').doc(sessionId).update({
             status: 'active',
@@ -1454,6 +1610,7 @@ function showBadgeNotification(badges) {
         
         Swal.fire('تم!', 'تم بدء الجلسة', 'success');
         loadSessions();
+        checkLiveSessions(); // تحديث الحالة فوراً
     } catch (error) {
         console.error('Error starting session:', error);
     }
