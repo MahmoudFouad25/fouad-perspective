@@ -469,6 +469,26 @@ body {
         opacity: 1;
     }
 }
+
+    /* رسائل النجاح */
+.success-message {
+    color: rgba(150, 255, 150, 0.9);
+    font-size: 14px;
+    margin-top: 10px;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.success-message.show {
+    opacity: 1;
+}
+
+/* تحسين الأمان - إخفاء كلمة المرور */
+.soul-input[type="password"]::-ms-reveal,
+.soul-input[type="password"]::-webkit-textfield-decoration-container {
+    display: none;
+}
 </style>
     
 </head>
@@ -554,10 +574,11 @@ body {
 </div>
 
     
-    <!-- Firebase Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <!-- Firebase Scripts -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script src="js/firebase-config.js"></script>
 
     <div class="portal-transition" id="portalTransition"></div>
     <script>
@@ -708,32 +729,112 @@ function createFallingStars(groupId) {
 }
 
 // معالج تسجيل الدخول
-function handleLogin(event) {
+// معالج تسجيل الدخول الحقيقي مع Firebase
+async function handleLogin(event) {
+    if (!checkLoginAttempts()) {
+    button.innerHTML = originalText;
+    button.disabled = false;
+    return;
+}
+
     event.preventDefault();
     
     const button = event.target.querySelector('.enter-button');
     const originalText = button.innerHTML;
-    const email = document.getElementById('email').value;
+    const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
     
-    // إضافة تأثير الموجة
+    // تأثير الموجة
     createRipple(button);
     
     // تأثير التحميل
     button.innerHTML = '<span class="loading-text">جاري فتح البوابة...</span>';
     button.disabled = true;
     
-    // محاكاة تسجيل الدخول
-    setTimeout(() => {
-        if (email && password) {
-            // نجاح - تأثير الانتقال
-            startPortalTransition();
-        } else {
-            showError('الطريق مغلق... تأكد من مفتاحك');
-            button.innerHTML = originalText;
-            button.disabled = false;
+    try {
+        // البحث عن المستخدم في قاعدة البيانات
+        const usersQuery = await db.collection('users')
+            .where('personalInfo.email', '==', email)
+            .limit(1)
+            .get();
+        
+        if (usersQuery.empty) {
+            throw new Error('لم نتعرف على روحك... تأكد من هويتك');
         }
-    }, 2000);
+        
+        const userDoc = usersQuery.docs[0];
+        const userData = userDoc.data();
+        const userId = userDoc.id;
+        
+        // التحقق من حالة الحساب
+        if (userData.accountStatus) {
+            if (userData.accountStatus.status === 'inactive' || 
+                userData.accountStatus.suspended === true) {
+                throw new Error('روحك محجوبة عن الدخول... تواصل مع الحكماء');
+            }
+        }
+        
+        // محاولة تسجيل الدخول
+        let authSuccess = false;
+        
+        try {
+            // محاولة عبر Firebase Auth
+            await auth.signInWithEmailAndPassword(email, password);
+            authSuccess = true;
+            
+        } catch (authError) {
+            // التحقق من كلمة المرور المحفوظة
+            if (userData.auth && userData.auth.tempPassword) {
+                const savedPassword = atob(userData.auth.tempPassword);
+                if (password === savedPassword) {
+                    authSuccess = true;
+                    // محاولة إنشاء/تحديث حساب Auth
+                    try {
+                        await auth.createUserWithEmailAndPassword(email, password);
+                    } catch (e) {
+                        // لا بأس إذا كان الحساب موجود
+                    }
+                }
+            }
+            
+            if (!authSuccess) {
+                throw new Error('الطريق مغلق... تأكد من مفتاحك');
+            }
+        }
+        
+        if (authSuccess) {
+            // تحديث آخر دخول
+            await db.collection('users').doc(userId).update({
+                'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+                'auth.loginCount': firebase.firestore.FieldValue.increment(1)
+            });
+            
+            // حفظ البيانات الضرورية فقط
+            sessionStorage.setItem('uid', userId);
+            sessionStorage.setItem('uname', userData.personalInfo?.name || 'روح باحثة');
+            
+            // التحقق من نوع المستخدم
+            const isAdmin = email === 'admin@fouad-academy.com' || 
+                           userData.auth?.role === 'admin';
+            
+            // تأثير الانتقال
+            startPortalTransition();
+            
+            setTimeout(() => {
+                if (isAdmin) {
+                    window.location.href = './admin/dashboard.html';
+                } else {
+                    window.location.href = './dashboard.html';
+                }
+            }, 1500);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في الدخول:', error);
+        showError(error.message || 'حدث خطأ في فتح البوابة');
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }
 }
 
 // تأثير الموجة عند الضغط
@@ -794,9 +895,39 @@ function showError(message) {
 }
 
 // نسيت طريقك
-function forgotPath(event) {
+// استعادة كلمة المرور
+async function forgotPath(event) {
     event.preventDefault();
-    showError('سيصلك دليل الطريق قريباً...');
+    
+    const email = document.getElementById('email').value.trim();
+    
+    if (!email) {
+        showError('اكتب بريدك أولاً ليصلك دليل الطريق');
+        document.getElementById('email').focus();
+        return;
+    }
+    
+    try {
+        // التحقق من وجود المستخدم
+        const usersQuery = await db.collection('users')
+            .where('personalInfo.email', '==', email)
+            .limit(1)
+            .get();
+        
+        if (usersQuery.empty) {
+            showError('لم نجد روحك في سجلاتنا');
+            return;
+        }
+        
+        // إرسال رابط الاستعادة
+        await auth.sendPasswordResetEmail(email);
+        
+        showSuccess('تم إرسال دليل الطريق إلى بريدك');
+        
+    } catch (error) {
+        console.error('خطأ في الاستعادة:', error);
+        showError('تعذر إرسال دليل الطريق... حاول لاحقاً');
+    }
 }
 
 // روح جديدة
@@ -805,6 +936,135 @@ function newSoul(event) {
     showError('رحلة جديدة تبدأ قريباً...');
 }
 
+// إظهار رسالة نجاح
+function showSuccess(message) {
+    // إنشاء عنصر إذا لم يكن موجود
+    let successEl = document.getElementById('successMessage');
+    if (!successEl) {
+        successEl = document.createElement('div');
+        successEl.id = 'successMessage';
+        successEl.className = 'success-message';
+        document.getElementById('errorMessage').parentNode.insertBefore(
+            successEl, 
+            document.getElementById('errorMessage')
+        );
+    }
+    
+    successEl.textContent = message;
+    successEl.classList.add('show');
+    
+    setTimeout(() => {
+        successEl.classList.remove('show');
+    }, 5000);
+}
+
+// صوت النجاح
+function playSuccessSound() {
+    if (!isAudioEnabled) return;
+    
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // نغمة صاعدة مريحة
+    oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4
+    oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.2); // A5
+    
+    gainNode.gain.setValueAtTime(0.05, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.5);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.5);
+}
+
+// صوت الخطأ
+function playErrorSound() {
+    if (!isAudioEnabled) return;
+    
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // نغمة هابطة
+    oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(220, audioContext.currentTime + 0.2);
+    
+    gainNode.gain.setValueAtTime(0.03, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+}
+
+// تحديث showError و showSuccess لتشغيل الأصوات
+const originalShowError = showError;
+showError = function(message) {
+    originalShowError(message);
+    playErrorSound();
+};
+
+const originalShowSuccess = showSuccess;
+showSuccess = function(message) {
+    originalShowSuccess(message);
+    playSuccessSound();
+};
+        
+// حماية من محاولات الاختراق
+let loginAttempts = 0;
+const maxAttempts = 5;
+
+// تحديث handleLogin بإضافة حماية من المحاولات المتكررة
+function checkLoginAttempts() {
+    loginAttempts++;
+    if (loginAttempts >= maxAttempts) {
+        const button = document.querySelector('.enter-button');
+        button.disabled = true;
+        showError('تم إغلاق البوابة مؤقتاً... انتظر قليلاً');
+        
+        setTimeout(() => {
+            loginAttempts = 0;
+            button.disabled = false;
+            showSuccess('البوابة مفتوحة مجدداً');
+        }, 30000); // 30 ثانية
+        
+        return false;
+    }
+    return true;
+}
+
+// حماية من فحص الكود
+(function() {
+    // تعطيل النقر الأيمن
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    
+    // تعطيل F12 وأدوات المطور
+    document.addEventListener('keydown', e => {
+        if (e.key === 'F12' || 
+            (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+            (e.ctrlKey && e.shiftKey && e.key === 'J') ||
+            (e.ctrlKey && e.key === 'U')) {
+            e.preventDefault();
+            showError('البوابة محمية... لا تحاول');
+            return false;
+        }
+    });
+})();
+
+// مسح البيانات الحساسة عند مغادرة الصفحة
+window.addEventListener('beforeunload', () => {
+    // مسح أي بيانات حساسة
+    sessionStorage.clear();
+    
+    // مسح الحقول
+    document.getElementById('email').value = '';
+    document.getElementById('password').value = '';
+});
+
+        
 // تشغيل عند تحميل الصفحة
 window.addEventListener('load', () => {
     // تفعيل التنفس للصفحة
