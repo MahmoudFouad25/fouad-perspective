@@ -315,6 +315,10 @@ async function handleForcedLogout(reason = 'جلسة أخرى نشطة') {
 }
 
 // التحقق من الجلسة لصفحة Dashboard
+// في ملف firebase-config.js - استبدل دالة verifyDashboardSession بهذه النسخة المحسنة
+
+// في ملف firebase-config.js - استبدل فقط دالة verifyDashboardSession
+
 async function verifyDashboardSession() {
     try {
         const userId = localStorage.getItem('userId');
@@ -326,23 +330,108 @@ async function verifyDashboardSession() {
             return false;
         }
         
-        const sessionCheck = await checkActiveSession(userId);
+        // هنا الإصلاح المهم: لا نفحص الجلسة مرة أخرى!
+        // المستخدم وصل هنا معناه أنه نجح في تسجيل الدخول
+        // فقط نحدث النشاط ونكمل
         
-        if (!sessionCheck.allowed) {
-            if (sessionCheck.reason === 'active_device') {
-                await handleForcedLogout('يوجد جهاز آخر نشط بحسابك');
-            } else {
-                await handleForcedLogout('خطأ في التحقق من الجلسة');
-            }
-            return false;
-        }
+        const deviceId = generateDeviceId();
+        await db.collection('users').doc(userId).update({
+            lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
         
+        // بدء مراقبة النشاط فقط للحفاظ على الجلسة
+        startActivityMonitoring(userId, deviceId);
+        
+        console.log('✅ تم التحقق من الجلسة بنجاح');
         return true;
         
     } catch (error) {
         console.error('خطأ في التحقق من جلسة Dashboard:', error);
+        
+        // في حالة خطأ شبكة، اعطي المستخدم خيار
+        const result = await Swal.fire({
+            icon: 'error',
+            title: 'خطأ في الشبكة',
+            text: 'حدث خطأ في التحقق من الجلسة. هل تريد المحاولة مرة أخرى؟',
+            showCancelButton: true,
+            confirmButtonText: 'إعادة المحاولة',
+            cancelButtonText: 'تسجيل خروج'
+        });
+        
+        if (result.isConfirmed) {
+            window.location.reload();
+        } else {
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.replace('./login.html');
+        }
+        
         return false;
     }
+}
+
+// تحديث مراقبة النشاط لتكون أقل تدخلاً
+function startActivityMonitoring(userId, deviceId) {
+    // إيقاف أي مراقبة سابقة
+    if (window.activityMonitor) {
+        clearInterval(window.activityMonitor);
+        window.activityMonitor = null;
+    }
+    
+    if (!userId || !deviceId || !db) {
+        console.warn('⚠️ لا يمكن بدء مراقبة النشاط - معاملات مفقودة');
+        return;
+    }
+    
+    let consecutiveErrors = 0;
+    const MAX_ERRORS = 5;
+    
+    // مراقبة كل دقيقتين بدلاً من 30 ثانية
+    const activityInterval = setInterval(async () => {
+        try {
+            if (!navigator.onLine) {
+                console.log('📴 لا يوجد اتصال بالإنترنت');
+                return;
+            }
+            
+            const userDoc = await db.collection('users').doc(userId).get();
+            
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                
+                // فقط تحديث النشاط - بدون فحص forceLogout
+                await db.collection('users').doc(userId).update({
+                    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                consecutiveErrors = 0;
+                
+            } else {
+                console.warn('❌ لم يتم العثور على بيانات المستخدم');
+                clearInterval(activityInterval);
+                window.activityMonitor = null;
+            }
+        } catch (error) {
+            console.error('خطأ في تحديث النشاط:', error);
+            consecutiveErrors++;
+            
+            if (consecutiveErrors >= MAX_ERRORS) {
+                console.warn('⚠️ إيقاف مراقبة النشاط بسبب أخطاء متكررة');
+                clearInterval(activityInterval);
+                window.activityMonitor = null;
+            }
+        }
+    }, 120000); // كل دقيقتين
+    
+    window.activityMonitor = activityInterval;
+    
+    // تنظيف عند المغادرة
+    window.addEventListener('beforeunload', () => {
+        if (window.activityMonitor) {
+            clearInterval(window.activityMonitor);
+            window.activityMonitor = null;
+        }
+    });
 }
 
 // إجبار تسجيل خروج الأجهزة الأخرى
@@ -845,3 +934,4 @@ if (window.location.hostname === 'mahmoudfouad25.github.io') {
         originalLog.apply(console, safeArgs);
     };
 }
+
