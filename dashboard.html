@@ -1950,6 +1950,43 @@
     </div>
 </div>
 
+        <!-- نظام الإشعارات للشارات الجديدة -->
+<div id="badgeNotification" style="
+    position: fixed;
+    top: 100px;
+    right: -400px;
+    width: 350px;
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.95), rgba(255, 165, 0, 0.95));
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    z-index: 10000;
+    transition: right 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    border: 2px solid var(--gold-primary);
+">
+    <div style="display: flex; align-items: center; gap: 1rem;">
+        <div style="font-size: 3rem;">🏆</div>
+        <div style="flex: 1;">
+            <h3 style="margin: 0; color: var(--dark-bg); font-size: 1.2rem;">مبروك! شارة جديدة</h3>
+            <p id="badgeNotificationText" style="margin: 0.5rem 0 0 0; color: rgba(0,0,0,0.8); font-size: 0.9rem;">
+                حصلت على شارة جديدة
+            </p>
+        </div>
+        <button onclick="closeBadgeNotification()" style="
+            background: none;
+            border: none;
+            color: var(--dark-bg);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        " onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
+            ×
+        </button>
+    </div>
+</div>
 
     <!-- 7. أزرار الإجراءات السريعة -->
     <div class="action-buttons">
@@ -1990,187 +2027,308 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        let currentUser = null;
-        let userData = null;
-        let userId = null;
-        let learningChart = null;
+   let currentUser = null;
+let userData = null;
+let userId = null;
+let learningChart = null;
 
-        // استرجاع معرف المستخدم من localStorage
-        userId = localStorage.getItem('userId');
-        const userEmail = localStorage.getItem('userEmail');
-        const userName = localStorage.getItem('userName');
+// استرجاع معرف المستخدم من localStorage
+userId = localStorage.getItem('userId');
+const userEmail = localStorage.getItem('userEmail');
+const userName = localStorage.getItem('userName');
 
-        // حماية الصفحة - نفس الكود القديم
-      // حماية الصفحة مع منع التكرار
+// ================== حماية الصفحة المحسنة ==================
+
 let isCheckingAuth = false;
-auth.onAuthStateChanged(async (user) => {
-    // منع التكرار
-    if (isCheckingAuth) return;
-    isCheckingAuth = true;
+let isSessionVerified = false;
+
+// التحقق من الجلسة عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', async function() {
+    console.log('🔐 بدء التحقق من الأمان...');
     
-    // استرجاع معرف المستخدم من localStorage أولاً
-    const storedUserId = localStorage.getItem('userId');
-    const isLoggedIn = localStorage.getItem('isLoggedIn');
-    
-    // التحقق من وجود مستخدم وبيانات محفوظة
-    if (!user) {
-        // لا يوجد مستخدم في Firebase Auth
-        if (!storedUserId || isLoggedIn !== 'true') {
-            console.log('❌ لا يوجد مستخدم مسجل دخول');
-            // تنظيف البيانات المحلية
-            localStorage.removeItem('userId');
-            localStorage.removeItem('userEmail');
-            localStorage.removeItem('userName');
-            localStorage.removeItem('isLoggedIn');
-            
-            // منع التوجيه المتكرر
-            if (!window.location.pathname.includes('login.html')) {
-                window.location.replace('./login.html');
-            }
-            return;
-        }
+    // التحقق الأولي
+    const isValid = await verifyInitialSession();
+    if (!isValid) {
+        return; // سيتم التوجيه تلقائياً
     }
     
-    // تعيين المتغيرات
-    currentUser = user;
-    userId = storedUserId || (user ? user.uid : null);
+    // إعداد مراقب تغيير المصادقة
+    setupAuthStateMonitor();
     
-    if (!userId) {
-        console.log('❌ لا يوجد معرف مستخدم');
-        localStorage.removeItem('isLoggedIn');
-        if (!window.location.pathname.includes('login.html')) {
-            window.location.replace('./login.html');
-        }
-        return;
-    }
-    
-    console.log('👤 مستخدم مسجل دخول:', user ? user.email : 'من البيانات المحفوظة');
-    console.log('🔑 معرف المستخدم:', userId);
-    
-    // تحميل بيانات المستخدم
-    try {
-        await loadUserData();
-    } catch (error) {
-        console.error('خطأ في تحميل البيانات:', error);
-        // في حالة الخطأ، لا نوجه تلقائياً
-        // نعطي المستخدم فرصة لإعادة المحاولة
-    }
-    
-    // إعادة تعيين العلامة
-    isCheckingAuth = false;
+    // بدء تحميل البيانات
+    await initializeDashboard();
 });
 
+// التحقق الأولي من الجلسة
+async function verifyInitialSession() {
+    try {
+        const storedUserId = localStorage.getItem('userId');
+        const isLoggedIn = localStorage.getItem('isLoggedIn');
+        
+        // التحقق من وجود البيانات الأساسية
+        if (!storedUserId || isLoggedIn !== 'true') {
+            console.log('❌ لا توجد جلسة صالحة');
+            redirectToLogin();
+            return false;
+        }
+        
+        // التحقق من صحة الجلسة مع الخادم
+        console.log('🔍 التحقق من صحة الجلسة...');
+        const sessionCheck = await firebaseAuth.verifyDashboardSession();
+        
+        if (!sessionCheck) {
+            console.log('❌ فشل التحقق من الجلسة');
+            return false;
+        }
+        
+        console.log('✅ تم التحقق من الجلسة بنجاح');
+        userId = storedUserId;
+        isSessionVerified = true;
+        
+        return true;
+        
+    } catch (error) {
+        console.error('❌ خطأ في التحقق من الجلسة:', error);
+        redirectToLogin();
+        return false;
+    }
+}
 
-        // تحميل بيانات المستخدم - نفس الكود القديم مع تحسينات بصرية
-       async function loadUserData() {
+// إعداد مراقب حالة المصادقة
+function setupAuthStateMonitor() {
+    auth.onAuthStateChanged(async (user) => {
+        // منع التكرار
+        if (isCheckingAuth) return;
+        isCheckingAuth = true;
+        
+        try {
+            const storedUserId = localStorage.getItem('userId');
+            const isLoggedIn = localStorage.getItem('isLoggedIn');
+            
+            // إذا لم يكن هناك مستخدم في Firebase Auth ولا بيانات محفوظة
+            if (!user && (!storedUserId || isLoggedIn !== 'true')) {
+                console.log('❌ لا يوجد مستخدم مسجل دخول');
+                redirectToLogin();
+                return;
+            }
+            
+            // إذا كان هناك مستخدم في Firebase Auth
+            if (user) {
+                currentUser = user;
+                console.log('👤 مستخدم Firebase Auth:', user.email);
+                
+                // التحقق من تطابق البيانات
+                if (storedUserId && storedUserId !== user.uid) {
+                    console.log('⚠️ عدم تطابق معرف المستخدم');
+                    // إعادة التحقق من الجلسة
+                    const sessionCheck = await firebaseAuth.verifyDashboardSession();
+                    if (!sessionCheck) {
+                        return;
+                    }
+                }
+            }
+            
+            // إذا لم تكن الجلسة محققة بعد، احقق منها
+            if (!isSessionVerified) {
+                const sessionCheck = await firebaseAuth.verifyDashboardSession();
+                if (!sessionCheck) {
+                    return;
+                }
+                isSessionVerified = true;
+            }
+            
+            // تعيين معرف المستخدم
+            userId = storedUserId || (user ? user.uid : null);
+            
+            if (!userId) {
+                console.log('❌ لا يوجد معرف مستخدم صالح');
+                redirectToLogin();
+                return;
+            }
+            
+            console.log('🔑 معرف المستخدم المؤكد:', userId);
+            
+            // تحميل بيانات المستخدم إذا لم تحمل بعد
+            if (!userData) {
+                await loadUserData();
+            }
+            
+        } catch (error) {
+            console.error('❌ خطأ في مراقب حالة المصادقة:', error);
+            // لا نوجه تلقائياً في حالة خطأ الشبكة
+        } finally {
+            isCheckingAuth = false;
+        }
+    });
+}
+
+// تحميل بيانات المستخدم مع التحقق المعزز
+async function loadUserData() {
     try {
         console.log('📋 تحميل بيانات المستخدم:', userId);
         
-        if (userId) {
-            localStorage.setItem('userId', userId);
+        if (!userId) {
+            throw new Error('لا يوجد معرف مستخدم');
         }
         
+        // التحقق من صحة الجلسة مرة أخرى قبل تحميل البيانات
+        if (!isSessionVerified) {
+            const sessionCheck = await firebaseAuth.verifyDashboardSession();
+            if (!sessionCheck) {
+                return;
+            }
+            isSessionVerified = true;
+        }
+        
+        // تحميل البيانات من Firestore
         const userDoc = await db.collection('users').doc(userId).get();
         
-        if (userDoc.exists) {
-            userData = userDoc.data();
-            console.log('✅ تم تحميل بيانات المستخدم:', userData);
-            
-            // حفظ البيانات الأساسية
-            localStorage.setItem('userName', userData.name || userData.personalInfo?.name || '');
-            localStorage.setItem('userEmail', userData.email || userData.personalInfo?.email || '');
-            
-            // تحديث الواجهة بالترتيب الصحيح
-            updateUserInfo();
-            updatePointsDisplay();
-            calculateQuickStats();
-            updateCurrentActivity();
-            updatePaymentsSection();
-            
-            // تحميل باقي البيانات
-            await initializeDashboard();
-            
-            // عرض الدورات مع البث المباشر
-            await displayCoursesWithLive();
-            
-            // تفعيل التحديثات الفورية
-            setupRealtimeListeners();
-            
-        } else {
-            console.error('❌ بيانات المستخدم غير موجودة');
-            showErrorState();
+        if (!userDoc.exists) {
+            throw new Error('بيانات المستخدم غير موجودة');
         }
+        
+        userData = userDoc.data();
+        console.log('✅ تم تحميل بيانات المستخدم بنجاح');
+        
+        // التحقق من حالة الحساب
+        if (userData.accountStatus?.suspended === true) {
+            await Swal.fire({
+                icon: 'error',
+                title: 'حساب معلق',
+                text: userData.accountStatus.suspendReason || 'تواصل مع الإدارة',
+                confirmButtonText: 'حسناً',
+                allowOutsideClick: false
+            });
+            redirectToLogin();
+            return;
+        }
+        
+        // حفظ البيانات المحدثة
+        if (userData.personalInfo?.name) {
+            localStorage.setItem('userName', userData.personalInfo.name);
+        }
+        if (userData.personalInfo?.email) {
+            localStorage.setItem('userEmail', userData.personalInfo.email);
+        }
+        
+        // تحديث الواجهة
+        updateUserInterface();
+        
+        // إعداد التحديثات الفورية
+        setupRealtimeListeners();
+        
     } catch (error) {
         console.error('❌ خطأ في تحميل بيانات المستخدم:', error);
-        showErrorState();
+        
+        // في حالة خطأ شديد، وجه للخروج
+        if (error.message.includes('غير موجودة') || error.message.includes('لا يوجد معرف')) {
+            await Swal.fire({
+                icon: 'error',
+                title: 'خطأ في البيانات',
+                text: 'حدث خطأ في تحميل بيانات حسابك. سيتم تسجيل خروجك.',
+                confirmButtonText: 'حسناً'
+            });
+            redirectToLogin();
+        } else {
+            // خطأ شبكة أو مؤقت - اعرض رسالة وحاول مرة أخرى
+            showRetryMessage();
+        }
     }
 }
 
-        // حساب التقدم الإجمالي
-// حساب التقدم الإجمالي المطور
-function calculateOverallProgress() {
-    let totalProgress = 0;
-    let completedCourses = 0;
-    let activeCourses = 0;
-    
-    // حساب تقدم الدورات
-    const enrollments = userData.enrollments || userData.courses || [];
-    if (enrollments.length > 0) {
-        enrollments.forEach(course => {
-            const progress = course.courseInfo?.progress || course.progress || 0;
-            totalProgress += progress;
-            
-            if (progress === 100 || course.status?.current === 'completed') {
-                completedCourses++;
-            }
-            if (course.status?.current === 'active') {
-                activeCourses++;
-            }
-        });
+// تحديث واجهة المستخدم
+function updateUserInterface() {
+    try {
+        // تحديث معلومات المستخدم
+        updateUserInfo();
         
-        totalProgress = Math.round(totalProgress / enrollments.length);
+        // تحديث النقاط
+        updatePointsDisplay();
+        
+        // تحديث الإحصائيات
+        calculateQuickStats();
+        
+        // تحديث النشاط الحالي
+        updateCurrentActivity();
+        
+        // تحديث قسم المدفوعات
+        updatePaymentsSection();
+        
+        // عرض الدورات
+        displayCoursesWithLive();
+        
+        console.log('✅ تم تحديث الواجهة بنجاح');
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحديث الواجهة:', error);
     }
-    
-    // عدد الشارات
-    const badgesCount = (userData.badges || userData.achievements || []).length;
-    
-    // المرحلة الحالية
-    const currentStage = userData.accountStatus?.journeyStage || 1;
-    
-    // تحديث العناصر الموجودة فقط
-    const overallProgressText = document.getElementById('overallProgressText');
-    if (overallProgressText) {
-        overallProgressText.textContent = totalProgress + '%';
-    }
-    
-    const overallProgressBar = document.getElementById('overallProgressBar');
-    if (overallProgressBar) {
-        overallProgressBar.style.width = totalProgress + '%';
-    }
-    
-    const coursesProgressEl = document.getElementById('coursesProgress');
-    if (coursesProgressEl) {
-        coursesProgressEl.textContent = completedCourses;
-    }
-    
-    const badgesProgressEl = document.getElementById('badgesProgress');
-    if (badgesProgressEl) {
-        badgesProgressEl.textContent = badgesCount;
-    }
-    
-    const journeyProgressEl = document.getElementById('journeyProgress');
-    if (journeyProgressEl) {
-        journeyProgressEl.textContent = currentStage + '/7';
-    }
-    
-    return {
-        totalProgress,
-        completedCourses,
-        activeCourses,
-        badgesCount,
-        currentStage
-    };
 }
+
+// إعداد المستمعات الفورية
+function setupRealtimeListeners() {
+    if (!userId) return;
+    
+    // مراقبة تغييرات بيانات المستخدم
+    db.collection('users').doc(userId).onSnapshot((doc) => {
+        if (doc.exists) {
+            const newData = doc.data();
+            
+            // التحقق من الإخراج القسري
+            if (newData.forceLogout === true) {
+                firebaseAuth.handleForcedLogout('تم تسجيل الدخول من جهاز آخر');
+                return;
+            }
+            
+            // التحقق من تعليق الحساب
+            if (newData.accountStatus?.suspended === true) {
+                firebaseAuth.handleForcedLogout('تم تعليق حسابك: ' + (newData.accountStatus.suspendReason || 'تواصل مع الإدارة'));
+                return;
+            }
+            
+            // تحديث البيانات المحلية
+            userData = newData;
+            updateUserInterface();
+        }
+    }, (error) => {
+        console.error('خطأ في مراقبة البيانات:', error);
+    });
+}
+
+// عرض رسالة إعادة المحاولة
+function showRetryMessage() {
+    Swal.fire({
+        icon: 'warning',
+        title: 'خطأ في الاتصال',
+        text: 'حدث خطأ في تحميل البيانات. هل تريد المحاولة مرة أخرى؟',
+        showCancelButton: true,
+        confirmButtonText: 'إعادة المحاولة',
+        cancelButtonText: 'تسجيل الخروج'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            location.reload();
+        } else {
+            firebaseAuth.signOut();
+        }
+    });
+}
+
+// توجيه لصفحة تسجيل الدخول
+function redirectToLogin() {
+    // تنظيف البيانات
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    // إيقاف المراقبة
+    if (window.activityMonitor) {
+        clearInterval(window.activityMonitor);
+    }
+    
+    // التوجيه
+    window.location.replace('./login.html');
+}
+
+
+
 
         // حساب الإحصائيات السريعة المحسنة
 // حساب الإحصائيات الذكية المطورة
@@ -6000,44 +6158,17 @@ async function displayCoursesWithLive() {
             console.error('خطأ غير معالج:', e.reason);
         });
 
+      // تصدير الوظائف للاستخدام العام
+window.dashboardFunctions = {
+    loadUserData,
+    updateUserInterface,
+    redirectToLogin,
+    verifyInitialSession
+};
+
+console.log('🛡️ تم تحميل نظام الحماية المحسن للوحة التحكم');
         
     </script>
-    <!-- نظام الإشعارات للشارات الجديدة -->
-<div id="badgeNotification" style="
-    position: fixed;
-    top: 100px;
-    right: -400px;
-    width: 350px;
-    background: linear-gradient(135deg, rgba(255, 215, 0, 0.95), rgba(255, 165, 0, 0.95));
-    backdrop-filter: blur(10px);
-    border-radius: 20px;
-    padding: 1.5rem;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-    z-index: 10000;
-    transition: right 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    border: 2px solid var(--gold-primary);
-">
-    <div style="display: flex; align-items: center; gap: 1rem;">
-        <div style="font-size: 3rem;">🏆</div>
-        <div style="flex: 1;">
-            <h3 style="margin: 0; color: var(--dark-bg); font-size: 1.2rem;">مبروك! شارة جديدة</h3>
-            <p id="badgeNotificationText" style="margin: 0.5rem 0 0 0; color: rgba(0,0,0,0.8); font-size: 0.9rem;">
-                حصلت على شارة جديدة
-            </p>
-        </div>
-        <button onclick="closeBadgeNotification()" style="
-            background: none;
-            border: none;
-            color: var(--dark-bg);
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 0;
-            opacity: 0.7;
-            transition: opacity 0.3s;
-        " onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
-            ×
-        </button>
-    </div>
-</div>
+
 </body>
 </html>
