@@ -373,10 +373,33 @@
             return originalConsoleLog.apply(console, safeArgs);
         };
         
-        // منع copy/paste في حقول حساسة
+        // السماح بلصق كلمة المرور ولكن منع نسخها
+        document.addEventListener('copy', function(e) {
+            if (e.target.type === 'password') {
+                e.preventDefault();
+                recordSuspiciousActivity('copy_password_attempt');
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'غير مسموح',
+                        text: 'لا يمكن نسخ كلمة المرور لأغراض الأمان',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                }
+            }
+        });
+        
+        // السماح بلصق كلمة المرور (من مدير كلمات المرور)
         document.addEventListener('paste', function(e) {
-            if (e.target.type === 'password' || 
-                e.target.classList.contains('sensitive-input') ||
+            // السماح بلصق كلمة المرور
+            if (e.target.type === 'password') {
+                console.log('✅ تم السماح بلصق كلمة المرور');
+                return; // اسمح بالعملية
+            }
+            
+            // منع اللصق في المحتوى الحساس الآخر
+            if (e.target.classList.contains('sensitive-input') ||
                 e.target.closest('.sensitive-content')) {
                 e.preventDefault();
                 recordSuspiciousActivity('paste_in_sensitive_field');
