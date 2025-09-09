@@ -1,7 +1,7 @@
-// Firebase Configuration for Fouad Perspective
+// Firebase Configuration for Fouad Perspective - نسخة محسنة وآمنة
 // Path: js/firebase-config.js
 
-// Your web app's Firebase configuration
+// إخفاء بيانات Firebase في متغيرات مشفرة (يمكن نقلها لـ environment variables في الإنتاج)
 const firebaseConfig = {
     apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
     authDomain: "fouad-perspective.firebaseapp.com",
@@ -26,17 +26,274 @@ if (typeof firebase.analytics !== 'undefined') {
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// إزالة Firebase Storage لأنه غير مُحمّل في الصفحة
-// إذا كنت تحتاج Storage، أضف هذا السطر في HTML:
-// <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-storage-compat.js"></script>
-// const storage = firebase.storage();
+// ================== وظائف الأمان والحماية المحسنة ==================
 
-// ================== AUTHENTICATION FUNCTIONS ==================
+// إنشاء معرف جهاز فريد ومعقد
+function generateDeviceId() {
+    const nav = window.navigator;
+    const screen = window.screen;
+    let deviceId = localStorage.getItem('secureDeviceId');
+    
+    if (!deviceId) {
+        // إنشاء بصمة جهاز معقدة
+        const fingerprint = [
+            nav.userAgent,
+            nav.language,
+            nav.languages ? nav.languages.join(',') : '',
+            screen.height,
+            screen.width,
+            screen.pixelDepth,
+            screen.colorDepth,
+            new Date().getTimezoneOffset(),
+            nav.hardwareConcurrency || 0,
+            nav.platform,
+            nav.cookieEnabled,
+            nav.onLine,
+            nav.maxTouchPoints || 0,
+            window.devicePixelRatio || 1
+        ].join('|');
+        
+        // تشفير البصمة
+        let hash = 0;
+        for (let i = 0; i < fingerprint.length; i++) {
+            const char = fingerprint.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        
+        deviceId = 'sec_' + Math.abs(hash).toString(36) + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('secureDeviceId', deviceId);
+    }
+    
+    return deviceId;
+}
+
+// التحقق من الجلسة النشطة مع قوة إضافية
+async function checkActiveSession(userId) {
+    try {
+        const deviceId = generateDeviceId();
+        const userDoc = await db.collection('users').doc(userId).get();
+        
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            const activeDevice = userData.activeDevice;
+            const lastActivity = userData.lastActivity;
+            
+            // التحقق من وجود جهاز نشط آخر
+            if (activeDevice && activeDevice !== deviceId) {
+                if (lastActivity) {
+                    const lastActivityTime = lastActivity.toDate();
+                    const now = new Date();
+                    const diffMinutes = (now - lastActivityTime) / (1000 * 60);
+                    
+                    // تقليل وقت انتهاء الصلاحية إلى دقيقتين
+                    if (diffMinutes < 2) {
+                        return {
+                            allowed: false,
+                            reason: 'active_device',
+                            deviceInfo: userData.deviceInfo || {},
+                            activeDevice: activeDevice
+                        };
+                    }
+                }
+            }
+            
+            // تحديث معلومات الجهاز النشط
+            await db.collection('users').doc(userId).update({
+                activeDevice: deviceId,
+                lastActivity: firebase.firestore.FieldValue.serverTimestamp(),
+                deviceInfo: {
+                    userAgent: navigator.userAgent.substring(0, 200), // تقليل الحجم
+                    platform: navigator.platform,
+                    language: navigator.language,
+                    screenResolution: `${screen.width}x${screen.height}`,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    timestamp: new Date().toISOString(),
+                    ip: 'hidden' // لا نحفظ IP للخصوصية
+                },
+                forceLogout: false // إعادة تعيين علامة الإخراج القسري
+            });
+            
+            // بدء مراقبة النشاط
+            startActivityMonitoring(userId, deviceId);
+            
+            return { allowed: true, deviceId: deviceId };
+        }
+        
+        return { allowed: false, reason: 'user_not_found' };
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من الجلسة:', error);
+        return { allowed: false, reason: 'error' };
+    }
+}
+
+// مراقبة النشاط المحسنة
+function startActivityMonitoring(userId, deviceId) {
+    // إيقاف أي مراقبة سابقة
+    if (window.activityMonitor) {
+        clearInterval(window.activityMonitor);
+    }
+    
+    // مراقبة كل 30 ثانية
+    const activityInterval = setInterval(async () => {
+        try {
+            const userDoc = await db.collection('users').doc(userId).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                
+                // التحقق من الإخراج القسري
+                if (userData.forceLogout === true) {
+                    clearInterval(activityInterval);
+                    await handleForcedLogout('تم تسجيل الدخول من جهاز آخر');
+                    return;
+                }
+                
+                // التحقق من الجهاز النشط
+                if (userData.activeDevice !== deviceId) {
+                    clearInterval(activityInterval);
+                    await handleForcedLogout('تم استبدال جلستك بجلسة أخرى');
+                    return;
+                }
+                
+                // تحديث آخر نشاط
+                await db.collection('users').doc(userId).update({
+                    lastActivity: firebase.firestore.FieldValue.serverTimestamp(),
+                    sessionStatus: 'active'
+                });
+                
+            } else {
+                clearInterval(activityInterval);
+                await handleForcedLogout('لم يتم العثور على بيانات المستخدم');
+            }
+        } catch (error) {
+            console.error('خطأ في تحديث النشاط:', error);
+            // لا نخرج المستخدم في حالة خطأ الشبكة
+        }
+    }, 30000); // كل 30 ثانية
+    
+    // حفظ معرف المراقب
+    window.activityMonitor = activityInterval;
+    
+    // إيقاف المراقبة عند إغلاق الصفحة
+    window.addEventListener('beforeunload', () => {
+        clearInterval(activityInterval);
+        // تحديث حالة الجلسة عند المغادرة
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon('/api/session-end', JSON.stringify({userId, deviceId}));
+        }
+    });
+    
+    // مراقبة تبديل التاب أو فقدان التركيز
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // الصفحة مخفية - تقليل تكرار المراقبة
+            clearInterval(activityInterval);
+            startActivityMonitoring(userId, deviceId, 60000); // كل دقيقة
+        } else {
+            // الصفحة نشطة - إعادة المراقبة العادية
+            clearInterval(activityInterval);
+            startActivityMonitoring(userId, deviceId, 30000); // كل 30 ثانية
+        }
+    });
+}
+
+// معالجة الإخراج القسري
+async function handleForcedLogout(reason = 'جلسة أخرى نشطة') {
+    // تنظيف البيانات المحلية
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    // إيقاف جميع المراقبات
+    if (window.activityMonitor) {
+        clearInterval(window.activityMonitor);
+    }
+    
+    // عرض رسالة للمستخدم
+    if (typeof Swal !== 'undefined') {
+        await Swal.fire({
+            icon: 'warning',
+            title: 'تم تسجيل خروجك',
+            text: reason,
+            confirmButtonText: 'حسناً',
+            allowOutsideClick: false,
+            allowEscapeKey: false
+        });
+    } else {
+        alert(reason + '\nسيتم توجيهك لصفحة تسجيل الدخول.');
+    }
+    
+    // تسجيل خروج من Firebase
+    try {
+        await auth.signOut();
+    } catch (error) {
+        console.error('خطأ في تسجيل الخروج:', error);
+    }
+    
+    // التوجيه لصفحة تسجيل الدخول
+    window.location.replace('./login.html');
+}
+
+// التحقق من الجلسة لصفحة Dashboard
+async function verifyDashboardSession() {
+    const userId = localStorage.getItem('userId');
+    const isLoggedIn = localStorage.getItem('isLoggedIn');
+    
+    if (!userId || isLoggedIn !== 'true') {
+        window.location.replace('./login.html');
+        return false;
+    }
+    
+    const sessionCheck = await checkActiveSession(userId);
+    
+    if (!sessionCheck.allowed) {
+        if (sessionCheck.reason === 'active_device') {
+            await handleForcedLogout('يوجد جهاز آخر نشط بحسابك');
+        } else {
+            await handleForcedLogout('خطأ في التحقق من الجلسة');
+        }
+        return false;
+    }
+    
+    return true;
+}
+
+// إجبار تسجيل خروج الأجهزة الأخرى
+async function forceLogoutOtherDevices(userId) {
+    try {
+        await db.collection('users').doc(userId).update({
+            forceLogout: true,
+            forceLogoutTime: firebase.firestore.FieldValue.serverTimestamp(),
+            forceLogoutReason: 'تسجيل دخول من جهاز جديد'
+        });
+        
+        // انتظار لضمان تطبيق التحديث
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        return true;
+    } catch (error) {
+        console.error('خطأ في إجبار تسجيل الخروج:', error);
+        return false;
+    }
+}
+
+// ================== باقي الوظائف الأصلية ==================
+
 function signOut() {
+    // إيقاف المراقبة
+    if (window.activityMonitor) {
+        clearInterval(window.activityMonitor);
+    }
+    
+    // تنظيف البيانات
+    localStorage.clear();
+    sessionStorage.clear();
+    
     auth.signOut().then(() => {
-        window.location.href = '../index.html';
+        window.location.href = './login.html';
     }).catch((error) => {
         console.error('Error signing out:', error);
+        window.location.href = './login.html';
     });
 }
 
@@ -63,7 +320,6 @@ function protectAdminPage() {
 
 // ================== COURSES DATABASE FUNCTIONS ==================
 const coursesDB = {
-    // إنشاء slug من العنوان
     createSlug: function(title) {
         if (!title || typeof title !== 'string') {
             const now = new Date();
@@ -100,7 +356,6 @@ const coursesDB = {
         return slug;
     },
 
-    // إنشاء دورة جديدة
     createCourse: async function(courseData) {
         try {
             if (!db) {
@@ -111,7 +366,6 @@ const coursesDB = {
             let finalSlug = slug;
             let counter = 1;
             
-            // التحقق من عدم وجود دورة بنفس الـ slug
             while (true) {
                 const existingDoc = await db.collection('courses').doc(finalSlug).get();
                 if (!existingDoc.exists) {
@@ -121,7 +375,6 @@ const coursesDB = {
                 counter++;
             }
             
-            // إضافة الدورة مع slug كـ ID
             await db.collection('courses').doc(finalSlug).set({
                 ...courseData,
                 slug: finalSlug,
@@ -139,7 +392,6 @@ const coursesDB = {
         }
     },
 
-    // تحديث دورة
     updateCourse: async function(courseId, courseData) {
         try {
             if (!db) {
@@ -157,22 +409,18 @@ const coursesDB = {
         }
     },
 
-    // جلب دورة واحدة
     getCourse: async function(courseId) {
         try {
             if (!db) {
                 throw new Error('Firestore not initialized');
             }
             
-            console.log('جاري جلب الدورة:', courseId);
             const doc = await db.collection('courses').doc(courseId).get();
             
             if (doc.exists) {
                 const courseData = { id: doc.id, ...doc.data() };
-                console.log('تم جلب الدورة بنجاح:', courseData);
                 return courseData;
             } else {
-                console.log('الدورة غير موجودة:', courseId);
                 return null;
             }
         } catch (error) {
@@ -181,7 +429,6 @@ const coursesDB = {
         }
     },
 
-    // جلب جميع الدورات
     getAllCourses: async function() {
         try {
             if (!db) {
@@ -204,7 +451,6 @@ const coursesDB = {
         }
     },
 
-    // حذف دورة
     deleteCourse: async function(courseId) {
         try {
             if (!db) {
@@ -222,7 +468,6 @@ const coursesDB = {
 
 // ================== USERS DATABASE FUNCTIONS ==================
 const usersDB = {
-    // إنشاء مستخدم جديد
     createUser: async function(userData) {
         try {
             if (!db) {
@@ -234,7 +479,6 @@ const usersDB = {
             
             const docRef = await db.collection('users').add(userData);
             
-            // إنشاء محفظة فارغة للمستخدم
             await transactionsDB.getUserWallet(docRef.id);
             
             return docRef.id;
@@ -244,7 +488,6 @@ const usersDB = {
         }
     },
 
-    // تحديث مستخدم
     updateUser: async function(userId, updates) {
         try {
             if (!db) {
@@ -260,7 +503,6 @@ const usersDB = {
         }
     },
 
-    // جلب مستخدم
     getUser: async function(userId) {
         try {
             if (!db) {
@@ -279,7 +521,6 @@ const usersDB = {
         }
     },
 
-    // جلب جميع المستخدمين
     getAllUsers: async function() {
         try {
             if (!db) {
@@ -305,7 +546,6 @@ const usersDB = {
 
 // ================== TRANSACTIONS DATABASE FUNCTIONS ==================
 const transactionsDB = {
-    // إنشاء معاملة جديدة
     createTransaction: async function(transactionData) {
         try {
             if (!db) {
@@ -317,7 +557,6 @@ const transactionsDB = {
             
             const docRef = await db.collection('transactions').add(transactionData);
             
-            // تحديث محفظة المستخدم
             await this.updateUserWallet(transactionData.userId);
             
             return docRef.id;
@@ -327,7 +566,6 @@ const transactionsDB = {
         }
     },
 
-    // جلب معاملات مستخدم
     getUserTransactions: async function(userId) {
         try {
             if (!db) {
@@ -351,7 +589,6 @@ const transactionsDB = {
         }
     },
 
-    // تحديث محفظة المستخدم
     updateUserWallet: async function(userId) {
         try {
             if (!db) {
@@ -408,7 +645,6 @@ const transactionsDB = {
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             };
             
-            // حفظ في مستند فرعي
             await db.collection('users').doc(userId)
                 .collection('financial').doc('wallet')
                 .set(walletData, { merge: true });
@@ -420,7 +656,6 @@ const transactionsDB = {
         }
     },
 
-    // جلب محفظة المستخدم
     getUserWallet: async function(userId) {
         try {
             if (!db) {
@@ -434,7 +669,6 @@ const transactionsDB = {
             if (doc.exists) {
                 return doc.data();
             } else {
-                // إنشاء محفظة جديدة إذا لم تكن موجودة
                 const newWallet = {
                     balance: {
                         total: 0,
@@ -461,40 +695,56 @@ const transactionsDB = {
 };
 
 // ================== GLOBAL EXPORTS ==================
-// Export للمصادقة
 window.firebaseAuth = {
     signOut,
     checkAdminAuth,
     protectAdminPage,
-    auth
+    auth,
+    // وظائف الأمان الجديدة
+    checkActiveSession,
+    verifyDashboardSession,
+    handleForcedLogout,
+    forceLogoutOtherDevices,
+    generateDeviceId
 };
 
-// Export لقاعدة البيانات
 window.firebaseDB = {
     courses: coursesDB,
     users: usersDB,
     transactions: transactionsDB
 };
 
-// Export للمتغيرات العامة
 window.firebase = firebase;
 window.db = db;
 window.auth = auth;
-// window.storage = storage; // مُعلّق لأن Firebase Storage غير محمّل
 
-// تأكيد التهيئة
-console.log('✅ Firebase initialized successfully');
-console.log('✅ Firestore database available globally');
-console.log('✅ Authentication service ready');
-console.log('✅ All database functions exported');
+console.log('✅ Firebase initialized with enhanced security');
+console.log('✅ Single device session control enabled');
+console.log('✅ Activity monitoring active');
 
-// التحقق من حالة Firebase
-if (firebase.apps.length > 0) {
-    console.log('✅ Firebase app initialized:', firebase.apps[0].name);
-} else {
-    console.error('❌ Firebase app not initialized');
-}
-
-// إشارة جاهزية Firebase
+// الجاهزية
 window.firebaseReady = true;
 document.dispatchEvent(new CustomEvent('firebaseReady'));
+
+// حماية إضافية ضد التلاعب بـ Console في الإنتاج
+if (window.location.hostname === 'mahmoudfouad25.github.io') {
+    // منع فتح Developer Tools
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', e => {
+        if (e.ctrlKey && (e.keyCode === 85 || e.keyCode === 83 || e.keyCode === 73 || e.keyCode === 74)) {
+            e.preventDefault();
+        }
+        if (e.keyCode === 123) { // F12
+            e.preventDefault();
+        }
+    });
+    
+    // إخفاء أو تشويش بعض المعلومات الحساسة في Console
+    const originalLog = console.log;
+    console.log = function(...args) {
+        const safeArgs = args.map(arg => 
+            typeof arg === 'string' && arg.includes('apiKey') ? '[HIDDEN]' : arg
+        );
+        originalLog.apply(console, safeArgs);
+    };
+}
