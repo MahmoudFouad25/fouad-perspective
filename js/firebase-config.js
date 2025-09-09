@@ -12,19 +12,31 @@ const firebaseConfig = {
     measurementId: "G-RY1FYVB3Q9"
 };
 
-// Initialize Firebase - تهيئة واحدة فقط
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-
-// Initialize Firebase Analytics (optional)
-if (typeof firebase.analytics !== 'undefined') {
-    firebase.analytics();
-}
-
 // متغيرات Firebase العامة
-const auth = firebase.auth();
-const db = firebase.firestore();
+let auth, db;
+
+// Initialize Firebase - تهيئة واحدة فقط مع معالجة الأخطاء
+try {
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+        console.log('✅ Firebase initialized successfully');
+    }
+    
+    // Initialize Firebase Analytics (optional)
+    if (typeof firebase.analytics !== 'undefined') {
+        firebase.analytics();
+    }
+    
+    // تهيئة الخدمات
+    auth = firebase.auth();
+    db = firebase.firestore();
+    
+} catch (error) {
+    console.error('❌ خطأ في تهيئة Firebase:', error);
+    // لا تتوقف - حاول المتابعة
+    auth = firebase.auth();
+    db = firebase.firestore();
+}
 
 // ================== وظائف الأمان والحماية المحسنة ==================
 
@@ -35,34 +47,41 @@ function generateDeviceId() {
     let deviceId = localStorage.getItem('secureDeviceId');
     
     if (!deviceId) {
-        // إنشاء بصمة جهاز معقدة
-        const fingerprint = [
-            nav.userAgent,
-            nav.language,
-            nav.languages ? nav.languages.join(',') : '',
-            screen.height,
-            screen.width,
-            screen.pixelDepth,
-            screen.colorDepth,
-            new Date().getTimezoneOffset(),
-            nav.hardwareConcurrency || 0,
-            nav.platform,
-            nav.cookieEnabled,
-            nav.onLine,
-            nav.maxTouchPoints || 0,
-            window.devicePixelRatio || 1
-        ].join('|');
-        
-        // تشفير البصمة
-        let hash = 0;
-        for (let i = 0; i < fingerprint.length; i++) {
-            const char = fingerprint.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+        try {
+            // إنشاء بصمة جهاز معقدة
+            const fingerprint = [
+                nav.userAgent,
+                nav.language,
+                nav.languages ? nav.languages.join(',') : '',
+                screen.height,
+                screen.width,
+                screen.pixelDepth,
+                screen.colorDepth,
+                new Date().getTimezoneOffset(),
+                nav.hardwareConcurrency || 0,
+                nav.platform,
+                nav.cookieEnabled,
+                nav.onLine,
+                nav.maxTouchPoints || 0,
+                window.devicePixelRatio || 1
+            ].join('|');
+            
+            // تشفير البصمة
+            let hash = 0;
+            for (let i = 0; i < fingerprint.length; i++) {
+                const char = fingerprint.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            
+            deviceId = 'sec_' + Math.abs(hash).toString(36) + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('secureDeviceId', deviceId);
+        } catch (error) {
+            console.error('خطأ في إنشاء معرف الجهاز:', error);
+            // fallback معرف بسيط
+            deviceId = 'fallback_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('secureDeviceId', deviceId);
         }
-        
-        deviceId = 'sec_' + Math.abs(hash).toString(36) + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('secureDeviceId', deviceId);
     }
     
     return deviceId;
@@ -71,6 +90,11 @@ function generateDeviceId() {
 // التحقق من الجلسة النشطة مع قوة إضافية
 async function checkActiveSession(userId) {
     try {
+        if (!db || !userId) {
+            console.log('❌ قاعدة البيانات غير متاحة أو معرف المستخدم فارغ');
+            return { allowed: false, reason: 'invalid_params' };
+        }
+        
         const deviceId = generateDeviceId();
         const userDoc = await db.collection('users').doc(userId).get();
         
@@ -114,8 +138,10 @@ async function checkActiveSession(userId) {
                 forceLogout: false // إعادة تعيين علامة الإخراج القسري
             });
             
-            // بدء مراقبة النشاط
-            startActivityMonitoring(userId, deviceId);
+            // بدء مراقبة النشاط مع تأخير لتجنب المشاكل
+            setTimeout(() => {
+                startActivityMonitoring(userId, deviceId);
+            }, 1000);
             
             return { allowed: true, deviceId: deviceId };
         }
@@ -124,27 +150,45 @@ async function checkActiveSession(userId) {
         
     } catch (error) {
         console.error('خطأ في التحقق من الجلسة:', error);
-        return { allowed: false, reason: 'error' };
+        return { allowed: false, reason: 'error', error: error.message };
     }
 }
 
-// مراقبة النشاط المحسنة
+// مراقبة النشاط المحسنة مع حماية من الحلقات اللانهائية
 function startActivityMonitoring(userId, deviceId) {
-    // إيقاف أي مراقبة سابقة
+    // إيقاف أي مراقبة سابقة لتجنب التكرار
     if (window.activityMonitor) {
         clearInterval(window.activityMonitor);
+        window.activityMonitor = null;
     }
+    
+    // التحقق من المعاملات المطلوبة
+    if (!userId || !deviceId || !db) {
+        console.warn('⚠️ لا يمكن بدء مراقبة النشاط - معاملات مفقودة');
+        return;
+    }
+    
+    let consecutiveErrors = 0;
+    const MAX_ERRORS = 3;
     
     // مراقبة كل 30 ثانية
     const activityInterval = setInterval(async () => {
         try {
+            // التحقق من حالة الاتصال
+            if (!navigator.onLine) {
+                console.log('📴 لا يوجد اتصال بالإنترنت');
+                return;
+            }
+            
             const userDoc = await db.collection('users').doc(userId).get();
+            
             if (userDoc.exists) {
                 const userData = userDoc.data();
                 
                 // التحقق من الإخراج القسري
                 if (userData.forceLogout === true) {
                     clearInterval(activityInterval);
+                    window.activityMonitor = null;
                     await handleForcedLogout('تم تسجيل الدخول من جهاز آخر');
                     return;
                 }
@@ -152,6 +196,7 @@ function startActivityMonitoring(userId, deviceId) {
                 // التحقق من الجهاز النشط
                 if (userData.activeDevice !== deviceId) {
                     clearInterval(activityInterval);
+                    window.activityMonitor = null;
                     await handleForcedLogout('تم استبدال جلستك بجلسة أخرى');
                     return;
                 }
@@ -162,13 +207,24 @@ function startActivityMonitoring(userId, deviceId) {
                     sessionStatus: 'active'
                 });
                 
+                // إعادة تعيين عداد الأخطاء
+                consecutiveErrors = 0;
+                
             } else {
                 clearInterval(activityInterval);
+                window.activityMonitor = null;
                 await handleForcedLogout('لم يتم العثور على بيانات المستخدم');
             }
         } catch (error) {
             console.error('خطأ في تحديث النشاط:', error);
-            // لا نخرج المستخدم في حالة خطأ الشبكة
+            consecutiveErrors++;
+            
+            // إيقاف المراقبة بعد عدة أخطاء متتالية لتجنب الحلقات اللانهائية
+            if (consecutiveErrors >= MAX_ERRORS) {
+                console.warn('⚠️ إيقاف مراقبة النشاط بسبب أخطاء متكررة');
+                clearInterval(activityInterval);
+                window.activityMonitor = null;
+            }
         }
     }, 30000); // كل 30 ثانية
     
@@ -176,91 +232,126 @@ function startActivityMonitoring(userId, deviceId) {
     window.activityMonitor = activityInterval;
     
     // إيقاف المراقبة عند إغلاق الصفحة
-    window.addEventListener('beforeunload', () => {
-        clearInterval(activityInterval);
-        // تحديث حالة الجلسة عند المغادرة
-        if (navigator.sendBeacon) {
-            navigator.sendBeacon('/api/session-end', JSON.stringify({userId, deviceId}));
+    const handleBeforeUnload = () => {
+        if (window.activityMonitor) {
+            clearInterval(window.activityMonitor);
+            window.activityMonitor = null;
         }
-    });
+        
+        // تحديث حالة الجلسة عند المغادرة
+        if (navigator.sendBeacon && db) {
+            try {
+                navigator.sendBeacon('/api/session-end', JSON.stringify({userId, deviceId}));
+            } catch (e) {
+                // تجاهل الأخطاء هنا
+            }
+        }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
     
     // مراقبة تبديل التاب أو فقدان التركيز
-    document.addEventListener('visibilitychange', () => {
+    const handleVisibilityChange = () => {
+        if (!window.activityMonitor) return;
+        
+        clearInterval(window.activityMonitor);
+        
         if (document.hidden) {
             // الصفحة مخفية - تقليل تكرار المراقبة
-            clearInterval(activityInterval);
             startActivityMonitoring(userId, deviceId, 60000); // كل دقيقة
         } else {
             // الصفحة نشطة - إعادة المراقبة العادية
-            clearInterval(activityInterval);
             startActivityMonitoring(userId, deviceId, 30000); // كل 30 ثانية
         }
-    });
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 }
 
 // معالجة الإخراج القسري
 async function handleForcedLogout(reason = 'جلسة أخرى نشطة') {
-    // تنظيف البيانات المحلية
-    localStorage.clear();
-    sessionStorage.clear();
-    
-    // إيقاف جميع المراقبات
-    if (window.activityMonitor) {
-        clearInterval(window.activityMonitor);
-    }
-    
-    // عرض رسالة للمستخدم
-    if (typeof Swal !== 'undefined') {
-        await Swal.fire({
-            icon: 'warning',
-            title: 'تم تسجيل خروجك',
-            text: reason,
-            confirmButtonText: 'حسناً',
-            allowOutsideClick: false,
-            allowEscapeKey: false
-        });
-    } else {
-        alert(reason + '\nسيتم توجيهك لصفحة تسجيل الدخول.');
-    }
-    
-    // تسجيل خروج من Firebase
     try {
-        await auth.signOut();
+        // تنظيف البيانات المحلية
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // إيقاف جميع المراقبات
+        if (window.activityMonitor) {
+            clearInterval(window.activityMonitor);
+            window.activityMonitor = null;
+        }
+        
+        // عرض رسالة للمستخدم
+        if (typeof Swal !== 'undefined') {
+            await Swal.fire({
+                icon: 'warning',
+                title: 'تم تسجيل خروجك',
+                text: reason,
+                confirmButtonText: 'حسناً',
+                allowOutsideClick: false,
+                allowEscapeKey: false
+            });
+        } else {
+            alert(reason + '\nسيتم توجيهك لصفحة تسجيل الدخول.');
+        }
+        
+        // تسجيل خروج من Firebase
+        try {
+            if (auth) {
+                await auth.signOut();
+            }
+        } catch (error) {
+            console.error('خطأ في تسجيل الخروج:', error);
+        }
+        
+        // التوجيه لصفحة تسجيل الدخول
+        window.location.replace('./login.html');
+        
     } catch (error) {
-        console.error('خطأ في تسجيل الخروج:', error);
+        console.error('خطأ في معالجة الإخراج القسري:', error);
+        // التوجيه مباشرة في حالة الخطأ
+        window.location.replace('./login.html');
     }
-    
-    // التوجيه لصفحة تسجيل الدخول
-    window.location.replace('./login.html');
 }
 
 // التحقق من الجلسة لصفحة Dashboard
 async function verifyDashboardSession() {
-    const userId = localStorage.getItem('userId');
-    const isLoggedIn = localStorage.getItem('isLoggedIn');
-    
-    if (!userId || isLoggedIn !== 'true') {
-        window.location.replace('./login.html');
-        return false;
-    }
-    
-    const sessionCheck = await checkActiveSession(userId);
-    
-    if (!sessionCheck.allowed) {
-        if (sessionCheck.reason === 'active_device') {
-            await handleForcedLogout('يوجد جهاز آخر نشط بحسابك');
-        } else {
-            await handleForcedLogout('خطأ في التحقق من الجلسة');
+    try {
+        const userId = localStorage.getItem('userId');
+        const isLoggedIn = localStorage.getItem('isLoggedIn');
+        
+        if (!userId || isLoggedIn !== 'true') {
+            console.log('❌ لا توجد جلسة محفوظة');
+            window.location.replace('./login.html');
+            return false;
         }
+        
+        const sessionCheck = await checkActiveSession(userId);
+        
+        if (!sessionCheck.allowed) {
+            if (sessionCheck.reason === 'active_device') {
+                await handleForcedLogout('يوجد جهاز آخر نشط بحسابك');
+            } else {
+                await handleForcedLogout('خطأ في التحقق من الجلسة');
+            }
+            return false;
+        }
+        
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من جلسة Dashboard:', error);
         return false;
     }
-    
-    return true;
 }
 
 // إجبار تسجيل خروج الأجهزة الأخرى
 async function forceLogoutOtherDevices(userId) {
     try {
+        if (!db || !userId) {
+            return false;
+        }
+        
         await db.collection('users').doc(userId).update({
             forceLogout: true,
             forceLogoutTime: firebase.firestore.FieldValue.serverTimestamp(),
@@ -280,21 +371,27 @@ async function forceLogoutOtherDevices(userId) {
 // ================== باقي الوظائف الأصلية ==================
 
 function signOut() {
-    // إيقاف المراقبة
-    if (window.activityMonitor) {
-        clearInterval(window.activityMonitor);
+    try {
+        // إيقاف المراقبة
+        if (window.activityMonitor) {
+            clearInterval(window.activityMonitor);
+            window.activityMonitor = null;
+        }
+        
+        // تنظيف البيانات
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        auth.signOut().then(() => {
+            window.location.href = './login.html';
+        }).catch((error) => {
+            console.error('Error signing out:', error);
+            window.location.href = './login.html';
+        });
+    } catch (error) {
+        console.error('خطأ في تسجيل الخروج:', error);
+        window.location.href = './login.html';
     }
-    
-    // تنظيف البيانات
-    localStorage.clear();
-    sessionStorage.clear();
-    
-    auth.signOut().then(() => {
-        window.location.href = './login.html';
-    }).catch((error) => {
-        console.error('Error signing out:', error);
-        window.location.href = './login.html';
-    });
 }
 
 function checkAdminAuth() {
