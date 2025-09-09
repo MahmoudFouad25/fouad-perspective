@@ -792,6 +792,9 @@
                 <button class="btn-export" onclick="exportToPDF()">
                     <i class="fas fa-file-pdf"></i> تصدير PDF
                 </button>
+                <button class="btn-export" onclick="showGrantsReport()" style="background: #9333EA;">
+    <i class="fas fa-hand-holding-heart"></i> تقرير المنح
+</button>
             </div>
         </div>
         
@@ -2650,17 +2653,17 @@ ${booking.paymentDetails?.type === 'installment' && booking.paymentDetails?.inst
 }
 
         // دالة جديدة للتفاصيل الكاملة
-  function getFullDetailsContent(booking) {
+function getFullDetailsContent(booking) {
     const type = booking.bookingType || booking.type || 'unknown';
     
     if (type === 'individual') {
         return createIndividualContent(booking);
     } else if (type === 'grant_request') {
         return createGrantContent(booking);
+    } else {
+        return '<p style="text-align: center; color: #6B7280;">نوع حجز غير مدعوم حالياً</p>';
     }
-    
-    return '<p style="text-align: center; color: #6B7280;">نوع حجز غير مدعوم حالياً</p>';
-}  
+}
         
         // دوال مساعدة
         
@@ -4476,6 +4479,124 @@ async function sendGrantRejection(bookingId) {
     }
 }
 
+        // دالة تحويل المنحة المعتمدة إلى حجز عادي
+async function convertGrantToBooking(bookingId) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    
+    const grantCalc = calculateGrantSupport(booking);
+    
+    Swal.fire({
+        title: 'تحويل إلى حجز عادي',
+        html: `
+            <div style="text-align: right;">
+                <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                    <h4 style="color: #065F46;">تفاصيل المنحة المعتمدة:</h4>
+                    <p>المبلغ النهائي: ${grantCalc.finalAmount.toLocaleString('ar-EG')} ج.م</p>
+                    <p>نسبة الخصم: ${grantCalc.discount}%</p>
+                    ${grantCalc.installmentInfo ? `
+                        <p>التقسيط: ${grantCalc.installmentInfo.months} شهور</p>
+                        <p>القسط الشهري: ${grantCalc.installmentInfo.monthlyAmount.toLocaleString('ar-EG')} ج.م</p>
+                    ` : ''}
+                </div>
+                <p style="color: #DC2626;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    سيتم تحويل طلب المنحة إلى حجز عادي بالشروط المعتمدة
+                </p>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تحويل الآن',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            try {
+                // تحديث البيانات
+                const updateData = {
+                    bookingType: 'individual',
+                    status: 'confirmed',
+                    grantApproved: true,
+                    grantApprovedAt: new Date().toISOString(),
+                    'pricing.finalPrice': `${grantCalc.finalAmount.toLocaleString('ar-EG')} ج.م`,
+                    'pricing.finalPriceNumber': grantCalc.finalAmount,
+                    totalSavings: grantCalc.savings,
+                    totalSavingsText: `${grantCalc.savings.toLocaleString('ar-EG')} ج.م`
+                };
+                
+                if (grantCalc.installmentInfo) {
+                    updateData.payment = {
+                        method: 'installment',
+                        code: `grant_installment_${grantCalc.installmentInfo.months}`,
+                        installmentDetails: `${grantCalc.installmentInfo.months} أقساط شهرية`,
+                        installmentHTML: `${grantCalc.installmentInfo.monthlyAmount.toLocaleString('ar-EG')} ج.م × ${grantCalc.installmentInfo.months}`
+                    };
+                }
+                
+                await db.collection('tempBookings').doc(bookingId).update(updateData);
+                
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم التحويل بنجاح!',
+                    text: 'تم تحويل طلب المنحة إلى حجز عادي',
+                    confirmButtonColor: '#10B981'
+                });
+                
+                loadBookings();
+            } catch (error) {
+                console.error('خطأ:', error);
+                Swal.fire('خطأ!', 'فشل تحويل المنحة', 'error');
+            }
+        }
+    });
+}
+
+// دالة عرض تقرير المنح
+async function showGrantsReport() {
+    const grantBookings = allBookings.filter(b => b.bookingType === 'grant_request');
+    
+    const approved = grantBookings.filter(b => b.grantStatus === 'approved').length;
+    const pending = grantBookings.filter(b => !b.grantStatus || b.grantStatus === 'pending').length;
+    const rejected = grantBookings.filter(b => b.grantStatus === 'rejected').length;
+    
+    let totalGrantAmount = 0;
+    grantBookings.forEach(booking => {
+        const calc = calculateGrantSupport(booking);
+        totalGrantAmount += calc.savings;
+    });
+    
+    Swal.fire({
+        title: 'تقرير المنح',
+        html: `
+            <div style="text-align: right;">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="font-size: 2rem; color: #10B981; font-weight: bold;">${approved}</div>
+                        <div style="color: #065F46;">معتمدة</div>
+                    </div>
+                    <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="font-size: 2rem; color: #F59E0B; font-weight: bold;">${pending}</div>
+                        <div style="color: #92400E;">قيد المراجعة</div>
+                    </div>
+                    <div style="background: #FEE2E2; padding: 15px; border-radius: 10px; text-align: center;">
+                        <div style="font-size: 2rem; color: #EF4444; font-weight: bold;">${rejected}</div>
+                        <div style="color: #991B1B;">مرفوضة</div>
+                    </div>
+                </div>
+                <div style="background: #F3E8FF; padding: 20px; border-radius: 10px; text-align: center;">
+                    <div style="color: #6B21A8; margin-bottom: 10px;">إجمالي قيمة المنح</div>
+                    <div style="font-size: 2.5rem; color: #9333EA; font-weight: bold;">
+                        ${totalGrantAmount.toLocaleString('ar-EG')} ج.م
+                    </div>
+                </div>
+            </div>
+        `,
+        confirmButtonText: 'إغلاق',
+        confirmButtonColor: '#6B7280',
+        width: '600px'
+    });
+}
+        
 async function requestMoreGrantInfo(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
@@ -5688,6 +5809,96 @@ function printCustomerCard(bookingId) {
 
        
 
+        // دالة التحقق من اكتمال بيانات المنحة
+function validateGrantData(booking) {
+    const errors = [];
+    const warnings = [];
+    
+    // التحقق من البيانات الأساسية
+    if (!booking.customer?.name) {
+        errors.push('اسم المتقدم مفقود');
+    }
+    if (!booking.customer?.whatsapp) {
+        errors.push('رقم الواتساب مفقود');
+    }
+    if (!booking.grantDetails?.reason) {
+        errors.push('سبب طلب المنحة مفقود');
+    }
+    if (!booking.grantDetails?.challenges) {
+        errors.push('التحديات غير محددة');
+    }
+    if (!booking.grantDetails?.financial?.employmentStatus) {
+        warnings.push('الوضع الوظيفي غير محدد');
+    }
+    if (!booking.grantDetails?.supportDetails?.type) {
+        errors.push('نوع الدعم المطلوب غير محدد');
+    }
+    
+    // حساب نسبة الاكتمال
+    const totalFields = 12;
+    const filledFields = totalFields - errors.length - (warnings.length * 0.5);
+    const completeness = Math.round((filledFields / totalFields) * 100);
+    
+    return {
+        isValid: errors.length === 0,
+        errors: errors,
+        warnings: warnings,
+        completeness: completeness,
+        canProceed: completeness >= 70
+    };
+}
+
+// دالة حساب الدعم المالي للمنحة
+function calculateGrantSupport(booking) {
+    const grantDetails = booking.grantDetails || {};
+    const supportDetails = grantDetails.supportDetails || {};
+    const pricing = booking.pricing || {};
+    
+    const basePrice = pricing.basePriceNumber || 7500;
+    let finalAmount = 0;
+    let discount = 0;
+    let installmentInfo = null;
+    
+    if (supportDetails.type === 'full') {
+        // منحة كاملة 100%
+        finalAmount = 0;
+        discount = 100;
+    } else if (supportDetails.type === 'partial') {
+        // منحة جزئية
+        const percentage = supportDetails.percentage || 50;
+        discount = percentage;
+        finalAmount = Math.round(basePrice * (1 - percentage / 100));
+        
+        if (supportDetails.installmentRequested) {
+            const months = supportDetails.installmentMonths || 3;
+            const monthlyAmount = Math.ceil(finalAmount / months);
+            installmentInfo = {
+                months: months,
+                monthlyAmount: monthlyAmount,
+                totalAmount: finalAmount
+            };
+        }
+    } else if (supportDetails.type === 'installment') {
+        // تقسيط ميسر فقط
+        discount = 0;
+        finalAmount = basePrice;
+        const months = supportDetails.months || 3;
+        const monthlyAmount = Math.ceil(finalAmount / months);
+        installmentInfo = {
+            months: months,
+            monthlyAmount: monthlyAmount,
+            totalAmount: finalAmount
+        };
+    }
+    
+    return {
+        basePrice: basePrice,
+        finalAmount: finalAmount,
+        discount: discount,
+        installmentInfo: installmentInfo,
+        savings: basePrice - finalAmount
+    };
+}
 // أضف هذه الدالة قبل دالة transferToSpecialized
 async function checkExistingUser(booking) {
     try {
