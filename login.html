@@ -467,6 +467,73 @@ body {
         opacity: 1;
     }
 }
+
+      /* تخصيص SweetAlert2 للتصميم الروحاني */
+.swal2-popup {
+    background: rgba(26, 31, 58, 0.95) !important;
+    backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 20px !important;
+    color: white !important;
+}
+
+.swal2-title {
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-weight: 300 !important;
+}
+
+.swal2-content {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.swal2-confirm {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.1)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 50px !important;
+    padding: 12px 30px !important;
+    font-weight: 400 !important;
+    transition: all 0.3s !important;
+}
+
+.swal2-confirm:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2) !important;
+}
+
+/* مؤشر جهاز نشط */
+.active-device-indicator {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    padding: 10px 20px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    z-index: 100;
+}
+
+.active-device-indicator.show {
+    display: flex;
+}
+
+.device-dot {
+    width: 8px;
+    height: 8px;
+    background: #4ade80;
+    border-radius: 50%;
+    animation: devicePulse 2s infinite;
+}
+
+@keyframes devicePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+}
 </style>
 </head>
 <body>
@@ -550,15 +617,153 @@ body {
     </div>
 </div>
 
-    <!-- Firebase Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <!-- Firebase Scripts -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script src="./js/firebase-config.js"></script>
+    
 <div class="portal-transition" id="portalTransition"></div>
     <script>
-    // متغيرات الصوت
+// ============ متغيرات عامة ============
 let audioContext;
 let isAudioEnabled = false;
+let loginAttempts = 0;
+const MAX_LOGIN_ATTEMPTS = 5;
+
+// ============ وظائف الحماية والأمان ============
+
+// توليد معرف فريد للجهاز
+function generateDeviceId() {
+    const nav = window.navigator;
+    const screen = window.screen;
+    let deviceId = localStorage.getItem('deviceId');
+    
+    if (!deviceId) {
+        const fingerprint = [
+            nav.userAgent,
+            nav.language,
+            screen.height,
+            screen.width,
+            screen.pixelDepth,
+            new Date().getTimezoneOffset(),
+            nav.hardwareConcurrency,
+            nav.platform
+        ].join('|');
+        
+        // إنشاء hash بسيط
+        let hash = 0;
+        for (let i = 0; i < fingerprint.length; i++) {
+            const char = fingerprint.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        
+        deviceId = 'device_' + Math.abs(hash).toString(36) + '_' + Date.now().toString(36);
+        localStorage.setItem('deviceId', deviceId);
+    }
+    
+    return deviceId;
+}
+
+// التحقق من الجلسة النشطة
+async function checkActiveSession(userId) {
+    try {
+        const deviceId = generateDeviceId();
+        const userDoc = await db.collection('users').doc(userId).get();
+        
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            const activeDevice = userData.activeDevice;
+            const lastActivity = userData.lastActivity;
+            
+            // التحقق من الجهاز النشط
+            if (activeDevice && activeDevice !== deviceId) {
+                // التحقق من آخر نشاط (5 دقائق)
+                if (lastActivity) {
+                    const lastActivityTime = lastActivity.toDate();
+                    const now = new Date();
+                    const diffMinutes = (now - lastActivityTime) / (1000 * 60);
+                    
+                    if (diffMinutes < 5) {
+                        // جهاز آخر نشط
+                        return {
+                            allowed: false,
+                            reason: 'active_device',
+                            deviceInfo: userData.deviceInfo || {}
+                        };
+                    }
+                }
+            }
+            
+            // تحديث الجهاز النشط
+            await db.collection('users').doc(userId).update({
+                activeDevice: deviceId,
+                lastActivity: firebase.firestore.FieldValue.serverTimestamp(),
+                deviceInfo: {
+                    userAgent: navigator.userAgent,
+                    platform: navigator.platform,
+                    language: navigator.language,
+                    screenResolution: `${screen.width}x${screen.height}`,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            
+            // بدء مراقبة النشاط
+            startActivityMonitoring(userId, deviceId);
+            
+            return { allowed: true };
+        }
+        
+        return { allowed: false, reason: 'user_not_found' };
+        
+    } catch (error) {
+        console.error('خطأ في التحقق من الجلسة:', error);
+        return { allowed: false, reason: 'error' };
+    }
+}
+
+// مراقبة النشاط المستمر
+function startActivityMonitoring(userId, deviceId) {
+    // تحديث النشاط كل دقيقة
+    setInterval(async () => {
+        try {
+            const userDoc = await db.collection('users').doc(userId).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                
+                // التحقق من أن الجهاز ما زال هو النشط
+                if (userData.activeDevice === deviceId) {
+                    await db.collection('users').doc(userId).update({
+                        lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } else {
+                    // جهاز آخر أصبح نشط - تسجيل خروج
+                    handleForcedLogout();
+                }
+            }
+        } catch (error) {
+            console.error('خطأ في تحديث النشاط:', error);
+        }
+    }, 60000); // كل دقيقة
+}
+
+// تسجيل خروج إجباري
+function handleForcedLogout() {
+    Swal.fire({
+        icon: 'warning',
+        title: 'جلسة أخرى نشطة',
+        text: 'تم تسجيل الدخول من جهاز آخر. سيتم تسجيل خروجك الآن.',
+        confirmButtonText: 'حسناً',
+        allowOutsideClick: false,
+        allowEscapeKey: false
+    }).then(() => {
+        auth.signOut();
+        window.location.reload();
+    });
+}
+
+// ============ وظائف التصميم والحركة ============
 
 // إنشاء النجوم المحسّنة
 function createStars() {
@@ -569,23 +774,15 @@ function createStars() {
         const star = document.createElement('div');
         star.className = 'star';
         
-        // حجم عشوائي
         const size = Math.random() * 3 + 1;
         star.style.width = size + 'px';
         star.style.height = size + 'px';
-        
-        // موقع عشوائي
         star.style.left = Math.random() * 100 + '%';
         star.style.top = Math.random() * 100 + '%';
-        
-        // تأخير عشوائي للومضة
         star.style.animationDelay = Math.random() * 3 + 's';
         star.style.animationDuration = (Math.random() * 3 + 3) + 's';
-        
-        // شفافية متفاوتة
         star.style.opacity = Math.random() * 0.7 + 0.3;
         
-        // بعض النجوم تتحرك أفقياً
         if (Math.random() > 0.7) {
             star.classList.add('moving');
             star.style.animationDelay = Math.random() * 20 + 's';
@@ -595,7 +792,7 @@ function createStars() {
     }
 }
 
-// النص الترحيبي يظهر حرف حرف
+// النص الترحيبي
 function showWelcomeText() {
     const text = "أهلاً بروحك الباحثة";
     const element = document.getElementById('welcomeText');
@@ -607,17 +804,17 @@ function showWelcomeText() {
                 element.textContent += text[index];
                 element.classList.add('show');
                 index++;
-                playKeySound(); // صوت الكتابة
+                playKeySound();
             } else {
                 clearInterval(interval);
-                // إظهار منطقة الدخول
                 document.getElementById('loginArea').classList.add('show');
             }
         }, 100);
     }, 2000);
 }
 
-// تهيئة الصوت
+// ============ وظائف الصوت ============
+
 function initAudio() {
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -625,7 +822,6 @@ function initAudio() {
     }
 }
 
-// صوت همسة خفيفة
 function playKeySound() {
     if (!isAudioEnabled) return;
     
@@ -634,18 +830,14 @@ function playKeySound() {
     
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
-    
     oscillator.frequency.value = 800 + Math.random() * 400;
     oscillator.type = 'sine';
-    
     gainNode.gain.setValueAtTime(0.02, audioContext.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
-    
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + 0.1);
 }
 
-// صوت الرياح الخفيفة
 function playWindSound() {
     if (!isAudioEnabled) return;
     
@@ -656,21 +848,18 @@ function playWindSound() {
     oscillator.connect(filter);
     filter.connect(gainNode);
     gainNode.connect(audioContext.destination);
-    
     oscillator.type = 'sawtooth';
     oscillator.frequency.value = 100 + Math.random() * 50;
-    
     filter.type = 'lowpass';
     filter.frequency.value = 400;
-    
     gainNode.gain.setValueAtTime(0.01, audioContext.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.5);
-    
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + 0.5);
 }
 
-// التعامل مع التركيز على الحقول
+// ============ وظائف التفاعل ============
+
 function handleFocus(groupId) {
     document.getElementById(groupId).classList.add('focused');
     createFallingStars(groupId);
@@ -681,7 +870,6 @@ function handleBlur(groupId) {
     document.getElementById(groupId).classList.remove('focused');
 }
 
-// إنشاء نجوم متساقطة حول الحقل
 function createFallingStars(groupId) {
     const group = document.getElementById(groupId);
     const container = document.createElement('div');
@@ -693,7 +881,6 @@ function createFallingStars(groupId) {
             star.className = 'mini-star';
             star.style.left = Math.random() * 100 + '%';
             container.appendChild(star);
-            
             setTimeout(() => star.remove(), 1000);
         }, i * 100);
     }
@@ -702,105 +889,228 @@ function createFallingStars(groupId) {
     setTimeout(() => container.remove(), 2000);
 }
 
-// معالج تسجيل الدخول
-function handleLogin(event) {
-    event.preventDefault();
-    
-    const button = event.target.querySelector('.enter-button');
-    const originalText = button.innerHTML;
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    
-    // إضافة تأثير الموجة
-    createRipple(button);
-    
-    // تأثير التحميل
-    button.innerHTML = '<span class="loading-text">جاري فتح البوابة...</span>';
-    button.disabled = true;
-    
-    // محاكاة تسجيل الدخول
-    setTimeout(() => {
-        if (email && password) {
-            // نجاح - تأثير الانتقال
-            startPortalTransition();
-        } else {
-            showError('الطريق مغلق... تأكد من مفتاحك');
-            button.innerHTML = originalText;
-            button.disabled = false;
-        }
-    }, 2000);
-}
-
-// تأثير الموجة عند الضغط
 function createRipple(button) {
     const ripple = document.createElement('div');
     ripple.className = 'ripple';
-    
     const rect = button.getBoundingClientRect();
     const size = Math.max(rect.width, rect.height);
-    
     ripple.style.width = ripple.style.height = size + 'px';
     ripple.style.left = '50%';
     ripple.style.top = '50%';
-    
     button.appendChild(ripple);
-    
     setTimeout(() => ripple.remove(), 600);
 }
 
-// تأثير الانتقال للصفحة التالية
+// ============ معالج تسجيل الدخول مع Firebase ============
+
+async function handleLogin(event) {
+    event.preventDefault();
+    
+    // التحقق من عدد المحاولات
+    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        showError('تم تجاوز عدد المحاولات المسموح. حاول لاحقاً.');
+        return;
+    }
+    
+    const button = event.target.querySelector('.enter-button');
+    const originalText = button.innerHTML;
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    
+    // تأثيرات بصرية
+    createRipple(button);
+    button.innerHTML = '<span class="loading-text">جاري فتح البوابة...</span>';
+    button.disabled = true;
+    
+    try {
+        // البحث عن المستخدم في قاعدة البيانات
+        const usersQuery = await db.collection('users')
+            .where('personalInfo.email', '==', email)
+            .limit(1)
+            .get();
+        
+        if (usersQuery.empty) {
+            throw new Error('لم نتعرف على روحك... تأكد من هويتك');
+        }
+        
+        const userDoc = usersQuery.docs[0];
+        const userData = userDoc.data();
+        const userId = userDoc.id;
+        
+        // التحقق من حالة الحساب
+        if (userData.accountStatus) {
+            if (userData.accountStatus.suspended === true) {
+                throw new Error(`حسابك معلق: ${userData.accountStatus.suspendReason || 'تواصل مع الإدارة'}`);
+            }
+        }
+        
+        // التحقق من الجلسة النشطة
+        const sessionCheck = await checkActiveSession(userId);
+        
+        if (!sessionCheck.allowed) {
+            if (sessionCheck.reason === 'active_device') {
+                const result = await Swal.fire({
+                    icon: 'warning',
+                    title: 'جهاز آخر نشط',
+                    html: `
+                        <div style="text-align: right;">
+                            <p>يوجد جهاز آخر مسجل دخول بحسابك:</p>
+                            <p style="color: rgba(255,255,255,0.5); font-size: 14px;">
+                                ${sessionCheck.deviceInfo.platform || 'جهاز غير معروف'}<br>
+                                ${sessionCheck.deviceInfo.userAgent ? sessionCheck.deviceInfo.userAgent.substring(0, 50) + '...' : ''}
+                            </p>
+                            <p style="margin-top: 20px;">هل تريد تسجيل الخروج من الجهاز الآخر والمتابعة؟</p>
+                        </div>
+                    `,
+                    showCancelButton: true,
+                    confirmButtonText: 'نعم، سجل الخروج من الجهاز الآخر',
+                    cancelButtonText: 'إلغاء'
+                });
+                
+                if (!result.isConfirmed) {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                    return;
+                }
+            } else {
+                throw new Error('حدث خطأ في التحقق من الجلسة');
+            }
+        }
+        
+        // محاولة تسجيل الدخول
+        let authSuccess = false;
+        
+        try {
+            await auth.signInWithEmailAndPassword(email, password);
+            authSuccess = true;
+        } catch (authError) {
+            // التحقق من كلمة المرور المحفوظة
+            if (userData.auth && userData.auth.tempPassword) {
+                const savedPassword = atob(userData.auth.tempPassword);
+                if (password === savedPassword) {
+                    authSuccess = true;
+                    try {
+                        await auth.createUserWithEmailAndPassword(email, password);
+                    } catch (e) {
+                        if (e.code !== 'auth/email-already-in-use') throw e;
+                    }
+                }
+            }
+            
+            if (!authSuccess) {
+                throw new Error('الطريق مغلق... تأكد من مفتاحك');
+            }
+        }
+        
+        if (authSuccess) {
+            // تحديث معلومات الدخول
+            await db.collection('users').doc(userId).update({
+                'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+                'auth.loginCount': firebase.firestore.FieldValue.increment(1),
+                activeDevice: generateDeviceId(),
+                lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            // حفظ معلومات المستخدم
+            localStorage.setItem('userId', userId);
+            localStorage.setItem('userEmail', email);
+            localStorage.setItem('userName', userData.personalInfo?.name || 'مستخدم');
+            
+            // إظهار مؤشر الجهاز المحمي
+            document.getElementById('deviceIndicator').classList.add('show');
+            
+            // تأثير الانتقال
+            startPortalTransition();
+            
+            // التوجيه حسب نوع المستخدم
+            setTimeout(() => {
+                const isAdmin = email === 'admin@fouad-academy.com' || 
+                               userData.auth?.role === 'admin';
+                
+                if (isAdmin) {
+                    window.location.href = './admin/dashboard.html';
+                } else {
+                    window.location.href = './dashboard.html';
+                }
+            }, 1500);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في تسجيل الدخول:', error);
+        loginAttempts++;
+        button.innerHTML = originalText;
+        button.disabled = false;
+        showError(error.message || 'حدث خطأ في الدخول');
+    }
+}
+
+// تأثير الانتقال
 function startPortalTransition() {
     const portal = document.getElementById('portalTransition');
     portal.classList.add('active');
     
-    // صوت النجاح
     if (isAudioEnabled) {
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
-        
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
-        
-        oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
-        oscillator.frequency.exponentialRampToValueAtTime(1046.50, audioContext.currentTime + 0.5); // C6
-        
+        oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(1046.50, audioContext.currentTime + 0.5);
         gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
         gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 1);
-        
         oscillator.start(audioContext.currentTime);
         oscillator.stop(audioContext.currentTime + 1);
     }
-    
-    setTimeout(() => {
-        // هنا يمكن إضافة كود الانتقال الفعلي
-        console.log('الانتقال للصفحة التالية...');
-    }, 1500);
 }
 
-// إظهار رسالة خطأ روحانية
+// إظهار رسالة خطأ
 function showError(message) {
     const errorEl = document.getElementById('errorMessage');
     errorEl.textContent = message;
     errorEl.classList.add('show');
-    
-    setTimeout(() => {
-        errorEl.classList.remove('show');
-    }, 5000);
+    setTimeout(() => errorEl.classList.remove('show'), 5000);
 }
 
-// نسيت طريقك
-function forgotPath(event) {
+// نسيت كلمة المرور
+async function forgotPath(event) {
     event.preventDefault();
-    showError('سيصلك دليل الطريق قريباً...');
+    
+    const { value: email } = await Swal.fire({
+        title: 'استعادة الطريق',
+        input: 'email',
+        inputLabel: 'أدخل بريدك الإلكتروني',
+        inputPlaceholder: 'your@email.com',
+        showCancelButton: true,
+        confirmButtonText: 'أرسل دليل الطريق',
+        cancelButtonText: 'إلغاء',
+        inputValidator: (value) => {
+            if (!value) return 'يرجى إدخال البريد الإلكتروني';
+            if (!value.includes('@')) return 'البريد الإلكتروني غير صحيح';
+        }
+    });
+    
+    if (email) {
+        try {
+            await auth.sendPasswordResetEmail(email);
+            Swal.fire({
+                icon: 'success',
+                title: 'تم الإرسال',
+                text: 'تم إرسال دليل الطريق إلى بريدك الإلكتروني'
+            });
+        } catch (error) {
+            showError('حدث خطأ في إرسال دليل الطريق');
+        }
+    }
 }
 
 // روح جديدة
 function newSoul(event) {
     event.preventDefault();
-    showError('رحلة جديدة تبدأ قريباً...');
+    window.location.href = './register.html';
 }
 
-// تشغيل عند تحميل الصفحة
+// ============ التهيئة عند التحميل ============
+
 window.addEventListener('load', () => {
     // تفعيل التنفس للصفحة
     document.querySelector('.portal-container').classList.add('breathing');
@@ -816,9 +1126,17 @@ window.addEventListener('load', () => {
         initAudio();
         document.removeEventListener('click', initSound);
     }, { once: true });
+    
+    // التحقق من حالة تسجيل الدخول
+    auth.onAuthStateChanged((user) => {
+        if (user) {
+            // المستخدم مسجل دخول بالفعل
+            window.location.href = './dashboard.html';
+        }
+    });
 });
 
-// تأثيرات إضافية عند الكتابة
+// تأثيرات الكتابة
 document.addEventListener('DOMContentLoaded', function() {
     const inputs = document.querySelectorAll('.soul-input');
     
@@ -833,7 +1151,22 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// منع فحص العناصر في الإنتاج
+if (window.location.hostname === 'mahmoudfouad25.github.io') {
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', e => {
+        if (e.ctrlKey && (e.keyCode === 85 || e.keyCode === 83 || e.keyCode === 73)) {
+            e.preventDefault();
+        }
+    });
+}
         
     </script>
+    <!-- مؤشر الجهاز النشط -->
+<div class="active-device-indicator" id="deviceIndicator">
+    <div class="device-dot"></div>
+    <span>جهاز محمي</span>
+</div>
 </body>
 </html>
