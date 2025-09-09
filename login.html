@@ -915,6 +915,7 @@ function createRipple(button) {
 }
 
 // ============ معالج تسجيل الدخول الرئيسي ============
+// استبدل دالة handleLogin بالكامل بهذه النسخة المصححة
 async function handleLogin(event) {
     event.preventDefault();
     
@@ -927,6 +928,12 @@ async function handleLogin(event) {
     const originalText = button.innerHTML;
     const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
+    
+    // التحقق من الحقول
+    if (!email || !password) {
+        showError('يرجى إدخال الإيميل وكلمة المرور');
+        return;
+    }
     
     createRipple(button);
     button.innerHTML = '<span class="loading-text">جاري فتح البوابة...</span>';
@@ -941,6 +948,9 @@ async function handleLogin(event) {
             .limit(1)
             .get();
         
+        let userDoc = null;
+        let firestoreUserId = null;
+        
         if (usersQuery.empty) {
             // جرب البحث بحقل email مباشرة (للمستخدمين القدامى)
             const oldUsersQuery = await db.collection('users')
@@ -952,63 +962,19 @@ async function handleLogin(event) {
                 throw new Error('لم نتعرف على روحك... تأكد من هويتك');
             }
             
-            // استخدم البيانات القديمة
-            var userDoc = oldUsersQuery.docs[0];
+            userDoc = oldUsersQuery.docs[0];
         } else {
-            var userDoc = usersQuery.docs[0];
+            userDoc = usersQuery.docs[0];
         }
         
         const userData = userDoc.data();
-        const firestoreUserId = userDoc.id; // معرف Firestore الحقيقي
+        firestoreUserId = userDoc.id;
         
         console.log('✅ تم العثور على المستخدم:', firestoreUserId);
-        console.log('📋 بيانات المستخدم:', userData);
         
         // التحقق من حالة الحساب
-        if (userData.accountStatus) {
-            if (userData.accountStatus.suspended === true) {
-                throw new Error(`حسابك معلق: ${userData.accountStatus.suspendReason || 'تواصل مع الإدارة'}`);
-            }
-        }
-        
-        // التحقق من الجلسة النشطة
-        const sessionCheck = await checkActiveSession(firestoreUserId);
-        
-        if (!sessionCheck.allowed) {
-            if (sessionCheck.reason === 'active_device') {
-                const result = await Swal.fire({
-                    icon: 'warning',
-                    title: 'جهاز آخر نشط',
-                    html: `
-                        <div style="text-align: right;">
-                            <p>يوجد جهاز آخر مسجل دخول بحسابك:</p>
-                            <p style="color: rgba(255,255,255,0.5); font-size: 14px;">
-                                ${sessionCheck.deviceInfo.platform || 'جهاز غير معروف'}<br>
-                                آخر نشاط: ${sessionCheck.deviceInfo.timestamp || 'غير معروف'}
-                            </p>
-                            <p style="margin-top: 20px; color: #fbbf24;">
-                                <strong>هل تريد تسجيل الخروج من الجهاز الآخر والمتابعة؟</strong>
-                            </p>
-                        </div>
-                    `,
-                    showCancelButton: true,
-                    confirmButtonText: 'نعم، سجل الخروج من الجهاز الآخر',
-                    cancelButtonText: 'إلغاء'
-                });
-                
-                if (!result.isConfirmed) {
-                    button.innerHTML = originalText;
-                    button.disabled = false;
-                    return;
-                }
-                
-                await db.collection('users').doc(firestoreUserId).update({
-                    forceLogout: true,
-                    forceLogoutTime: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            } else {
-                throw new Error('حدث خطأ في التحقق من الجلسة');
-            }
+        if (userData.accountStatus?.suspended === true) {
+            throw new Error(`حسابك معلق: ${userData.accountStatus.suspendReason || 'تواصل مع الإدارة'}`);
         }
         
         // محاولة تسجيل الدخول
@@ -1021,19 +987,25 @@ async function handleLogin(event) {
         } catch (authError) {
             console.log('⚠️ فشل Auth، جاري التحقق من كلمة المرور المحفوظة...');
             
-            if (userData.auth && userData.auth.tempPassword) {
-                const savedPassword = atob(userData.auth.tempPassword);
-                if (password === savedPassword) {
-                    authSuccess = true;
-                    console.log('✅ كلمة المرور المحفوظة صحيحة');
-                    
-                    try {
-                        await auth.createUserWithEmailAndPassword(email, password);
-                    } catch (e) {
-                        if (e.code !== 'auth/email-already-in-use') {
-                            console.log('تحذير:', e.message);
+            // التحقق من كلمة المرور المحفوظة
+            if (userData.auth?.tempPassword) {
+                try {
+                    const savedPassword = atob(userData.auth.tempPassword);
+                    if (password === savedPassword) {
+                        authSuccess = true;
+                        console.log('✅ كلمة المرور المحفوظة صحيحة');
+                        
+                        // محاولة إنشاء حساب في Firebase Auth
+                        try {
+                            await auth.createUserWithEmailAndPassword(email, password);
+                        } catch (e) {
+                            if (e.code !== 'auth/email-already-in-use') {
+                                console.log('تحذير:', e.message);
+                            }
                         }
                     }
+                } catch (decodeError) {
+                    console.error('خطأ في فك تشفير كلمة المرور:', decodeError);
                 }
             }
             
@@ -1043,9 +1015,47 @@ async function handleLogin(event) {
         }
         
         if (authSuccess) {
+            // التحقق من الجلسة النشطة
+            const sessionCheck = await checkActiveSession(firestoreUserId);
+            
+            if (!sessionCheck.allowed) {
+                if (sessionCheck.reason === 'active_device') {
+                    const result = await Swal.fire({
+                        icon: 'warning',
+                        title: 'جهاز آخر نشط',
+                        html: `
+                            <div style="text-align: right;">
+                                <p>يوجد جهاز آخر مسجل دخول بحسابك</p>
+                                <p style="margin-top: 20px; color: #fbbf24;">
+                                    <strong>هل تريد تسجيل الخروج من الجهاز الآخر والمتابعة؟</strong>
+                                </p>
+                            </div>
+                        `,
+                        showCancelButton: true,
+                        confirmButtonText: 'نعم، سجل الخروج من الجهاز الآخر',
+                        cancelButtonText: 'إلغاء'
+                    });
+                    
+                    if (!result.isConfirmed) {
+                        button.innerHTML = originalText;
+                        button.disabled = false;
+                        return;
+                    }
+                    
+                    // إجبار تسجيل الخروج من الجهاز الآخر
+                    await db.collection('users').doc(firestoreUserId).update({
+                        forceLogout: true,
+                        forceLogoutTime: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    // انتظار ثانية واحدة
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+            
             const deviceId = generateDeviceId();
             
-            // تحديث معلومات الدخول - استخدم معرف Firestore
+            // تحديث معلومات الدخول
             await db.collection('users').doc(firestoreUserId).update({
                 'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
                 'auth.loginCount': firebase.firestore.FieldValue.increment(1),
@@ -1053,7 +1063,7 @@ async function handleLogin(event) {
                 lastActivity: firebase.firestore.FieldValue.serverTimestamp(),
                 forceLogout: false,
                 deviceInfo: {
-                    userAgent: navigator.userAgent,
+                    userAgent: navigator.userAgent.substring(0, 200),
                     platform: navigator.platform,
                     language: navigator.language,
                     screenResolution: `${screen.width}x${screen.height}`,
@@ -1061,7 +1071,7 @@ async function handleLogin(event) {
                 }
             });
             
-            // حفظ معرف Firestore وليس معرف Auth
+            // حفظ البيانات في localStorage
             localStorage.setItem('userId', firestoreUserId);
             localStorage.setItem('userEmail', email);
             localStorage.setItem('userName', userData.personalInfo?.name || userData.name || 'مستخدم');
@@ -1070,12 +1080,16 @@ async function handleLogin(event) {
             
             console.log('💾 تم حفظ معرف Firestore:', firestoreUserId);
             
+            // عرض مؤشر الجهاز النشط
             document.getElementById('deviceIndicator').classList.add('show');
             
+            // بدء مراقبة النشاط
             startActivityMonitoring(firestoreUserId, deviceId);
             
+            // بدء انتقال البوابة
             startPortalTransition();
             
+            // التوجيه بعد التأثير
             setTimeout(() => {
                 const isAdmin = email === 'admin@fouad-academy.com' || 
                                userData.auth?.role === 'admin' ||
@@ -1098,6 +1112,98 @@ async function handleLogin(event) {
     }
 }
 
+// تحديث كود معالجة الحقول - نسخة مبسطة وغير متعارضة
+document.addEventListener('DOMContentLoaded', function() {
+    // منع التعارض عن طريق فحص وجود الحقول أولاً
+    setTimeout(() => {
+        const passwordField = document.getElementById('password');
+        const emailField = document.getElementById('email');
+        
+        if (passwordField && !passwordField.hasAttribute('data-enhanced')) {
+            // وضع علامة لمنع التعارض
+            passwordField.setAttribute('data-enhanced', 'true');
+            emailField.setAttribute('data-enhanced', 'true');
+            
+            // السماح بلصق كلمة المرور
+            passwordField.addEventListener('paste', function(e) {
+                console.log('✅ تم السماح بلصق كلمة المرور');
+                
+                // إظهار رسالة تأكيد بسيطة
+                setTimeout(() => {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'تم اللصق بنجاح',
+                            text: 'تم لصق كلمة المرور',
+                            timer: 1500,
+                            showConfirmButton: false,
+                            toast: true,
+                            position: 'top-end'
+                        });
+                    }
+                }, 100);
+            });
+            
+            // منع نسخ كلمة المرور
+            passwordField.addEventListener('copy', function(e) {
+                e.preventDefault();
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'غير مسموح',
+                        text: 'لا يمكن نسخ كلمة المرور لأغراض الأمان',
+                        timer: 2000,
+                        showConfirmButton: false,
+                        toast: true,
+                        position: 'top-end'
+                    });
+                }
+                return false;
+            });
+            
+            // منع قص وسحب كلمة المرور
+            passwordField.addEventListener('cut', e => e.preventDefault());
+            passwordField.addEventListener('dragstart', e => e.preventDefault());
+            
+            // إضافة خصائص AutoComplete
+            emailField.setAttribute('autocomplete', 'username email');
+            passwordField.setAttribute('autocomplete', 'current-password');
+            
+            console.log('✅ تم تفعيل تحسينات حقل كلمة المرور');
+        }
+    }, 500); // تأخير لضمان تحميل DOM كاملاً
+});
+
+// تحسين معالجة الأخطاء
+function showError(message) {
+    const errorEl = document.getElementById('errorMessage');
+    if (errorEl) {
+        errorEl.textContent = message;
+        errorEl.classList.add('show');
+        setTimeout(() => errorEl.classList.remove('show'), 5000);
+    }
+    
+    // عرض في console أيضاً للتشخيص
+    console.error('خطأ:', message);
+}
+
+// إضافة معالج للتأكد من تحميل Firebase
+window.addEventListener('load', function() {
+    // التحقق من تحميل Firebase
+    if (typeof firebase === 'undefined') {
+        console.error('❌ Firebase غير محمل');
+        showError('خطأ في تحميل النظام. يرجى إعادة تحميل الصفحة.');
+        return;
+    }
+    
+    if (typeof auth === 'undefined' || typeof db === 'undefined') {
+        console.error('❌ خدمات Firebase غير متاحة');
+        showError('خطأ في الاتصال. يرجى إعادة تحميل الصفحة.');
+        return;
+    }
+    
+    console.log('✅ تم تحميل جميع المكونات بنجاح');
+});
 function startPortalTransition() {
     const portal = document.getElementById('portalTransition');
     portal.classList.add('active');
@@ -1159,7 +1265,7 @@ function newSoul(event) {
     window.location.href = './register.html';
 }
 
-// ============ التهيئة عند التحميل ============
+// ============ التهيئة عند التحميل ============  
 window.addEventListener('load', () => {
     document.querySelector('.portal-container').classList.add('breathing');
     createStars();
@@ -1171,19 +1277,75 @@ window.addEventListener('load', () => {
     }, { once: true });
 });
 
+// معالجة واحدة فقط للحقول - لمنع التعارض
 document.addEventListener('DOMContentLoaded', function() {
-    const inputs = document.querySelectorAll('.soul-input');
-    
-    inputs.forEach(input => {
-        input.addEventListener('input', function(e) {
-            if (e.target.value.length > 0) {
-                e.target.style.textShadow = '0 0 5px rgba(255, 255, 255, 0.3)';
-                playKeySound();
-            } else {
-                e.target.style.textShadow = 'none';
+    setTimeout(() => {
+        const inputs = document.querySelectorAll('.soul-input');
+        const passwordField = document.getElementById('password');
+        const emailField = document.getElementById('email');
+        
+        // معالجة عامة للحقول
+        inputs.forEach(input => {
+            if (!input.hasAttribute('data-handled')) {
+                input.setAttribute('data-handled', 'true');
+                
+                input.addEventListener('input', function(e) {
+                    if (e.target.value.length > 0) {
+                        e.target.style.textShadow = '0 0 5px rgba(255, 255, 255, 0.3)';
+                        e.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.6)';
+                        playKeySound();
+                    } else {
+                        e.target.style.textShadow = 'none';
+                        e.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.2)';
+                    }
+                });
             }
         });
-    });
+        
+        // معالجة خاصة لكلمة المرور
+        if (passwordField && !passwordField.hasAttribute('data-password-enhanced')) {
+            passwordField.setAttribute('data-password-enhanced', 'true');
+            
+            // السماح بلصق كلمة المرور
+            passwordField.addEventListener('paste', function(e) {
+                // لا نمنع الحدث - نتركه يحدث طبيعياً
+                console.log('✅ تم السماح بلصق كلمة المرور');
+                
+                setTimeout(() => {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'تم اللصق بنجاح',
+                            timer: 1000,
+                            showConfirmButton: false,
+                            toast: true,
+                            position: 'top-end'
+                        });
+                    }
+                }, 50);
+            });
+            
+            // منع نسخ كلمة المرور
+            passwordField.addEventListener('copy', function(e) {
+                e.preventDefault();
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'غير مسموح',
+                        text: 'لا يمكن نسخ كلمة المرور',
+                        timer: 1500,
+                        showConfirmButton: false,
+                        toast: true,
+                        position: 'top-end'
+                    });
+                }
+            });
+            
+            // إضافة autocomplete للحقول
+            emailField.setAttribute('autocomplete', 'username email');
+            passwordField.setAttribute('autocomplete', 'current-password');
+        }
+    }, 500);
 });
 
 if (window.location.hostname === 'mahmoudfouad25.github.io') {
@@ -1194,188 +1356,6 @@ if (window.location.hostname === 'mahmoudfouad25.github.io') {
         }
     });
 }
-
-// ============ تحسينات حقل كلمة المرور الجديدة ============
-
-// السماح بلصق كلمة المرور مع منع نسخها
-document.addEventListener('DOMContentLoaded', function() {
-    const passwordField = document.getElementById('password');
-    const emailField = document.getElementById('email');
-    
-    if (passwordField) {
-        // السماح بلصق كلمة المرور
-        passwordField.addEventListener('paste', function(e) {
-            console.log('✅ تم السماح بلصق كلمة المرور');
-            
-            // إظهار رسالة تأكيد بسيطة
-            setTimeout(() => {
-                if (typeof Swal !== 'undefined') {
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'تم اللصق بنجاح',
-                        text: 'تم لصق كلمة المرور',
-                        timer: 1500,
-                        showConfirmButton: false,
-                        toast: true,
-                        position: 'top-end'
-                    });
-                }
-            }, 100);
-        });
-        
-        // منع نسخ كلمة المرور
-        passwordField.addEventListener('copy', function(e) {
-            e.preventDefault();
-            if (typeof Swal !== 'undefined') {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'غير مسموح',
-                    text: 'لا يمكن نسخ كلمة المرور لأغراض الأمان',
-                    timer: 2000,
-                    showConfirmButton: false,
-                    toast: true,
-                    position: 'top-end'
-                });
-            }
-            return false;
-        });
-        
-        // منع قص كلمة المرور
-        passwordField.addEventListener('cut', function(e) {
-            e.preventDefault();
-            return false;
-        });
-        
-        // منع السحب من حقل كلمة المرور
-        passwordField.addEventListener('dragstart', function(e) {
-            e.preventDefault();
-            return false;
-        });
-        
-        // منع التحديد الطويل (للجوال)
-        passwordField.addEventListener('selectstart', function(e) {
-            // السماح بالتحديد للكتابة/التعديل ولكن منع التحديد الكامل
-            if (window.getSelection().toString().length > 5) {
-                e.preventDefault();
-                return false;
-            }
-        });
-    }
-    
-    // السماح بلصق الإيميل بشكل عادي
-    if (emailField) {
-        emailField.addEventListener('paste', function(e) {
-            console.log('✅ تم السماح بلصق الإيميل');
-        });
-    }
-    
-    // إضافة مؤشرات بصرية لتحسين تجربة المستخدم
-    const inputs = document.querySelectorAll('.soul-input');
-    
-    inputs.forEach(input => {
-        input.addEventListener('input', function(e) {
-            if (e.target.value.length > 0) {
-                e.target.style.textShadow = '0 0 5px rgba(255, 255, 255, 0.3)';
-                playKeySound();
-                
-                // إضافة تأثير الحواف للحقول المملوءة
-                e.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.6)';
-            } else {
-                e.target.style.textShadow = 'none';
-                e.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.2)';
-            }
-        });
-        
-        // تأثير عند التركيز
-        input.addEventListener('focus', function(e) {
-            e.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.8)';
-        });
-        
-        // إزالة التأثير عند فقدان التركيز
-        input.addEventListener('blur', function(e) {
-            if (e.target.value.length === 0) {
-                e.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.2)';
-            }
-        });
-    });
-    
-    // إضافة دعم لمديري كلمات المرور (AutoFill)
-    window.addEventListener('load', function() {
-        // السماح لمديري كلمات المرور بملء الحقول
-        if (passwordField && emailField) {
-            // إضافة خصائص للمساعدة في الـ AutoFill
-            emailField.setAttribute('autocomplete', 'username email');
-            passwordField.setAttribute('autocomplete', 'current-password');
-            
-            // مراقبة التغييرات التلقائية (من مدير كلمات المرور)
-            const observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.target === emailField || mutation.target === passwordField) {
-                        if (mutation.target.value && mutation.target.value.length > 0) {
-                            mutation.target.style.borderBottomColor = 'rgba(255, 255, 255, 0.6)';
-                            mutation.target.style.textShadow = '0 0 5px rgba(255, 255, 255, 0.3)';
-                        }
-                    }
-                });
-            });
-            
-            observer.observe(emailField, { attributes: true, attributeFilter: ['value'] });
-            observer.observe(passwordField, { attributes: true, attributeFilter: ['value'] });
-        }
-    });
-});
-
-// إضافة نصائح للمستخدم
-function showPasswordTips() {
-    if (typeof Swal !== 'undefined') {
-        Swal.fire({
-            icon: 'info',
-            title: 'نصائح لكلمة المرور',
-            html: `
-                <div style="text-align: right; line-height: 1.6;">
-                    <p>💡 <strong>يمكنك:</strong></p>
-                    <ul style="list-style: none; padding: 0;">
-                        <li>✅ لصق كلمة المرور من مدير كلمات المرور</li>
-                        <li>✅ استخدام الملء التلقائي</li>
-                        <li>✅ كتابة كلمة المرور يدوياً</li>
-                    </ul>
-                    <p>🔒 <strong>لأغراض الأمان:</strong></p>
-                    <ul style="list-style: none; padding: 0;">
-                        <li>❌ لا يمكن نسخ كلمة المرور</li>
-                        <li>❌ لا يمكن سحب كلمة المرور</li>
-                    </ul>
-                </div>
-            `,
-            confirmButtonText: 'فهمت',
-            timer: 8000
-        });
-    }
-}
-
-// إضافة أيقونة مساعدة بجانب حقل كلمة المرور (اختياري)
-setTimeout(() => {
-    const passwordGroup = document.getElementById('passwordGroup');
-    if (passwordGroup) {
-        const helpIcon = document.createElement('div');
-        helpIcon.innerHTML = '💡';
-        helpIcon.style.cssText = `
-            position: absolute;
-            left: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            cursor: pointer;
-            opacity: 0.6;
-            transition: opacity 0.3s;
-            font-size: 16px;
-        `;
-        helpIcon.addEventListener('click', showPasswordTips);
-        helpIcon.addEventListener('mouseenter', () => helpIcon.style.opacity = '1');
-        helpIcon.addEventListener('mouseleave', () => helpIcon.style.opacity = '0.6');
-        
-        passwordGroup.style.position = 'relative';
-        passwordGroup.appendChild(helpIcon);
-    }
-}, 2000);
         
     </script>
 </body>
