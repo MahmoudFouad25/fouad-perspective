@@ -4531,22 +4531,183 @@ async function sendGrantApproval(bookingId) {
         const selectedOffer = savedOffers[parseInt(selection)];
         
         try {
-            // تحويل لحجز فردي بالعرض المختار
-            await db.collection('tempBookings').doc(bookingId).update({
+            // تحويل لحجز فردي بالعرض المختار بنفس منطق تغيير خطة الدفع
+            const basePrice = booking.pricing?.basePriceNumber || 7500;
+            const finalAmount = selectedOffer.amount;
+            const isInstallment = selectedOffer.months > 0;
+            const isFullGrant = selectedOffer.type === 'full' || finalAmount === 0;
+
+            // بناء بيانات التحديث بشكل صحيح
+            const updateData = {
                 status: 'confirmed',
                 grantStatus: 'approved',
                 approvedAt: new Date().toISOString(),
                 approvedOffer: selectedOffer,
-                'pricing.finalPrice': `${selectedOffer.amount.toLocaleString('ar-EG')} ج.م`,
-                'pricing.finalPriceNumber': selectedOffer.amount,
-                'payment.method': selectedOffer.months > 0 ? 'installment' : 'cash',
-                'payment.installmentDetails': selectedOffer.months > 0 ? 
-                    `${selectedOffer.months} أقساط شهرية` : null
-            });
+                
+                // تحديث التسعير
+                'pricing.basePrice': `${basePrice.toLocaleString('ar-EG')} ج.م`,
+                'pricing.basePriceNumber': basePrice,
+                'pricing.finalPrice': `${finalAmount.toLocaleString('ar-EG')} ج.م`,
+                'pricing.finalPriceNumber': finalAmount,
+                
+                // حساب وحفظ التوفير
+                totalSavings: basePrice - finalAmount,
+                totalSavingsText: `${(basePrice - finalAmount).toLocaleString('ar-EG')} ج.م`
+            };
+
+            // إضافة الخصومات
+            const discounts = [];
+
+            // خصم المنحة
+            if (isFullGrant) {
+                discounts.push({
+                    type: 'grant',
+                    label: 'منحة كاملة 100%',
+                    value: `-${basePrice.toLocaleString('ar-EG')} ج.م`,
+                    amount: basePrice
+                });
+            } else if (finalAmount < basePrice) {
+                const grantAmount = basePrice - finalAmount;
+                const grantPercentage = Math.round((grantAmount / basePrice) * 100);
+                discounts.push({
+                    type: 'grant',
+                    label: `منحة جزئية ${grantPercentage}%`,
+                    value: `-${grantAmount.toLocaleString('ar-EG')} ج.م`,
+                    amount: grantAmount
+                });
+            }
+
+            updateData.discounts = discounts;
+
+            // تحديث معلومات الدفع
+            if (isInstallment) {
+                // حالة الأقساط
+                const months = selectedOffer.months;
+                const firstPaymentPercent = months <= 3 ? 40 : 30;
+                const firstPayment = Math.round(finalAmount * firstPaymentPercent / 100);
+                const remaining = finalAmount - firstPayment;
+                const monthlyAmount = Math.ceil(remaining / (months - 1));
+                
+                updateData.payment = {
+                    code: `installment_${months}`,
+                    method: 'installment',
+                    type: 'installment',
+                    installmentDetails: `${firstPayment.toLocaleString('ar-EG')} ج.م مقدم + ${months-1} × ${monthlyAmount.toLocaleString('ar-EG')} ج.م`,
+                    installmentHTML: `
+                        <div style="background: #F0FDF4; padding: 10px; border-radius: 8px;">
+                            <strong>خطة الأقساط:</strong><br>
+                            الدفعة الأولى: ${firstPayment.toLocaleString('ar-EG')} ج.م<br>
+                            الأقساط الشهرية: ${monthlyAmount.toLocaleString('ar-EG')} ج.م × ${months-1} شهر<br>
+                            الإجمالي: ${finalAmount.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    `
+                };
+                
+                // إنشاء جدول الأقساط
+                const installmentSchedule = [];
+                const today = new Date();
+                
+                // الدفعة الأولى
+                installmentSchedule.push({
+                    installmentNumber: 0,
+                    amount: firstPayment,
+                    dueDate: today.toISOString(),
+                    status: 'pending',
+                    description: 'الدفعة الأولى'
+                });
+                
+                // الأقساط الشهرية
+                for (let i = 1; i < months; i++) {
+                    const dueDate = new Date(today);
+                    dueDate.setMonth(dueDate.getMonth() + i);
+                    
+                    installmentSchedule.push({
+                        installmentNumber: i,
+                        amount: monthlyAmount,
+                        dueDate: dueDate.toISOString(),
+                        status: 'pending',
+                        description: `القسط الشهري ${i}`
+                    });
+                }
+                
+                updateData.paymentDetails = {
+                    type: 'installment',
+                    totalAmount: finalAmount,
+                    firstPayment: firstPayment,
+                    monthlyAmount: monthlyAmount,
+                    totalInstallments: months,
+                    paidInstallments: 0,
+                    remainingAmount: finalAmount,
+                    installmentSchedule: installmentSchedule,
+                    fullyPaid: false
+                };
+                
+            } else {
+                // حالة الدفعة الواحدة (منحة كاملة أو جزئية بدون تقسيط)
+                updateData.payment = {
+                    code: isFullGrant ? 'full_grant' : 'cash',
+                    method: isFullGrant ? 'منحة كاملة' : 'دفعة واحدة',
+                    type: 'cash',
+                    installmentDetails: null,
+                    installmentHTML: null
+                };
+                
+                updateData.paymentDetails = {
+                    type: 'cash',
+                    totalAmount: finalAmount,
+                    paidAmount: 0,
+                    remainingAmount: finalAmount,
+                    fullyPaid: false,
+                    installmentSchedule: null
+                };
+            }
+
+            // للمنحة الكاملة - إضافة علامة خاصة
+            if (isFullGrant) {
+                updateData.isFullGrant = true;
+                updateData.requiresPayment = false;
+                // للمنحة الكاملة - تحديث حالة الدفع
+                updateData.paymentDetails.paidAmount = 0;
+                updateData.paymentDetails.remainingAmount = 0;
+                updateData.paymentDetails.fullyPaid = true;
+            } else {
+                updateData.isFullGrant = false;
+                updateData.requiresPayment = true;
+            }
+
+            // التحديث في Firebase
+            await db.collection('tempBookings').doc(bookingId).update(updateData);
             
             // إرسال إشعار للتليجرام بالموافقة
             if (booking.telegramChatId) {
-                const approvalMessage = `✅ تمت الموافقة على العرض المختار!\n\nسيتم الآن تحويلك للمسار العادي للحجز.`;
+                let approvalMessage = `✅ تمت الموافقة على العرض المختار!\n\n`;
+                
+                if (isFullGrant) {
+                    approvalMessage += `🎉 منحة كاملة 100% - مجاناً!\n`;
+                } else {
+                    const grantAmount = basePrice - finalAmount;
+                    const grantPercentage = Math.round((grantAmount / basePrice) * 100);
+                    approvalMessage += `💰 المبلغ النهائي: ${finalAmount.toLocaleString('ar-EG')} ج.م\n`;
+                    if (grantAmount > 0) {
+                        approvalMessage += `🎁 توفير: ${grantAmount.toLocaleString('ar-EG')} ج.م (${grantPercentage}%)\n`;
+                    }
+                    
+                    if (isInstallment) {
+                        const months = selectedOffer.months;
+                        const firstPaymentPercent = months <= 3 ? 40 : 30;
+                        const firstPayment = Math.round(finalAmount * firstPaymentPercent / 100);
+                        const remaining = finalAmount - firstPayment;
+                        const monthlyAmount = Math.ceil(remaining / (months - 1));
+                        
+                        approvalMessage += `📅 خطة الأقساط:\n`;
+                        approvalMessage += `   • الدفعة الأولى: ${firstPayment.toLocaleString('ar-EG')} ج.م\n`;
+                        approvalMessage += `   • ${months-1} أقساط شهرية: ${monthlyAmount.toLocaleString('ar-EG')} ج.م\n`;
+                    } else {
+                        approvalMessage += `💳 الدفع: دفعة واحدة\n`;
+                    }
+                }
+                
+                approvalMessage += `\nسيتم الآن تحويلك للمسار العادي للحجز.`;
                 
                 await fetch('http://localhost:3000/send-message-to-chat', {
                     method: 'POST',
@@ -4561,15 +4722,20 @@ async function sendGrantApproval(bookingId) {
             Swal.fire({
                 icon: 'success',
                 title: 'تمت الموافقة!',
-                text: 'تم تحويل المنحة إلى حجز فردي',
+                text: 'تم تحويل المنحة إلى حجز فردي بنجاح',
                 confirmButtonColor: '#10B981'
             });
             
             loadBookings();
             
         } catch (error) {
-            console.error('خطأ:', error);
-            Swal.fire('خطأ!', 'فشلت الموافقة', 'error');
+            console.error('خطأ في الموافقة على المنحة:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'خطأ!',
+                text: 'فشلت الموافقة على المنحة، حاول مرة أخرى',
+                confirmButtonColor: '#DC2626'
+            });
         }
     }
 }
