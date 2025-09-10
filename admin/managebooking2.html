@@ -1130,12 +1130,6 @@ function createBookingCard(booking) {
 const isGrant = booking.bookingType === 'grant_request';
 const grantStatus = booking.grantStatus || 'pending';
 const needsNegotiation = isGrant && grantStatus === 'pending';
-
-// إضافة أزرار خاصة بالمنح في حالة الانتظار
-if (needsNegotiation && booking.telegramConnected) {
-    // سيتم إضافة الأزرار في قسم card-actions
-}
-
     const type = booking.bookingType || booking.type || 'unknown';
     const status = booking.status || 'pending';
     const bookingDate = new Date(booking.timestamp || booking.bookingDate);
@@ -1374,31 +1368,6 @@ if (needsNegotiation && booking.telegramConnected) {
                     
                     return buttons;
                 })()}
-
-                ${type === 'grant_request' && grantStatus === 'pending' && booking.telegramConnected ? `
-    <!-- أزرار المنح المتصلة بالتليجرام -->
-    <button onclick="openTelegramGrantNegotiation('${booking.id}')" 
-            style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); 
-                   color: white; border: none; padding: 12px 20px; 
-                   border-radius: 10px; cursor: pointer; font-weight: bold;
-                   animation: pulse 2s infinite;">
-        <i class="fas fa-handshake"></i> تفاوض عبر التليجرام
-    </button>
-    
-    <button onclick="approveGrantDirectly('${booking.id}')" 
-            style="background: linear-gradient(135deg, #10B981, #059669); 
-                   color: white; border: none; padding: 12px 20px; 
-                   border-radius: 10px; cursor: pointer;">
-        <i class="fas fa-check"></i> موافقة مباشرة
-    </button>
-    
-    <button onclick="rejectGrantTelegram('${booking.id}')" 
-            style="background: linear-gradient(135deg, #EF4444, #DC2626); 
-                   color: white; border: none; padding: 12px 20px; 
-                   border-radius: 10px; cursor: pointer;">
-        <i class="fas fa-times"></i> رفض
-    </button>
-` : ''}
 
                 ${booking.status === 'paid' || booking.status === 'confirmed' ? `
                     <button class="btn" style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); color: white; padding: 12px 20px;" 
@@ -4575,6 +4544,20 @@ async function sendGrantApproval(bookingId) {
                     `${selectedOffer.months} أقساط شهرية` : null
             });
             
+            // إرسال إشعار للتليجرام بالموافقة
+            if (booking.telegramChatId) {
+                const approvalMessage = `✅ تمت الموافقة على العرض المختار!\n\nسيتم الآن تحويلك للمسار العادي للحجز.`;
+                
+                await fetch('http://localhost:3000/send-message-to-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chatId: booking.telegramChatId,
+                        message: approvalMessage
+                    })
+                });
+            }
+
             Swal.fire({
                 icon: 'success',
                 title: 'تمت الموافقة!',
@@ -4591,7 +4574,7 @@ async function sendGrantApproval(bookingId) {
     }
 }
 
-        async function sendGrantRejection(bookingId) {
+async function sendGrantRejection(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
     
@@ -4621,6 +4604,20 @@ async function sendGrantApproval(bookingId) {
                 rejectedBy: 'admin'
             });
             
+            // إرسال إشعار للتليجرام بالرفض
+            if (booking.telegramChatId) {
+                const rejectionMessage = `❌ نأسف - طلب المنحة مرفوض\n\n${result.value}`;
+                
+                await fetch('http://localhost:3000/send-message-to-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chatId: booking.telegramChatId,
+                        message: rejectionMessage
+                    })
+                });
+            }
+            
             Swal.fire('تم الرفض', 'تم رفض طلب المنحة', 'info');
             loadBookings();
         } catch (error) {
@@ -4630,8 +4627,7 @@ async function sendGrantApproval(bookingId) {
     }
 }
 
-
-        async function requestMoreGrantInfo(bookingId) {
+async function requestMoreGrantInfo(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
     
@@ -4653,6 +4649,20 @@ async function sendGrantApproval(bookingId) {
                 infoRequested: result.value,
                 infoRequestedAt: new Date().toISOString()
             });
+            
+            // إرسال إشعار للتليجرام بطلب المعلومات
+            if (booking.telegramChatId) {
+                const infoMessage = `📝 مطلوب معلومات إضافية\n\n${result.value}`;
+                
+                await fetch('http://localhost:3000/send-message-to-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chatId: booking.telegramChatId,
+                        message: infoMessage
+                    })
+                });
+            }
             
             Swal.fire('تم الإرسال', 'تم طلب معلومات إضافية', 'success');
             loadBookings();
@@ -6032,11 +6042,22 @@ async function saveNegotiationOffers(bookingId, data) {
         });
         
         // فتح واتساب
-        if (customer.whatsapp) {
-            const phoneNumber = formatPhoneForWhatsApp(customer.whatsapp);
-            const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
-            window.open(whatsappUrl, '_blank');
-        }
+        if (booking.telegramChatId) {
+    // إرسال للتليجرام بدلاً من الواتساب
+    await fetch('http://localhost:3000/send-message-to-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chatId: booking.telegramChatId,
+            message: message
+        })
+    });
+} else if (customer.whatsapp) {
+    // احتياطي: واتساب إذا لم يكن متصل بالتليجرام
+    const phoneNumber = formatPhoneForWhatsApp(customer.whatsapp);
+    const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+}
         
         Swal.fire({
             icon: 'success',
@@ -6761,255 +6782,6 @@ function getStatusText(status) {
                document.getElementById('lastUpdate').textContent = timeString;
            }
        }, 60000); // كل دقيقة
-
-        // دالة التفاوض عبر التليجرام
-async function openTelegramGrantNegotiation(bookingId) {
-    const booking = allBookings.find(b => b.id === bookingId);
-    if (!booking || !booking.telegramChatId) {
-        Swal.fire('خطأ', 'الحجز غير متصل بالتليجرام', 'error');
-        return;
-    }
-    
-    const basePrice = booking.pricing?.basePriceNumber || 7500;
-    
-    const { value: offers } = await Swal.fire({
-        title: '🤝 إنشاء عروض التفاوض',
-        html: `
-            <div style="text-align: right;">
-                <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-                    <p><strong>العميل:</strong> ${booking.customer?.name || 'غير محدد'}</p>
-                    <p><strong>السعر الأصلي:</strong> ${basePrice.toLocaleString('ar-EG')} ج.م</p>
-                </div>
-                
-                <h4>العروض المقترحة:</h4>
-                
-                <!-- عرض 1 -->
-                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <label>العرض الأول:</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
-                        <input type="number" id="offer1_amount" placeholder="المبلغ" class="swal2-input">
-                        <select id="offer1_months" class="swal2-input">
-                            <option value="0">دفعة واحدة</option>
-                            <option value="3">3 شهور</option>
-                            <option value="6">6 شهور</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <!-- عرض 2 -->
-                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <label>العرض الثاني:</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
-                        <input type="number" id="offer2_amount" placeholder="المبلغ" class="swal2-input">
-                        <select id="offer2_months" class="swal2-input">
-                            <option value="0">دفعة واحدة</option>
-                            <option value="3">3 شهور</option>
-                            <option value="6">6 شهور</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <!-- عرض 3 -->
-                <div style="background: #F9FAFB; padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <label>العرض الثالث (منحة كاملة):</label>
-                    <div style="text-align: center; padding: 10px;">
-                        <input type="checkbox" id="offer3_full" value="full">
-                        <label for="offer3_full">منحة كاملة 100% - مجاناً</label>
-                    </div>
-                </div>
-            </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'إرسال العروض',
-        cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#8B5CF6',
-        preConfirm: () => {
-            const offersArray = [];
-            
-            // جمع العروض
-            const offer1Amount = document.getElementById('offer1_amount').value;
-            const offer1Months = document.getElementById('offer1_months').value;
-            if (offer1Amount) {
-                offersArray.push({
-                    amount: parseInt(offer1Amount),
-                    months: parseInt(offer1Months),
-                    type: 'partial'
-                });
-            }
-            
-            const offer2Amount = document.getElementById('offer2_amount').value;
-            const offer2Months = document.getElementById('offer2_months').value;
-            if (offer2Amount) {
-                offersArray.push({
-                    amount: parseInt(offer2Amount),
-                    months: parseInt(offer2Months),
-                    type: 'partial'
-                });
-            }
-            
-            if (document.getElementById('offer3_full').checked) {
-                offersArray.push({
-                    amount: 0,
-                    months: 0,
-                    type: 'full'
-                });
-            }
-            
-            if (offersArray.length === 0) {
-                Swal.showValidationMessage('يجب إدخال عرض واحد على الأقل');
-                return false;
-            }
-            
-            return offersArray;
-        }
-    });
-    
-    if (offers) {
-        await sendOffersToTelegram(booking, offers);
-    }
-}
-
-// دالة إرسال العروض للتليجرام
-async function sendOffersToTelegram(booking, offers) {
-    try {
-        // حفظ العروض في Firebase
-        await db.collection('tempBookings').doc(booking.id).update({
-            negotiationOffers: offers,
-            negotiationSentAt: new Date().toISOString(),
-            grantStatus: 'negotiating'
-        });
-        
-        // بناء رسالة العروض
-        let message = `🎯 *عروض خاصة لطلب المنحة*\n\n`;
-        message += `مرحباً ${booking.customer?.name || 'عميلنا العزيز'}\n\n`;
-        message += `بعد مراجعة طلبك، نقدم لك العروض التالية:\n\n`;
-        
-        offers.forEach((offer, index) => {
-            message += `*العرض ${index + 1}:*\n`;
-            if (offer.type === 'full') {
-                message += `✅ منحة كاملة 100% - مجاناً\n`;
-            } else {
-                message += `💰 المبلغ: ${offer.amount.toLocaleString('ar-EG')} ج.م\n`;
-                if (offer.months > 0) {
-                    const monthly = Math.ceil(offer.amount / offer.months);
-                    message += `📅 التقسيط: ${offer.months} شهور\n`;
-                    message += `💳 القسط الشهري: ${monthly.toLocaleString('ar-EG')} ج.م\n`;
-                } else {
-                    message += `💵 دفعة واحدة\n`;
-                }
-            }
-            message += '\n';
-        });
-        
-        message += `للموافقة على أي عرض، اكتب رقم العرض (1 أو 2 أو 3)\n`;
-        message += `\nشكراً لثقتك بنا 🙏`;
-        
-        // إرسال للتليجرام
-        const response = await fetch('http://localhost:3000/send-message-to-chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chatId: booking.telegramChatId,
-                message: message
-            })
-        });
-        
-        if (response.ok) {
-            Swal.fire({
-                icon: 'success',
-                title: 'تم إرسال العروض!',
-                text: 'تم إرسال العروض للعميل عبر التليجرام',
-                confirmButtonColor: '#10B981'
-            });
-            loadBookings();
-        }
-    } catch (error) {
-        console.error('خطأ:', error);
-        Swal.fire('خطأ!', 'فشل إرسال العروض', 'error');
-    }
-}
-
-// دالة الموافقة المباشرة
-async function approveGrantDirectly(bookingId) {
-    const booking = allBookings.find(b => b.id === bookingId);
-    if (!booking) return;
-    
-    const result = await Swal.fire({
-        title: 'موافقة مباشرة على المنحة',
-        text: 'سيتم الموافقة على المنحة بالشروط المطلوبة من العميل',
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonText: 'موافق',
-        cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#10B981'
-    });
-    
-    if (result.isConfirmed) {
-        await db.collection('tempBookings').doc(bookingId).update({
-            grantStatus: 'approved',
-            approvedAt: new Date().toISOString()
-        });
-        
-        // إرسال رسالة الموافقة للتليجرام
-        if (booking.telegramChatId) {
-            const message = `🎉 *تمت الموافقة على منحتك!*\n\nيمكنك الآن المتابعة لإكمال الحجز.`;
-            
-            await fetch('http://localhost:3000/send-message-to-chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chatId: booking.telegramChatId,
-                    message: message
-                })
-            });
-        }
-        
-        Swal.fire('تم!', 'تمت الموافقة على المنحة', 'success');
-        loadBookings();
-    }
-}
-
-// دالة رفض المنحة عبر التليجرام
-async function rejectGrantTelegram(bookingId) {
-    const booking = allBookings.find(b => b.id === bookingId);
-    if (!booking) return;
-    
-    const { value: reason } = await Swal.fire({
-        title: 'رفض طلب المنحة',
-        input: 'textarea',
-        inputLabel: 'سبب الرفض',
-        inputPlaceholder: 'اكتب سبب الرفض...',
-        showCancelButton: true,
-        confirmButtonText: 'رفض',
-        cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#EF4444'
-    });
-    
-    if (reason) {
-        await db.collection('tempBookings').doc(bookingId).update({
-            grantStatus: 'rejected',
-            rejectionReason: reason,
-            rejectedAt: new Date().toISOString()
-        });
-        
-        // إرسال رسالة الرفض للتليجرام
-        if (booking.telegramChatId) {
-            const message = `❌ *نأسف - طلب المنحة مرفوض*\n\n${reason}\n\nيمكنك التواصل معنا لمناقشة البدائل.`;
-            
-            await fetch('http://localhost:3000/send-message-to-chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chatId: booking.telegramChatId,
-                    message: message
-                })
-            });
-        }
-        
-        Swal.fire('تم الرفض', 'تم رفض طلب المنحة', 'info');
-        loadBookings();
-    }
-}
    </script>
 </body>
 </html>
