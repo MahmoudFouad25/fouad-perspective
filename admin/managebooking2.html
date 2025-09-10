@@ -1250,7 +1250,23 @@ const needsNegotiation = isGrant && grantStatus === 'pending';
                             </div>
                         </div>
                     </div>
-                    
+
+                    ${booking.bookingType === 'grant_request' && (!booking.grantStatus || booking.grantStatus === 'pending') ? `
+    <!-- شريط تنبيه المنحة -->
+    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                padding: 15px; margin: 15px 0; border-radius: 10px; 
+                border: 2px solid #F59E0B; position: relative;">
+        <div style="position: absolute; top: -12px; right: 20px; 
+                    background: #F59E0B; color: white; padding: 5px 15px; 
+                    border-radius: 20px; font-size: 0.85rem; font-weight: bold;">
+            ⚠️ يحتاج موافقة
+        </div>
+        <p style="color: #92400E; margin: 10px 0 0 0; font-weight: bold;">
+            هذا طلب منحة يحتاج مراجعة وموافقة قبل المتابعة
+        </p>
+    </div>
+` : ''}
+
                     <!-- الأزرار السريعة -->
                     <div style="display: flex; flex-direction: column; gap: 8px;">
                         ${primaryPhone ? `
@@ -1276,21 +1292,56 @@ const needsNegotiation = isGrant && grantStatus === 'pending';
                 ${(() => {
                     let buttons = '';
                     
-                    if (status === 'pending' || status === 'pending_review') {
-                        buttons = `
-                            <button class="btn" style="background: linear-gradient(135deg, #3B82F6, #2563EB); color: white;" 
-                                    onclick="confirmBooking('${booking.id}')">
-                                <i class="fas fa-check"></i> تأكيد الحجز
-                            </button>
-                            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white;" 
-                                    onclick="cancelBooking('${booking.id}')">
-                                <i class="fas fa-ban"></i> إلغاء
-                            </button>
-                            <button class="btn" style="background: linear-gradient(135deg, #EF4444, #DC2626); color: white;" 
-                                    onclick="deleteBooking('${booking.id}')">
-                                <i class="fas fa-trash"></i> حذف نهائي
-                            </button>`;
-                    }
+                   if (status === 'pending' || status === 'pending_review') {
+    // التحقق من نوع الطلب
+    if (booking.bookingType === 'grant_request' && 
+        (!booking.grantStatus || booking.grantStatus === 'pending')) {
+        // أزرار خاصة بالمنح
+        buttons = `
+            <button class="btn pulse-animation" 
+                    style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); 
+                           color: white; font-weight: bold; font-size: 1.05rem;"
+                    onclick="openGrantNegotiation('${booking.id}')">
+                <i class="fas fa-handshake"></i> تفاوض على العرض
+            </button>
+            
+            <button class="btn" 
+                    style="background: linear-gradient(135deg, #10B981, #059669); 
+                           color: white;"
+                    onclick="approveGrantDirectly('${booking.id}')">
+                <i class="fas fa-check"></i> موافقة فورية
+            </button>
+            
+            <button class="btn" 
+                    style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                           color: white;"
+                    onclick="requestMoreGrantInfo('${booking.id}')">
+                <i class="fas fa-info-circle"></i> طلب معلومات
+            </button>
+            
+            <button class="btn" 
+                    style="background: linear-gradient(135deg, #EF4444, #DC2626); 
+                           color: white;"
+                    onclick="rejectGrant('${booking.id}')">
+                <i class="fas fa-times"></i> رفض الطلب
+            </button>`;
+    } else {
+        // الأزرار العادية للحجوزات الفردية
+        buttons = `
+            <button class="btn" style="background: linear-gradient(135deg, #3B82F6, #2563EB); color: white;" 
+                    onclick="confirmBooking('${booking.id}')">
+                <i class="fas fa-check"></i> تأكيد الحجز
+            </button>
+            <button class="btn" style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white;" 
+                    onclick="cancelBooking('${booking.id}')">
+                <i class="fas fa-ban"></i> إلغاء
+            </button>
+            <button class="btn" style="background: linear-gradient(135deg, #EF4444, #DC2626); color: white;" 
+                    onclick="deleteBooking('${booking.id}')">
+                <i class="fas fa-trash"></i> حذف نهائي
+            </button>`;
+    }
+}
                     else if (status === 'confirmed') {
                         // التحقق من اتصال التليجرام ووجود إيصال
                         if (booking.telegramConnected && booking.automationWorkflow?.receiptReceived) {
@@ -5951,6 +6002,159 @@ async function openGrantNegotiation(bookingId) {
         await saveNegotiationOffers(bookingId, negotiationData);
     }
 }
+
+        // دالة الموافقة المباشرة على المنحة
+async function approveGrantDirectly(bookingId) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    
+    const grantDetails = booking.grantDetails || {};
+    const supportType = grantDetails.supportType;
+    let finalPrice = 0;
+    let installmentDetails = null;
+    
+    // حساب السعر النهائي حسب نوع المنحة
+    if (supportType === 'full') {
+        finalPrice = 0;
+    } else if (supportType === 'partial') {
+        const percentage = grantDetails.supportDetails?.percentage || 50;
+        const basePrice = booking.pricing?.basePriceNumber || 7500;
+        finalPrice = Math.round(basePrice * (1 - percentage/100));
+        
+        if (grantDetails.supportDetails?.installmentRequested) {
+            const months = grantDetails.supportDetails?.installmentMonths || 3;
+            installmentDetails = `${months} أقساط شهرية`;
+        }
+    } else if (supportType === 'installment') {
+        finalPrice = booking.pricing?.basePriceNumber || 7500;
+        const months = grantDetails.supportDetails?.months || 3;
+        installmentDetails = `${months} أقساط شهرية`;
+    }
+    
+    const result = await Swal.fire({
+        title: 'تأكيد الموافقة على المنحة',
+        html: `
+            <div style="text-align: right;">
+                <h4>هل تريد الموافقة على هذه المنحة كما هي؟</h4>
+                <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin: 15px 0;">
+                    <p><strong>النوع:</strong> ${getSupportTypeText(supportType)}</p>
+                    <p><strong>المبلغ النهائي:</strong> ${finalPrice.toLocaleString('ar-EG')} ج.م</p>
+                    ${installmentDetails ? `<p><strong>التقسيط:</strong> ${installmentDetails}</p>` : ''}
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'نعم، موافق',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981'
+    });
+    
+    if (result.isConfirmed) {
+        try {
+            // تحديث حالة المنحة
+            await db.collection('tempBookings').doc(bookingId).update({
+                grantStatus: 'approved',
+                grantApprovedAt: new Date().toISOString(),
+                status: 'confirmed',
+                'pricing.finalPrice': `${finalPrice.toLocaleString('ar-EG')} ج.م`,
+                'pricing.finalPriceNumber': finalPrice,
+                'payment.installmentDetails': installmentDetails
+            });
+            
+            // إرسال إشعار للبوت إذا كان متصلاً
+            if (booking.telegramChatId) {
+                await notifyGrantApproval(booking.telegramChatId, booking);
+            }
+            
+            Swal.fire('تمت الموافقة!', 'تم الموافقة على المنحة وتحويلها للمسار العادي', 'success');
+            loadBookings();
+            
+        } catch (error) {
+            console.error('خطأ:', error);
+            Swal.fire('خطأ!', 'حدث خطأ في الموافقة', 'error');
+        }
+    }
+}
+
+// دالة رفض المنحة
+async function rejectGrant(bookingId) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    
+    const { value: reason } = await Swal.fire({
+        title: 'رفض طلب المنحة',
+        input: 'textarea',
+        inputLabel: 'سبب الرفض',
+        inputPlaceholder: 'اكتب سبب الرفض...',
+        showCancelButton: true,
+        confirmButtonText: 'رفض',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#EF4444',
+        inputValidator: (value) => {
+            if (!value) return 'يجب كتابة سبب الرفض';
+        }
+    });
+    
+    if (reason) {
+        try {
+            await db.collection('tempBookings').doc(bookingId).update({
+                grantStatus: 'rejected',
+                status: 'cancelled',
+                rejectionReason: reason,
+                rejectedAt: new Date().toISOString()
+            });
+            
+            if (booking.telegramChatId) {
+                await notifyGrantRejection(booking.telegramChatId, reason);
+            }
+            
+            Swal.fire('تم الرفض', 'تم رفض طلب المنحة', 'info');
+            loadBookings();
+            
+        } catch (error) {
+            console.error('خطأ:', error);
+            Swal.fire('خطأ!', 'حدث خطأ في الرفض', 'error');
+        }
+    }
+}
+
+// دالة إشعار البوت بالموافقة
+async function notifyGrantApproval(chatId, booking) {
+    try {
+        const response = await fetch('http://localhost:3000/update-grant-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: chatId,
+                bookingId: booking.id,
+                status: 'approved',
+                finalPrice: booking.pricing?.finalPriceNumber || 0
+            })
+        });
+        console.log('تم إشعار البوت بالموافقة');
+    } catch (error) {
+        console.error('خطأ في إشعار البوت:', error);
+    }
+}
+
+// دالة إشعار البوت بالرفض  
+async function notifyGrantRejection(chatId, reason) {
+    try {
+        const response = await fetch('http://localhost:3000/update-grant-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: chatId,
+                status: 'rejected',
+                reason: reason
+            })
+        });
+        console.log('تم إشعار البوت بالرفض');
+    } catch (error) {
+        console.error('خطأ في إشعار البوت:', error);
+    }
+}
+        
 
 // دالة حفظ العروض
 async function saveNegotiationOffers(bookingId, data) {
