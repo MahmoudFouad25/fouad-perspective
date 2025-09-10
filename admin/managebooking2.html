@@ -4441,208 +4441,320 @@ async function deleteBooking(bookingId) {
 
         // دوال إجراءات المنح الجديدة
 async function sendGrantApproval(bookingId) {
-    const booking = allBookings.find(b => b.id === bookingId);
-    if (!booking) return;
-    
-    const customer = booking.customer || {};
-    
-    // التحقق من وجود تفاوضات سابقة
-    const hasNegotiations = booking.hasNegotiations || false;
-    const negotiationHistory = booking.negotiationHistory || [];
-    
-    if (!hasNegotiations || negotiationHistory.length === 0) {
-        // لا توجد تفاوضات - نافذة تحذير
-        const startNegotiation = await Swal.fire({
-            title: '⚠️ لا توجد تفاوضات سابقة',
-            html: `
-                <div style="text-align: right;">
-                    <div style="background: #FEF3C7; padding: 15px; border-radius: 10px;">
-                        <p style="color: #92400E;">
-                            لم يتم إجراء أي تفاوض مع العميل ${customer.name || ''} بعد.
-                            هل تريد البدء في التفاوض أولاً؟
-                        </p>
-                    </div>
-                </div>
-            `,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'بدء التفاوض',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#8B5CF6'
-        });
-        
-        if (startNegotiation.isConfirmed) {
-            openGrantNegotiation(bookingId);
-        }
-        return;
-    }
-    
-    // عرض التفاوضات السابقة للاختيار
-    let negotiationsHTML = `
-        <div style="text-align: right;">
-            <h4 style="color: #1F2937; margin-bottom: 20px;">
-                <i class="fas fa-history"></i> التفاوضات السابقة مع ${customer.name}
-            </h4>
-            <div style="max-height: 400px; overflow-y: auto;">
-    `;
-    
-    negotiationHistory.forEach((neg, index) => {
-        const date = new Date(neg.timestamp).toLocaleDateString('ar-EG');
-        const time = new Date(neg.timestamp).toLocaleTimeString('ar-EG', {hour: '2-digit', minute: '2-digit'});
-        
-        let offerSummary = '';
-        if (neg.offerType === 'full_grant') {
-            offerSummary = 'منحة كاملة 100%';
-        } else {
-            const discount = Math.round(((neg.basePrice - neg.finalAmount) / neg.basePrice) * 100);
-            offerSummary = `${neg.finalAmount.toLocaleString('ar-EG')} ج.م (خصم ${discount}%)`;
-            if (neg.installmentMonths > 0) {
-                offerSummary += ` - ${neg.installmentMonths} أقساط`;
-            }
-        }
-        
-        negotiationsHTML += `
-            <div style="background: ${index === negotiationHistory.length - 1 ? '#F0FDF4' : '#F9FAFB'}; 
-                        padding: 15px; border-radius: 10px; margin-bottom: 15px; 
-                        border: 2px solid ${index === negotiationHistory.length - 1 ? '#10B981' : '#E5E7EB'};
-                        cursor: pointer;" 
-                 onclick="selectNegotiation('${neg.id}', this)">
-                
-                <div style="display: flex; justify-content: space-between; align-items: start;">
-                    <div>
-                        <input type="radio" name="selectedNegotiation" value="${neg.id}" 
-                               ${index === negotiationHistory.length - 1 ? 'checked' : ''}
-                               style="margin-left: 10px;">
-                        <strong style="color: #065F46;">عرض ${index + 1}</strong>
-                        ${index === negotiationHistory.length - 1 ? 
-                          '<span style="background: #10B981; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; margin-right: 10px;">الأحدث</span>' : ''}
-                    </div>
-                    <div style="text-align: left; font-size: 0.85rem; color: #6B7280;">
-                        ${date} - ${time}
-                    </div>
-                </div>
-                
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #E5E7EB;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div>
-                            <strong>العرض الرئيسي:</strong> ${offerSummary}
-                        </div>
-                        ${neg.alternativeOffers && neg.alternativeOffers.length > 0 ? 
-                          `<div><strong>عروض بديلة:</strong> ${neg.alternativeOffers.length}</div>` : ''}
-                    </div>
-                    ${neg.customMessage ? 
-                      `<div style="margin-top: 10px; padding: 10px; background: white; border-radius: 8px;">
-                         <i class="fas fa-comment"></i> ${neg.customMessage.substring(0, 100)}...
-                       </div>` : ''}
-                </div>
-            </div>
-        `;
-    });
-    
-    negotiationsHTML += `
-            </div>
-            
-            <!-- خيار إنشاء عرض جديد -->
-            <div style="margin-top: 20px; padding: 15px; background: #EFF6FF; border-radius: 10px; border: 2px dashed #3B82F6;">
-                <label style="cursor: pointer;">
-                    <input type="radio" name="selectedNegotiation" value="new_offer" style="margin-left: 10px;">
-                    <strong style="color: #1E40AF;">
-                        <i class="fas fa-plus-circle"></i> إنشاء عرض جديد الآن
-                    </strong>
-                </label>
-            </div>
-            
-            <!-- ملخص العرض المختار -->
-            <div id="selectedOfferSummary" style="margin-top: 20px; padding: 15px; 
-                                                   background: #DCFCE7; border-radius: 10px; 
-                                                   border: 2px solid #10B981; display: none;">
-            </div>
-        </div>
-    `;
-    
-    const { value: selectedOffer } = await Swal.fire({
-        title: '✅ اختر العرض النهائي للموافقة',
-        html: negotiationsHTML,
-        showCancelButton: true,
-        confirmButtonText: 'تأكيد الموافقة',
-        cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#10B981',
-        width: '800px',
-        didOpen: () => {
-            // دالة اختيار التفاوض
-            window.selectNegotiation = function(negId, element) {
-                // تحديد الراديو
-                const radio = element.querySelector('input[type="radio"]');
-                if (radio) radio.checked = true;
-                
-                // تحديث الملخص
-                updateSelectedOfferSummary(negId);
-            };
-            
-            // دالة تحديث الملخص
-            window.updateSelectedOfferSummary = function(negId) {
-                const summaryDiv = document.getElementById('selectedOfferSummary');
-                
-                if (negId === 'new_offer') {
-                    summaryDiv.style.display = 'none';
-                    return;
-                }
-                
-                const selectedNeg = negotiationHistory.find(n => n.id === negId);
-                if (!selectedNeg) return;
-                
-                let summaryHTML = '<h5 style="color: #065F46; margin-bottom: 10px;">📋 ملخص العرض المختار:</h5>';
-                
-                if (selectedNeg.offerType === 'full_grant') {
-                    summaryHTML += '<p>✅ منحة كاملة 100% - مجاناً</p>';
-                } else {
-                    summaryHTML += `<p>💰 المبلغ النهائي: ${selectedNeg.finalAmount.toLocaleString('ar-EG')} ج.م</p>`;
-                    if (selectedNeg.installmentMonths > 0) {
-                        const monthly = Math.ceil(selectedNeg.finalAmount / selectedNeg.installmentMonths);
-                        summaryHTML += `<p>📅 التقسيط: ${selectedNeg.installmentMonths} شهور × ${monthly.toLocaleString('ar-EG')} ج.م</p>`;
-                    }
-                }
-                
-                summaryDiv.innerHTML = summaryHTML;
-                summaryDiv.style.display = 'block';
-            };
-            
-            // إضافة مستمع للراديو
-            document.querySelectorAll('input[name="selectedNegotiation"]').forEach(radio => {
-                radio.addEventListener('change', function() {
-                    updateSelectedOfferSummary(this.value);
-                });
-            });
-            
-            // عرض الملخص الافتراضي
-            const defaultSelected = document.querySelector('input[name="selectedNegotiation"]:checked');
-            if (defaultSelected) {
-                updateSelectedOfferSummary(defaultSelected.value);
-            }
-        },
-        preConfirm: () => {
-            const selected = document.querySelector('input[name="selectedNegotiation"]:checked');
-            if (!selected) {
-                Swal.showValidationMessage('يرجى اختيار عرض');
-                return false;
-            }
-            return selected.value;
-        }
-    });
-    
-    if (selectedOffer) {
-        if (selectedOffer === 'new_offer') {
-            // فتح نافذة التفاوض لإنشاء عرض جديد
-            openGrantNegotiation(bookingId);
+    try {
+        // جلب البيانات الحديثة من Firebase
+        const bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+        if (!bookingDoc.exists) {
+            Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
             return;
         }
         
-        // تطبيق العرض المختار
-        const selectedNeg = negotiationHistory.find(n => n.id === selectedOffer);
-        if (!selectedNeg) return;
+        const booking = { id: bookingDoc.id, ...bookingDoc.data() };
+        const customer = booking.customer || {};
         
-        try {
-            // تحديث البيانات للتحويل إلى حجز فردي
+        // التحقق من وجود تفاوضات
+        const negotiationHistory = booking.negotiationHistory || [];
+        
+        if (negotiationHistory.length === 0) {
+            // لا توجد تفاوضات سابقة
+            const startNegotiation = await Swal.fire({
+                title: '⚠️ لا توجد تفاوضات سابقة',
+                html: `
+                    <div style="text-align: right;">
+                        <div style="background: #FEF3C7; padding: 20px; border-radius: 10px;">
+                            <p style="color: #92400E; font-size: 1.1rem;">
+                                لم يتم إجراء أي تفاوض مع <strong>${customer.name || 'العميل'}</strong> بعد.
+                            </p>
+                            <p style="color: #92400E; margin-top: 10px;">
+                                يجب إجراء تفاوض أولاً قبل الموافقة النهائية.
+                            </p>
+                        </div>
+                    </div>
+                `,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: '🤝 بدء التفاوض الآن',
+                cancelButtonText: 'إلغاء',
+                confirmButtonColor: '#8B5CF6'
+            });
+            
+            if (startNegotiation.isConfirmed) {
+                openGrantNegotiation(bookingId);
+            }
+            return;
+        }
+        
+        // عرض التفاوضات السابقة
+        let negotiationsHTML = `
+            <div style="text-align: right;">
+                <div style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
+                            padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h3 style="color: #065F46; margin: 0;">
+                        <i class="fas fa-user-circle"></i> ${customer.name || 'العميل'}
+                    </h3>
+                    <p style="color: #047857; margin-top: 5px;">
+                        عدد التفاوضات: ${negotiationHistory.length} عرض
+                    </p>
+                </div>
+                
+                <h4 style="color: #1F2937; margin-bottom: 15px;">
+                    <i class="fas fa-history"></i> اختر العرض النهائي للموافقة:
+                </h4>
+                
+                <div style="max-height: 400px; overflow-y: auto; padding: 5px;">
+        `;
+        
+        // عرض كل تفاوض
+        negotiationHistory.forEach((neg, index) => {
+            const date = new Date(neg.timestamp).toLocaleDateString('ar-EG');
+            const time = new Date(neg.timestamp).toLocaleTimeString('ar-EG', {hour: '2-digit', minute: '2-digit'});
+            
+            // حساب التفاصيل
+            let mainOfferText = '';
+            let badgeColor = '#6B7280';
+            let badgeText = '';
+            
+            if (neg.offerType === 'full_grant') {
+                mainOfferText = 'منحة كاملة 100% - مجاناً';
+                badgeColor = '#DC2626';
+                badgeText = 'منحة كاملة';
+            } else if (neg.offerType === 'partial_percentage') {
+                const discount = Math.round(((neg.basePrice - neg.finalAmount) / neg.basePrice) * 100);
+                mainOfferText = `${neg.finalAmount.toLocaleString('ar-EG')} ج.م (خصم ${discount}%)`;
+                badgeColor = '#F59E0B';
+                badgeText = `خصم ${discount}%`;
+            } else if (neg.offerType === 'installment_only') {
+                mainOfferText = `${neg.finalAmount.toLocaleString('ar-EG')} ج.م`;
+                badgeColor = '#3B82F6';
+                badgeText = 'تقسيط';
+            } else {
+                mainOfferText = `${neg.finalAmount.toLocaleString('ar-EG')} ج.م`;
+                badgeColor = '#8B5CF6';
+                badgeText = 'عرض مخصص';
+            }
+            
+            if (neg.installmentMonths > 0) {
+                const monthly = Math.ceil(neg.finalAmount / neg.installmentMonths);
+                mainOfferText += ` - ${neg.installmentMonths} شهور (${monthly.toLocaleString('ar-EG')} ج.م/شهر)`;
+            }
+            
+            const isLatest = index === negotiationHistory.length - 1;
+            
+            negotiationsHTML += `
+                <div style="background: ${isLatest ? 'linear-gradient(135deg, #F0FDF4, #DCFCE7)' : '#F9FAFB'}; 
+                            padding: 20px; border-radius: 15px; margin-bottom: 15px; 
+                            border: 3px solid ${isLatest ? '#10B981' : '#E5E7EB'};
+                            cursor: pointer; transition: all 0.3s; position: relative;"
+                     onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 20px rgba(0,0,0,0.1)'"
+                     onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'"
+                     onclick="selectNegotiationOffer('${neg.id}', this)">
+                    
+                    <!-- شارة نوع العرض -->
+                    <div style="position: absolute; top: -10px; right: 20px; 
+                                background: ${badgeColor}; color: white; 
+                                padding: 5px 15px; border-radius: 20px; 
+                                font-size: 0.85rem; font-weight: bold;">
+                        ${badgeText}
+                    </div>
+                    
+                    <!-- رأس البطاقة -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center;">
+                            <input type="radio" name="selectedNegotiation" value="${neg.id}" 
+                                   ${isLatest ? 'checked' : ''}
+                                   style="width: 20px; height: 20px; margin-left: 15px; cursor: pointer;">
+                            <div>
+                                <strong style="color: #1F2937; font-size: 1.1rem;">
+                                    عرض #${index + 1}
+                                </strong>
+                                ${isLatest ? 
+                                  `<span style="background: linear-gradient(135deg, #10B981, #059669); 
+                                               color: white; padding: 3px 10px; border-radius: 15px; 
+                                               font-size: 0.75rem; margin-right: 10px;">
+                                     الأحدث
+                                   </span>` : ''}
+                            </div>
+                        </div>
+                        <div style="text-align: left; color: #6B7280; font-size: 0.85rem;">
+                            <i class="fas fa-clock"></i> ${date} - ${time}
+                        </div>
+                    </div>
+                    
+                    <!-- تفاصيل العرض -->
+                    <div style="background: white; padding: 15px; border-radius: 10px;">
+                        <div style="display: grid; grid-template-columns: ${neg.alternativeOffers?.length > 0 ? '2fr 1fr' : '1fr'}; gap: 15px;">
+                            <div>
+                                <h5 style="color: #059669; margin-bottom: 8px;">
+                                    <i class="fas fa-tag"></i> العرض الرئيسي:
+                                </h5>
+                                <p style="font-size: 1.1rem; font-weight: bold; color: #1F2937;">
+                                    ${mainOfferText}
+                                </p>
+                            </div>
+                            ${neg.alternativeOffers && neg.alternativeOffers.length > 0 ? `
+                                <div style="text-align: center; background: #F3F4F6; padding: 10px; border-radius: 8px;">
+                                    <div style="color: #6B7280; font-size: 0.9rem;">عروض بديلة</div>
+                                    <div style="font-size: 1.5rem; font-weight: bold; color: #8B5CF6;">
+                                        ${neg.alternativeOffers.length}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        ${neg.customMessage ? `
+                            <div style="margin-top: 15px; padding: 10px; background: #FEF3C7; 
+                                        border-radius: 8px; border-right: 3px solid #F59E0B;">
+                                <i class="fas fa-comment"></i> 
+                                <span style="color: #92400E;">
+                                    ${neg.customMessage.substring(0, 100)}${neg.customMessage.length > 100 ? '...' : ''}
+                                </span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+        
+        negotiationsHTML += `
+                </div>
+                
+                <!-- خيار إنشاء عرض جديد -->
+                <div style="margin-top: 20px; padding: 20px; 
+                            background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                            border-radius: 15px; border: 3px dashed #3B82F6; 
+                            cursor: pointer; transition: all 0.3s;"
+                     onmouseover="this.style.transform='scale(1.02)'"
+                     onmouseout="this.style.transform='scale(1)'"
+                     onclick="document.getElementById('radio_new_offer').checked=true">
+                    <label style="cursor: pointer; display: flex; align-items: center;">
+                        <input type="radio" name="selectedNegotiation" value="new_offer" id="radio_new_offer"
+                               style="width: 20px; height: 20px; margin-left: 15px;">
+                        <div>
+                            <strong style="color: #1E40AF; font-size: 1.1rem;">
+                                <i class="fas fa-plus-circle"></i> إنشاء عرض جديد الآن
+                            </strong>
+                            <p style="color: #3B82F6; margin: 5px 0 0 0; font-size: 0.9rem;">
+                                ابدأ تفاوض جديد مع العميل بشروط مختلفة
+                            </p>
+                        </div>
+                    </label>
+                </div>
+                
+                <!-- ملخص العرض المختار -->
+                <div id="selectedOfferSummary" style="margin-top: 20px; display: none;">
+                </div>
+            </div>
+        `;
+        
+        const { value: selectedOffer } = await Swal.fire({
+            title: '✅ الموافقة النهائية على المنحة',
+            html: negotiationsHTML,
+            showCancelButton: true,
+            confirmButtonText: '✅ تأكيد الموافقة والتحويل',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981',
+            width: '900px',
+            didOpen: () => {
+                // دالة اختيار العرض
+                window.selectNegotiationOffer = function(negId, element) {
+                    const radio = element.querySelector('input[type="radio"]');
+                    if (radio) radio.checked = true;
+                    
+                    // تحديث الملخص
+                    updateOfferSummary(negId);
+                };
+                
+                // دالة تحديث الملخص
+                window.updateOfferSummary = function(negId) {
+                    const summaryDiv = document.getElementById('selectedOfferSummary');
+                    
+                    if (negId === 'new_offer') {
+                        summaryDiv.style.display = 'none';
+                        return;
+                    }
+                    
+                    const selectedNeg = negotiationHistory.find(n => n.id === negId);
+                    if (!selectedNeg) return;
+                    
+                    let summaryHTML = `
+                        <div style="background: linear-gradient(135deg, #DCFCE7, #D1FAE5); 
+                                    padding: 20px; border-radius: 15px; border: 3px solid #10B981;">
+                            <h4 style="color: #065F46; margin-bottom: 15px;">
+                                <i class="fas fa-check-circle"></i> العرض الذي سيتم تطبيقه:
+                            </h4>
+                            <div style="background: white; padding: 15px; border-radius: 10px;">
+                    `;
+                    
+                    if (selectedNeg.offerType === 'full_grant') {
+                        summaryHTML += `
+                            <p style="font-size: 1.2rem; color: #DC2626; font-weight: bold;">
+                                ✅ منحة كاملة 100% - مجاناً
+                            </p>`;
+                    } else {
+                        summaryHTML += `
+                            <p style="font-size: 1.2rem; color: #1F2937; margin-bottom: 10px;">
+                                💰 <strong>المبلغ النهائي:</strong> 
+                                <span style="color: #059669; font-size: 1.3rem;">
+                                    ${selectedNeg.finalAmount.toLocaleString('ar-EG')} ج.م
+                                </span>
+                            </p>`;
+                        
+                        if (selectedNeg.installmentMonths > 0) {
+                            const monthly = Math.ceil(selectedNeg.finalAmount / selectedNeg.installmentMonths);
+                            summaryHTML += `
+                                <p style="color: #3B82F6;">
+                                    📅 <strong>خطة السداد:</strong> 
+                                    ${selectedNeg.installmentMonths} أقساط شهرية × ${monthly.toLocaleString('ar-EG')} ج.م
+                                </p>`;
+                        }
+                    }
+                    
+                    summaryHTML += `
+                            </div>
+                        </div>`;
+                    
+                    summaryDiv.innerHTML = summaryHTML;
+                    summaryDiv.style.display = 'block';
+                };
+                
+                // إضافة مستمعات للراديو
+                document.querySelectorAll('input[name="selectedNegotiation"]').forEach(radio => {
+                    radio.addEventListener('change', function() {
+                        updateOfferSummary(this.value);
+                    });
+                });
+                
+                // عرض الملخص الافتراضي
+                const defaultSelected = document.querySelector('input[name="selectedNegotiation"]:checked');
+                if (defaultSelected) {
+                    updateOfferSummary(defaultSelected.value);
+                }
+            },
+            preConfirm: () => {
+                const selected = document.querySelector('input[name="selectedNegotiation"]:checked');
+                if (!selected) {
+                    Swal.showValidationMessage('يرجى اختيار عرض');
+                    return false;
+                }
+                return selected.value;
+            }
+        });
+        
+        if (selectedOffer) {
+            if (selectedOffer === 'new_offer') {
+                // فتح نافذة تفاوض جديدة
+                openGrantNegotiation(bookingId);
+                return;
+            }
+            
+            // تطبيق العرض المختار
+            const selectedNeg = negotiationHistory.find(n => n.id === selectedOffer);
+            if (!selectedNeg) {
+                Swal.fire('خطأ!', 'لم يتم العثور على العرض المختار', 'error');
+                return;
+            }
+            
+            // تحديث البيانات في Firebase
             await db.collection('tempBookings').doc(bookingId).update({
                 status: 'confirmed',
                 grantStatus: 'approved',
@@ -4650,38 +4762,58 @@ async function sendGrantApproval(bookingId) {
                 approvedBy: 'admin',
                 approvedNegotiationId: selectedNeg.id,
                 finalApprovedOffer: selectedNeg,
-                // تحديث الأسعار النهائية
+                // تحديث الأسعار
                 'pricing.finalPrice': `${selectedNeg.finalAmount.toLocaleString('ar-EG')} ج.م`,
                 'pricing.finalPriceNumber': selectedNeg.finalAmount,
-                // تحديث معلومات الدفع
+                // تحديث الدفع
                 'payment.method': selectedNeg.installmentMonths > 0 ? 'installment' : 'cash',
                 'payment.installmentDetails': selectedNeg.installmentMonths > 0 ? 
-                    `${selectedNeg.installmentMonths} أقساط شهرية` : null
+                    `${selectedNeg.installmentMonths} أقساط شهرية` : null,
+                'payment.installmentMonths': selectedNeg.installmentMonths || 0
             });
             
             Swal.fire({
                 icon: 'success',
-                title: 'تمت الموافقة!',
+                title: 'تمت الموافقة بنجاح!',
                 html: `
                     <div style="text-align: center;">
-                        <p>تم تحويل طلب المنحة إلى حجز فردي بنجاح</p>
-                        <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-top: 15px;">
-                            <p style="color: #065F46;">
-                                العميل: ${customer.name}<br>
-                                المبلغ النهائي: ${selectedNeg.finalAmount.toLocaleString('ar-EG')} ج.م
-                            </p>
+                        <p style="font-size: 1.1rem; margin-bottom: 15px;">
+                            تم تحويل طلب المنحة إلى حجز فردي
+                        </p>
+                        <div style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); 
+                                    padding: 20px; border-radius: 15px;">
+                            <h4 style="color: #065F46; margin-bottom: 15px;">
+                                <i class="fas fa-user"></i> ${customer.name}
+                            </h4>
+                            <div style="background: white; padding: 15px; border-radius: 10px;">
+                                <p style="color: #1F2937; margin: 5px 0;">
+                                    <strong>المبلغ النهائي:</strong> 
+                                    ${selectedNeg.finalAmount.toLocaleString('ar-EG')} ج.م
+                                </p>
+                                ${selectedNeg.installmentMonths > 0 ? `
+                                    <p style="color: #3B82F6; margin: 5px 0;">
+                                        <strong>التقسيط:</strong> 
+                                        ${selectedNeg.installmentMonths} شهور
+                                    </p>
+                                ` : ''}
+                                <p style="color: #10B981; margin-top: 10px; font-weight: bold;">
+                                    <i class="fas fa-check-circle"></i> 
+                                    جاهز للمعالجة كحجز فردي
+                                </p>
+                            </div>
                         </div>
                     </div>
                 `,
                 confirmButtonColor: '#10B981'
             });
             
+            // تحديث البيانات
             loadBookings();
-            
-        } catch (error) {
-            console.error('خطأ:', error);
-            Swal.fire('خطأ!', 'حدث خطأ في الموافقة', 'error');
         }
+        
+    } catch (error) {
+        console.error('خطأ في الموافقة:', error);
+        Swal.fire('خطأ!', 'حدث خطأ في معالجة الموافقة: ' + error.message, 'error');
     }
 }
 
@@ -6073,30 +6205,40 @@ async function saveAndSendNegotiationOffer(bookingId, negotiationData) {
         const booking = allBookings.find(b => b.id === bookingId);
         const customer = booking.customer || {};
         
+        // تصحيح البيانات قبل الحفظ
+        const correctedData = {
+            offerType: negotiationData.offerType,
+            basePrice: negotiationData.basePrice || booking.pricing?.basePriceNumber || 7500,
+            finalAmount: negotiationData.finalAmount || 0,
+            installmentMonths: negotiationData.installmentMonths || 0,
+            alternativeOffers: negotiationData.alternativeOffers || [],
+            customMessage: negotiationData.customMessage || ''
+        };
+        
         // بناء رسالة التفاوض
         let message = `مرحباً ${customer.name || 'عميلنا العزيز'} 👋\n\n`;
         message += `بخصوص طلب المنحة المقدم لدورة: ${booking.courseName}\n\n`;
         message += `📋 *العرض المقترح:*\n`;
         
         // العرض الرئيسي
-        if (negotiationData.offerType === 'full_grant') {
+        if (correctedData.offerType === 'full_grant') {
             message += `✅ منحة كاملة 100% - مجاناً\n`;
         } else {
-            const discount = ((negotiationData.basePrice - negotiationData.finalAmount) / negotiationData.basePrice * 100).toFixed(0);
-            message += `💰 المبلغ المطلوب: ${negotiationData.finalAmount.toLocaleString('ar-EG')} ج.م\n`;
+            const discount = ((correctedData.basePrice - correctedData.finalAmount) / correctedData.basePrice * 100).toFixed(0);
+            message += `💰 المبلغ المطلوب: ${correctedData.finalAmount.toLocaleString('ar-EG')} ج.م\n`;
             message += `📊 نسبة الخصم: ${discount}%\n`;
             
-            if (negotiationData.installmentMonths > 0) {
-                const monthly = Math.ceil(negotiationData.finalAmount / negotiationData.installmentMonths);
-                message += `📅 التقسيط: ${negotiationData.installmentMonths} شهور\n`;
+            if (correctedData.installmentMonths > 0) {
+                const monthly = Math.ceil(correctedData.finalAmount / correctedData.installmentMonths);
+                message += `📅 التقسيط: ${correctedData.installmentMonths} شهور\n`;
                 message += `💳 القسط الشهري: ${monthly.toLocaleString('ar-EG')} ج.م\n`;
             }
         }
         
         // العروض البديلة
-        if (negotiationData.alternativeOffers.length > 0) {
+        if (correctedData.alternativeOffers.length > 0) {
             message += `\n🎯 *عروض بديلة:*\n`;
-            negotiationData.alternativeOffers.forEach((offer, index) => {
+            correctedData.alternativeOffers.forEach((offer, index) => {
                 message += `\n${index + 1}. `;
                 if (offer.months > 0) {
                     const monthly = Math.ceil(offer.amount / offer.months);
@@ -6108,35 +6250,46 @@ async function saveAndSendNegotiationOffer(bookingId, negotiationData) {
         }
         
         // الرسالة المخصصة
-        if (negotiationData.customMessage) {
-            message += `\n\n💬 ${negotiationData.customMessage}`;
+        if (correctedData.customMessage) {
+            message += `\n\n💬 ${correctedData.customMessage}`;
         }
         
         message += `\n\nللموافقة على أي من العروض، يرجى الرد برقم العرض المناسب لك.\n`;
         message += `شكراً لثقتك بنا 🙏`;
         
-        // حفظ التفاوض في قاعدة البيانات
+        // إنشاء سجل التفاوض مع ID فريد
         const negotiationRecord = {
-            ...negotiationData,
+            id: 'neg_' + bookingId + '_' + Date.now(),
+            bookingId: bookingId,
+            offerType: correctedData.offerType,
+            basePrice: correctedData.basePrice,
+            finalAmount: correctedData.finalAmount,
+            installmentMonths: correctedData.installmentMonths,
+            alternativeOffers: correctedData.alternativeOffers,
+            customMessage: correctedData.customMessage,
+            messageSent: message,
             timestamp: new Date().toISOString(),
             sentBy: 'admin',
             status: 'pending_response',
-            messageSent: message
-        };
-        
-        // إضافة سجل التفاوض للتاريخ
-        const negotiationWithId = {
-            ...negotiationRecord,
-            id: 'neg_' + Date.now(),
             selected: false
         };
         
+        // جلب البيانات الحالية أولاً
+        const currentDoc = await db.collection('tempBookings').doc(bookingId).get();
+        const currentData = currentDoc.data() || {};
+        const currentHistory = currentData.negotiationHistory || [];
+        
+        // إضافة السجل الجديد للتاريخ
+        const updatedHistory = [...currentHistory, negotiationRecord];
+        
+        // تحديث Firebase
         await db.collection('tempBookings').doc(bookingId).update({
-            lastNegotiation: negotiationWithId,
-            negotiationHistory: firebase.firestore.FieldValue.arrayUnion(negotiationWithId),
+            lastNegotiation: negotiationRecord,
+            negotiationHistory: updatedHistory,
             hasNegotiations: true,
-            negotiationCount: firebase.firestore.FieldValue.increment(1),
-            status: 'negotiating'
+            negotiationCount: updatedHistory.length,
+            status: 'negotiating',
+            lastNegotiationDate: new Date().toISOString()
         });
         
         // إرسال الرسالة عبر واتساب
@@ -6154,6 +6307,7 @@ async function saveAndSendNegotiationOffer(bookingId, negotiationData) {
                     <p>تم إرسال عرض التفاوض للعميل بنجاح</p>
                     <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-top: 15px;">
                         <p style="color: #065F46; margin: 0;">
+                            <i class="fas fa-check-circle"></i> تم حفظ العرض في السجل<br>
                             <i class="fas fa-clock"></i> في انتظار رد العميل
                         </p>
                     </div>
@@ -6162,12 +6316,12 @@ async function saveAndSendNegotiationOffer(bookingId, negotiationData) {
             confirmButtonColor: '#10B981'
         });
         
-        // تحديث البيانات
+        // تحديث البيانات المحلية
         loadBookings();
         
     } catch (error) {
         console.error('خطأ في حفظ التفاوض:', error);
-        Swal.fire('خطأ!', 'حدث خطأ في إرسال العرض', 'error');
+        Swal.fire('خطأ!', 'حدث خطأ في إرسال العرض: ' + error.message, 'error');
     }
 }
 
