@@ -4445,118 +4445,98 @@ async function sendGrantApproval(bookingId) {
     if (!booking) return;
     
     const customer = booking.customer || {};
+    const savedOffers = booking.negotiationOffers || [];
     
-    try {
-        // جلب جميع العروض الخاصة بهذا الحجز
-        const offersSnapshot = await db.collection('grantOffers')
-            .where('bookingId', '==', bookingId)
-            .orderBy('timestamp', 'desc')
-            .get();
-        
-        const offers = [];
-        offersSnapshot.forEach(doc => {
-            offers.push({ id: doc.id, ...doc.data() });
-        });
-        
-        if (offers.length === 0) {
-            const startNegotiation = await Swal.fire({
-                title: '⚠️ لا توجد عروض',
-                text: 'لم يتم إنشاء أي عروض بعد. هل تريد إنشاء عرض الآن؟',
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'إنشاء عرض',
-                cancelButtonText: 'إلغاء',
-                confirmButtonColor: '#8B5CF6'
-            });
-            
-            if (startNegotiation.isConfirmed) {
+    if (savedOffers.length === 0) {
+        // لا توجد عروض - اطلب التفاوض أولاً
+        Swal.fire({
+            icon: 'warning',
+            title: 'لا توجد عروض محفوظة',
+            text: 'يجب إنشاء عروض تفاوض أولاً',
+            confirmButtonText: 'إنشاء عروض',
+            confirmButtonColor: '#8B5CF6'
+        }).then((result) => {
+            if (result.isConfirmed) {
                 openGrantNegotiation(bookingId);
             }
-            return;
-        }
-        
-        // بناء قائمة العروض
-        let offersHTML = `
-            <div style="text-align: right; max-height: 500px; overflow-y: auto;">
-                <h4 style="margin-bottom: 20px;">اختر العرض النهائي:</h4>
-        `;
-        
-        offers.forEach((offer, index) => {
-            const date = new Date(offer.timestamp).toLocaleDateString('ar-EG');
-            const time = new Date(offer.timestamp).toLocaleTimeString('ar-EG', {hour: '2-digit', minute: '2-digit'});
-            
-            let offerSummary = '';
-            if (offer.amount === 0) {
-                offerSummary = '✅ منحة كاملة 100%';
-            } else {
-                offerSummary = `💰 ${offer.amount.toLocaleString('ar-EG')} ج.م`;
-                if (offer.discount) {
-                    offerSummary += ` (خصم ${offer.discount}%)`;
-                }
-                if (offer.months > 0) {
-                    offerSummary += ` - ${offer.months} أقساط`;
-                }
-            }
-            
-            offersHTML += `
-                <div style="background: ${index === 0 ? '#F0FDF4' : '#F9FAFB'}; 
-                            padding: 15px; border-radius: 10px; margin-bottom: 10px; 
-                            border: 2px solid ${index === 0 ? '#10B981' : '#E5E7EB'};">
-                    <label style="cursor: pointer; display: block;">
-                        <input type="radio" name="selectedOffer" value="${offer.id}" 
-                               ${index === 0 ? 'checked' : ''}
-                               style="margin-left: 10px;">
-                        <strong>عرض ${index + 1}</strong>
-                        ${index === 0 ? '<span style="background: #10B981; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; margin-right: 10px;">الأحدث</span>' : ''}
-                        <div style="margin-top: 10px;">
-                            ${offerSummary}
-                            <br><small>${date} - ${time}</small>
-                            ${offer.notes ? `<br><em>${offer.notes}</em>` : ''}
-                        </div>
-                    </label>
-                </div>
-            `;
         });
-        
+        return;
+    }
+    
+    // عرض العروض المحفوظة للاختيار
+    let offersHTML = `
+        <div style="text-align: right;">
+            <h4 style="color: #1F2937; margin-bottom: 20px;">اختر العرض النهائي:</h4>
+            <div style="display: grid; gap: 15px;">
+    `;
+    
+    savedOffers.forEach((offer, index) => {
+        const isFullGrant = offer.type === 'full' || offer.amount === 0;
         offersHTML += `
-                <div style="margin-top: 20px; padding: 15px; background: #EFF6FF; border-radius: 10px;">
-                    <label style="cursor: pointer;">
-                        <input type="radio" name="selectedOffer" value="new">
-                        <strong>إنشاء عرض جديد</strong>
-                    </label>
-                </div>
-            </div>
+            <label style="background: #F9FAFB; padding: 15px; border-radius: 10px; 
+                          border: 2px solid #E5E7EB; cursor: pointer; display: block;
+                          transition: all 0.3s;"
+                   onmouseover="this.style.borderColor='#3B82F6'; this.style.background='#EFF6FF';"
+                   onmouseout="this.style.borderColor='#E5E7EB'; this.style.background='#F9FAFB';">
+                <input type="radio" name="selectedOffer" value="${index}" 
+                       ${index === 0 ? 'checked' : ''} style="margin-left: 10px;">
+                <strong>عرض ${index + 1}:</strong>
+                ${isFullGrant ? 
+                    '<span style="color: #10B981;">منحة كاملة 100% - مجاناً</span>' :
+                    `<span style="color: #DC2626;">${offer.amount.toLocaleString('ar-EG')} ج.م</span>`
+                }
+                ${offer.months > 0 ? 
+                    ` - <span style="color: #F59E0B;">${offer.months} أقساط</span>` : 
+                    ' - <span style="color: #3B82F6;">دفعة واحدة</span>'
+                }
+            </label>
         `;
-        
-        const { value: selectedOfferId } = await Swal.fire({
-            title: '✅ الموافقة النهائية',
-            html: offersHTML,
-            showCancelButton: true,
-            confirmButtonText: 'تأكيد الموافقة',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#10B981',
-            width: '600px',
-            preConfirm: () => {
-                const selected = document.querySelector('input[name="selectedOffer"]:checked');
-                return selected ? selected.value : null;
-            }
-        });
-        
-        if (selectedOfferId === 'new') {
+    });
+    
+    offersHTML += `
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: #EFF6FF; 
+                        border-radius: 10px; border: 2px dashed #3B82F6;">
+                <label style="cursor: pointer;">
+                    <input type="radio" name="selectedOffer" value="new" style="margin-left: 10px;">
+                    <strong style="color: #1E40AF;">
+                        <i class="fas fa-plus"></i> إنشاء عرض جديد للتفاوض
+                    </strong>
+                </label>
+            </div>
+        </div>
+    `;
+    
+    const { value: selection } = await Swal.fire({
+        title: '✅ الموافقة النهائية على المنحة',
+        html: offersHTML,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد الموافقة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        width: '600px',
+        preConfirm: () => {
+            const selected = document.querySelector('input[name="selectedOffer"]:checked');
+            return selected ? selected.value : null;
+        }
+    });
+    
+    if (selection) {
+        if (selection === 'new') {
             openGrantNegotiation(bookingId);
             return;
         }
         
-        if (selectedOfferId) {
-            const selectedOffer = offers.find(o => o.id === selectedOfferId);
-            if (!selectedOffer) return;
-            
-            // تحديث الحجز بالعرض المعتمد
+        const selectedOffer = savedOffers[parseInt(selection)];
+        
+        try {
+            // تحويل لحجز فردي بالعرض المختار
             await db.collection('tempBookings').doc(bookingId).update({
                 status: 'confirmed',
                 grantStatus: 'approved',
                 approvedAt: new Date().toISOString(),
-                approvedOfferId: selectedOfferId,
+                approvedOffer: selectedOffer,
                 'pricing.finalPrice': `${selectedOffer.amount.toLocaleString('ar-EG')} ج.م`,
                 'pricing.finalPriceNumber': selectedOffer.amount,
                 'payment.method': selectedOffer.months > 0 ? 'installment' : 'cash',
@@ -4567,19 +4547,18 @@ async function sendGrantApproval(bookingId) {
             Swal.fire({
                 icon: 'success',
                 title: 'تمت الموافقة!',
-                text: 'تم تحويل طلب المنحة إلى حجز فردي',
+                text: 'تم تحويل المنحة إلى حجز فردي',
                 confirmButtonColor: '#10B981'
             });
             
             loadBookings();
+            
+        } catch (error) {
+            console.error('خطأ:', error);
+            Swal.fire('خطأ!', 'فشلت الموافقة', 'error');
         }
-        
-    } catch (error) {
-        console.error('خطأ:', error);
-        Swal.fire('خطأ!', 'حدث خطأ في جلب العروض', 'error');
     }
 }
-
 async function sendGrantRejection(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
@@ -5717,6 +5696,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // نظام التفاوض الذكي للمنح
 // نظام التفاوض المبسط للمنح
+// نظام التفاوض المبسط والفعال للمنح
 async function openGrantNegotiation(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
@@ -5724,63 +5704,317 @@ async function openGrantNegotiation(bookingId) {
     const customer = booking.customer || {};
     const basePrice = booking.pricing?.basePriceNumber || 7500;
     
-    const { value: offerData } = await Swal.fire({
-        title: '🤝 إنشاء عرض تفاوضي',
+    // جلب العروض المحفوظة سابقاً
+    const savedOffers = booking.negotiationOffers || [];
+    
+    // عرض العروض السابقة إن وجدت
+    let previousOffersHTML = '';
+    if (savedOffers.length > 0) {
+        previousOffersHTML = `
+            <div style="background: #F3F4F6; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                <h4 style="color: #1F2937; margin-bottom: 10px;">
+                    <i class="fas fa-history"></i> العروض المحفوظة (${savedOffers.length})
+                </h4>
+                <div style="max-height: 200px; overflow-y: auto;">
+        `;
+        
+        savedOffers.forEach((offer, index) => {
+            const date = new Date(offer.timestamp).toLocaleDateString('ar-EG');
+            previousOffersHTML += `
+                <div style="background: white; padding: 10px; border-radius: 8px; margin-bottom: 8px;">
+                    <strong>عرض ${index + 1}:</strong> 
+                    ${offer.amount.toLocaleString('ar-EG')} ج.م
+                    ${offer.months > 0 ? ` - ${offer.months} شهور` : ' - دفعة واحدة'}
+                    <span style="float: left; color: #6B7280; font-size: 0.85rem;">${date}</span>
+                </div>
+            `;
+        });
+        
+        previousOffersHTML += `
+                </div>
+            </div>
+        `;
+    }
+    
+    const { value: negotiationData } = await Swal.fire({
+        title: '🤝 إنشاء عروض التفاوض',
         html: `
             <div style="text-align: right;">
-                <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-                    <h4 style="color: #065F46;">العميل: ${customer.name || 'غير محدد'}</h4>
-                    <p>السعر الأصلي: ${basePrice.toLocaleString('ar-EG')} ج.م</p>
+                ${previousOffersHTML}
+                
+                <div style="background: #EFF6FF; padding: 20px; border-radius: 10px;">
+                    <h4 style="color: #1E40AF; margin-bottom: 15px;">
+                        <i class="fas fa-plus"></i> إضافة عرض جديد
+                    </h4>
+                    
+                    <div id="offersContainer">
+                        <!-- سيتم إضافة العروض هنا -->
+                    </div>
+                    
+                    <button type="button" onclick="addNewOffer()" 
+                            style="background: #8B5CF6; color: white; border: none; 
+                                   padding: 10px 20px; border-radius: 8px; cursor: pointer;
+                                   width: 100%; margin-top: 15px;">
+                        <i class="fas fa-plus-circle"></i> إضافة عرض آخر
+                    </button>
                 </div>
                 
-                <div style="margin-bottom: 15px;">
+                <div style="margin-top: 20px;">
                     <label style="font-weight: bold; display: block; margin-bottom: 5px;">
-                        المبلغ المطلوب (0 = منحة كاملة):
+                        رسالة توضيحية (اختياري):
                     </label>
-                    <input type="number" id="offerAmount" class="swal2-input" 
-                           placeholder="أدخل المبلغ" min="0" max="${basePrice}"
-                           style="width: 100%;">
-                </div>
-                
-                <div style="margin-bottom: 15px;">
-                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">
-                        عدد الأقساط (0 = دفعة واحدة):
-                    </label>
-                    <input type="number" id="offerMonths" class="swal2-input" 
-                           placeholder="عدد الشهور" min="0" max="12"
-                           style="width: 100%;">
-                </div>
-                
-                <div style="margin-bottom: 15px;">
-                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">
-                        ملاحظات (اختياري):
-                    </label>
-                    <textarea id="offerNotes" class="swal2-textarea" 
-                              placeholder="أي ملاحظات للعرض..."
+                    <textarea id="negotiationMessage" class="swal2-textarea" 
+                              placeholder="اكتب رسالة للعميل..."
                               style="width: 100%; min-height: 80px;"></textarea>
                 </div>
             </div>
         `,
         showCancelButton: true,
-        confirmButtonText: 'حفظ وإرسال العرض',
+        confirmButtonText: 'إرسال العروض',
         cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#10B981',
-        preConfirm: () => {
-            const amount = parseInt(document.getElementById('offerAmount').value) || 0;
-            const months = parseInt(document.getElementById('offerMonths').value) || 0;
-            const notes = document.getElementById('offerNotes').value;
+        confirmButtonColor: '#8B5CF6',
+        width: '700px',
+        didOpen: () => {
+            let offerCount = 0;
             
-            return {
-                amount: amount,
-                months: months,
-                notes: notes,
-                timestamp: new Date().toISOString()
+            window.addNewOffer = function() {
+                if (offerCount >= 5) {
+                    Swal.showValidationMessage('الحد الأقصى 5 عروض');
+                    return;
+                }
+                
+                offerCount++;
+                const container = document.getElementById('offersContainer');
+                const offerDiv = document.createElement('div');
+                offerDiv.id = `offer_${offerCount}`;
+                offerDiv.style.cssText = 'background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 2px solid #E5E7EB;';
+                
+                offerDiv.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h5 style="color: #374151; margin: 0;">
+                            <i class="fas fa-tag"></i> عرض ${offerCount}
+                        </h5>
+                        <button onclick="removeOffer('offer_${offerCount}')" 
+                                style="background: #EF4444; color: white; border: none; 
+                                       padding: 5px 10px; border-radius: 5px; cursor: pointer;">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9rem;">نوع العرض:</label>
+                            <select class="offer-type swal2-input" style="width: 100%; padding: 8px;"
+                                    onchange="updateOfferFields(${offerCount}, this.value)">
+                                <option value="amount">مبلغ محدد</option>
+                                <option value="percentage">نسبة خصم</option>
+                                <option value="full">منحة كاملة</option>
+                            </select>
+                        </div>
+                        
+                        <div id="amountField_${offerCount}">
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9rem;">المبلغ:</label>
+                            <input type="number" class="offer-amount swal2-input" 
+                                   placeholder="المبلغ بالجنيه" style="width: 100%; padding: 8px;">
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 10px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 0.9rem;">طريقة الدفع:</label>
+                        <select class="offer-payment swal2-input" style="width: 100%; padding: 8px;"
+                                onchange="updateInstallmentField(${offerCount}, this.value)">
+                            <option value="cash">دفعة واحدة</option>
+                            <option value="2">شهرين</option>
+                            <option value="3">3 شهور</option>
+                            <option value="4">4 شهور</option>
+                            <option value="5">5 شهور</option>
+                            <option value="6">6 شهور</option>
+                            <option value="9">9 شهور</option>
+                            <option value="12">12 شهر</option>
+                        </select>
+                    </div>
+                    
+                    <div id="installmentPreview_${offerCount}" style="margin-top: 10px; display: none;
+                                                                       background: #FEF3C7; padding: 10px; 
+                                                                       border-radius: 8px;">
+                    </div>
+                `;
+                
+                container.appendChild(offerDiv);
             };
+            
+            window.removeOffer = function(offerId) {
+                const element = document.getElementById(offerId);
+                if (element) {
+                    element.remove();
+                    offerCount--;
+                }
+            };
+            
+            window.updateOfferFields = function(offerNum, type) {
+                const amountField = document.getElementById(`amountField_${offerNum}`);
+                
+                if (type === 'full') {
+                    amountField.innerHTML = `
+                        <label style="display: block; margin-bottom: 5px; font-size: 0.9rem;">المبلغ:</label>
+                        <input type="number" class="offer-amount swal2-input" value="0" readonly
+                               style="width: 100%; padding: 8px; background: #E5E7EB;">
+                    `;
+                } else if (type === 'percentage') {
+                    amountField.innerHTML = `
+                        <label style="display: block; margin-bottom: 5px; font-size: 0.9rem;">نسبة الخصم %:</label>
+                        <input type="number" class="offer-amount swal2-input" min="1" max="100"
+                               placeholder="النسبة %" style="width: 100%; padding: 8px;"
+                               onchange="calculatePercentageAmount(${offerNum}, this.value)">
+                    `;
+                } else {
+                    amountField.innerHTML = `
+                        <label style="display: block; margin-bottom: 5px; font-size: 0.9rem;">المبلغ:</label>
+                        <input type="number" class="offer-amount swal2-input"
+                               placeholder="المبلغ بالجنيه" style="width: 100%; padding: 8px;">
+                    `;
+                }
+            };
+            
+            window.calculatePercentageAmount = function(offerNum, percentage) {
+                const preview = document.getElementById(`installmentPreview_${offerNum}`);
+                const finalAmount = Math.round(${basePrice} * (1 - percentage/100));
+                preview.style.display = 'block';
+                preview.innerHTML = `السعر بعد الخصم: ${finalAmount.toLocaleString('ar-EG')} ج.م`;
+            };
+            
+            window.updateInstallmentField = function(offerNum, months) {
+                const preview = document.getElementById(`installmentPreview_${offerNum}`);
+                const amountInput = document.querySelector(`#offer_${offerNum} .offer-amount`);
+                const amount = parseFloat(amountInput?.value) || 0;
+                
+                if (months !== 'cash' && amount > 0) {
+                    const monthlyAmount = Math.ceil(amount / parseInt(months));
+                    preview.style.display = 'block';
+                    preview.innerHTML = `
+                        <i class="fas fa-calendar-alt"></i>
+                        ${months} أقساط × ${monthlyAmount.toLocaleString('ar-EG')} ج.م شهرياً
+                    `;
+                } else {
+                    preview.style.display = 'none';
+                }
+            };
+            
+            // إضافة عرض افتراضي
+            addNewOffer();
+        },
+        preConfirm: () => {
+            const offers = [];
+            const offerDivs = document.querySelectorAll('[id^="offer_"]');
+            
+            offerDivs.forEach(div => {
+                const type = div.querySelector('.offer-type').value;
+                const amountInput = div.querySelector('.offer-amount').value;
+                const payment = div.querySelector('.offer-payment').value;
+                
+                let finalAmount = 0;
+                if (type === 'full') {
+                    finalAmount = 0;
+                } else if (type === 'percentage') {
+                    finalAmount = Math.round(${basePrice} * (1 - parseFloat(amountInput)/100));
+                } else {
+                    finalAmount = parseFloat(amountInput) || 0;
+                }
+                
+                if (finalAmount >= 0) {
+                    offers.push({
+                        type: type,
+                        amount: finalAmount,
+                        percentage: type === 'percentage' ? parseFloat(amountInput) : null,
+                        months: payment === 'cash' ? 0 : parseInt(payment),
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            });
+            
+            const message = document.getElementById('negotiationMessage').value;
+            
+            if (offers.length === 0) {
+                Swal.showValidationMessage('يجب إضافة عرض واحد على الأقل');
+                return false;
+            }
+            
+            return { offers, message };
         }
     });
     
-    if (offerData) {
-        await saveNegotiationOffer(bookingId, offerData);
+    if (negotiationData) {
+        await saveNegotiationOffers(bookingId, negotiationData);
+    }
+}
+
+// دالة حفظ العروض
+async function saveNegotiationOffers(bookingId, data) {
+    try {
+        const booking = allBookings.find(b => b.id === bookingId);
+        const customer = booking.customer || {};
+        
+        // بناء رسالة الواتساب
+        let message = `مرحباً ${customer.name || 'عميلنا العزيز'} 👋\n\n`;
+        message += `بخصوص طلب المنحة لدورة: ${booking.courseName}\n\n`;
+        message += `📋 *العروض المتاحة:*\n\n`;
+        
+        data.offers.forEach((offer, index) => {
+            message += `*العرض ${index + 1}:*\n`;
+            if (offer.type === 'full') {
+                message += `✅ منحة كاملة 100% - مجاناً\n`;
+            } else {
+                message += `💰 المبلغ: ${offer.amount.toLocaleString('ar-EG')} ج.م\n`;
+                if (offer.percentage) {
+                    message += `📊 نسبة الخصم: ${offer.percentage}%\n`;
+                }
+            }
+            
+            if (offer.months > 0) {
+                const monthly = Math.ceil(offer.amount / offer.months);
+                message += `📅 التقسيط: ${offer.months} شهور\n`;
+                message += `💳 القسط الشهري: ${monthly.toLocaleString('ar-EG')} ج.م\n`;
+            } else {
+                message += `💵 دفعة واحدة\n`;
+            }
+            message += '\n';
+        });
+        
+        if (data.message) {
+            message += `💬 ${data.message}\n\n`;
+        }
+        
+        message += `للموافقة على أي عرض، يرجى الرد برقم العرض المناسب لك.\n`;
+        message += `شكراً لثقتك بنا 🙏`;
+        
+        // حفظ في Firebase
+        await db.collection('tempBookings').doc(bookingId).update({
+            negotiationOffers: data.offers,
+            lastNegotiationMessage: message,
+            lastNegotiationDate: new Date().toISOString(),
+            hasNegotiations: true,
+            negotiationStatus: 'pending_response'
+        });
+        
+        // فتح واتساب
+        if (customer.whatsapp) {
+            const phoneNumber = formatPhoneForWhatsApp(customer.whatsapp);
+            const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
+            window.open(whatsappUrl, '_blank');
+        }
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم إرسال العروض!',
+            text: 'تم حفظ العروض وإرسالها للعميل',
+            confirmButtonColor: '#10B981'
+        });
+        
+        loadBookings();
+        
+    } catch (error) {
+        console.error('خطأ:', error);
+        Swal.fire('خطأ!', 'فشل حفظ العروض', 'error');
     }
 }
 
@@ -5870,151 +6104,7 @@ async function saveNegotiationOffer(bookingId, offerData) {
     }
 }
 
-// دالة حفظ وإرسال عرض التفاوض
-// دالة حفظ وإرسال عرض التفاوض - النسخة المصححة
-async function saveAndSendNegotiationOffer(bookingId, negotiationData) {
-    try {
-        const booking = allBookings.find(b => b.id === bookingId);
-        const customer = booking.customer || {};
-        
-        // إنشاء معرف فريد للتفاوض
-        const negotiationId = 'neg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        
-        // بناء رسالة التفاوض
-        let message = `مرحباً ${customer.name || 'عميلنا العزيز'} 👋\n\n`;
-        message += `بخصوص طلب المنحة المقدم لدورة: ${booking.courseName}\n\n`;
-        message += `📋 *العرض المقترح:*\n`;
-        
-        // حساب تفاصيل العرض الرئيسي
-        let mainOfferDetails = {
-            type: negotiationData.offerType,
-            amount: negotiationData.finalAmount,
-            months: negotiationData.installmentMonths,
-            discount: 0
-        };
-        
-        // العرض الرئيسي
-        if (negotiationData.offerType === 'full_grant') {
-            message += `✅ منحة كاملة 100% - مجاناً\n`;
-            mainOfferDetails.discount = 100;
-        } else {
-            const discount = ((negotiationData.basePrice - negotiationData.finalAmount) / negotiationData.basePrice * 100).toFixed(0);
-            mainOfferDetails.discount = parseInt(discount);
-            message += `💰 المبلغ المطلوب: ${negotiationData.finalAmount.toLocaleString('ar-EG')} ج.م\n`;
-            message += `📊 نسبة الخصم: ${discount}%\n`;
-            
-            if (negotiationData.installmentMonths > 0) {
-                const monthly = Math.ceil(negotiationData.finalAmount / negotiationData.installmentMonths);
-                message += `📅 التقسيط: ${negotiationData.installmentMonths} شهور\n`;
-                message += `💳 القسط الشهري: ${monthly.toLocaleString('ar-EG')} ج.م\n`;
-                mainOfferDetails.monthlyAmount = monthly;
-            }
-        }
-        
-        // معالجة العروض البديلة بشكل صحيح
-        let processedAlternatives = [];
-        if (negotiationData.alternativeOffers && negotiationData.alternativeOffers.length > 0) {
-            message += `\n🎯 *عروض بديلة:*\n`;
-            negotiationData.alternativeOffers.forEach((offer, index) => {
-                if (offer.amount && offer.amount > 0) {
-                    const altDiscount = ((negotiationData.basePrice - offer.amount) / negotiationData.basePrice * 100).toFixed(0);
-                    processedAlternatives.push({
-                        amount: offer.amount,
-                        months: offer.months || 0,
-                        discount: parseInt(altDiscount),
-                        monthlyAmount: offer.months > 0 ? Math.ceil(offer.amount / offer.months) : 0
-                    });
-                    
-                    message += `\n${index + 1}. `;
-                    if (offer.months > 0) {
-                        const monthly = Math.ceil(offer.amount / offer.months);
-                        message += `${offer.amount.toLocaleString('ar-EG')} ج.م على ${offer.months} شهور (${monthly.toLocaleString('ar-EG')} ج.م شهرياً)`;
-                    } else {
-                        message += `${offer.amount.toLocaleString('ar-EG')} ج.م دفعة واحدة`;
-                    }
-                }
-            });
-        }
-        
-        // الرسالة المخصصة
-        if (negotiationData.customMessage) {
-            message += `\n\n💬 ${negotiationData.customMessage}`;
-        }
-        
-        message += `\n\nللموافقة على أي من العروض، يرجى الرد برقم العرض المناسب لك.\n`;
-        message += `شكراً لثقتك بنا 🙏`;
-        
-        // إنشاء سجل التفاوض الكامل
-        const negotiationRecord = {
-            id: negotiationId,
-            timestamp: new Date().toISOString(),
-            sentBy: 'admin',
-            status: 'pending_response',
-            basePrice: negotiationData.basePrice,
-            
-            // العرض الرئيسي
-            mainOffer: mainOfferDetails,
-            offerType: negotiationData.offerType,
-            finalAmount: negotiationData.finalAmount,
-            installmentMonths: negotiationData.installmentMonths || 0,
-            
-            // العروض البديلة
-            alternativeOffers: processedAlternatives,
-            alternativeOffersCount: processedAlternatives.length,
-            
-            // معلومات إضافية
-            customMessage: negotiationData.customMessage || '',
-            messageSent: message,
-            
-            // معلومات العميل
-            customerName: customer.name || '',
-            customerPhone: customer.whatsapp || ''
-        };
-        
-        // حفظ في Firebase بشكل صحيح
-        await db.collection('tempBookings').doc(bookingId).update({
-            lastNegotiation: negotiationRecord,
-            negotiationHistory: firebase.firestore.FieldValue.arrayUnion(negotiationRecord),
-            hasNegotiations: true,
-            negotiationCount: firebase.firestore.FieldValue.increment(1),
-            lastNegotiationDate: new Date().toISOString(),
-            status: 'negotiating'
-        });
-        
-        // إرسال الرسالة عبر واتساب
-        if (customer.whatsapp) {
-            const phoneNumber = formatPhoneForWhatsApp(customer.whatsapp);
-            const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
-            window.open(whatsappUrl, '_blank');
-        }
-        
-        Swal.fire({
-            icon: 'success',
-            title: 'تم إرسال العرض!',
-            html: `
-                <div style="text-align: center;">
-                    <p>تم إرسال عرض التفاوض للعميل بنجاح</p>
-                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-top: 15px;">
-                        <p style="color: #065F46; margin: 0;">
-                            <i class="fas fa-clock"></i> في انتظار رد العميل
-                        </p>
-                        <p style="margin-top: 10px; font-size: 0.9rem; color: #047857;">
-                            معرف التفاوض: ${negotiationId}
-                        </p>
-                    </div>
-                </div>
-            `,
-            confirmButtonColor: '#10B981'
-        });
-        
-        // تحديث البيانات المحلية
-        loadBookings();
-        
-    } catch (error) {
-        console.error('خطأ في حفظ التفاوض:', error);
-        Swal.fire('خطأ!', 'حدث خطأ في إرسال العرض', 'error');
-    }
-}
+
         // دوال إضافية للحجز الفردي
         // دالة إرسال تذكير بالدفع
 async function sendReminder(bookingId) {
