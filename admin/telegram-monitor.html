@@ -1266,6 +1266,286 @@ await loadChat(chatId);
         });
     }
 }
+
+       // دوال إدارة المنح الجديدة المحسنة
+async function startGrantNegotiation(chatId) {
+    try {
+        const chatData = chatsData[chatId];
+        
+        const { value: formValues } = await Swal.fire({
+            title: '🤝 بدء التفاوض على المنحة',
+            html: `
+                <div style="text-align: right; padding: 10px;">
+                    <h4 style="color: #6366F1; margin-bottom: 15px;">📋 تفاصيل العرض الجديد</h4>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">نوع العرض:</label>
+                        <select id="offerType" class="swal2-input" style="width: 100%; padding: 10px;">
+                            <option value="partial_50">منحة 50% + دفعة واحدة</option>
+                            <option value="partial_70">منحة 70% + دفعة واحدة</option>
+                            <option value="partial_installment">منحة جزئية + أقساط</option>
+                            <option value="installment_only">تقسيط ميسر فقط (بدون خصم)</option>
+                            <option value="full">منحة كاملة 100%</option>
+                        </select>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">المبلغ النهائي (اترك فارغ للمنحة الكاملة):</label>
+                        <input id="finalAmount" type="number" class="swal2-input" placeholder="مثال: 750" style="width: 100%;">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">عدد الأقساط (للتقسيط فقط):</label>
+                        <select id="installmentMonths" class="swal2-input" style="width: 100%;">
+                            <option value="0">بدون أقساط</option>
+                            <option value="2">شهرين</option>
+                            <option value="3">3 شهور</option>
+                            <option value="4">4 شهور</option>
+                            <option value="6">6 شهور</option>
+                        </select>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">رسالة شخصية للمتقدم:</label>
+                        <textarea id="personalMessage" class="swal2-textarea" 
+                                  placeholder="مثال: بناءً على ظروفك الخاصة، يسعدنا تقديم هذا العرض..." 
+                                  style="width: 100%; min-height: 100px;"></textarea>
+                    </div>
+                </div>
+            `,
+            confirmButtonText: '📤 إرسال العرض',
+            confirmButtonColor: '#6366F1',
+            showCancelButton: true,
+            cancelButtonText: 'إلغاء',
+            width: '600px',
+            preConfirm: () => {
+                return {
+                    type: document.getElementById('offerType').value,
+                    amount: document.getElementById('finalAmount').value || 0,
+                    months: document.getElementById('installmentMonths').value,
+                    message: document.getElementById('personalMessage').value
+                };
+            }
+        });
+
+        if (formValues) {
+            // تحديث حالة المنحة في Firebase
+            await db.collection('telegramChats').doc(chatId).update({
+                grantStatus: 'negotiation',
+                lastNegotiationOffer: {
+                    type: formValues.type,
+                    amount: parseInt(formValues.amount),
+                    months: parseInt(formValues.months),
+                    timestamp: new Date(),
+                    message: formValues.message
+                },
+                negotiationStarted: new Date()
+            });
+
+            // إرسال رسالة للعميل
+            const offerMessage = `🎯 *عرض خاص من إدارة الأكاديمية*\n\n${formValues.message}\n\n📌 *تفاصيل العرض:*\n${getOfferDescription(formValues)}\n\n✅ للموافقة اضغط: /accept_offer\n❌ للرفض اضغط: /reject_offer\n💬 للمناقشة اضغط: /discuss_offer`;
+            
+            await sendMessageToClient(chatId, offerMessage);
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'تم إرسال العرض',
+                text: 'العرض في انتظار رد العميل',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            
+            await loadChats();
+        }
+    } catch (error) {
+        console.error('خطأ في بدء التفاوض:', error);
+        Swal.fire('خطأ', 'حدث خطأ أثناء إرسال العرض', 'error');
+    }
+}
+
+async function approveGrant(chatId) {
+    const chatData = chatsData[chatId];
+    
+    const result = await Swal.fire({
+        title: '✅ الموافقة النهائية على المنحة',
+        html: `
+            <div style="text-align: right; padding: 10px;">
+                <h4>تأكيد الموافقة على منحة: ${chatData.studentName || chatData.userInfo?.firstName}</h4>
+                <p>نوع المنحة: ${getGrantTypeDisplay(chatData)}</p>
+                <hr>
+                <label>إضافة ملاحظات (اختياري):</label>
+                <textarea id="approvalNotes" class="swal2-textarea" placeholder="ملاحظات للسجل..."></textarea>
+            </div>
+        `,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#10B981',
+        cancelButtonColor: '#6B7280',
+        confirmButtonText: '✅ اعتماد نهائي',
+        cancelButtonText: 'رجوع',
+        preConfirm: () => {
+            return document.getElementById('approvalNotes').value;
+        }
+    });
+    
+    if (result.isConfirmed) {
+        await db.collection('telegramChats').doc(chatId).update({
+            grantStatus: 'approved',
+            approvedAt: new Date(),
+            approvalNotes: result.value,
+            convertedToBooking: false
+        });
+        
+        // إرسال رسالة تهنئة للعميل
+        const congratsMessage = `🎉 *تهانينا!*\n\nتمت الموافقة على طلب المنحة الخاص بك.\n\n✅ يمكنك الآن المتابعة لإتمام إجراءات التسجيل.\n\n📞 للمساعدة: اضغط /help`;
+        await sendMessageToClient(chatId, congratsMessage);
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تمت الموافقة!',
+            text: 'تم اعتماد المنحة وإشعار العميل',
+            timer: 3000
+        });
+        
+        await loadChats();
+    }
+}
+
+async function rejectGrant(chatId) {
+    const { value: formData } = await Swal.fire({
+        title: '❌ رفض طلب المنحة',
+        html: `
+            <div style="text-align: right;">
+                <label>سبب الرفض:</label>
+                <select id="rejectionReason" class="swal2-input" style="width: 100%; margin-bottom: 10px;">
+                    <option value="incomplete">البيانات غير مكتملة</option>
+                    <option value="criteria">لا يستوفي الشروط</option>
+                    <option value="budget">تجاوز الميزانية المخصصة</option>
+                    <option value="other">سبب آخر</option>
+                </select>
+                
+                <label>رسالة للمتقدم:</label>
+                <textarea id="rejectionMessage" class="swal2-textarea" 
+                          placeholder="نأسف لعدم قدرتنا على الموافقة في الوقت الحالي..."></textarea>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonColor: '#EF4444',
+        confirmButtonText: 'تأكيد الرفض',
+        cancelButtonText: 'إلغاء',
+        preConfirm: () => {
+            return {
+                reason: document.getElementById('rejectionReason').value,
+                message: document.getElementById('rejectionMessage').value
+            };
+        }
+    });
+    
+    if (formData) {
+        await db.collection('telegramChats').doc(chatId).update({
+            grantStatus: 'rejected',
+            rejectionReason: formData.reason,
+            rejectionMessage: formData.message,
+            rejectedAt: new Date()
+        });
+        
+        // إرسال رسالة اعتذار للعميل
+        const sorryMessage = `📋 *رد على طلب المنحة*\n\n${formData.message}\n\n💡 يمكنك التسجيل بالأسعار العادية أو الاستفسار عن خيارات التقسيط.\n\n📞 للتواصل: اضغط /contact`;
+        await sendMessageToClient(chatId, sorryMessage);
+        
+        Swal.fire('تم الرفض', 'تم رفض الطلب وإشعار المتقدم', 'info');
+        await loadChats();
+    }
+}
+
+async function convertToIndividualBooking(chatId) {
+    const chatData = chatsData[chatId];
+    
+    const result = await Swal.fire({
+        title: '🔄 تحويل لحجز فردي',
+        html: `
+            <div style="text-align: right;">
+                <h4>سيتم تحويل المنحة المعتمدة إلى حجز فردي</h4>
+                <p><strong>الاسم:</strong> ${chatData.studentName || chatData.userInfo?.firstName}</p>
+                <p><strong>نوع المنحة:</strong> ${getGrantTypeDisplay(chatData)}</p>
+                <hr>
+                <p style="color: #059669;">✅ سيتم إرسال رابط الدفع للعميل</p>
+            </div>
+        `,
+        icon: 'info',
+        confirmButtonText: '🔄 تحويل الآن',
+        confirmButtonColor: '#3B82F6',
+        showCancelButton: true,
+        cancelButtonText: 'إلغاء'
+    });
+    
+    if (result.isConfirmed) {
+        await db.collection('telegramChats').doc(chatId).update({
+            convertedToBooking: true,
+            conversionDate: new Date(),
+            bookingType: 'individual',
+            previousGrantStatus: chatData.grantStatus
+        });
+        
+        // إرسال رسالة بالخطوات التالية
+        const nextStepsMessage = `✅ *تم اعتماد طلبك!*\n\n📝 *الخطوات التالية:*\n1️⃣ سيصلك رابط الدفع خلال دقائق\n2️⃣ أكمل عملية الدفع\n3️⃣ سيتم تفعيل حسابك فوراً\n\n💳 للدفع الآن: اضغط /pay`;
+        await sendMessageToClient(chatId, nextStepsMessage);
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم التحويل بنجاح!',
+            text: 'تم تحويل المنحة لحجز فردي',
+            timer: 3000
+        });
+        
+        await loadChats();
+    }
+}
+
+// دوال مساعدة
+function getOfferDescription(offer) {
+    const types = {
+        'partial_50': '💰 منحة 50% + دفعة واحدة',
+        'partial_70': '💰 منحة 70% + دفعة واحدة',
+        'partial_installment': '📅 منحة جزئية + نظام أقساط',
+        'installment_only': '🗓️ تقسيط ميسر بدون خصم',
+        'full': '💎 منحة كاملة 100%'
+    };
+    
+    let description = types[offer.type] || 'عرض خاص';
+    if (offer.amount > 0) {
+        description += `\n💵 المبلغ المطلوب: ${offer.amount} ج.م`;
+    }
+    if (offer.months > 0) {
+        description += `\n📆 عدد الأقساط: ${offer.months} شهر`;
+    }
+    return description;
+}
+
+function getGrantTypeDisplay(chatData) {
+    if (chatData.grantDetails?.supportType === 'full') {
+        return '💎 منحة كاملة 100%';
+    } else if (chatData.grantDetails?.supportType === 'partial') {
+        return `💰 منحة ${chatData.grantDetails?.supportDetails?.percentage || 50}%`;
+    } else if (chatData.grantDetails?.supportType === 'installment') {
+        return '📅 تقسيط ميسر';
+    }
+    return '🎯 منحة خاصة';
+}
+
+async function sendMessageToClient(chatId, message) {
+    try {
+        const response = await fetch('http://localhost:3000/send-message-to-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chatId, message })
+        });
+        return response.ok;
+    } catch (error) {
+        console.error('خطأ في إرسال الرسالة:', error);
+        return false;
+    }
+} 
 let isSending = false; // متغير عام لمنع التكرار
         
 
