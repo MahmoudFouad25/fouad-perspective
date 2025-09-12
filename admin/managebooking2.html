@@ -4805,69 +4805,56 @@ async function sendGrantApproval(bookingId) {
             updateData.discounts = discounts;
 
             // تحديث معلومات الدفع
-            if (isInstallment) {
-                // حالة الأقساط
-                const months = selectedOffer.months;
-                const firstPaymentPercent = months <= 3 ? 40 : 30;
-                const firstPayment = Math.round(finalAmount * firstPaymentPercent / 100);
-                const remaining = finalAmount - firstPayment;
-                const monthlyAmount = Math.ceil(remaining / (months - 1));
-                
-                updateData.payment = {
-                    code: `installment_${months}`,
-                    method: 'installment',
-                    type: 'installment',
-                    installmentDetails: `${firstPayment.toLocaleString('ar-EG')} ج.م مقدم + ${months-1} × ${monthlyAmount.toLocaleString('ar-EG')} ج.م`,
-                    installmentHTML: `
-                        <div style="background: #F0FDF4; padding: 10px; border-radius: 8px;">
-                            <strong>خطة الأقساط:</strong><br>
-                            الدفعة الأولى: ${firstPayment.toLocaleString('ar-EG')} ج.م<br>
-                            الأقساط الشهرية: ${monthlyAmount.toLocaleString('ar-EG')} ج.م × ${months-1} شهر<br>
-                            الإجمالي: ${finalAmount.toLocaleString('ar-EG')} ج.م
-                        </div>
-                    `
-                };
-                
-                // إنشاء جدول الأقساط
-                const installmentSchedule = [];
-                const today = new Date();
-                
-                // الدفعة الأولى
-                installmentSchedule.push({
-                    installmentNumber: 0,
-                    amount: firstPayment,
-                    dueDate: today.toISOString(),
-                    status: 'pending',
-                    description: 'الدفعة الأولى'
-                });
-                
-                // الأقساط الشهرية
-                for (let i = 1; i < months; i++) {
-                    const dueDate = new Date(today);
-                    dueDate.setMonth(dueDate.getMonth() + i);
-                    
-                    installmentSchedule.push({
-                        installmentNumber: i,
-                        amount: monthlyAmount,
-                        dueDate: dueDate.toISOString(),
-                        status: 'pending',
-                        description: `القسط الشهري ${i}`
-                    });
-                }
-                
-                updateData.paymentDetails = {
-                    type: 'installment',
-                    totalAmount: finalAmount,
-                    firstPayment: firstPayment,
-                    monthlyAmount: monthlyAmount,
-                    totalInstallments: months,
-                    paidInstallments: 0,
-                    remainingAmount: finalAmount,
-                    installmentSchedule: installmentSchedule,
-                    fullyPaid: false
-                };
-                
-            } else {
+if (isInstallment) {
+    // حالة الأقساط - نظام الأقساط المتساوية الجديد
+    const months = selectedOffer.months;
+    const monthlyAmount = smartRound(finalAmount / months); // استخدام دالة التقريب الذكي
+    const totalAfterRounding = monthlyAmount * months;
+    
+    updateData.payment = {
+        code: `installment_${months}`,
+        method: 'installment',
+        type: 'installment',
+        installmentDetails: `${months} أقساط × ${monthlyAmount.toLocaleString('ar-EG')} ج.م`,
+        installmentHTML: `
+            <div style="background: #F0FDF4; padding: 10px; border-radius: 8px;">
+                <strong>خطة الأقساط:</strong><br>
+                عدد الأقساط: ${months}<br>
+                القسط الشهري: ${monthlyAmount.toLocaleString('ar-EG')} ج.م<br>
+                الإجمالي: ${totalAfterRounding.toLocaleString('ar-EG')} ج.م
+            </div>
+        `
+    };
+    
+    // إنشاء جدول الأقساط المتساوية
+    const installmentSchedule = [];
+    const today = new Date();
+    
+    // كل الأقساط متساوية
+    for (let i = 0; i < months; i++) {
+        const dueDate = new Date(today);
+        dueDate.setMonth(dueDate.getMonth() + i);
+        
+        installmentSchedule.push({
+            installmentNumber: i + 1,
+            amount: monthlyAmount,
+            dueDate: dueDate.toISOString(),
+            status: 'pending',
+            description: `القسط ${i + 1}`
+        });
+    }
+    
+    updateData.paymentDetails = {
+        type: 'installment',
+        totalAmount: totalAfterRounding,
+        monthlyAmount: monthlyAmount,
+        totalInstallments: months,
+        paidInstallments: 0,
+        remainingAmount: totalAfterRounding,
+        installmentSchedule: installmentSchedule,
+        fullyPaid: false
+    };
+} else {
                 // حالة الدفعة الواحدة (منحة كاملة أو جزئية بدون تقسيط)
                 updateData.payment = {
                     code: isFullGrant ? 'full_grant' : 'cash',
@@ -5171,8 +5158,12 @@ let currentEditingBooking = null;
 let selectedNewPlan = null;
 
 // دالة التقريب الذكية
-function smartRound(number) {
-    return Math.round(number / 10) * 10;
+// دالة التقريب الذكي للأقساط
+function smartRound(num) {
+    const rounded = Math.round(num);
+    if (rounded % 10 === 0) return rounded;
+    if (rounded % 5 === 0) return rounded;
+    return Math.ceil(num / 5) * 5;
 }
 
 // دالة استخراج الأرقام من النص العربي
