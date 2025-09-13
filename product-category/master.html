@@ -1872,8 +1872,9 @@
         async function loadCourses() {
             try {
                 // جلب كل الدورات بغض النظر عن الحالة
-const snapshot = await db.collection('courses').get();
-                    
+const snapshot = await db.collection('bundles')
+    .where('status', '==', 'published')
+    .get();                    
                 allCourses = snapshot.docs.map(doc => ({
                     id: doc.id,
                     ...doc.data()
@@ -2071,27 +2072,114 @@ const TestimonialsManager = {
         // الانتظار حتى يتم تحميل الكورسات
         this.waitForCourses();
     },
-    
+
     waitForCourses() {
-        let attempts = 0;
-        const maxAttempts = 30; // 15 ثانية انتظار
+    let attempts = 0;
+    const maxAttempts = 30;
+    
+    const checkInterval = setInterval(async () => {
+        attempts++;
         
-        const checkInterval = setInterval(() => {
-            attempts++;
+        // جلب كل الدورات للشهادات فقط (بدون فلترة)
+        try {
+            const allCoursesSnapshot = await db.collection('courses').get();
+            const coursesForTestimonials = [];
             
-            // التحقق من وجود allCourses
-            if (typeof allCourses !== 'undefined' && allCourses.length > 0) {
+            allCoursesSnapshot.docs.forEach(doc => {
+                coursesForTestimonials.push({ id: doc.id, ...doc.data() });
+            });
+            
+            if (coursesForTestimonials.length > 0) {
                 clearInterval(checkInterval);
-                console.log(`✅ تم العثور على ${allCourses.length} دورة`);
-                setTimeout(() => this.safeExtract(), 500);
+                console.log(`✅ تم العثور على ${coursesForTestimonials.length} دورة للشهادات`);
+                // تمرير الدورات مباشرة للاستخراج
+                setTimeout(() => this.safeExtractFromAll(coursesForTestimonials), 500);
             } else if (attempts >= maxAttempts) {
                 clearInterval(checkInterval);
                 console.log('📌 عرض الشهادات الافتراضية');
                 this.showDefaults();
                 this.isLoading = false;
             }
-        }, 500);
-    },
+        } catch (error) {
+            console.log('خطأ في جلب الدورات للشهادات:', error);
+            if (attempts >= maxAttempts) {
+                clearInterval(checkInterval);
+                this.showDefaults();
+                this.isLoading = false;
+            }
+        }
+    }, 500);
+},
+
+    safeExtractFromAll(coursesForTestimonials) {
+    console.log('🔒 استخراج آمن للشهادات من كل الدورات...');
+    this.allTestimonials = [];
+    
+    // قراءة آمنة من كل الدورات بغض النظر عن حالتها
+    if (coursesForTestimonials && Array.isArray(coursesForTestimonials)) {
+        coursesForTestimonials.forEach(course => {
+            try {
+                if (!course || !course.testimonials) return;
+                
+                let testimonialsList = [];
+                
+                // محاولة قراءة من مختلف التنسيقات
+                if (course.testimonials.testimonials && Array.isArray(course.testimonials.testimonials)) {
+                    testimonialsList = course.testimonials.testimonials;
+                } else if (Array.isArray(course.testimonials)) {
+                    testimonialsList = course.testimonials;
+                } else if (typeof course.testimonials.testimonials === 'object') {
+                    testimonialsList = Object.values(course.testimonials.testimonials);
+                }
+                
+                // استخراج الشهادات الموثقة فقط
+                testimonialsList.forEach(t => {
+                    if (t && t.text) {
+                        const isVerified = t.verified === true || t.verified === 'true' || t.verified === 1;
+                        const isHighlighted = t.highlight === true || t.highlight === 'true' || t.highlight === 1;
+                        
+                        if (isVerified) {
+                            this.allTestimonials.push({
+                                name: t.name || 'متدرب من رحلة تحويلية',
+                                text: t.text,
+                                rating: parseInt(t.rating) || 5,
+                                course: t.course || course.title || 'رحلة تحويلية',
+                                date: t.date || '',
+                                job: t.job || '',
+                                gender: t.gender || '',
+                                age: t.age || '',
+                                highlight: isHighlighted,
+                                verified: true,
+                                charCount: t.text.length
+                            });
+                        }
+                    }
+                });
+            } catch (err) {
+                console.warn('تجاهل خطأ:', err);
+            }
+        });
+    }
+    
+    console.log(`📊 تم استخراج ${this.allTestimonials.length} شهادة موثقة من كل الدورات`);
+    
+    // ترتيب الشهادات: المميزة أولاً
+    this.allTestimonials.sort((a, b) => {
+        if (a.highlight && !b.highlight) return -1;
+        if (!a.highlight && b.highlight) return 1;
+        return 0;
+    });
+    
+    if (this.allTestimonials.length === 0) {
+        console.log('📌 لا توجد شهادات موثقة، عرض الافتراضية');
+        this.showDefaults();
+    } else {
+        this.shuffleTestimonials();
+        this.displayWithRotation();
+    }
+    
+    this.isLoading = false;
+},
     
    safeExtract() {
     console.log('🔒 استخراج آمن للشهادات (قراءة فقط)...');
