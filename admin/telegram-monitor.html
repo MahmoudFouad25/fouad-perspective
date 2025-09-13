@@ -993,135 +993,184 @@
                 });
         }
 
-        async function resolveHelpRequest(chatId) {
+      // دالة محسنة لحل طلب المساعدة
+async function resolveHelpRequest(chatId) {
+    try {
+        const chatData = chatsData[chatId];
+        const studentName = chatData?.studentName || chatData?.userInfo?.firstName || 'المستخدم';
+        
+        const { value: responseOption } = await Swal.fire({
+            title: 'تأكيد حل المشكلة',
+            text: `هل تم حل مشكلة ${studentName} فعلاً؟`,
+            icon: 'question',
+            input: 'select',
+            inputLabel: 'اختر نوع الرد للعميل:',
+            inputOptions: {
+                'default_success': '✅ رد تلقائي: تم حل المشكلة بنجاح',
+                'default_login': '🔑 رد تلقائي: تم إرسال بيانات الدخول',
+                'default_account': '🎓 رد تلقائي: تم إنشاء الحساب',
+                'default_course': '📚 رد تلقائي: تم تخصيص الدورة',
+                'default_payment': '💳 رد تلقائي: تم حل مشكلة الدفع (مع زر الاستكمال)',
+                'custom': '✏️ كتابة رسالة مخصصة'
+            },
+            inputValue: 'default_success',
+            showCancelButton: true,
+            confirmButtonText: 'إرسال وإنهاء',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#22C55E',
+            inputValidator: (value) => {
+                if (!value) {
+                    return 'يجب اختيار نوع الرد';
+                }
+            }
+        });
+        
+        if (!responseOption) return;
+        
+        let messageToSend = '';
+        
+        if (responseOption === 'custom') {
+            const { value: customMessage } = await Swal.fire({
+                title: 'اكتب الرسالة المخصصة',
+                input: 'textarea',
+                inputLabel: `رسالة لـ ${studentName}:`,
+                inputPlaceholder: 'اكتب رسالتك هنا...',
+                showCancelButton: true,
+                confirmButtonText: 'إرسال',
+                cancelButtonText: 'رجوع',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length < 5) {
+                        return 'الرسالة قصيرة جداً';
+                    }
+                }
+            });
+            
+            if (!customMessage) return;
+            messageToSend = customMessage.trim();
+        } else {
+            const predefinedMessages = {
+                'default_success': '✅ تم حل مشكلتك بنجاح!\n\nشكراً لصبرك، ونتمنى لك تجربة ممتازة.',
+                'default_login': '🔑 تم إرسال بيانات الدخول الخاصة بك.\n\nيمكنك الآن الدخول للمنصة والبدء في رحلتك التعليمية.',
+                'default_account': '🎓 تم إنشاء حسابك بنجاح وإرسال البيانات.\n\nمرحباً بك في منظور الفؤاد!',
+                'default_course': '📚 تم تخصيص الدورة لحسابك بنجاح.\n\nيمكنك الآن الوصول لجميع محتويات الدورة.',
+                'default_payment': '💳 تم حل مشكلة الدفع!\n\nيمكنك الآن استكمال عملية الدفع.\n\nاضغط الزر أدناه لاستكمال إجراءات الحجز.'
+            };
+            messageToSend = predefinedMessages[responseOption];
+        }
+
+        // 🔧 تحديث tempBookings إذا كان هناك bookingId
+        if (chatData?.bookingId) {
+            console.log(`🔄 تحديث الحجز: ${chatData.bookingId}`);
             try {
-                const chatData = chatsData[chatId];
-                const studentName = chatData?.studentName || chatData?.userInfo?.firstName || 'المستخدم';
-                
-                const { value: responseOption } = await Swal.fire({
-                    title: 'تأكيد حل المشكلة',
-                    text: `هل تم حل مشكلة ${studentName} فعلاً؟`,
-                    icon: 'question',
-                    input: 'select',
-                    inputLabel: 'اختر نوع الرد للعميل:',
-                    inputOptions: {
-                        'default_success': '✅ رد تلقائي: تم حل المشكلة بنجاح',
-                        'default_login': '🔑 رد تلقائي: تم إرسال بيانات الدخول',
-                        'default_account': '🎓 رد تلقائي: تم إنشاء الحساب',
-                        'default_course': '📚 رد تلقائي: تم تخصيص الدورة',
-                        'default_payment': '💳 رد تلقائي: تم حل مشكلة الدفع (مع زر الاستكمال)',
-                        'custom': '✏️ كتابة رسالة مخصصة'
-                    },
-                    inputValue: 'default_success',
-                    showCancelButton: true,
-                    confirmButtonText: 'إرسال وإنهاء',
-                    cancelButtonText: 'إلغاء',
-                    confirmButtonColor: '#22C55E',
-                    inputValidator: (value) => {
-                        if (!value) {
-                            return 'يجب اختيار نوع الرد';
-                        }
-                    }
+                await db.collection('tempBookings').doc(chatData.bookingId).update({
+                    'automationWorkflow.helpModeActivated': false,
+                    'automationWorkflow.currentState': 'awaiting_receipt',
+                    'automationWorkflow.helpResolvedAt': new Date(),
+                    'automationWorkflow.helpResolvedBy': 'admin',
+                    'automationWorkflow.adminResponse': messageToSend
                 });
+                console.log('✅ تم تحديث حالة الحجز بنجاح');
+            } catch (bookingError) {
+                console.error('❌ خطأ في تحديث الحجز:', bookingError);
+                // نكمل باقي العملية حتى لو فشل تحديث الحجز
+            }
+        }
+        
+        // 🔧 تحديث telegramChats
+        console.log(`🔄 تحديث المحادثة: ${chatId}`);
+        await db.collection('telegramChats').doc(chatId).update({
+            hasHelpRequest: false,
+            helpResolvedAt: new Date(),
+            helpResolvedBy: 'admin',
+            adminResponse: messageToSend,
+            lastActivity: new Date() // إضافة آخر نشاط
+        });
+        console.log('✅ تم تحديث حالة المحادثة');
+        
+        // 🔧 تحديث individualStudents إن وُجد
+        if (chatData?.isRegisteredStudent) {
+            console.log('🔄 البحث عن الطالب المسجل...');
+            try {
+                const studentSnapshot = await db.collection('individualStudents')
+                    .where('telegramChatId', '==', chatId)
+                    .limit(1)
+                    .get();
                 
-                if (!responseOption) return;
-                
-                let messageToSend = '';
-                
-                if (responseOption === 'custom') {
-                    const { value: customMessage } = await Swal.fire({
-                        title: 'اكتب الرسالة المخصصة',
-                        input: 'textarea',
-                        inputLabel: `رسالة لـ ${studentName}:`,
-                        inputPlaceholder: 'اكتب رسالتك هنا...',
-                        showCancelButton: true,
-                        confirmButtonText: 'إرسال',
-                        cancelButtonText: 'رجوع',
-                        inputValidator: (value) => {
-                            if (!value || value.trim().length < 5) {
-                                return 'الرسالة قصيرة جداً';
-                            }
-                        }
-                    });
-                    
-                    if (!customMessage) return;
-                    messageToSend = customMessage.trim();
-                } else {
-                    const predefinedMessages = {
-                        'default_success': '✅ تم حل مشكلتك بنجاح!\n\nشكراً لصبرك، ونتمنى لك تجربة ممتازة.',
-                        'default_login': '🔑 تم إرسال بيانات الدخول الخاصة بك.\n\nيمكنك الآن الدخول للمنصة والبدء في رحلتك التعليمية.',
-                        'default_account': '🎓 تم إنشاء حسابك بنجاح وإرسال البيانات.\n\nمرحباً بك في منظور الفؤاد!',
-                        'default_course': '📚 تم تخصيص الدورة لحسابك بنجاح.\n\nيمكنك الآن الوصول لجميع محتويات الدورة.',
-                        'default_payment': '💳 تم حل مشكلة الدفع!\n\nيمكنك الآن استكمال عملية الدفع.\n\nاضغط الزر أدناه لاستكمال إجراءات الحجز.'
-                    };
-                    messageToSend = predefinedMessages[responseOption];
-                }
-
-                if (chatData?.bookingId) {
-                    await db.collection('tempBookings').doc(chatData.bookingId).update({
+                if (!studentSnapshot.empty) {
+                    await studentSnapshot.docs[0].ref.update({
+                        needsHelp: false,
+                        helpResolvedAt: new Date().toISOString(),
                         'automationWorkflow.helpModeActivated': false,
-                        'automationWorkflow.currentState': 'awaiting_receipt',
-                        'automationWorkflow.helpResolvedAt': new Date()
+                        'automationWorkflow.currentState': 'resolved',
+                        'automationWorkflow.helpResolvedBy': 'admin'
                     });
-                    console.log('✅ تم تحديث حالة الحجز لاستقبال الإيصالات');
+                    console.log('✅ تم تحديث بيانات الطالب');
+                } else {
+                    console.log('⚠️ لم يتم العثور على الطالب المسجل');
                 }
-                
-                await db.collection('telegramChats').doc(chatId).update({
-                    hasHelpRequest: false,
-                    helpResolvedAt: new Date(),
-                    helpResolvedBy: 'admin',
-                    adminResponse: messageToSend
-                });
-                
-                if (chatData?.isRegisteredStudent) {
-                    const studentSnapshot = await db.collection('individualStudents')
-                        .where('telegramChatId', '==', chatId)
-                        .limit(1)
-                        .get();
-                    
-                    if (!studentSnapshot.empty) {
-                        await studentSnapshot.docs[0].ref.update({
-                            needsHelp: false,
-                            helpResolvedAt: new Date().toISOString(),
-                            'automationWorkflow.helpModeActivated': false,
-                            'automationWorkflow.currentState': 'resolved'
-                        });
-                    }
-                }
-
-                
-                await sendTelegramMessage(booking.telegramChatId, message);
-
-                if (chatData?.helpCategory === 'استفسار حجز' || chatData?.helpCategory === 'مشكلة دفع') {
-                    setTimeout(async () => {
-                        // الكود الجديد هنا
-                    }, 1000);
-                }
-                
-                await loadChats();
-                await loadChat(chatId);
-                
-                Swal.fire({
-                    icon: 'success',
-                    title: 'تم الحل بنجاح',
-                    text: `تم إرسال الرد وإغلاق طلب المساعدة`,
-                    timer: 2000,
-                    showConfirmButton: false
-                });
-                
-            } catch (error) {
-                console.error('خطأ في حل المشكلة:', error);
-                Swal.fire({
-                    icon: 'error',
-                    title: 'خطأ',
-                    text: 'حدث خطأ أثناء حل المشكلة'
-                });
+            } catch (studentError) {
+                console.error('❌ خطأ في تحديث بيانات الطالب:', studentError);
             }
         }
 
-        // دالة محسنة للتواصل مع البوت
+        // 🔧 إرسال الرسالة للتليجرام (مُصحح)
+        console.log('📤 إرسال الرسالة للعميل...');
+        const messageSent = await sendTelegramMessage(chatId, messageToSend);
+        
+        if (!messageSent) {
+            // إظهار تحذير للأدمن أن الرسالة لم تُرسل
+            await Swal.fire({
+                icon: 'warning',
+                title: 'تحذير',
+                text: 'تم حفظ حل المشكلة لكن الرسالة لم تُرسل للعميل',
+                footer: 'تأكد من إرسال الرد يدوياً',
+                confirmButtonColor: '#F59E0B'
+            });
+        }
+
+        // 🔧 إضافة زر الدفع للحالات المناسبة
+        if ((chatData?.helpCategory === 'استفسار حجز' || chatData?.helpCategory === 'مشكلة دفع') && 
+            responseOption === 'default_payment') {
+            setTimeout(async () => {
+                try {
+                    await sendPaymentButton(chatId, chatData.bookingId);
+                    console.log('✅ تم إرسال زر الدفع');
+                } catch (error) {
+                    console.error('❌ خطأ في إرسال زر الدفع:', error);
+                }
+            }, 1000);
+        }
+        
+        // 🔄 تحديث واجهة المدير
+        await loadChats();
+        await loadChat(chatId);
+        
+        // ✅ رسالة نجاح
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الحل بنجاح',
+            text: messageSent ? 
+                'تم إرسال الرد وإغلاق طلب المساعدة' : 
+                'تم حل المشكلة (الرسالة لم تُرسل)',
+            timer: 2000,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('❌ خطأ في حل المشكلة:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: `حدث خطأ أثناء حل المشكلة: ${error.message}`
+        });
+    }
+}
+
+// 🔧 دالة محسنة للتواصل مع البوت
 async function sendTelegramMessage(chatId, message) {
     try {
+        console.log(`📤 إرسال رسالة للشات: ${chatId}`);
+        
         const response = await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
             method: 'POST',
             headers: { 
@@ -1129,19 +1178,27 @@ async function sendTelegramMessage(chatId, message) {
                 'Accept': 'application/json'
             },
             body: JSON.stringify({
-                chatId: chatId,
-                message: messageToSend
+                chatId: String(chatId), // تأكد من أنه string
+                message: message // ✅ مُصحح: كان messageToSend
             })
         });
         
         if (!response.ok) {
-            console.error('خطأ في الإرسال:', response.status);
+            const errorText = await response.text();
+            console.error('❌ خطأ في الإرسال:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+            });
             return false;
         }
         
+        const responseData = await response.json();
+        console.log('✅ تم إرسال الرسالة بنجاح:', responseData);
         return true;
+        
     } catch (error) {
-        console.error('فشل الاتصال بالبوت:', error);
+        console.error('❌ فشل الاتصال بالبوت:', error);
         
         // إظهار رسالة خطأ للمستخدم
         Swal.fire({
@@ -1153,6 +1210,47 @@ async function sendTelegramMessage(chatId, message) {
         });
         
         return false;
+    }
+}
+
+// 🔧 دالة إضافية لإرسال زر الدفع
+async function sendPaymentButton(chatId, bookingId) {
+    try {
+        const response = await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-payment-button', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                chatId: String(chatId),
+                bookingId: bookingId
+            })
+        });
+        
+        if (!response.ok) {
+            console.error('❌ خطأ في إرسال زر الدفع:', response.status);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('❌ فشل إرسال زر الدفع:', error);
+        return false;
+    }
+}
+
+// 🔧 دالة مساعدة للحصول على معلومات الشات
+async function getChatInfo(chatId) {
+    try {
+        const chatDoc = await db.collection('telegramChats').doc(chatId).get();
+        if (chatDoc.exists) {
+            return chatDoc.data();
+        }
+        return null;
+    } catch (error) {
+        console.error('❌ خطأ في جلب معلومات الشات:', error);
+        return null;
     }
 }
         let isSending = false;
