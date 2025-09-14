@@ -663,6 +663,23 @@
 .testimonials-actions {
     text-align: center;
     margin-bottom: 40px;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+    .testimonials-actions {
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+    }
+    
+    .testimonials-actions .action-btn {
+        width: 90%;
+        max-width: 300px;
+    }
 }
 
 .action-btn {
@@ -828,6 +845,48 @@
     font-style: italic;
     position: relative;
     padding: 0 10px;
+}
+
+        .testimonial-text.collapsed {
+    max-height: 100px;
+    overflow: hidden;
+    position: relative;
+}
+
+.testimonial-text.collapsed::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: linear-gradient(to bottom, transparent, rgba(10, 22, 40, 0.9));
+}
+
+.read-more-btn {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    color: #0A1628;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: -10px;
+    transition: all 0.3s ease;
+}
+
+.read-more-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 15px rgba(255, 215, 0, 0.3);
+}
+
+.testimonial-card.expanded .testimonial-text {
+    max-height: none;
+}
+
+.testimonial-card.expanded .testimonial-text::after {
+    display: none;
 }
 
 .testimonial-text::before,
@@ -2693,6 +2752,8 @@ const TestimonialsManager = {
     maxCards: 6,
     isActive: false,
     isLoading: false,
+    isPaused: false,
+    pausedCards: new Set(),
     
     init() {
         if (this.isActive || this.isLoading) return;
@@ -2708,7 +2769,6 @@ const TestimonialsManager = {
         
         console.log('🚀 تشغيل نظام الشهادات...');
         
-        // الانتظار حتى يتم تحميل Firebase
         if (typeof db !== 'undefined') {
             this.loadTestimonials();
         } else {
@@ -2744,7 +2804,6 @@ const TestimonialsManager = {
             
             let testimonialsList = [];
             
-            // استخراج الشهادات من مختلف التنسيقات
             if (course.testimonials.testimonials && Array.isArray(course.testimonials.testimonials)) {
                 testimonialsList = course.testimonials.testimonials;
             } else if (Array.isArray(course.testimonials)) {
@@ -2753,21 +2812,36 @@ const TestimonialsManager = {
             
             testimonialsList.forEach(t => {
                 if (t && t.text && (t.verified === true || t.verified === 'true' || t.verified === 1)) {
+                    // معالجة الاسم والوظيفة
+                    let displayName = t.name || 'متدرب';
+                    let displayJob = '';
+                    
+                    if (displayName.includes('$$')) {
+                        const parts = displayName.split('$$');
+                        displayName = parts[0].trim();
+                        displayJob = parts[1] ? parts[1].trim() : '';
+                    }
+                    
+                    // الحصول على الأيقونة الذكية
+                    const userIcon = this.getSmartIcon(t.gender, t.age, displayName);
+                    
                     this.allTestimonials.push({
-                        name: t.name || 'متدرب',
+                        name: displayName,
                         text: t.text,
                         rating: parseInt(t.rating) || 5,
                         course: course.title || 'دورة',
                         date: t.date || '',
-                        job: t.job || '',
+                        job: displayJob || t.job || '',
                         highlight: t.highlight === true || t.highlight === 'true',
-                        verified: true
+                        verified: true,
+                        gender: t.gender || '',
+                        age: t.age || '',
+                        icon: userIcon
                     });
                 }
             });
         });
         
-        // ترتيب الشهادات
         this.allTestimonials.sort((a, b) => {
             if (a.highlight && !b.highlight) return -1;
             if (!a.highlight && b.highlight) return 1;
@@ -2784,6 +2858,31 @@ const TestimonialsManager = {
         this.isLoading = false;
     },
     
+    getSmartIcon(gender, age, name) {
+        const iconSets = {
+            male: {
+                young: ['👨‍🎓', '🧑‍💻', '👨‍🔬', '🧑‍🎨', '👨‍💼'],
+                adult: ['👨‍💼', '👨‍⚕️', '👨‍🏫', '👨‍🔧', '👨‍💻'],
+                middle: ['👨‍💼', '👨‍⚕️', '👨‍🏫', '👨‍🌾', '👨‍🍳'],
+                mature: ['👨‍💼', '👨‍⚕️', '👨‍🏫', '👴', '🧔']
+            },
+            female: {
+                young: ['👩‍🎓', '👩‍💻', '👩‍🔬', '👩‍🎨', '👩‍💼'],
+                adult: ['👩‍💼', '👩‍⚕️', '👩‍🏫', '👩‍🔧', '👩‍💻'],
+                middle: ['👩‍💼', '👩‍⚕️', '👩‍🏫', '👩‍🌾', '👩‍🍳'],
+                mature: ['👩‍💼', '👩‍⚕️', '👩‍🏫', '👵', '🧕']
+            }
+        };
+        
+        if (!gender || !age || !iconSets[gender] || !iconSets[gender][age]) {
+            const defaultIcons = ['👤', '👨', '👩', '🧑', '👱', '👨‍💼', '👩‍💼', '🧑‍💼'];
+            return defaultIcons[name.length % defaultIcons.length];
+        }
+        
+        const appropriateIcons = iconSets[gender][age];
+        return appropriateIcons[name.length % appropriateIcons.length];
+    },
+    
     displayTestimonials() {
         if (!this.container) return;
         
@@ -2796,7 +2895,6 @@ const TestimonialsManager = {
             this.createCard(testimonial, index);
         });
         
-        // بدء التدوير إذا كان هناك المزيد
         if (this.allTestimonials.length > this.maxCards) {
             setTimeout(() => this.startRotation(), 10000);
         }
@@ -2807,30 +2905,24 @@ const TestimonialsManager = {
         card.className = 'testimonial-card';
         if (testimonial.highlight) card.className += ' highlighted';
         
-        // معالجة الاسم والوظيفة
-        let displayName = testimonial.name;
-        let displayJob = testimonial.job || '';
-        
-        if (displayName.includes('$$')) {
-            const parts = displayName.split('$$');
-            displayName = parts[0];
-            displayJob = parts[1] || displayJob;
-        }
-        
         const stars = '⭐'.repeat(testimonial.rating);
+        const isLongText = testimonial.text.length > 150;
+        const cardId = 'card-' + Date.now() + '-' + index;
+        card.setAttribute('data-card-id', cardId);
         
         card.innerHTML = `
-            ${testimonial.highlight ? '<span class="highlight-badge">⭐ مميز</span>' : ''}
             <div class="testimonial-header">
                 <div class="stars">${stars}</div>
+                ${testimonial.highlight ? '<span class="highlight-badge" style="position: absolute; top: -15px; right: 20px; background: linear-gradient(135deg, #FFD700, #FFA500); color: #0A1628; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 700; box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4); z-index: -1;">⭐ مميز</span>' : ''}
                 <span class="verified-badge">✓ موثق</span>
             </div>
-            <p class="testimonial-text">"${testimonial.text}"</p>
+            <p class="testimonial-text ${isLongText ? 'collapsed' : ''}">"${testimonial.text}"</p>
+            ${isLongText ? '<button class="read-more-btn" onclick="TestimonialsManager.toggleReadMore(this)">اقرأ المزيد</button>' : ''}
             <div class="testimonial-author">
-                <div class="author-avatar">👤</div>
+                <div class="author-avatar">${testimonial.icon}</div>
                 <div class="author-info">
-                    <h5 class="author-name">${displayName}</h5>
-                    ${displayJob ? `<small class="author-job">${displayJob}</small>` : ''}
+                    <h5 class="author-name">${testimonial.name}</h5>
+                    ${testimonial.job ? `<small class="author-job">${testimonial.job}</small>` : ''}
                     <small class="author-course">📚 ${testimonial.course}</small>
                     ${testimonial.date ? `<small class="author-date">📅 ${testimonial.date}</small>` : ''}
                 </div>
@@ -2839,28 +2931,58 @@ const TestimonialsManager = {
         
         this.container.appendChild(card);
         
-        // تأثير الظهور
+        // إضافة مستمعات الأحداث للإيقاف المؤقت
+        card.addEventListener('mouseenter', () => {
+            this.pausedCards.add(cardId);
+            this.isPaused = true;
+        });
+        
+        card.addEventListener('mouseleave', () => {
+            this.pausedCards.delete(cardId);
+            if (this.pausedCards.size === 0) {
+                this.isPaused = false;
+            }
+        });
+        
+        // للموبايل
+        card.addEventListener('touchstart', () => {
+            this.pausedCards.add(cardId);
+            this.isPaused = true;
+        });
+        
         setTimeout(() => {
             card.style.animation = `cardFloat 0.8s ease-out backwards`;
             card.style.animationDelay = `${index * 0.1}s`;
         }, 100);
     },
     
+    toggleReadMore(button) {
+        const card = button.closest('.testimonial-card');
+        const text = card.querySelector('.testimonial-text');
+        
+        if (text.classList.contains('collapsed')) {
+            text.classList.remove('collapsed');
+            button.textContent = 'اقرأ أقل';
+            card.classList.add('expanded');
+        } else {
+            text.classList.add('collapsed');
+            button.textContent = 'اقرأ المزيد';
+            card.classList.remove('expanded');
+        }
+    },
+    
     startRotation() {
         if (!this.isActive || this.allTestimonials.length <= this.maxCards) return;
         
         const rotateInterval = setInterval(() => {
-            if (!this.isActive) {
-                clearInterval(rotateInterval);
+            if (!this.isActive || this.isPaused) {
                 return;
             }
             
-            // اختيار كارت عشوائي للتبديل
             const cards = this.container.querySelectorAll('.testimonial-card');
             const randomIndex = Math.floor(Math.random() * cards.length);
             const cardToReplace = cards[randomIndex];
             
-            // الحصول على شهادة جديدة
             if (this.currentDisplayIndex >= this.allTestimonials.length) {
                 this.currentDisplayIndex = 0;
             }
@@ -2868,50 +2990,16 @@ const TestimonialsManager = {
             const newTestimonial = this.allTestimonials[this.currentDisplayIndex];
             this.currentDisplayIndex++;
             
-            // تأثير الاختفاء
             cardToReplace.style.opacity = '0';
             cardToReplace.style.transform = 'scale(0.95)';
             
             setTimeout(() => {
-                // تحديث المحتوى
-                cardToReplace.className = 'testimonial-card';
-                if (newTestimonial.highlight) cardToReplace.className += ' highlighted';
-                
-                let displayName = newTestimonial.name;
-                let displayJob = newTestimonial.job || '';
-                
-                if (displayName.includes('$$')) {
-                    const parts = displayName.split('$$');
-                    displayName = parts[0];
-                    displayJob = parts[1] || displayJob;
-                }
-                
-                const stars = '⭐'.repeat(newTestimonial.rating);
-                
-                cardToReplace.innerHTML = `
-                    ${newTestimonial.highlight ? '<span class="highlight-badge">⭐ مميز</span>' : ''}
-                    <div class="testimonial-header">
-                        <div class="stars">${stars}</div>
-                        <span class="verified-badge">✓ موثق</span>
-                    </div>
-                    <p class="testimonial-text">"${newTestimonial.text}"</p>
-                    <div class="testimonial-author">
-                        <div class="author-avatar">👤</div>
-                        <div class="author-info">
-                            <h5 class="author-name">${displayName}</h5>
-                            ${displayJob ? `<small class="author-job">${displayJob}</small>` : ''}
-                            <small class="author-course">📚 ${newTestimonial.course}</small>
-                            ${newTestimonial.date ? `<small class="author-date">📅 ${newTestimonial.date}</small>` : ''}
-                        </div>
-                    </div>
-                `;
-                
-                // تأثير الظهور
-                cardToReplace.style.opacity = '1';
-                cardToReplace.style.transform = 'scale(1)';
+                this.createCard(newTestimonial, randomIndex);
+                const newCard = this.container.lastChild;
+                this.container.replaceChild(newCard, cardToReplace);
             }, 500);
             
-        }, 8000); // تبديل كل 8 ثواني
+        }, 8000);
         
         this.rotationTimers.push(rotateInterval);
     },
@@ -2924,63 +3012,22 @@ const TestimonialsManager = {
     },
     
     showDefaults() {
+        // نفس الكود الافتراضي مع الأيقونات المحسنة
         this.allTestimonials = [
             {
-                name: 'أحمد محمد$$مهندس برمجيات',
-                text: 'رحلة تحويلية حقيقية! منظور الفؤاد غير نظرتي للحياة تماماً وساعدني على فهم نفسي بعمق.',
+                name: 'أحمد محمد',
+                job: 'مهندس برمجيات',
+                text: 'رحلة تحويلية غيرت حياتي بالكامل وساعدتني على اكتشاف قدراتي الحقيقية.',
                 rating: 5,
                 course: 'رحلة الأشواق التسعة',
                 date: 'يناير 2024',
                 highlight: true,
-                verified: true
-            },
-            {
-                name: 'سارة أحمد$$طبيبة',
-                text: 'محتوى عميق ومؤثر، الكوتش محمود فؤاد له قدرة مذهلة على توصيل المفاهيم المعقدة ببساطة.',
-                rating: 5,
-                course: 'رحلة القلب السليم',
-                date: 'فبراير 2024',
-                verified: true
-            },
-            {
-                name: 'محمد علي$$رائد أعمال',
-                text: 'استثمار حقيقي في النفس! تعلمت كيف أتعامل مع تحديات الحياة بوعي ونضج أكبر.',
-                rating: 5,
-                course: 'رحلة الانطلاق المبهج',
-                date: 'مارس 2024',
-                verified: true
-            },
-            {
-                name: 'فاطمة حسن$$معلمة',
-                text: 'تجربة رائعة ومتابعة ممتازة من الكوتش محمود. أنصح الجميع بهذه الرحلة التحويلية.',
-                rating: 5,
-                course: 'رحلة السلام المتصالح',
-                date: 'أبريل 2024',
-                verified: true
-            },
-            {
-                name: 'عمر خالد$$مدير تسويق',
-                text: 'منهجية علمية مدروسة مع تطبيق عملي يناسب الواقع العربي. شكراً على هذا الجهد الرائع.',
-                rating: 5,
-                course: 'رحلة الاقتدار الحازم',
-                date: 'مايو 2024',
-                verified: true
-            },
-            {
-                name: 'نور الدين$$استشاري إداري',
-                text: 'رحلة حقيقية نحو النمو الشخصي والمهني. المحتوى غني ومفيد جداً.',
-                rating: 5,
-                course: 'رحلة الانتماء الأصيل',
-                date: 'يونيو 2024',
-                verified: true
+                verified: true,
+                icon: '👨‍💻'
             }
         ];
         
         this.displayTestimonials();
-    },
-    
-    openAddModal() {
-        alert('سيتم إضافة إمكانية إضافة شهادتك قريباً! 🌟');
     },
     
     destroy() {
@@ -2989,7 +3036,6 @@ const TestimonialsManager = {
         this.rotationTimers = [];
     }
 };
-
         // البدء
         document.addEventListener('DOMContentLoaded', function() {
             // إخفاء شاشة التحميل بعد ثانيتين
