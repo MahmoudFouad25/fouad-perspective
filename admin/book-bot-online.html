@@ -959,6 +959,15 @@
     <div style="background: linear-gradient(135deg, #0EA5E9, #0284C7); color: white; padding: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h5 style="margin: 0;"><i class="fab fa-telegram"></i> مركز المحادثات</h5>
+            <a href="https://mahmoudfouad25.github.io/fouad-perspective/admin/telegram-monitor.html" 
+   target="_blank"
+   style="background: rgba(255,255,255,0.3); color: white; 
+          padding: 5px 12px; border-radius: 20px; 
+          text-decoration: none; font-size: 0.85rem;
+          transition: all 0.3s; display: inline-block; margin-right: 10px;">
+    <i class="fas fa-external-link-alt"></i> عرض كامل
+</a>
+            
             <button onclick="toggleTelegramPanel()" 
                     style="background: none; border: none; color: white; cursor: pointer; font-size: 1.2rem;">×</button>
         </div>
@@ -1239,10 +1248,30 @@ let messagesListener = null;
 // دالة تحميل المحادثات مع التصنيف الذكي
 async function loadTelegramChatsAdvanced() {
     try {
+        // جلب المحادثات
         const snapshot = await db.collection('telegramChats')
             .orderBy('lastActivity', 'desc')
             .limit(50)
             .get();
+        
+        // جلب الحجوزات المؤقتة للربط بالأسماء
+        const bookingsSnapshot = await db.collection('tempBookings')
+            .where('telegramChatId', '!=', null)
+            .get();
+        
+        // إنشاء خريطة للربط بين الـ chatId والاسم الحقيقي
+        const bookingsMap = new Map();
+        bookingsSnapshot.forEach(doc => {
+            const booking = doc.data();
+            if (booking.telegramChatId) {
+                bookingsMap.set(booking.telegramChatId, {
+                    realName: booking.customer?.name || booking.applicantName || '',
+                    courseName: booking.courseName || '',
+                    bookingType: booking.bookingType || 'individual',
+                    grantStatus: booking.grantStatus || null
+                });
+            }
+        });
         
         telegramChatsData.clear();
         let stats = {
@@ -1259,19 +1288,26 @@ async function loadTelegramChatsAdvanced() {
             const data = doc.data();
             const chatId = doc.id;
             
-            // تصنيف نوع المحادثة
+            // الحصول على الاسم الحقيقي من الحجز
+            const bookingInfo = bookingsMap.get(chatId);
+            const realName = bookingInfo?.realName || 
+                           data.customer?.name || 
+                           data.userInfo?.firstName || 
+                           'مستخدم';
+            
+            // تصنيف نوع المحادثة بشكل صحيح
             let chatType = 'general';
             let priority = 0;
             
-            if (data.hasHelpRequest) {
+            if (data.hasHelpRequest || data.needsHelp) {
                 chatType = 'help';
                 priority = 3;
                 stats.helpRequests++;
-            } else if (data.bookingType === 'grant_request') {
+            } else if (bookingInfo?.bookingType === 'grant_request' || data.bookingType === 'grant_request') {
                 chatType = 'grant';
                 priority = 2;
                 stats.grants++;
-            } else if (data.bookingId || data.hasBooking) {
+            } else if (bookingInfo || data.bookingId || data.hasBooking) {
                 chatType = 'booking';
                 priority = 1;
                 stats.bookings++;
@@ -1308,12 +1344,16 @@ async function loadTelegramChatsAdvanced() {
             
             telegramChatsData.set(chatId, {
                 ...data,
+                realName: realName, // الاسم الحقيقي
+                telegramName: data.userInfo?.firstName || 'مستخدم', // اسم التليجرام
+                courseName: bookingInfo?.courseName || data.courseName || '',
                 chatType,
                 priority,
                 messages: messages.reverse(),
                 hasReceipt,
                 unreadCount,
-                isUrgent: data.hasHelpRequest || data.needsHelp
+                isUrgent: data.hasHelpRequest || data.needsHelp,
+                grantStatus: bookingInfo?.grantStatus || data.grantStatus
             });
             
             stats.total++;
@@ -1369,9 +1409,10 @@ function updateChatsDisplay(stats) {
             statusBadge = `<span class="badge bg-info">📋 حجز</span>`;
         }
         
-        html += `
-            <div class="chat-item ${chat.isUrgent ? 'urgent' : ''} ${chat.unreadCount > 0 ? 'unread' : ''}"
-                 onclick="openAdvancedChat('${chatId}')"
+       html += `
+    <div class="chat-item ${chat.isUrgent ? 'urgent' : ''} ${chat.unreadCount > 0 ? 'unread' : ''}"
+         data-type="${chat.chatType}"
+         onclick="openAdvancedChat('${chatId}')"
                  style="padding: 15px; border-bottom: 1px solid #E5E7EB; cursor: pointer;
                         ${chat.isUrgent ? 'background: linear-gradient(to right, #FEF2F2, #FFF); border-left: 4px solid #EF4444;' : ''}
                         ${chat.unreadCount > 0 ? 'background: #F0F9FF;' : ''}
@@ -1389,7 +1430,8 @@ function updateChatsDisplay(stats) {
                     <div style="flex: 1;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                             <div style="display: flex; align-items: center; gap: 10px;">
-                                <strong>${displayName}</strong>
+                               <strong>${chat.realName}</strong>
+<small style="color: #9CA3AF;"> (@${chat.telegramName})</small>
                                 ${statusBadge}
                                 ${chat.hasReceipt ? '<span class="badge bg-success">📎 إيصال</span>' : ''}
                             </div>
@@ -1454,7 +1496,7 @@ async function openAdvancedChat(chatId) {
                         color: white; padding: 20px; display: flex; 
                         justify-content: space-between; align-items: center;">
                 <div>
-                    <h4 style="margin: 0;">${chat.userInfo?.firstName || 'محادثة'}</h4>
+                    <h4 style="margin: 0;">${chat.realName} <small style="opacity: 0.7;">(@${chat.telegramName})</small></h4>
                     <small>Chat ID: ${chatId}</small>
                 </div>
                 <button onclick="closeChatModal()" 
@@ -1602,37 +1644,111 @@ async function sendMessageToChat() {
 
 // دالة الردود السريعة
 function sendQuickReply() {
-    Swal.fire({
-        title: 'اختر رد سريع',
-        input: 'select',
-        inputOptions: {
-            greeting: '👋 أهلاً وسهلاً! كيف يمكنني مساعدتك؟',
-            receipt_request: '📸 يرجى إرسال صورة واضحة لإيصال الدفع',
-            payment_confirmed: '✅ تم تأكيد استلام الدفع بنجاح',
-            account_ready: '🎉 تم إنشاء حسابك! ستصلك البيانات قريباً',
-            need_info: '📝 نحتاج بعض المعلومات الإضافية منك',
-            support: '📞 للمساعدة: 01224938330',
-            thanks: '🙏 شكراً لتواصلك معنا'
-        },
-        showCancelButton: true,
-        confirmButtonText: 'إرسال',
-        cancelButtonText: 'إلغاء'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            const messages = {
-                greeting: '👋 أهلاً وسهلاً! كيف يمكنني مساعدتك؟',
-                receipt_request: '📸 يرجى إرسال صورة واضحة لإيصال الدفع لإكمال العملية',
-                payment_confirmed: '✅ تم تأكيد استلام الدفع بنجاح! جاري معالجة طلبك',
-                account_ready: '🎉 تم إنشاء حسابك بنجاح! ستصلك بيانات الدخول خلال دقائق',
-                need_info: '📝 نحتاج بعض المعلومات الإضافية منك لإكمال الطلب',
-                support: '📞 للمساعدة والاستفسار: 01224938330',
-                thanks: '🙏 شكراً لتواصلك معنا، نتمنى لك تجربة رائعة'
-            };
+    // إنشاء نافذة مخصصة بدل SweetAlert
+    const quickReplyModal = document.createElement('div');
+    quickReplyModal.id = 'quick-reply-modal';
+    quickReplyModal.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        z-index: 99999; /* أعلى من نافذة الشات */
+        width: 400px;
+        max-width: 90%;
+    `;
+    
+    quickReplyModal.innerHTML = `
+        <div style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                    color: white; padding: 15px; border-radius: 15px 15px 0 0;">
+            <h4 style="margin: 0;">اختر رد سريع</h4>
+        </div>
+        
+        <div style="padding: 20px; max-height: 400px; overflow-y: auto;">
+            <div class="quick-reply-options">
+                <button class="quick-reply-btn" onclick="selectQuickReply('greeting')">
+                    👋 أهلاً وسهلاً! كيف يمكنني مساعدتك؟
+                </button>
+                <button class="quick-reply-btn" onclick="selectQuickReply('receipt_request')">
+                    📸 يرجى إرسال صورة واضحة لإيصال الدفع
+                </button>
+                <button class="quick-reply-btn" onclick="selectQuickReply('payment_confirmed')">
+                    ✅ تم تأكيد استلام الدفع بنجاح
+                </button>
+                <button class="quick-reply-btn" onclick="selectQuickReply('account_ready')">
+                    🎉 تم إنشاء حسابك! ستصلك البيانات قريباً
+                </button>
+                <button class="quick-reply-btn" onclick="selectQuickReply('need_info')">
+                    📝 نحتاج بعض المعلومات الإضافية منك
+                </button>
+                <button class="quick-reply-btn" onclick="selectQuickReply('support')">
+                    📞 للمساعدة: 01224938330
+                </button>
+                <button class="quick-reply-btn" onclick="selectQuickReply('thanks')">
+                    🙏 شكراً لتواصلك معنا
+                </button>
+            </div>
+        </div>
+        
+        <div style="padding: 15px; border-top: 1px solid #E5E7EB;">
+            <button onclick="closeQuickReply()" 
+                    style="width: 100%; padding: 10px; background: #6B7280; 
+                           color: white; border: none; border-radius: 8px; 
+                           cursor: pointer;">
+                إلغاء
+            </button>
+        </div>
+        
+        <style>
+            .quick-reply-btn {
+                width: 100%;
+                padding: 12px;
+                margin-bottom: 10px;
+                background: #F3F4F6;
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+                cursor: pointer;
+                text-align: right;
+                transition: all 0.3s;
+            }
             
-            document.getElementById('message-input').value = messages[result.value];
-            sendMessageToChat();
-        }
-    });
+            .quick-reply-btn:hover {
+                background: linear-gradient(135deg, #0EA5E9, #0284C7);
+                color: white;
+                transform: translateX(-5px);
+            }
+        </style>
+    `;
+    
+    document.body.appendChild(quickReplyModal);
+}
+
+function selectQuickReply(type) {
+    const messages = {
+        greeting: '👋 أهلاً وسهلاً! كيف يمكنني مساعدتك؟',
+        receipt_request: '📸 يرجى إرسال صورة واضحة لإيصال الدفع لإكمال العملية',
+        payment_confirmed: '✅ تم تأكيد استلام الدفع بنجاح! جاري معالجة طلبك',
+        account_ready: '🎉 تم إنشاء حسابك بنجاح! ستصلك بيانات الدخول خلال دقائق',
+        need_info: '📝 نحتاج بعض المعلومات الإضافية منك لإكمال الطلب',
+        support: '📞 للمساعدة والاستفسار: 01224938330',
+        thanks: '🙏 شكراً لتواصلك معنا، نتمنى لك تجربة رائعة'
+    };
+    
+    const input = document.getElementById('message-input');
+    if (input) {
+        input.value = messages[type];
+        closeQuickReply();
+        sendMessageToChat();
+    }
+}
+
+function closeQuickReply() {
+    const modal = document.getElementById('quick-reply-modal');
+    if (modal) {
+        modal.remove();
+    }
 }
 
 // دالة إغلاق نافذة المحادثة
