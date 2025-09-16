@@ -1248,28 +1248,54 @@ let messagesListener = null;
 // دالة تحميل المحادثات مع التصنيف الذكي
 async function loadTelegramChatsAdvanced() {
     try {
+        console.log('🔄 جاري تحميل المحادثات...');
+        
         // جلب المحادثات
         const snapshot = await db.collection('telegramChats')
             .orderBy('lastActivity', 'desc')
             .limit(50)
             .get();
         
-        // جلب الحجوزات المؤقتة للربط بالأسماء
+        // جلب الحجوزات المؤقتة
         const bookingsSnapshot = await db.collection('tempBookings')
-            .where('telegramChatId', '!=', null)
             .get();
         
-        // إنشاء خريطة للربط بين الـ chatId والاسم الحقيقي
+        // إنشاء خريطة للربط بين chatId والبيانات الكاملة
         const bookingsMap = new Map();
         bookingsSnapshot.forEach(doc => {
             const booking = doc.data();
-            if (booking.telegramChatId) {
-                bookingsMap.set(booking.telegramChatId, {
-                    realName: booking.customer?.name || booking.applicantName || '',
-                    courseName: booking.courseName || '',
-                    bookingType: booking.bookingType || 'individual',
-                    grantStatus: booking.grantStatus || null
+            
+            // التعامل مع البيانات المتداخلة
+            let realName = '';
+            let bookingType = '';
+            let courseName = '';
+            let telegramChatId = '';
+            
+            // البحث عن البيانات في أماكن مختلفة
+            if (booking.userData) {
+                // البيانات متداخلة في userData
+                realName = booking.userData.customer?.name || '';
+                bookingType = booking.userData.bookingType || 'individual';
+                courseName = booking.userData.courseName || '';
+                telegramChatId = String(booking.userData.telegramChatId || '');
+            } else {
+                // البيانات مباشرة
+                realName = booking.customer?.name || booking.applicantName || '';
+                bookingType = booking.bookingType || 'individual';
+                courseName = booking.courseName || '';
+                telegramChatId = String(booking.telegramChatId || '');
+            }
+            
+            if (telegramChatId) {
+                bookingsMap.set(telegramChatId, {
+                    realName: realName,
+                    courseName: courseName,
+                    bookingType: bookingType,
+                    bookingId: doc.id,
+                    grantStatus: booking.grantStatus || booking.userData?.grantStatus || null
                 });
+                
+                console.log(`✅ ربط Chat ${telegramChatId} بالاسم: ${realName}`);
             }
         });
         
@@ -1288,14 +1314,21 @@ async function loadTelegramChatsAdvanced() {
             const data = doc.data();
             const chatId = doc.id;
             
-            // الحصول على الاسم الحقيقي من الحجز
+            // الحصول على معلومات الحجز
             const bookingInfo = bookingsMap.get(chatId);
-            const realName = bookingInfo?.realName || 
-                           data.customer?.name || 
-                           data.userInfo?.firstName || 
-                           'مستخدم';
             
-            // تصنيف نوع المحادثة بشكل صحيح
+            // استخدام الاسم الحقيقي من الحجز أو الاسم من بيانات الشات
+            const realName = bookingInfo?.realName || 
+                           data.customer?.name ||
+                           data.applicantName ||
+                           data.userInfo?.firstName || 
+                           'غير محدد';
+            
+            const telegramName = data.userInfo?.firstName || data.userInfo?.username || 'Telegram User';
+            
+            console.log(`📋 Chat ${chatId}: الاسم الحقيقي = ${realName}, اسم التليجرام = ${telegramName}`);
+            
+            // تصنيف نوع المحادثة
             let chatType = 'general';
             let priority = 0;
             
@@ -1308,7 +1341,7 @@ async function loadTelegramChatsAdvanced() {
                 priority = 2;
                 stats.grants++;
             } else if (bookingInfo || data.bookingId || data.hasBooking) {
-                chatType = 'booking';
+                chatType = 'booking';  // حجز فردي
                 priority = 1;
                 stats.bookings++;
             }
@@ -1344,29 +1377,32 @@ async function loadTelegramChatsAdvanced() {
             
             telegramChatsData.set(chatId, {
                 ...data,
-                realName: realName, // الاسم الحقيقي
-                telegramName: data.userInfo?.firstName || 'مستخدم', // اسم التليجرام
+                realName: realName,
+                telegramName: telegramName,
                 courseName: bookingInfo?.courseName || data.courseName || '',
-                chatType,
-                priority,
+                chatType: chatType,
+                priority: priority,
                 messages: messages.reverse(),
-                hasReceipt,
-                unreadCount,
+                hasReceipt: hasReceipt,
+                unreadCount: unreadCount,
                 isUrgent: data.hasHelpRequest || data.needsHelp,
-                grantStatus: bookingInfo?.grantStatus || data.grantStatus
+                grantStatus: bookingInfo?.grantStatus || data.grantStatus,
+                hasBooking: !!bookingInfo,
+                bookingId: bookingInfo?.bookingId
             });
             
             stats.total++;
         }
         
+        console.log(`📊 الإحصائيات: المجموع=${stats.total}, مساعدة=${stats.helpRequests}, منح=${stats.grants}, حجوزات=${stats.bookings}`);
+        
         updateChatsDisplay(stats);
         updateNotificationBadge();
         
     } catch (error) {
-        console.error('خطأ في تحميل المحادثات:', error);
+        console.error('❌ خطأ في تحميل المحادثات:', error);
     }
 }
-
 // دالة عرض المحادثات المحسنة
 function updateChatsDisplay(stats) {
     const container = document.getElementById('telegram-chats-list');
@@ -1379,7 +1415,9 @@ function updateChatsDisplay(stats) {
     let html = '';
     
     sortedChats.forEach(([chatId, chat]) => {
-        const displayName = chat.userInfo?.firstName || chat.customer?.name || 'مستخدم';
+        // استخدام الاسم الحقيقي
+        const displayName = chat.realName;
+        const telegramName = chat.telegramName;
         const lastMessage = chat.messages[chat.messages.length - 1];
         
         // تحديد اللون والأيقونة حسب النوع
@@ -1402,17 +1440,19 @@ function updateChatsDisplay(stats) {
                 statusBadge = `<span class="badge" style="background: #8B5CF6;">💬 تفاوض</span>`;
             } else if (chat.grantStatus === 'approved') {
                 statusBadge = `<span class="badge bg-success">✅ معتمدة</span>`;
+            } else {
+                statusBadge = `<span class="badge" style="background: #9333EA;">🎁 منحة</span>`;
             }
         } else if (chat.chatType === 'booking') {
             typeIcon = 'fa-shopping-cart';
             typeColor = '#3B82F6';
-            statusBadge = `<span class="badge bg-info">📋 حجز</span>`;
+            statusBadge = `<span class="badge bg-info">📋 حجز فردي</span>`;
         }
         
-       html += `
-    <div class="chat-item ${chat.isUrgent ? 'urgent' : ''} ${chat.unreadCount > 0 ? 'unread' : ''}"
-         data-type="${chat.chatType}"
-         onclick="openAdvancedChat('${chatId}')"
+        html += `
+            <div class="chat-item ${chat.isUrgent ? 'urgent' : ''} ${chat.unreadCount > 0 ? 'unread' : ''}"
+                 data-type="${chat.chatType}"
+                 onclick="openAdvancedChat('${chatId}')"
                  style="padding: 15px; border-bottom: 1px solid #E5E7EB; cursor: pointer;
                         ${chat.isUrgent ? 'background: linear-gradient(to right, #FEF2F2, #FFF); border-left: 4px solid #EF4444;' : ''}
                         ${chat.unreadCount > 0 ? 'background: #F0F9FF;' : ''}
@@ -1428,10 +1468,20 @@ function updateChatsDisplay(stats) {
                     
                     <!-- المحتوى -->
                     <div style="flex: 1;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 5px;">
                             <div style="display: flex; align-items: center; gap: 10px;">
-                               <strong>${chat.realName}</strong>
-<small style="color: #9CA3AF;"> (@${chat.telegramName})</small>
+                                <!-- عرض الأسماء بشكل واضح -->
+                                <div style="display: flex; flex-direction: column;">
+                                    <strong style="color: #1F2937; font-size: 0.95rem;">${displayName}</strong>
+                                    ${displayName !== telegramName ? 
+                                        `<small style="color: #9CA3AF; font-size: 0.75rem;">
+                                            <i class="fab fa-telegram" style="font-size: 0.7rem;"></i> ${telegramName}
+                                        </small>` : ''}
+                                    ${chat.courseName ? 
+                                        `<small style="color: #059669; font-size: 0.75rem;">
+                                            <i class="fas fa-book" style="font-size: 0.7rem;"></i> ${chat.courseName}
+                                        </small>` : ''}
+                                </div>
                                 ${statusBadge}
                                 ${chat.hasReceipt ? '<span class="badge bg-success">📎 إيصال</span>' : ''}
                             </div>
@@ -1496,7 +1546,13 @@ async function openAdvancedChat(chatId) {
                         color: white; padding: 20px; display: flex; 
                         justify-content: space-between; align-items: center;">
                 <div>
-                    <h4 style="margin: 0;">${chat.realName} <small style="opacity: 0.7;">(@${chat.telegramName})</small></h4>
+                    <div>
+    <h4 style="margin: 0; color: white;">${chat.realName}</h4>
+    <div style="font-size: 0.85rem; opacity: 0.9; margin-top: 5px;">
+        <i class="fab fa-telegram"></i> @${chat.telegramName}
+        ${chat.courseName ? ` | <i class="fas fa-book"></i> ${chat.courseName}` : ''}
+    </div>
+</div>
                     <small>Chat ID: ${chatId}</small>
                 </div>
                 <button onclick="closeChatModal()" 
@@ -7509,6 +7565,59 @@ document.addEventListener('DOMContentLoaded', () => {
         soundToggle.style.background = soundEnabled ? '#6B7280' : '#EF4444';
     };
     document.body.appendChild(soundToggle);
+});
+
+        // دالة تحديث الأسماء في المحادثات الموجودة (للتشغيل مرة واحدة)
+async function syncChatNames() {
+    try {
+        console.log('🔄 بدء مزامنة الأسماء...');
+        
+        // جلب كل الحجوزات
+        const bookingsSnapshot = await db.collection('tempBookings').get();
+        
+        let updateCount = 0;
+        
+        for (const bookingDoc of bookingsSnapshot.docs) {
+            const booking = bookingDoc.data();
+            
+            let chatId = '';
+            let customerName = '';
+            
+            if (booking.userData) {
+                chatId = String(booking.userData.telegramChatId || '');
+                customerName = booking.userData.customer?.name || '';
+            } else {
+                chatId = String(booking.telegramChatId || '');
+                customerName = booking.customer?.name || '';
+            }
+            
+            if (chatId && customerName) {
+                // تحديث اسم العميل في المحادثة
+                await db.collection('telegramChats').doc(chatId).update({
+                    'customer.name': customerName,
+                    'hasBooking': true,
+                    'bookingId': bookingDoc.id
+                });
+                
+                console.log(`✅ تم تحديث Chat ${chatId}: ${customerName}`);
+                updateCount++;
+            }
+        }
+        
+        console.log(`✅ تم تحديث ${updateCount} محادثة`);
+        
+        // إعادة تحميل المحادثات
+        loadTelegramChatsAdvanced();
+        
+    } catch (error) {
+        console.error('❌ خطأ في المزامنة:', error);
+    }
+}
+
+// تشغيل المزامنة مرة واحدة عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', () => {
+    // مزامنة الأسماء مرة واحدة
+    syncChatNames();
 });
       
    </script>
