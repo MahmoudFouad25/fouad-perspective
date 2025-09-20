@@ -4610,57 +4610,162 @@ const TestimonialsManager = {
     rotationTimer: null,
     isLoading: false,
     
-    init() {
-        if (this.isLoading) return;
-        this.isLoading = true;
+  init() {
+    console.log('🚀 بدء تحميل الشهادات...');
+    
+    // منع التكرار
+    if (this.isLoading) {
+        console.log('⏳ التحميل جاري بالفعل...');
+        return;
+    }
+    this.isLoading = true;
+    
+    // البحث عن الحاوية
+    this.container = document.getElementById('testimonialsContainer');
+    if (!this.container) {
+        // لو مش موجودة، نبحث بطريقة تانية
+        this.container = document.querySelector('.testimonials-grid');
+    }
+    
+    if (!this.container) {
+        console.error('❌ لا يوجد مكان لعرض الشهادات');
+        this.isLoading = false;
+        return;
+    }
+    
+    // عرض رسالة تحميل
+    this.container.innerHTML = `
+        <div style="grid-column: 1/-1; text-align: center; padding: 40px;">
+            <div style="font-size: 48px; animation: pulse 1.5s infinite;">✨</div>
+            <p style="color: #FFD700; margin-top: 20px;">جاري تحميل آراء المتدربين السابقين...</p>
+        </div>
+    `;
+    
+    // انتظار Firebase بشكل صحيح
+    this.waitForFirebase();
+},
+
+waitForFirebase() {
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    const checkFirebase = setInterval(() => {
+        attempts++;
+        console.log(`🔍 محاولة ${attempts} للاتصال بـ Firebase...`);
         
-        this.container = document.getElementById('testimonialsContainer');
-        if (!this.container) {
-            console.log('لا يوجد حاوية للشهادات');
+        if (typeof db !== 'undefined' && db) {
+            clearInterval(checkFirebase);
+            console.log('✅ Firebase جاهز!');
+            this.loadFromFirebase();
+        } else if (attempts >= maxAttempts) {
+            clearInterval(checkFirebase);
+            console.log('⚠️ استخدام البيانات الافتراضية');
+            this.showDefaultTestimonials();
             this.isLoading = false;
+        }
+    }, 500);
+},
+    
+    async loadFromFirebase() {
+    try {
+        console.log('📥 جاري جلب الشهادات من قاعدة البيانات...');
+        
+        // جلب معرف الدورة الحالية
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentCourseId = urlParams.get('course');
+        
+        // جلب كل الدورات
+        const snapshot = await db.collection('courses').get();
+        
+        if (snapshot.empty) {
+            console.log('📭 لا توجد دورات في قاعدة البيانات');
+            this.showDefaultTestimonials();
             return;
         }
         
-        // التحقق من وجود Firebase
-        if (typeof db !== 'undefined') {
-            this.loadFromFirebase();
-        } else {
-            console.log('انتظار Firebase...');
-            setTimeout(() => {
-                this.isLoading = false;
-                this.init();
-            }, 1000);
-        }
-    },
-    
-    async loadFromFirebase() {
-        try {
-            // جلب كل الدورات من Firebase
-            const snapshot = await db.collection('courses').get();
+        let allTestimonialsData = [];
+        let currentCourseTestimonials = [];
+        
+        // معالجة كل دورة
+        snapshot.forEach(doc => {
+            const courseData = doc.data();
+            const courseId = doc.id;
             
-            if (!snapshot.empty) {
-                const allCourses = [];
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data) {
-                        allCourses.push({
-                            id: doc.id,
-                            ...data
-                        });
-                    }
-                });
+            console.log(`🔍 فحص دورة: ${courseData.title || courseId}`);
+            
+            // استخراج الشهادات من الدورة
+            let testimonials = this.extractTestimonials(courseData);
+            
+            if (testimonials && testimonials.length > 0) {
+                console.log(`✨ وجدت ${testimonials.length} شهادة في ${courseData.title}`);
                 
-                this.processTestimonials(allCourses);
-            } else {
-                this.showDefaultTestimonials();
+                // إضافة معلومات الدورة لكل شهادة
+                testimonials = testimonials.map(t => ({
+                    ...t,
+                    courseTitle: courseData.title || 'دورة تحويلية',
+                    courseId: courseId
+                }));
+                
+                // فصل شهادات الدورة الحالية
+                if (courseId === currentCourseId) {
+                    currentCourseTestimonials = testimonials;
+                } else {
+                    allTestimonialsData = allTestimonialsData.concat(testimonials);
+                }
             }
-        } catch (error) {
-            console.error('خطأ Firebase:', error);
+        });
+        
+        // دمج الشهادات: شهادات الدورة الحالية أولاً
+        this.allTestimonials = [...currentCourseTestimonials, ...allTestimonialsData];
+        
+        console.log(`📊 المجموع الكلي: ${this.allTestimonials.length} شهادة`);
+        
+        if (this.allTestimonials.length > 0) {
+            this.displayTestimonials();
+            
+            // بدء التدوير لو فيه أكتر من 6
+            if (this.allTestimonials.length > 6) {
+                this.startAutoRotation();
+            }
+        } else {
+            console.log('🎭 استخدام الشهادات الافتراضية');
             this.showDefaultTestimonials();
         }
         
+    } catch (error) {
+        console.error('❌ خطأ في جلب الشهادات:', error);
+        this.showDefaultTestimonials();
+    } finally {
         this.isLoading = false;
-    },
+    }
+},
+
+extractTestimonials(courseData) {
+    let testimonials = [];
+    
+    // محاولة 1: testimonials.testimonials
+    if (courseData.testimonials?.testimonials) {
+        if (Array.isArray(courseData.testimonials.testimonials)) {
+            testimonials = courseData.testimonials.testimonials;
+        }
+    }
+    // محاولة 2: testimonials مباشرة
+    else if (Array.isArray(courseData.testimonials)) {
+        testimonials = courseData.testimonials;
+    }
+    // محاولة 3: reviews
+    else if (courseData.reviews && Array.isArray(courseData.reviews)) {
+        testimonials = courseData.reviews;
+    }
+    // محاولة 4: studentReviews
+    else if (courseData.studentReviews && Array.isArray(courseData.studentReviews)) {
+        testimonials = courseData.studentReviews;
+    }
+    
+    // تصفية الشهادات الصالحة فقط
+    return testimonials.filter(t => t && (t.text || t.review || t.comment));
+},
+    
     
     processTestimonials(courses) {
         this.allTestimonials = [];
@@ -4726,37 +4831,50 @@ const TestimonialsManager = {
         return isVerified;
     },
     
-    addTestimonial(testimonial, course) {
-        // معالجة الاسم والوظيفة
-        let name = testimonial.name || 'متدرب';
-        let job = '';
-        
-        if (name.includes('$$')) {
-            const parts = name.split('$$');
-            name = parts[0].trim();
-            job = parts[1] ? parts[1].trim() : '';
-        }
-        
-        // الحصول على الأيقونة
-        const icon = this.getSmartIcon(
-            testimonial.gender || '',
-            testimonial.age || '',
-            name
-        );
-        
-        // إضافة الشهادة للقائمة
-        this.allTestimonials.push({
-            name: name,
-            text: testimonial.text,
-            rating: parseInt(testimonial.rating) || 5,
-            course: testimonial.course || course.title || 'دورة تحويلية',
-            date: testimonial.date || '',
-            job: job || testimonial.job || '',
-            highlight: testimonial.highlight === true || testimonial.highlight === 'true',
-            verified: true,
-            icon: icon
-        });
-    },
+  addTestimonial(testimonial, course) {
+    // استخراج النص
+    const text = testimonial.text || testimonial.review || testimonial.comment || '';
+    if (!text) return;
+    
+    // معالجة الاسم
+    let name = testimonial.name || testimonial.studentName || 'متدرب سابق';
+    let job = testimonial.job || testimonial.position || '';
+    
+    // معالجة الاسم المركب (اسم$$وظيفة)
+    if (name.includes('$$')) {
+        const parts = name.split('$$');
+        name = parts[0].trim();
+        job = parts[1]?.trim() || job;
+    }
+    
+    // الأيقونة
+    const icon = this.getSmartIcon(
+        testimonial.gender || 'mixed',
+        testimonial.age || 'adult',
+        name
+    );
+    
+    // التقييم
+    const rating = parseInt(testimonial.rating || testimonial.stars || 5);
+    
+    // التاريخ
+    const date = testimonial.date || testimonial.createdAt || '';
+    
+    // الإضافة للقائمة
+    this.allTestimonials.push({
+        name: name,
+        text: text,
+        rating: rating,
+        course: course.courseTitle || course.title || 'دورة تحويلية',
+        date: date,
+        job: job,
+        highlight: testimonial.highlight || testimonial.featured || false,
+        verified: testimonial.verified !== false,
+        icon: icon
+    });
+    
+    console.log(`✅ تمت إضافة شهادة من: ${name}`);
+},
     
     getSmartIcon(gender, age, name) {
         const iconSets = {
@@ -11577,17 +11695,15 @@ window.addEventListener('load', function() {
     setTimeout(() => {
         loadCourseData();
         
-        setTimeout(() => {
-            // تحميل الشهادات
-            if (typeof TestimonialsManager !== 'undefined') {
-                TestimonialsManager.init();
-            }
-            
-            // تحميل المقاعد - هنا الجزء المهم!
-            if (typeof seatsSystem !== 'undefined') {
-                seatsSystem.init();
-            }
-        }, 1500);
+        // تحميل الشهادات مع تأخير للتأكد من جاهزية كل شيء
+setTimeout(() => {
+    if (typeof TestimonialsManager !== 'undefined') {
+        console.log('🎯 بدء تحميل نظام الشهادات...');
+        TestimonialsManager.init();
+    } else {
+        console.error('❌ نظام الشهادات غير موجود!');
+    }
+}, 2000);
     }, 1000);
 });
 
