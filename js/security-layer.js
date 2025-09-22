@@ -193,6 +193,46 @@
             });
         }
     };
+
+
+    // حماية خاصة للموبايل من Eruda و vConsole
+    const blockMobileDebuggers = () => {
+        // حظر Eruda
+        if (window.eruda) {
+            window.eruda = undefined;
+            document.body.innerHTML = '<h1 style="text-align:center; margin-top:50px;">غير مسموح</h1>';
+        }
+        
+        // حظر vConsole
+        if (window.VConsole) {
+            window.VConsole = undefined;
+        }
+        
+        // مراقبة التغييرات
+        Object.defineProperty(window, 'eruda', {
+            set: function() {
+                location.reload();
+            }
+        });
+        
+        Object.defineProperty(window, 'VConsole', {
+            set: function() {
+                location.reload();
+            }
+        });
+        
+        // حماية من التلاعب بالـ URL
+        const checkURL = () => {
+            if (location.href.includes('eruda=true') || 
+                location.href.includes('vconsole=true') ||
+                location.href.includes('debug=')) {
+                location.href = location.href.split('?')[0];
+            }
+        };
+        
+        checkURL();
+        setInterval(checkURL, 1000);
+    };
     
     // تهيئة الحماية
     const init = () => {
@@ -200,7 +240,7 @@
         disableDevTools();
         protectContent();
         protectDatabase();
-        
+        blockMobileDebuggers();
         // إضافة شارة الحماية
         const badge = document.createElement('div');
         badge.className = 'security-badge';
