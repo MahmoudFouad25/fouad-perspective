@@ -128,14 +128,14 @@
     
     // طريقة 1: كشف بحجم النافذة
     setInterval(function() {
-        if (window.outerHeight - window.innerHeight > 100) {
+        if (window.outerHeight - window.innerHeight > 200) {
             if (!devToolsOpen) {
                 devToolsOpen = true;
                 blockPage();
             }
         }
         
-        if (window.outerWidth - window.innerWidth > 100) {
+        if (window.outerWidth - window.innerWidth > 200) {
             if (!devToolsOpen) {
                 devToolsOpen = true;
                 blockPage();
@@ -143,10 +143,6 @@
         }
     }, 500);
     
-    // طريقة 2: كشف بـ debugger
-    setInterval(function() {
-        debugger;
-    }, 5000);
     
     // ============ الجزء الخامس: حماية من الموبايل ============
     
@@ -244,10 +240,7 @@
             </div>
         `;
         
-        // إيقاف كل شيء
-        setInterval(function() {
-            debugger;
-        }, 100);
+       
     }
     
     // إضافة CSS للأنيميشن
