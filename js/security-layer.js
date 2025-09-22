@@ -91,7 +91,7 @@
                 </div>
             `;
             setTimeout(() => {
-                window.location.href = 'https://mahmoudfouad25.github.io/fouad-perspective/';
+                window.location.href = 'https://mahmoudfouad25.github.io/fouad-perspective/product-category/discover.html?course=malaz-alhayara-course';
             }, 3000);
         }
     };
