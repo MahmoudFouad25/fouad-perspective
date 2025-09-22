@@ -241,43 +241,7 @@
         protectContent();
         protectDatabase();
         blockMobileDebuggers();
-        // إضافة شارة الحماية
-        const badge = document.createElement('div');
-        badge.className = 'security-badge';
-        badge.innerHTML = `
-            <span style="animation: pulse 2s infinite;">🔒</span>
-            <span>${isMobile ? 'محمي' : 'محتوى محمي'}</span>
-        `;
-        badge.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.9), rgba(118, 75, 162, 0.9));
-            color: white;
-            padding: ${isMobile ? '8px 15px' : '10px 20px'};
-            border-radius: 25px;
-            font-size: ${isMobile ? '12px' : '14px'};
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            z-index: 9998;
-            font-family: 'Tajawal', sans-serif;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            backdrop-filter: blur(10px);
-            pointer-events: none;
-        `;
-        
-        // إضافة animation للنبض
-        const pulseStyle = document.createElement('style');
-        pulseStyle.innerHTML = `
-            @keyframes pulse {
-                0%, 100% { transform: scale(1); }
-                50% { transform: scale(1.1); }
-            }
-        `;
-        document.head.appendChild(pulseStyle);
-        
-        document.body.appendChild(badge);
+        // تم إزالة البادج - الحماية شغالة بدون إظهار أي شيء للمستخدم
     };
     
     // بدء الحماية
