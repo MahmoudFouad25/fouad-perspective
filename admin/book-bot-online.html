@@ -5037,30 +5037,8 @@ async function autoTransferToSpecialized(bookingId) {
         });
         
         // إشعار التليجرام بالتحويل وبدء الأتمتة
-       if (booking.telegramChatId) {
-
-           let message;
-if (booking.isFullGrant) {
-    // رسالة خاصة للمنحة الكاملة
-    message = `
-🎊 *تم تفعيل منحتك الكاملة!*
-━━━━━━━━━━━━━━━━━━
-
-${userCheck.exists ? 
-'✅ تم العثور على حسابك السابق' :
-'🆕 تم إنشاء حساب جديد لك'}
-
-📚 الدورة: ${booking.courseName || 'الدورة'}
-💎 منحة كاملة 100% - مجاناً
-
-⏳ جاري تجهيز حسابك النهائي...
-📧 ستصلك بيانات الدخول خلال لحظات
-
-شكراً لصبرك 🙏
-`;
-} else {
-    // رسالة للحجوزات العادية
-    message = `
+        if (booking.telegramChatId) {
+            const message = `
 ⚙️ *جاري معالجة طلبك...*
 
 ${userCheck.exists ? 
@@ -5070,8 +5048,7 @@ ${userCheck.exists ?
 📚 جاري تخصيص دورة: ${booking.courseName || 'الدورة'}
 
 ⏳ انتظر حتي الانتهاء من تجهيزات استقبالك....
-`;
-}
+            `;
                 
             await sendTelegramMessage(booking.telegramChatId, message);
         }
@@ -5529,43 +5506,7 @@ if (isInstallment) {
             }
 
             // التحديث في Firebase
-           await db.collection('tempBookings').doc(bookingId).update(updateData);
-
-// التكامل مع البوت
-if (isFullGrant) {
-    // منحة كاملة - تحويل تلقائي فقط
-    console.log('🎯 منحة كاملة - تحويل تلقائي');
-    
-    // لا نرسل رسالة هنا - البوت هيرسلها
-    // فقط نبدأ التحويل التلقائي
-    setTimeout(() => {
-        autoTransferToSpecialized(bookingId);
-    }, 5000);
-    
-} else {
-    // منحة جزئية - نبلغ البوت بالتفاصيل
-    if (booking.telegramChatId) {
-        await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/approve-grant-final', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bookingId: bookingId,
-                selectedOffer: selectedOffer
-            })
-        });
-    }
-}
-
-// رسالة النجاح للأدمن
-Swal.fire({
-    icon: 'success',
-    title: 'تمت الموافقة!',
-    text: 'تم تحويل المنحة إلى حجز فردي بنجاح',
-    confirmButtonColor: '#10B981'
-});
-
-loadBookings();
-            
+            await db.collection('tempBookings').doc(bookingId).update(updateData);
             // إعادة تحميل البيانات المحدثة
 const updatedDoc = await db.collection('tempBookings').doc(bookingId).get();
 const updatedBooking = { id: bookingId, ...updatedDoc.data() };
@@ -7095,31 +7036,17 @@ function calculateGrantSupport(booking) {
 // أضف هذه الدالة قبل دالة transferToSpecialized
 async function checkExistingUser(booking) {
     try {
+        const type = booking.bookingType || booking.type;
         let searchEmail = '';
-        let searchPhone = '';
+        let searchWhatsapp = '';
         
-        // استخراج البيانات من كل الأماكن الممكنة
-        if (booking.customer) {
+        // استخراج البيانات للبحث
+        if (type === 'individual' && booking.customer) {
             searchEmail = booking.customer.email || '';
-            searchPhone = booking.customer.phone || booking.customer.whatsapp || '';
-        } 
-        
-        // لو مفيش customer، دور في أماكن تانية
-        if (!searchEmail && booking.applicant) {
-            searchEmail = booking.applicant.email || '';
-            searchPhone = booking.applicant.phone || booking.applicant.whatsapp || '';
-        }
-        
-        // لو برضه مفيش، دور في grantDetails
-        if (!searchEmail && booking.grantDetails) {
-            searchEmail = booking.grantDetails.email || '';
-            searchPhone = booking.grantDetails.phone || '';
-        }
-        
-        // لو مفيش أي بيانات خالص
-        if (!searchEmail && !searchPhone) {
-            console.log('⚠️ لا توجد بيانات للبحث');
-            return { exists: false, userId: null };
+            searchWhatsapp = booking.customer.whatsapp || '';
+        } else if (type === 'grant_request') {
+            searchEmail = applicant?.email || '';
+            searchWhatsapp = applicant?.whatsapp || '';
         }
         
         // البحث بالإيميل
@@ -7137,40 +7064,32 @@ async function checkExistingUser(booking) {
             }
         }
         
-        // البحث بالهاتف
-        if (searchPhone) {
-            const phoneQuery = await db.collection('users')
-                .where('personalInfo.whatsapp', '==', searchPhone)
+        // البحث بالواتساب
+        if (searchWhatsapp) {
+            const whatsappQuery = await db.collection('users')
+                .where('personalInfo.whatsapp', '==', searchWhatsapp)
                 .limit(1)
                 .get();
             
-            if (!phoneQuery.empty) {
+            if (!whatsappQuery.empty) {
                 return {
                     exists: true,
-                    userId: phoneQuery.docs[0].id
-                };
-            }
-            
-            // جرب البحث بـ phone
-            const phoneQuery2 = await db.collection('users')
-                .where('personalInfo.phone', '==', searchPhone)
-                .limit(1)
-                .get();
-            
-            if (!phoneQuery2.empty) {
-                return {
-                    exists: true,
-                    userId: phoneQuery2.docs[0].id
+                    userId: whatsappQuery.docs[0].id
                 };
             }
         }
         
-        return { exists: false, userId: null };
+        return {
+            exists: false,
+            userId: null
+        };
         
     } catch (error) {
         console.error('خطأ في البحث:', error);
-        // في حالة الخطأ، نكمل العملية عادي
-        return { exists: false, userId: null };
+        return {
+            exists: false,
+            userId: null
+        };
     }
 }
         
