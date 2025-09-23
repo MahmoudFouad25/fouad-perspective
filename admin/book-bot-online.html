@@ -5036,8 +5036,8 @@ async function autoTransferToSpecialized(bookingId) {
             automationTriggered: true
         });
         
-        // إشعار التليجرام بالتحويل وبدء الأتمتة
-        if (booking.telegramChatId) {
+        // إشعار التليجرام فقط للحجوزات غير المنح الكاملة
+if (booking.telegramChatId && !booking.isFullGrant) {
             const message = `
 ⚙️ *جاري معالجة طلبك...*
 
@@ -5281,7 +5281,7 @@ async function deleteBooking(bookingId) {
 
 
         // دوال إجراءات المنح الجديدة
-async function sendGrantApproval(bookingId) {
+async function sendGrantApproval(bookingId) {async function sendGrantApproval(bookingId) {
     const booking = allBookings.find(b => b.id === bookingId);
     if (!booking) return;
     
@@ -5289,7 +5289,6 @@ async function sendGrantApproval(bookingId) {
     const savedOffers = booking.negotiationOffers || [];
     
     if (savedOffers.length === 0) {
-        // لا توجد عروض - اطلب التفاوض أولاً
         Swal.fire({
             icon: 'warning',
             title: 'لا توجد عروض محفوظة',
@@ -5304,7 +5303,7 @@ async function sendGrantApproval(bookingId) {
         return;
     }
     
-    // عرض العروض المحفوظة للاختيار
+    // عرض العروض المحفوظة
     let offersHTML = `
         <div style="text-align: right;">
             <h4 style="color: #1F2937; margin-bottom: 20px;">اختر العرض النهائي:</h4>
@@ -5336,7 +5335,6 @@ async function sendGrantApproval(bookingId) {
     
     offersHTML += `
             </div>
-            
             <div style="margin-top: 20px; padding: 15px; background: #EFF6FF; 
                         border-radius: 10px; border: 2px dashed #3B82F6;">
                 <label style="cursor: pointer;">
@@ -5372,36 +5370,32 @@ async function sendGrantApproval(bookingId) {
         const selectedOffer = savedOffers[parseInt(selection)];
         
         try {
-            // تحويل لحجز فردي بالعرض المختار بنفس منطق تغيير خطة الدفع
             const basePrice = booking.pricing?.basePriceNumber || 7500;
             const finalAmount = selectedOffer.amount;
             const isInstallment = selectedOffer.months > 0;
             const isFullGrant = selectedOffer.type === 'full' || finalAmount === 0;
 
-            // بناء بيانات التحديث بشكل صحيح
+            // بناء بيانات التحديث
             const updateData = {
                 status: 'confirmed',
                 grantStatus: 'approved',
                 approvedAt: new Date().toISOString(),
                 approvedOffer: selectedOffer,
-                grantApprovalLocked: true,  // <-- السطر الجديد
-
+                grantApprovalLocked: true,
                 
-                // تحديث التسعير
+                // التسعير
                 'pricing.basePrice': `${basePrice.toLocaleString('ar-EG')} ج.م`,
                 'pricing.basePriceNumber': basePrice,
                 'pricing.finalPrice': `${finalAmount.toLocaleString('ar-EG')} ج.م`,
                 'pricing.finalPriceNumber': finalAmount,
                 
-                // حساب وحفظ التوفير
+                // التوفير
                 totalSavings: basePrice - finalAmount,
                 totalSavingsText: `${(basePrice - finalAmount).toLocaleString('ar-EG')} ج.م`
             };
 
-            // إضافة الخصومات
+            // الخصومات
             const discounts = [];
-
-            // خصم المنحة
             if (isFullGrant) {
                 discounts.push({
                     type: 'grant',
@@ -5419,153 +5413,97 @@ async function sendGrantApproval(bookingId) {
                     amount: grantAmount
                 });
             }
-
             updateData.discounts = discounts;
 
-            // تحديث معلومات الدفع
-if (isInstallment) {
-    // حالة الأقساط - نظام الأقساط المتساوية الجديد
-    const months = selectedOffer.months;
-    const monthlyAmount = smartRound(finalAmount / months); // استخدام دالة التقريب الذكي
-    const totalAfterRounding = monthlyAmount * months;
-    
-    updateData.payment = {
-        code: `installment_${months}`,
-        method: 'installment',
-        type: 'installment',
-        installmentDetails: `${months} أقساط × ${monthlyAmount.toLocaleString('ar-EG')} ج.م`,
-        installmentHTML: `
-            <div style="background: #F0FDF4; padding: 10px; border-radius: 8px;">
-                <strong>خطة الأقساط:</strong><br>
-                عدد الأقساط: ${months}<br>
-                القسط الشهري: ${monthlyAmount.toLocaleString('ar-EG')} ج.م<br>
-                الإجمالي: ${totalAfterRounding.toLocaleString('ar-EG')} ج.م
-            </div>
-        `
-    };
-    
-    // إنشاء جدول الأقساط المتساوية
-    const installmentSchedule = [];
-    const today = new Date();
-    
-    // كل الأقساط متساوية
-    for (let i = 0; i < months; i++) {
-        const dueDate = new Date(today);
-        dueDate.setMonth(dueDate.getMonth() + i);
-        
-        installmentSchedule.push({
-            installmentNumber: i + 1,
-            amount: monthlyAmount,
-            dueDate: dueDate.toISOString(),
-            status: 'pending',
-            description: `القسط ${i + 1}`
-        });
-    }
-    
-    updateData.paymentDetails = {
-        type: 'installment',
-        totalAmount: totalAfterRounding,
-        monthlyAmount: monthlyAmount,
-        totalInstallments: months,
-        paidInstallments: 0,
-        remainingAmount: totalAfterRounding,
-        installmentSchedule: installmentSchedule,
-        fullyPaid: false
-    };
-} else {
-                // حالة الدفعة الواحدة (منحة كاملة أو جزئية بدون تقسيط)
+            // معلومات الدفع
+            if (isInstallment) {
+                const months = selectedOffer.months;
+                const monthlyAmount = smartRound(finalAmount / months);
+                const totalAfterRounding = monthlyAmount * months;
+                
+                updateData.payment = {
+                    code: `installment_${months}`,
+                    method: 'installment',
+                    type: 'installment',
+                    installmentDetails: `${months} أقساط × ${monthlyAmount.toLocaleString('ar-EG')} ج.م`
+                };
+                
+                const installmentSchedule = [];
+                const today = new Date();
+                
+                for (let i = 0; i < months; i++) {
+                    const dueDate = new Date(today);
+                    dueDate.setMonth(dueDate.getMonth() + i);
+                    
+                    installmentSchedule.push({
+                        installmentNumber: i + 1,
+                        amount: monthlyAmount,
+                        dueDate: dueDate.toISOString(),
+                        status: 'pending',
+                        description: `القسط ${i + 1}`
+                    });
+                }
+                
+                updateData.paymentDetails = {
+                    type: 'installment',
+                    totalAmount: totalAfterRounding,
+                    monthlyAmount: monthlyAmount,
+                    totalInstallments: months,
+                    paidInstallments: 0,
+                    remainingAmount: totalAfterRounding,
+                    installmentSchedule: installmentSchedule,
+                    fullyPaid: false
+                };
+            } else {
                 updateData.payment = {
                     code: isFullGrant ? 'full_grant' : 'cash',
                     method: isFullGrant ? 'منحة كاملة' : 'دفعة واحدة',
-                    type: 'cash',
-                    installmentDetails: null,
-                    installmentHTML: null
+                    type: 'cash'
                 };
                 
                 updateData.paymentDetails = {
                     type: 'cash',
                     totalAmount: finalAmount,
-                    paidAmount: 0,
-                    remainingAmount: finalAmount,
-                    fullyPaid: false,
-                    installmentSchedule: null
+                    paidAmount: isFullGrant ? 0 : 0,
+                    remainingAmount: isFullGrant ? 0 : finalAmount,
+                    fullyPaid: isFullGrant
                 };
             }
 
-            // للمنحة الكاملة - إضافة علامة خاصة
+            // علامات المنحة الكاملة
             if (isFullGrant) {
                 updateData.isFullGrant = true;
                 updateData.requiresPayment = false;
-                // للمنحة الكاملة - تحديث حالة الدفع
-                updateData.paymentDetails.paidAmount = 0;
-                updateData.paymentDetails.remainingAmount = 0;
-                updateData.paymentDetails.fullyPaid = true;
             } else {
                 updateData.isFullGrant = false;
                 updateData.requiresPayment = true;
             }
 
-            // التحديث في Firebase
-           await db.collection('tempBookings').doc(bookingId).update(updateData);
+            // حفظ في Firebase
+            await db.collection('tempBookings').doc(bookingId).update(updateData);
 
-// التكامل مع البوت
-if (isFullGrant) {
-    // منحة كاملة - تحويل تلقائي فقط
-    console.log('🎯 منحة كاملة - تحويل تلقائي');
-    
-    // لا نرسل رسالة هنا - البوت هيرسلها
-    // فقط نبدأ التحويل التلقائي
-    setTimeout(() => {
-        autoTransferToSpecialized(bookingId);
-    }, 3000);
-    
-} else {
-    // منحة جزئية - نبلغ البوت بالتفاصيل
-    if (booking.telegramChatId) {
-        await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/approve-grant-final', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bookingId: bookingId,
-                selectedOffer: selectedOffer
-            })
-        });
-    }
-}
+            // التكامل مع البوت والأتمتة
+            if (isFullGrant) {
+                // منحة كاملة - تحويل تلقائي بعد 5 ثواني
+                console.log('🎯 منحة كاملة - تحويل تلقائي');
+                setTimeout(() => {
+                    autoTransferToSpecialized(bookingId);
+                }, 5000);
+            } else {
+                // منحة جزئية - إرسال للبوت
+                if (booking.telegramChatId) {
+                    await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/approve-grant-final', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            bookingId: bookingId,
+                            selectedOffer: selectedOffer
+                        })
+                    });
+                }
+            }
 
-// رسالة النجاح للأدمن
-Swal.fire({
-    icon: 'success',
-    title: 'تمت الموافقة!',
-    text: 'تم تحويل المنحة إلى حجز فردي بنجاح',
-    confirmButtonColor: '#10B981'
-});
-
-loadBookings();
-            
-            // إعادة تحميل البيانات المحدثة
-const updatedDoc = await db.collection('tempBookings').doc(bookingId).get();
-const updatedBooking = { id: bookingId, ...updatedDoc.data() };
-
-// تحديث المصفوفة المحلية
-const bookingIndex = allBookings.findIndex(b => b.id === bookingId);
-if (bookingIndex !== -1) {
-    allBookings[bookingIndex] = updatedBooking;
-}
-            
-           // إرسال إشعار للتليجرام بالموافقة وتحويل للمسار العادي
-if (booking.telegramChatId) {
-    // استخدام API الموافقة النهائية الجديد
-    await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/approve-grant-final', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            bookingId: bookingId,
-            selectedOffer: selectedOffer
-        })
-    });
-}
-
+            // رسالة نجاح واحدة فقط
             Swal.fire({
                 icon: 'success',
                 title: 'تمت الموافقة!',
@@ -5580,7 +5518,7 @@ if (booking.telegramChatId) {
             Swal.fire({
                 icon: 'error',
                 title: 'خطأ!',
-                text: 'فشلت الموافقة على المنحة، حاول مرة أخرى',
+                text: 'فشلت الموافقة على المنحة',
                 confirmButtonColor: '#DC2626'
             });
         }
