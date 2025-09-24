@@ -5602,24 +5602,96 @@ async function sendGrantApproval(bookingId) {
     const customer = booking.customer || {};
     const savedOffers = booking.negotiationOffers || [];
     
-    if (savedOffers.length === 0) {
-    // لا توجد عروض - اعرض خيارات
+   if (savedOffers.length === 0) {
+    // إنشاء عرض من طلب العميل الأصلي
+    const grantDetails = booking.grantDetails || {};
+    const supportType = grantDetails.supportType || 'partial';
+    const basePrice = booking.pricing?.basePriceNumber || 7500;
+    
+    let customerOriginalRequest = '';
+    let directOffer;
+    
+    if (supportType === 'full') {
+        customerOriginalRequest = `
+            <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; border-right: 4px solid #10B981;">
+                <h4 style="color: #065F46; margin-bottom: 10px;">🎁 منحة كاملة 100%</h4>
+                <p style="margin: 5px 0;"><strong>المبلغ المطلوب من العميل:</strong> 0 ج.م</p>
+                <p style="margin: 5px 0;"><strong>التوفير:</strong> ${basePrice.toLocaleString('ar-EG')} ج.م (100%)</p>
+                <p style="margin: 5px 0;"><strong>طريقة الدفع:</strong> لا يوجد دفع مطلوب</p>
+            </div>
+        `;
+        
+        directOffer = {
+            type: 'full',
+            amount: 0,
+            months: 0,
+            timestamp: new Date().toISOString()
+        };
+    } else if (supportType === 'partial') {
+        const percentage = grantDetails.supportDetails?.percentage || 50;
+        const amount = Math.round(basePrice * percentage / 100);
+        const savings = basePrice - amount;
+        const installmentRequested = grantDetails.supportDetails?.installmentRequested;
+        const installmentMonths = grantDetails.supportDetails?.installmentMonths || 3;
+        
+        customerOriginalRequest = `
+            <div style="background: #EFF6FF; padding: 15px; border-radius: 10px; border-right: 4px solid #3B82F6;">
+                <h4 style="color: #1E40AF; margin-bottom: 10px;">💎 منحة جزئية ${percentage}%</h4>
+                <p style="margin: 5px 0;"><strong>المبلغ المطلوب:</strong> ${amount.toLocaleString('ar-EG')} ج.م</p>
+                <p style="margin: 5px 0;"><strong>التوفير:</strong> ${savings.toLocaleString('ar-EG')} ج.م (${100-percentage}%)</p>
+                <p style="margin: 5px 0;"><strong>طريقة الدفع:</strong> ${installmentRequested ? 
+                    `${installmentMonths} أقساط × ${Math.ceil(amount/installmentMonths).toLocaleString('ar-EG')} ج.م` : 
+                    'دفعة واحدة'}</p>
+            </div>
+        `;
+        
+        directOffer = {
+            type: 'amount',
+            amount: amount,
+            percentage: percentage,
+            months: installmentRequested ? installmentMonths : 0,
+            timestamp: new Date().toISOString()
+        };
+    } else if (supportType === 'installment') {
+        const months = grantDetails.supportDetails?.months || 6;
+        const monthlyAmount = Math.ceil(basePrice / months);
+        
+        customerOriginalRequest = `
+            <div style="background: #FEF3C7; padding: 15px; border-radius: 10px; border-right: 4px solid #F59E0B;">
+                <h4 style="color: #92400E; margin-bottom: 10px;">📅 تقسيط ميسر</h4>
+                <p style="margin: 5px 0;"><strong>المبلغ الإجمالي:</strong> ${basePrice.toLocaleString('ar-EG')} ج.م</p>
+                <p style="margin: 5px 0;"><strong>عدد الأقساط:</strong> ${months} شهور</p>
+                <p style="margin: 5px 0;"><strong>القسط الشهري:</strong> ${monthlyAmount.toLocaleString('ar-EG')} ج.م</p>
+                <p style="margin: 5px 0;"><strong>بدون فوائد:</strong> نعم</p>
+            </div>
+        `;
+        
+        directOffer = {
+            type: 'amount',
+            amount: basePrice,
+            months: months,
+            timestamp: new Date().toISOString()
+        };
+    }
+    
     const result = await Swal.fire({
         title: '🎯 طريقة الموافقة',
         html: `
             <div style="text-align: right;">
-                <p style="font-size: 1.1rem; margin-bottom: 20px;">
-                    كيف تريد الموافقة على المنحة؟
-                </p>
+                <div style="margin-bottom: 25px;">
+                    <h4 style="color: #374151; margin-bottom: 15px;">طلب العميل الأصلي:</h4>
+                    ${customerOriginalRequest}
+                </div>
+                
                 <div style="display: grid; gap: 15px;">
                     <label style="background: #F0FDF4; padding: 15px; border-radius: 10px; 
                                   border: 2px solid #10B981; cursor: pointer; display: flex; align-items: center;">
                         <input type="radio" name="approvalType" value="direct" checked 
                                style="margin-left: 15px; transform: scale(1.2);">
-                        <div>
-                            <strong style="color: #065F46;">موافقة مباشرة على طلب العميل</strong>
+                        <div style="flex: 1;">
+                            <strong style="color: #065F46;">موافقة فورية على هذا الطلب</strong>
                             <div style="color: #059669; font-size: 0.9rem; margin-top: 5px;">
-                                الموافقة على نفس المبلغ والخطة اللي طلبها العميل
+                                سيتم الموافقة مباشرة وإرسال رسالة التهاني للعميل
                             </div>
                         </div>
                     </label>
@@ -5628,10 +5700,10 @@ async function sendGrantApproval(bookingId) {
                                   border: 2px solid #3B82F6; cursor: pointer; display: flex; align-items: center;">
                         <input type="radio" name="approvalType" value="negotiate" 
                                style="margin-left: 15px; transform: scale(1.2);">
-                        <div>
-                            <strong style="color: #1E40AF;">إنشاء عروض بديلة أولاً</strong>
+                        <div style="flex: 1;">
+                            <strong style="color: #1E40AF;">إنشاء عروض بديلة</strong>
                             <div style="color: #2563EB; font-size: 0.9rem; margin-top: 5px;">
-                                عرض خيارات مختلفة للعميل قبل الموافقة
+                                عرض خيارات مختلفة للعميل أولاً
                             </div>
                         </div>
                     </label>
@@ -5639,10 +5711,10 @@ async function sendGrantApproval(bookingId) {
             </div>
         `,
         showCancelButton: true,
-        confirmButtonText: 'متابعة',
+        confirmButtonText: 'تأكيد الموافقة',
         cancelButtonText: 'إلغاء',
         confirmButtonColor: '#10B981',
-        width: '600px',
+        width: '700px',
         preConfirm: () => {
             const selected = document.querySelector('input[name="approvalType"]:checked');
             return selected ? selected.value : null;
@@ -5654,54 +5726,20 @@ async function sendGrantApproval(bookingId) {
             openGrantNegotiation(bookingId);
             return;
         } else {
-            // الموافقة المباشرة - إنشاء عرض من طلب العميل
-            const grantDetails = booking.grantDetails || {};
-            const supportType = grantDetails.supportType || 'partial';
-            
-            let directOffer;
-            
-            if (supportType === 'full') {
-                directOffer = {
-                    type: 'full',
-                    amount: 0,
-                    months: 0,
-                    timestamp: new Date().toISOString()
-                };
-            } else if (supportType === 'partial') {
-                const percentage = grantDetails.supportDetails?.percentage || 50;
-                const basePrice = booking.pricing?.basePriceNumber || 7500;
-                const amount = Math.round(basePrice * percentage / 100);
-                
-                directOffer = {
-                    type: 'amount',
-                    amount: amount,
-                    percentage: percentage,
-                    months: grantDetails.supportDetails?.installmentRequested ? 
-                            (grantDetails.supportDetails?.installmentMonths || 3) : 0,
-                    timestamp: new Date().toISOString()
-                };
-            } else if (supportType === 'installment') {
-                const months = grantDetails.supportDetails?.months || 6;
-                const basePrice = booking.pricing?.basePriceNumber || 7500;
-                const amount = basePrice; // السعر كامل بس بالتقسيط
-                
-                directOffer = {
-                    type: 'amount',
-                    amount: amount,
-                    months: months,
-                    timestamp: new Date().toISOString()
-                };
-            }
-            
-            // حفظ العرض المباشر كعرض وحيد
+            // الموافقة المباشرة - معاملة العرض كأنه مختار من العميل
             savedOffers = [directOffer];
             
-            // حفظ في قاعدة البيانات
+            // حفظ العرض وتحديد أنه تم اختياره
             await db.collection('tempBookings').doc(bookingId).update({
                 negotiationOffers: savedOffers,
+                customerSelectedOffer: true,
+                customerSelectedOfferIndex: 0,
                 directApproval: true,
                 directApprovalAt: new Date().toISOString()
             });
+            
+            // متابعة العملية كأن العميل اختار العرض
+            // بدلاً من return، هنكمل للجزء اللي بيتعامل مع العروض المحفوظة
         }
     } else {
         return;
