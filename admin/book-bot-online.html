@@ -5603,20 +5603,110 @@ async function sendGrantApproval(bookingId) {
     const savedOffers = booking.negotiationOffers || [];
     
     if (savedOffers.length === 0) {
-        // لا توجد عروض - اطلب التفاوض أولاً
-        Swal.fire({
-            icon: 'warning',
-            title: 'لا توجد عروض محفوظة',
-            text: 'يجب إنشاء عروض تفاوض أولاً',
-            confirmButtonText: 'إنشاء عروض',
-            confirmButtonColor: '#8B5CF6'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                openGrantNegotiation(bookingId);
+    // لا توجد عروض - اعرض خيارات
+    const result = await Swal.fire({
+        title: '🎯 طريقة الموافقة',
+        html: `
+            <div style="text-align: right;">
+                <p style="font-size: 1.1rem; margin-bottom: 20px;">
+                    كيف تريد الموافقة على المنحة؟
+                </p>
+                <div style="display: grid; gap: 15px;">
+                    <label style="background: #F0FDF4; padding: 15px; border-radius: 10px; 
+                                  border: 2px solid #10B981; cursor: pointer; display: flex; align-items: center;">
+                        <input type="radio" name="approvalType" value="direct" checked 
+                               style="margin-left: 15px; transform: scale(1.2);">
+                        <div>
+                            <strong style="color: #065F46;">موافقة مباشرة على طلب العميل</strong>
+                            <div style="color: #059669; font-size: 0.9rem; margin-top: 5px;">
+                                الموافقة على نفس المبلغ والخطة اللي طلبها العميل
+                            </div>
+                        </div>
+                    </label>
+                    
+                    <label style="background: #EFF6FF; padding: 15px; border-radius: 10px; 
+                                  border: 2px solid #3B82F6; cursor: pointer; display: flex; align-items: center;">
+                        <input type="radio" name="approvalType" value="negotiate" 
+                               style="margin-left: 15px; transform: scale(1.2);">
+                        <div>
+                            <strong style="color: #1E40AF;">إنشاء عروض بديلة أولاً</strong>
+                            <div style="color: #2563EB; font-size: 0.9rem; margin-top: 5px;">
+                                عرض خيارات مختلفة للعميل قبل الموافقة
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'متابعة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981',
+        width: '600px',
+        preConfirm: () => {
+            const selected = document.querySelector('input[name="approvalType"]:checked');
+            return selected ? selected.value : null;
+        }
+    });
+    
+    if (result.isConfirmed) {
+        if (result.value === 'negotiate') {
+            openGrantNegotiation(bookingId);
+            return;
+        } else {
+            // الموافقة المباشرة - إنشاء عرض من طلب العميل
+            const grantDetails = booking.grantDetails || {};
+            const supportType = grantDetails.supportType || 'partial';
+            
+            let directOffer;
+            
+            if (supportType === 'full') {
+                directOffer = {
+                    type: 'full',
+                    amount: 0,
+                    months: 0,
+                    timestamp: new Date().toISOString()
+                };
+            } else if (supportType === 'partial') {
+                const percentage = grantDetails.supportDetails?.percentage || 50;
+                const basePrice = booking.pricing?.basePriceNumber || 7500;
+                const amount = Math.round(basePrice * percentage / 100);
+                
+                directOffer = {
+                    type: 'amount',
+                    amount: amount,
+                    percentage: percentage,
+                    months: grantDetails.supportDetails?.installmentRequested ? 
+                            (grantDetails.supportDetails?.installmentMonths || 3) : 0,
+                    timestamp: new Date().toISOString()
+                };
+            } else if (supportType === 'installment') {
+                const months = grantDetails.supportDetails?.months || 6;
+                const basePrice = booking.pricing?.basePriceNumber || 7500;
+                const amount = basePrice; // السعر كامل بس بالتقسيط
+                
+                directOffer = {
+                    type: 'amount',
+                    amount: amount,
+                    months: months,
+                    timestamp: new Date().toISOString()
+                };
             }
-        });
+            
+            // حفظ العرض المباشر كعرض وحيد
+            savedOffers = [directOffer];
+            
+            // حفظ في قاعدة البيانات
+            await db.collection('tempBookings').doc(bookingId).update({
+                negotiationOffers: savedOffers,
+                directApproval: true,
+                directApprovalAt: new Date().toISOString()
+            });
+        }
+    } else {
         return;
     }
+}
     
     // عرض العروض المحفوظة للاختيار
     let offersHTML = `
