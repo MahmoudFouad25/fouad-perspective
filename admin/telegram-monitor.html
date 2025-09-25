@@ -117,6 +117,33 @@
             align-items: center;
             gap: 10px;
         }
+        .chat-item .real-name-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #10B981, #059669);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    margin-right: 5px;
+}
+
+.chat-item .telegram-name {
+    font-size: 11px;
+    color: #9CA3AF;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+}
+
+.chat-item .course-name {
+    font-size: 11px;
+    color: #059669;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+}
         
         .chat-item:hover {
             background: #f5f5f5;
@@ -390,6 +417,12 @@
                     <div class="number" id="totalChats">0</div>
                     <div>إجمالي المحادثات</div>
                 </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #3B82F6, #2563EB); cursor: pointer;" 
+     onclick="syncAllNames()">
+    <div class="number"><i class="fas fa-sync"></i></div>
+    <div>مزامنة الأسماء</div>
+</div>
+                
                 <div class="stat-card">
                     <div class="number" id="activeToday">0</div>
                     <div>نشط اليوم</div>
@@ -485,6 +518,55 @@
         let chatsData = {};
         let messagesListener = null;
 
+        // خريطة لحفظ أسماء العملاء الحقيقية من الحجوزات
+let realNamesMap = new Map();
+
+// دالة جلب الأسماء الحقيقية من الحجوزات
+async function fetchRealNames() {
+    try {
+        console.log('🔄 جلب الأسماء الحقيقية من الحجوزات...');
+        
+        const bookingsSnapshot = await db.collection('tempBookings').get();
+        
+        bookingsSnapshot.forEach(doc => {
+            const booking = doc.data();
+            
+            let realName = '';
+            let courseName = '';
+            let telegramChatId = '';
+            let bookingType = '';
+            
+            // التعامل مع البيانات المتداخلة
+            if (booking.userData) {
+                realName = booking.userData.customer?.name || '';
+                courseName = booking.userData.courseName || '';
+                telegramChatId = String(booking.userData.telegramChatId || '');
+                bookingType = booking.userData.bookingType || 'individual';
+            } else {
+                realName = booking.customer?.name || booking.applicantName || '';
+                courseName = booking.courseName || '';
+                telegramChatId = String(booking.telegramChatId || '');
+                bookingType = booking.bookingType || 'individual';
+            }
+            
+            if (telegramChatId && realName) {
+                realNamesMap.set(telegramChatId, {
+                    realName: realName,
+                    courseName: courseName,
+                    bookingType: bookingType,
+                    bookingId: doc.id
+                });
+                console.log(`✅ ربط Chat ${telegramChatId} بـ: ${realName}`);
+            }
+        });
+        
+        console.log(`✅ تم جلب ${realNamesMap.size} اسم حقيقي`);
+        
+    } catch (error) {
+        console.error('❌ خطأ في جلب الأسماء:', error);
+    }
+}
+        
         // تحميل قائمة المحادثات
         async function loadChats() {
             try {
@@ -665,7 +747,12 @@
                             }
                         }
                     } else {
-                        displayName = data.userInfo?.firstName || 'مستخدم';
+                        // الحصول على الاسم الحقيقي من الخريطة
+const bookingInfo = realNamesMap.get(chatId);
+displayName = bookingInfo?.realName || data.customer?.name || data.userInfo?.firstName || 'مستخدم';
+const telegramName = data.userInfo?.firstName || 'مستخدم';
+const courseName = bookingInfo?.courseName || data.courseName || '';
+                        
                         userType = 'زائر (غير مسجل)';
                         
                         if (!grantBadgeHTML) { // إذا لم يكن منحة
@@ -708,14 +795,22 @@
                     chatItem.innerHTML = `
                         <div class="avatar" style="background: ${avatarColor}">${initial}</div>
                         <div class="info">
-                            <div class="name" style="font-weight: bold;">
-                                ${displayName}
-                                ${isRegisteredStudent ? '<span style="color: #10B981; font-size: 12px;">📚</span>' : '<span style="color: #6B7280; font-size: 12px;">👤</span>'}
-                            </div>
-                            <div class="last-message" style="font-size: 12px; color: #666;">
-                                ${lastMessage}
-                            </div>
-                        </div>
+    <div class="name" style="font-weight: bold; color: #1F2937;">
+        ${displayName}
+        ${isRegisteredStudent ? '<span style="color: #10B981; font-size: 12px;">📚</span>' : '<span style="color: #6B7280; font-size: 12px;">👤</span>'}
+    </div>
+    ${displayName !== telegramName ? 
+        `<div style="font-size: 11px; color: #9CA3AF;">
+            <i class="fab fa-telegram" style="font-size: 10px;"></i> ${telegramName}
+        </div>` : ''}
+    ${courseName ? 
+        `<div style="font-size: 11px; color: #059669;">
+            <i class="fas fa-book" style="font-size: 10px;"></i> ${courseName}
+        </div>` : ''}
+    <div class="last-message" style="font-size: 13px; color: #666; margin-top: 3px;">
+        ${lastMessage}
+    </div>
+</div>
                         <div>
                             <div class="time">${time}</div>
                             ${grantBadgeHTML || statusBadge}
@@ -768,8 +863,19 @@
             }
             
             const chatData = chatsData[chatId];
-            const displayName = chatData?.studentName || chatData?.userInfo?.firstName || 'مستخدم';
-            document.getElementById('chatName').textContent = displayName;
+            const bookingInfo = realNamesMap.get(chatId);
+const realName = bookingInfo?.realName || chatData?.studentName || chatData?.customer?.name || chatData?.userInfo?.firstName || 'مستخدم';
+const telegramName = chatData?.userInfo?.firstName || 'Telegram User';
+const courseName = bookingInfo?.courseName || chatData?.courseName || '';
+
+// عرض الاسم الحقيقي كأساسي
+document.getElementById('chatName').innerHTML = `
+    ${realName}
+    ${realName !== telegramName ? 
+        `<span style="font-size: 0.8em; opacity: 0.8; margin-right: 10px;">
+            (@${telegramName})
+        </span>` : ''}
+`;
             
             let chatInfoContent = `Chat ID: ${chatId}`;
             
@@ -1401,10 +1507,20 @@ async function getChatInfo(chatId) {
             });
         });
 
-        window.onload = () => {
-            loadChats();
-            setInterval(loadChats, 30000);
-        };
+        window.onload = async () => {
+    // جلب الأسماء الحقيقية أولاً
+    await fetchRealNames();
+    
+    // ثم تحميل المحادثات
+    await loadChats();
+    
+    // تحديث دوري
+    setInterval(async () => {
+        await fetchRealNames();
+        await loadChats();
+    }, 30000);
+};
+        
 
         document.addEventListener('DOMContentLoaded', function() {
             const messageInput = document.getElementById('messageInput');
@@ -1424,6 +1540,65 @@ async function getChatInfo(chatId) {
                 });
             }
         });
+
+        // دالة مزامنة شاملة للأسماء
+async function syncAllNames() {
+    try {
+        Swal.fire({
+            title: 'جاري المزامنة',
+            text: 'يتم تحديث جميع الأسماء...',
+            icon: 'info',
+            allowOutsideClick: false,
+            showConfirmButton: false,
+            willOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        // إعادة جلب الأسماء
+        await fetchRealNames();
+        
+        // تحديث المحادثات في Firebase
+        let updateCount = 0;
+        for (const [chatId, info] of realNamesMap.entries()) {
+            try {
+                await db.collection('telegramChats').doc(chatId).update({
+                    'customer.name': info.realName,
+                    'courseName': info.courseName,
+                    'hasBooking': true,
+                    'bookingId': info.bookingId
+                });
+                updateCount++;
+            } catch (error) {
+                console.error(`خطأ في تحديث ${chatId}:`, error);
+            }
+        }
+        
+        // إعادة تحميل المحادثات
+        await loadChats();
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تمت المزامنة',
+            text: `تم تحديث ${updateCount} محادثة بنجاح`,
+            timer: 2000,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('خطأ في المزامنة:', error);
+        Swal.fire('خطأ', 'فشلت عملية المزامنة', 'error');
+    }
+}
+
+// اختصار لوحة المفاتيح للمزامنة السريعة (Ctrl+Shift+S)
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        syncAllNames();
+    }
+});
+        
     </script>
 </body>
 </html>
