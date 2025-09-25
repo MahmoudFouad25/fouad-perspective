@@ -490,6 +490,14 @@
     background: #94A3B8;
 }
     </style>
+    <!-- نظام الإشعارات الصوتية -->
+<audio id="notification-sound" preload="auto">
+    <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE" type="audio/wav">
+</audio>
+
+<audio id="urgent-sound" preload="auto">
+    <source src="data:audio/wav;base64,UklGRl9uBABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQtuBACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeS" type="audio/wav">
+</audio>
 </head>
 <body>
     <div class="container">
@@ -500,6 +508,7 @@
                 متابعة محادثات التليجرام
             </h1>
             <div class="stats" id="stats">
+                
                 <div class="stat-card">
                     <div class="number" id="totalChats">0</div>
                     <div>إجمالي المحادثات</div>
@@ -565,6 +574,39 @@
                 </div>
             </div>
         </div>
+
+        <!-- مركز الإشعارات -->
+<div id="notification-center" 
+     style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); 
+            z-index: 9999; pointer-events: none;">
+</div>
+
+<!-- زر التحكم في الإشعارات -->
+<div style="position: fixed; bottom: 20px; left: 20px; z-index: 1000;">
+    <button id="sound-toggle" onclick="toggleNotificationSound()" 
+            style="background: linear-gradient(135deg, #10B981, #059669); 
+                   color: white; border: none; width: 50px; height: 50px; 
+                   border-radius: 50%; cursor: pointer; 
+                   box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+                   transition: all 0.3s;">
+        <i class="fas fa-volume-up" id="sound-icon"></i>
+    </button>
+    
+    <button onclick="showNotificationHistory()" 
+            style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); 
+                   color: white; border: none; width: 50px; height: 50px; 
+                   border-radius: 50%; cursor: pointer; margin-right: 10px;
+                   box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+                   transition: all 0.3s; position: relative;">
+        <i class="fas fa-bell"></i>
+        <span id="notification-badge" 
+              style="position: absolute; top: -5px; right: -5px; 
+                     background: #EF4444; color: white; 
+                     width: 20px; height: 20px; border-radius: 50%; 
+                     font-size: 11px; display: none; 
+                     align-items: center; justify-content: center;">0</span>
+    </button>
+</div>
         
         <!-- Main Content -->
         <div class="main-content">
@@ -716,6 +758,297 @@
         // خريطة لحفظ أسماء العملاء الحقيقية من الحجوزات
 let realNamesMap = new Map();
 
+        // نظام الإشعارات المتقدم
+let notificationSettings = {
+    soundEnabled: localStorage.getItem('notificationSound') !== 'false',
+    desktopEnabled: false,
+    urgentOnly: false
+};
+
+let notificationHistory = [];
+let lastCheckTime = Date.now();
+
+// طلب إذن الإشعارات
+async function requestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+        const permission = await Notification.requestPermission();
+        notificationSettings.desktopEnabled = permission === "granted";
+        if (permission === "granted") {
+            showToast('تم تفعيل إشعارات سطح المكتب', 'success');
+        }
+    } else if (Notification.permission === "granted") {
+        notificationSettings.desktopEnabled = true;
+    }
+}
+
+// عرض إشعار toast
+function showToast(message, type = 'info', duration = 3000) {
+    const toastId = 'toast-' + Date.now();
+    const colors = {
+        success: 'linear-gradient(135deg, #10B981, #059669)',
+        error: 'linear-gradient(135deg, #EF4444, #DC2626)',
+        warning: 'linear-gradient(135deg, #F59E0B, #D97706)',
+        info: 'linear-gradient(135deg, #3B82F6, #2563EB)',
+        urgent: 'linear-gradient(135deg, #EF4444, #B91C1C)'
+    };
+    
+    const icons = {
+        success: 'fa-check-circle',
+        error: 'fa-times-circle',
+        warning: 'fa-exclamation-triangle',
+        info: 'fa-info-circle',
+        urgent: 'fa-bell'
+    };
+    
+    const toast = document.createElement('div');
+    toast.id = toastId;
+    toast.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        padding: 16px 20px;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        min-width: 300px;
+        max-width: 500px;
+        pointer-events: auto;
+        animation: slideDown 0.3s ease;
+        border-right: 4px solid transparent;
+        border-image: ${colors[type]} 1;
+        cursor: pointer;
+        transition: all 0.3s;
+    `;
+    
+    toast.innerHTML = `
+        <div style="width: 40px; height: 40px; background: ${colors[type]}; 
+                    border-radius: 10px; display: flex; align-items: center; 
+                    justify-content: center; flex-shrink: 0;">
+            <i class="fas ${icons[type]}" style="color: white; font-size: 20px;"></i>
+        </div>
+        <div style="flex: 1;">
+            <div style="color: #1F2937; font-weight: 600; font-size: 14px; 
+                        line-height: 1.5;">
+                ${message}
+            </div>
+            <div style="color: #6B7280; font-size: 12px; margin-top: 4px;">
+                ${new Date().toLocaleTimeString('ar-EG')}
+            </div>
+        </div>
+        <button onclick="dismissToast('${toastId}')" 
+                style="background: none; border: none; color: #9CA3AF; 
+                       cursor: pointer; font-size: 20px; padding: 0;">
+            ×
+        </button>
+    `;
+    
+    toast.onclick = function(e) {
+        if (e.target.tagName !== 'BUTTON') {
+            dismissToast(toastId);
+        }
+    };
+    
+    const container = document.getElementById('notification-center');
+    container.appendChild(toast);
+    
+    // تشغيل الصوت حسب النوع
+    if (notificationSettings.soundEnabled) {
+        const sound = type === 'urgent' ? 
+            document.getElementById('urgent-sound') : 
+            document.getElementById('notification-sound');
+        if (sound) sound.play().catch(e => console.log('Could not play sound'));
+    }
+    
+    // حذف تلقائي
+    setTimeout(() => dismissToast(toastId), duration);
+    
+    // إضافة للسجل
+    notificationHistory.unshift({
+        message,
+        type,
+        time: new Date(),
+        id: toastId
+    });
+    
+    // تحديث الشارة
+    updateNotificationBadge();
+}
+
+function dismissToast(toastId) {
+    const toast = document.getElementById(toastId);
+    if (toast) {
+        toast.style.animation = 'slideUp 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }
+}
+
+// مراقب الرسائل الجديدة
+function startMessageMonitoring() {
+    setInterval(async () => {
+        try {
+            const snapshot = await db.collection('telegramChats')
+                .where('lastActivity', '>', new Date(lastCheckTime))
+                .get();
+            
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const chatId = doc.id;
+                
+                // التحقق من الرسائل الجديدة
+                if (data.hasNewMessage) {
+                    const customerName = data.customer?.name || data.userInfo?.firstName || 'عميل';
+                    const message = `رسالة جديدة من ${customerName}`;
+                    
+                    // تحديد نوع الإشعار
+                    let notificationType = 'info';
+                    if (data.hasHelpRequest) {
+                        notificationType = 'urgent';
+                    } else if (data.bookingType === 'grant_request') {
+                        notificationType = 'warning';
+                    }
+                    
+                    // عرض الإشعار
+                    showToast(message, notificationType);
+                    
+                    // إشعار سطح المكتب
+                    if (notificationSettings.desktopEnabled) {
+                        showDesktopNotification(customerName, data.lastMessage || 'رسالة جديدة', chatId);
+                    }
+                }
+            });
+            
+            lastCheckTime = Date.now();
+            
+        } catch (error) {
+            console.error('Error monitoring messages:', error);
+        }
+    }, 10000); // كل 10 ثواني
+}
+
+// إشعارات سطح المكتب
+function showDesktopNotification(title, body, chatId) {
+    if (!notificationSettings.desktopEnabled) return;
+    
+    const notification = new Notification(title, {
+        body: body,
+        icon: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
+        badge: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
+        tag: chatId,
+        requireInteraction: false,
+        silent: false
+    });
+    
+    notification.onclick = function() {
+        window.focus();
+        loadChat(chatId);
+        notification.close();
+    };
+}
+
+// تبديل الصوت
+function toggleNotificationSound() {
+    notificationSettings.soundEnabled = !notificationSettings.soundEnabled;
+    localStorage.setItem('notificationSound', notificationSettings.soundEnabled);
+    
+    const icon = document.getElementById('sound-icon');
+    const button = document.getElementById('sound-toggle');
+    
+    if (notificationSettings.soundEnabled) {
+        icon.className = 'fas fa-volume-up';
+        button.style.background = 'linear-gradient(135deg, #10B981, #059669)';
+        showToast('تم تفعيل الصوت', 'success', 2000);
+    } else {
+        icon.className = 'fas fa-volume-mute';
+        button.style.background = 'linear-gradient(135deg, #6B7280, #4B5563)';
+        showToast('تم كتم الصوت', 'info', 2000);
+    }
+}
+
+// عرض سجل الإشعارات
+function showNotificationHistory() {
+    if (notificationHistory.length === 0) {
+        showToast('لا توجد إشعارات سابقة', 'info');
+        return;
+    }
+    
+    let historyHTML = '<div style="max-height: 400px; overflow-y: auto;">';
+    notificationHistory.slice(0, 20).forEach(notif => {
+        historyHTML += `
+            <div style="padding: 12px; border-bottom: 1px solid #E5E7EB; 
+                        display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <div style="font-weight: 600; color: #1F2937;">${notif.message}</div>
+                    <div style="font-size: 12px; color: #6B7280; margin-top: 4px;">
+                        ${notif.time.toLocaleString('ar-EG')}
+                    </div>
+                </div>
+                <span class="badge bg-${notif.type}" style="font-size: 11px;">
+                    ${notif.type}
+                </span>
+            </div>
+        `;
+    });
+    historyHTML += '</div>';
+    
+    Swal.fire({
+        title: '🔔 سجل الإشعارات',
+        html: historyHTML,
+        width: 600,
+        showConfirmButton: true,
+        confirmButtonText: 'إغلاق',
+        confirmButtonColor: '#3B82F6',
+        showCloseButton: true
+    });
+    
+    // إعادة تعيين العداد
+    notificationHistory = [];
+    updateNotificationBadge();
+}
+
+// تحديث شارة الإشعارات
+function updateNotificationBadge() {
+    const badge = document.getElementById('notification-badge');
+    const count = notificationHistory.length;
+    
+    if (count > 0) {
+        badge.textContent = count > 9 ? '9+' : count;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+// إضافة CSS للحركات
+const notificationStyles = document.createElement('style');
+notificationStyles.textContent = `
+    @keyframes slideDown {
+        from { transform: translateY(-100%); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+    
+    @keyframes slideUp {
+        from { transform: translateY(0); opacity: 1; }
+        to { transform: translateY(-100%); opacity: 0; }
+    }
+    
+    #notification-center > div:hover {
+        transform: scale(1.02);
+        box-shadow: 0 15px 50px rgba(0,0,0,0.25);
+    }
+`;
+document.head.appendChild(notificationStyles);
+
+// تشغيل النظام
+document.addEventListener('DOMContentLoaded', function() {
+    requestNotificationPermission();
+    startMessageMonitoring();
+    
+    // رسالة ترحيب
+    setTimeout(() => {
+        showToast('مرحباً! نظام المتابعة جاهز للعمل', 'success', 4000);
+    }, 1000);
+});
 // دالة جلب الأسماء الحقيقية من الحجوزات
 async function fetchRealNames() {
     try {
