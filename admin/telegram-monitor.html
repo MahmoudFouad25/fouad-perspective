@@ -489,6 +489,51 @@
 .chats-container::-webkit-scrollbar-thumb:hover {
     background: #94A3B8;
 }
+
+        /* مؤشر الكتابة */
+@keyframes typing {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.3;
+    }
+    30% {
+        transform: translateY(-10px);
+        opacity: 1;
+    }
+}
+
+/* شريط الحالة */
+#messageStatusBar {
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#messageStatusBar.success {
+    background: linear-gradient(135deg, #10B981, #059669) !important;
+}
+
+#messageStatusBar.error {
+    background: linear-gradient(135deg, #EF4444, #DC2626) !important;
+}
+
+/* تأثير النبض للرسائل الجديدة */
+.message.new-message {
+    animation: slideInPulse 0.5s ease;
+}
+
+@keyframes slideInPulse {
+    0% {
+        transform: translateX(-50px);
+        opacity: 0;
+    }
+    50% {
+        transform: translateX(5px);
+    }
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
     </style>
     <!-- نظام الإشعارات الصوتية -->
 <audio id="notification-sound" preload="auto">
@@ -723,6 +768,22 @@
                         <div>
                             <div id="chatName" style="font-weight: bold;"></div>
                             <div id="chatInfo" style="font-size: 12px; opacity: 0.9;"></div>
+                            <!-- شريط حالة الرسائل -->
+<div id="messageStatusBar" style="display: none; background: linear-gradient(135deg, #FBBF24, #F59E0B); 
+                                   color: white; padding: 8px 15px; font-size: 12px; 
+                                   display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <i class="fas fa-info-circle"></i>
+        <span id="statusText">جاري تحديث الحالة...</span>
+    </div>
+    <button onclick="retryFailedMessages()" 
+            style="background: white; color: #F59E0B; border: none; 
+                   padding: 4px 10px; border-radius: 4px; cursor: pointer; 
+                   font-size: 11px; display: none;" 
+            id="retryButton">
+        <i class="fas fa-redo"></i> إعادة إرسال
+    </button>
+</div>
                         </div>
                         <div>
                             <button onclick="refreshChat()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 5px 10px; border-radius: 5px; cursor: pointer;">
@@ -1708,6 +1769,30 @@ allMessages.forEach((msg, index) => {
         msg.style.animation = 'glow 2s ease-in-out 3';
     }
 });
+
+            // مراقبة الرسائل الفاشلة
+const failedListener = db.collection('telegramChats')
+    .doc(chatId)
+    .collection('failed_messages')
+    .orderBy('timestamp', 'desc')
+    .limit(1)
+    .onSnapshot(snapshot => {
+        if (!snapshot.empty) {
+            const statusBar = document.getElementById('messageStatusBar');
+            const statusText = document.getElementById('statusText');
+            const retryBtn = document.getElementById('retryButton');
+            
+            statusBar.style.display = 'flex';
+            statusBar.style.background = 'linear-gradient(135deg, #EF4444, #DC2626)';
+            statusText.textContent = '⚠️ فشل إرسال آخر رسالة - تحقق من الاتصال';
+            retryBtn.style.display = 'block';
+            
+            // إشعار صوتي
+            if (notificationSettings.soundEnabled) {
+                document.getElementById('urgent-sound').play();
+            }
+        }
+    });
 }
 
       // دالة محسنة لحل طلب المساعدة
@@ -2876,6 +2961,81 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log(`آخر تحديث: منذ ${minutes}:${seconds.toString().padStart(2, '0')}`);
     }, 5000);
 });
+
+        // إعادة إرسال الرسائل الفاشلة
+async function retryFailedMessages() {
+    if (!currentChatId) return;
+    
+    try {
+        const failedMessages = await db.collection('telegramChats')
+            .doc(currentChatId)
+            .collection('failed_messages')
+            .get();
+        
+        for (const doc of failedMessages.docs) {
+            const msg = doc.data();
+            
+            // إعادة الإرسال
+            const response = await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chatId: currentChatId,
+                    message: msg.message
+                })
+            });
+            
+            if (response.ok) {
+                // حذف من الرسائل الفاشلة
+                await doc.ref.delete();
+                showToast('✅ تم إعادة إرسال الرسالة بنجاح', 'success');
+            }
+        }
+        
+        // إخفاء شريط الحالة
+        document.getElementById('messageStatusBar').style.display = 'none';
+        
+    } catch (error) {
+        console.error('خطأ في إعادة الإرسال:', error);
+        showToast('❌ فشلت إعادة الإرسال', 'error');
+    }
+}
+
+// مؤشر الكتابة (عندما الأدمن يكتب)
+let typingTimeout;
+function showTypingIndicator() {
+    const container = document.getElementById('messagesContainer');
+    
+    // إزالة المؤشر القديم إن وجد
+    const oldIndicator = document.getElementById('typing-indicator');
+    if (oldIndicator) oldIndicator.remove();
+    
+    const typingDiv = document.createElement('div');
+    typingDiv.id = 'typing-indicator';
+    typingDiv.className = 'message bot';
+    typingDiv.innerHTML = `
+        <div class="bubble" style="background: #F3F4F6; padding: 15px;">
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="animation: typing 1.4s infinite;">●</span>
+                <span style="animation: typing 1.4s infinite 0.2s;">●</span>
+                <span style="animation: typing 1.4s infinite 0.4s;">●</span>
+                <span style="color: #6B7280; margin-right: 10px; font-size: 13px;">
+                    الإدارة تكتب...
+                </span>
+            </div>
+        </div>
+    `;
+    
+    container.appendChild(typingDiv);
+    container.scrollTop = container.scrollHeight;
+    
+    // إخفاء بعد 3 ثواني
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        const indicator = document.getElementById('typing-indicator');
+        if (indicator) indicator.remove();
+    }, 3000);
+}
         
     </script>
 </body>
