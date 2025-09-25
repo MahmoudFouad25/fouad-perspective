@@ -1759,6 +1759,69 @@ chatItem.innerHTML = `
     </div>
 `;
 
+                    // إضافة معلومات مالية محسنة للحجوزات الفردية
+if (chatType === 'booking' && combinedData.pricing) {
+    const pricing = combinedData.pricing;
+    const hasInstallments = combinedData.paymentDetails?.type === 'installment';
+    const paidAmount = combinedData.paymentDetails?.paidAmount || 0;
+    const totalAmount = pricing.finalPriceNumber || 0;
+    
+    // إضافة مؤشر مالي صغير
+    let paymentIndicator = '';
+    if (hasInstallments) {
+        const paidPercentage = totalAmount > 0 ? Math.round((paidAmount / totalAmount) * 100) : 0;
+        paymentIndicator = `
+            <div style="position: absolute; top: 5px; left: 5px; 
+                        background: linear-gradient(135deg, #F59E0B, #D97706); 
+                        color: white; padding: 4px 8px; border-radius: 15px; 
+                        font-size: 11px; font-weight: bold;">
+                💳 ${paidPercentage}% مدفوع
+            </div>
+        `;
+    } else if (combinedData.paymentConfirmed) {
+        paymentIndicator = `
+            <div style="position: absolute; top: 5px; left: 5px; 
+                        background: linear-gradient(135deg, #10B981, #059669); 
+                        color: white; padding: 4px 8px; border-radius: 15px; 
+                        font-size: 11px; font-weight: bold;">
+                ✅ مدفوع كامل
+            </div>
+        `;
+    }
+    
+    // إضافة المؤشر للـ HTML
+    chatItem.innerHTML = paymentIndicator + chatItem.innerHTML;
+    
+    // إضافة شريط مالي صغير في الأسفل
+    if (pricing.finalPrice) {
+        const financialBar = document.createElement('div');
+        financialBar.style.cssText = `
+            background: linear-gradient(to right, #F3F4F6, #E5E7EB);
+            padding: 5px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            border-top: 1px solid #E5E7EB;
+        `;
+        
+        financialBar.innerHTML = `
+            <span style="color: #6B7280;">
+                <i class="fas fa-tag" style="color: #F59E0B;"></i>
+                ${pricing.finalPrice}
+            </span>
+            ${hasInstallments ? `
+                <span style="color: #8B5CF6;">
+                    <i class="fas fa-calendar-alt"></i>
+                    ${combinedData.paymentDetails.totalInstallments} أقساط
+                </span>
+            ` : ''}
+        `;
+        
+        chatItem.appendChild(financialBar);
+    }
+}
+                    
 // إضافة أولوية للترتيب
 chatItem.setAttribute('data-priority', priorityLevel);
 chatItem.setAttribute('data-grant-status', combinedData.grantStatus || '');
@@ -1959,156 +2022,182 @@ if (chatData?.bookingType === 'grant_request') {
     const negotiationOffers = chatData.negotiationOffers || [];
     const customerResponse = chatData.customerSelectedOffer || chatData.customerProposal;
     
-    // إنشاء لوحة المنحة
-    let grantPanel = `
-        <div id="grant-info-panel" style="
-            background: linear-gradient(135deg, #F3E8FF, #EDE9FE);
-            border: 2px solid #9333EA;
-            border-radius: 12px;
-            padding: 15px;
-            margin: 15px;
-            position: relative;
-            box-shadow: 0 4px 15px rgba(147, 51, 234, 0.1);
-        ">
-            <div style="position: absolute; top: -12px; right: 20px; 
-                        background: white; padding: 0 10px; 
-                        color: #9333EA; font-weight: bold; font-size: 14px;">
-                📊 تفاصيل المنحة
+   // إنشاء لوحة المنحة القابلة للطي
+let grantPanelId = `grant-panel-${chatId}`;
+let isPanelExpanded = localStorage.getItem(grantPanelId) !== 'collapsed';
+
+let grantPanel = `
+    <div id="grant-info-panel" style="
+        background: linear-gradient(135deg, #F3E8FF, #EDE9FE);
+        border: 2px solid #9333EA;
+        border-radius: 12px;
+        margin: 15px;
+        position: relative;
+        box-shadow: 0 4px 15px rgba(147, 51, 234, 0.1);
+        transition: all 0.3s ease;
+    ">
+        <!-- رأس اللوحة مع زر الطي -->
+        <div style="background: linear-gradient(135deg, #9333EA, #7C3AED); 
+                    color: white; padding: 12px 15px; border-radius: 10px 10px 0 0;
+                    cursor: pointer; display: flex; justify-content: space-between; 
+                    align-items: center; user-select: none;"
+             onclick="toggleGrantPanel('${grantPanelId}')">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-hand-holding-heart"></i>
+                <span style="font-weight: bold;">تفاصيل المنحة السريعة</span>
+                ${grantTypeDisplay ? `
+                    <span style="background: rgba(255,255,255,0.3); padding: 3px 10px; 
+                                 border-radius: 15px; font-size: 12px;">
+                        ${grantIcon} ${grantTypeDisplay}
+                    </span>
+                ` : ''}
             </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+            <i id="${grantPanelId}-arrow" class="fas fa-chevron-${isPanelExpanded ? 'up' : 'down'}" 
+               style="transition: transform 0.3s;"></i>
+        </div>
+        
+        <!-- المحتوى القابل للطي -->
+        <div id="${grantPanelId}-content" style="
+            padding: 15px;
+            display: ${isPanelExpanded ? 'block' : 'none'};
+            max-height: ${isPanelExpanded ? '400px' : '0'};
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        ">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+`;
+
+// نوع المنحة والسبب في سطر واحد مختصر
+grantPanel += `
+    <div style="background: white; padding: 10px; border-radius: 8px;">
+        <div style="color: #6B7280; font-size: 11px; margin-bottom: 3px;">نوع الدعم</div>
+        <div style="font-size: 14px; font-weight: bold; color: #9333EA;">
+            ${grantIcon} ${grantTypeDisplay}
+        </div>
+    </div>
+`;
+
+// السبب المختصر
+if (grantData.reason || chatData.grantReason) {
+    const reason = (grantData.reason || chatData.grantReason || '').substring(0, 50);
+    grantPanel += `
+        <div style="background: white; padding: 10px; border-radius: 8px; grid-column: span 2;">
+            <div style="color: #6B7280; font-size: 11px; margin-bottom: 3px;">السبب</div>
+            <div style="font-size: 12px; color: #374151; white-space: nowrap; 
+                        overflow: hidden; text-overflow: ellipsis;">
+                ${reason}${reason.length >= 50 ? '...' : ''}
+            </div>
+        </div>
     `;
+}
+
+// المبلغ المطلوب
+if (chatData.pricing?.finalPrice) {
+    grantPanel += `
+        <div style="background: linear-gradient(135deg, #DCFCE7, #D1FAE5); 
+                    padding: 10px; border-radius: 8px;">
+            <div style="color: #065F46; font-size: 11px; margin-bottom: 3px;">المطلوب</div>
+            <div style="font-size: 16px; font-weight: bold; color: #10B981;">
+                ${chatData.pricing.finalPrice}
+            </div>
+        </div>
+    `;
+}
+
+// العروض والردود
+if (negotiationOffers.length > 0) {
+    grantPanel += `
+        <div style="background: white; padding: 10px; border-radius: 8px;">
+            <div style="color: #6B7280; font-size: 11px; margin-bottom: 3px;">العروض</div>
+            <div style="font-size: 18px; font-weight: bold; color: #6366F1;">
+                ${negotiationOffers.length}
+            </div>
+        </div>
+    `;
+}
+
+// حالة رد العميل
+if (customerResponse) {
+    let responseDisplay = '';
+    let responseColor = '';
     
-    // نوع المنحة
-    let grantTypeDisplay = '';
-    let grantIcon = '';
-    if (grantData.supportType === 'full' || chatData.isFullGrant) {
-        grantTypeDisplay = 'منحة كاملة 100%';
-        grantIcon = '🏆';
-    } else if (grantData.supportType === 'partial') {
-        grantTypeDisplay = `منحة جزئية ${grantData.percentage || 50}%`;
-        grantIcon = '💎';
-    } else if (grantData.supportType === 'installment') {
-        grantTypeDisplay = 'تقسيط ميسر';
-        grantIcon = '💳';
+    if (chatData.customerSelectedOffer) {
+        responseDisplay = `عرض ${(chatData.customerSelectedOfferIndex || 0) + 1}`;
+        responseColor = '#10B981';
+    } else if (chatData.customerProposal) {
+        responseDisplay = 'طلب خاص';
+        responseColor = '#F59E0B';
     }
     
     grantPanel += `
         <div style="background: white; padding: 10px; border-radius: 8px;">
-            <div style="color: #6B7280; font-size: 12px; margin-bottom: 5px;">نوع الدعم</div>
-            <div style="font-size: 16px; font-weight: bold; color: #9333EA;">
-                ${grantIcon} ${grantTypeDisplay}
+            <div style="color: #6B7280; font-size: 11px; margin-bottom: 3px;">رد العميل</div>
+            <div style="font-size: 13px; font-weight: bold; color: ${responseColor};">
+                ✅ ${responseDisplay}
             </div>
         </div>
     `;
-    
-    // السبب المذكور
-    if (grantData.reason || chatData.grantReason) {
-        grantPanel += `
-            <div style="background: white; padding: 10px; border-radius: 8px;">
-                <div style="color: #6B7280; font-size: 12px; margin-bottom: 5px;">السبب المذكور</div>
-                <div style="font-size: 14px; color: #374151;">
-                    ${grantData.reason || chatData.grantReason || 'غير محدد'}
-                </div>
-            </div>
-        `;
-    }
-    
-    // عدد العروض المرسلة
-    if (negotiationOffers.length > 0) {
-        grantPanel += `
-            <div style="background: white; padding: 10px; border-radius: 8px;">
-                <div style="color: #6B7280; font-size: 12px; margin-bottom: 5px;">العروض المرسلة</div>
-                <div style="font-size: 20px; font-weight: bold; color: #6366F1;">
-                    ${negotiationOffers.length} عرض
-                </div>
-            </div>
-        `;
-    }
-    
-    // حالة آخر عرض
-    if (customerResponse) {
-        let responseDisplay = '';
-        let responseColor = '';
-        
-        if (chatData.customerSelectedOffer) {
-            responseDisplay = `اختار العرض ${(chatData.customerSelectedOfferIndex || 0) + 1}`;
-            responseColor = '#10B981';
-        } else if (chatData.customerProposal) {
-            responseDisplay = 'طلب عرض مخصص';
-            responseColor = '#F59E0B';
-        }
-        
-        grantPanel += `
-            <div style="background: white; padding: 10px; border-radius: 8px;">
-                <div style="color: #6B7280; font-size: 12px; margin-bottom: 5px;">رد العميل</div>
-                <div style="font-size: 14px; font-weight: bold; color: ${responseColor};">
-                    ✅ ${responseDisplay}
-                </div>
-            </div>
-        `;
-    }
-    
-    // المدة منذ الطلب
-    if (chatData.timestamp) {
-        const daysSince = Math.floor((Date.now() - new Date(chatData.timestamp).getTime()) / (1000 * 60 * 60 * 24));
-        let urgencyColor = daysSince > 3 ? '#EF4444' : daysSince > 1 ? '#F59E0B' : '#10B981';
-        
-        grantPanel += `
-            <div style="background: white; padding: 10px; border-radius: 8px;">
-                <div style="color: #6B7280; font-size: 12px; margin-bottom: 5px;">مدة الانتظار</div>
-                <div style="font-size: 16px; font-weight: bold; color: ${urgencyColor};">
-                    ${daysSince} يوم
-                </div>
-            </div>
-        `;
-    }
+}
+
+// المدة
+if (chatData.timestamp) {
+    const daysSince = Math.floor((Date.now() - new Date(chatData.timestamp).getTime()) / (1000 * 60 * 60 * 24));
+    let urgencyColor = daysSince > 3 ? '#EF4444' : daysSince > 1 ? '#F59E0B' : '#10B981';
     
     grantPanel += `
+        <div style="background: white; padding: 10px; border-radius: 8px;">
+            <div style="color: #6B7280; font-size: 11px; margin-bottom: 3px;">المدة</div>
+            <div style="font-size: 14px; font-weight: bold; color: ${urgencyColor};">
+                ${daysSince} يوم
+            </div>
+        </div>
+    `;
+}
+
+grantPanel += `
             </div>
             
-            <!-- شريط التقدم -->
-            <div style="margin-top: 15px; padding: 10px; background: white; border-radius: 8px;">
-                <div style="color: #6B7280; font-size: 12px; margin-bottom: 10px;">مراحل المعالجة</div>
-                <div style="display: flex; align-items: center; gap: 5px;">
-    `;
-    
-    // مراحل المنحة
-    const stages = [
-        { name: 'الطلب', completed: true },
-        { name: 'المراجعة', completed: chatData.grantStatus !== 'pending' },
-        { name: 'التفاوض', completed: negotiationOffers.length > 0 },
-        { name: 'رد العميل', completed: !!customerResponse },
-        { name: 'الاعتماد', completed: chatData.grantStatus === 'approved' }
-    ];
-    
-    stages.forEach((stage, index) => {
-        grantPanel += `
-            <div style="flex: 1; text-align: center;">
-                <div style="
-                    width: 30px; height: 30px; margin: 0 auto 5px;
-                    background: ${stage.completed ? 'linear-gradient(135deg, #10B981, #059669)' : '#E5E7EB'};
-                    border-radius: 50%; display: flex; align-items: center; justify-content: center;
-                    color: white; font-weight: bold; font-size: 12px;
-                ">
-                    ${stage.completed ? '✓' : index + 1}
-                </div>
-                <div style="font-size: 11px; color: ${stage.completed ? '#10B981' : '#9CA3AF'};">
-                    ${stage.name}
-                </div>
-            </div>
-            ${index < stages.length - 1 ? `
-                <div style="flex: 0.5; height: 2px; background: ${stage.completed ? '#10B981' : '#E5E7EB'}; 
-                           align-self: center; margin-bottom: 20px;"></div>
-            ` : ''}
-        `;
-    });
-    
+            <!-- شريط التقدم المختصر -->
+            <div style="margin-top: 12px; padding: 10px; background: white; border-radius: 8px;">
+                <div style="display: flex; align-items: center; gap: 3px;">
+`;
+
+// مراحل مختصرة
+const stages = [
+    { name: 'طلب', completed: true },
+    { name: 'مراجعة', completed: chatData.grantStatus !== 'pending' },
+    { name: 'تفاوض', completed: negotiationOffers.length > 0 },
+    { name: 'رد', completed: !!customerResponse },
+    { name: 'اعتماد', completed: chatData.grantStatus === 'approved' }
+];
+
+stages.forEach((stage, index) => {
     grantPanel += `
+        <div style="flex: 1; text-align: center;">
+            <div style="width: 25px; height: 25px; margin: 0 auto 3px;
+                        background: ${stage.completed ? '#10B981' : '#E5E7EB'};
+                        border-radius: 50%; display: flex; align-items: center; 
+                        justify-content: center; color: white; font-size: 10px;">
+                ${stage.completed ? '✓' : index + 1}
+            </div>
+            <div style="font-size: 10px; color: ${stage.completed ? '#10B981' : '#9CA3AF'};">
+                ${stage.name}
+            </div>
+        </div>
+        ${index < stages.length - 1 ? `
+            <div style="flex: 0.3; height: 2px; 
+                        background: ${stage.completed ? '#10B981' : '#E5E7EB'}; 
+                        align-self: center; margin-bottom: 15px;"></div>
+        ` : ''}
+    `;
+});
+
+grantPanel += `
                 </div>
             </div>
         </div>
-    `;
+    </div>
+`;
     
     // إدراج اللوحة في الصفحة
     chatInfoContent = grantPanel + '<div style="padding: 0 15px;">' + chatInfoContent + '</div>';
@@ -3380,6 +3469,24 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
+        // دالة طي وفتح لوحة المنحة
+function toggleGrantPanel(panelId) {
+    const content = document.getElementById(`${panelId}-content`);
+    const arrow = document.getElementById(`${panelId}-arrow`);
+    
+    if (content.style.display === 'none' || !content.style.display) {
+        content.style.display = 'block';
+        content.style.maxHeight = '400px';
+        arrow.className = 'fas fa-chevron-up';
+        localStorage.setItem(panelId, 'expanded');
+    } else {
+        content.style.display = 'none';
+        content.style.maxHeight = '0';
+        arrow.className = 'fas fa-chevron-down';
+        localStorage.setItem(panelId, 'collapsed');
+    }
+}
+        
         // التحكم في لوحة المنح
 function toggleGrantsPanel() {
     const panel = document.getElementById('grants-quick-panel');
