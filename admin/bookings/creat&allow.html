@@ -4149,15 +4149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }, 1000);
                     
                     // سؤال تلقائي عند فتح الصفحة
-                    const result = await Swal.fire({
-                        icon: 'info',
-                        title: 'يوجد طلبات معلقة',
-                        text: 'هل تريد معالجة جميع الطلبات المعلقة الآن؟',
-                        showCancelButton: true,
-                        confirmButtonText: 'نعم، عالج الكل',
-                        cancelButtonText: 'لاحقاً',
-                        confirmButtonColor: '#10B981'
-                    });
+                   await showPendingBookingsSelector();
                     
                     if (result.isConfirmed) {
                         await processAllPendingBookings();
@@ -4273,6 +4265,219 @@ async function sendWelcomeMessage(student) {
 // ==================== ======================== ====================
 // ==================== 🤖 نظام الأتمتة الذكية الشاملة ====================
 
+        // دالة عرض نافذة الاختيار المتقدمة
+async function showPendingBookingsSelector() {
+    try {
+        // جلب الطلبات المعلقة
+        const snapshot = await db.collection('individualStudents')
+            .where('accountCreated', '==', false)
+            .where('paymentConfirmed', '==', true)
+            .get();
+        
+        if (snapshot.empty) {
+            Swal.fire({
+                icon: 'info',
+                title: 'لا توجد طلبات معلقة',
+                text: 'جميع الطلبات تم معالجتها بالفعل',
+                confirmButtonColor: '#3B82F6'
+            });
+            return;
+        }
+        
+        // بناء قائمة HTML للطلبات
+        let bookingsHTML = '';
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const customer = data.customer || {};
+            const pricing = data.pricing || {};
+            
+            bookingsHTML += `
+                <div style="background: white; border: 2px solid #E5E7EB; 
+                            border-radius: 12px; padding: 15px; margin-bottom: 15px;
+                            transition: all 0.3s;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" 
+                               class="booking-checkbox"
+                               data-id="${doc.id}"
+                               data-name="${customer.name || 'غير محدد'}"
+                               style="width: 20px; height: 20px; margin-left: 15px;">
+                        
+                        <div style="flex: 1;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <h4 style="margin: 0 0 5px 0; color: #1F2937;">
+                                        ${customer.name || 'غير محدد'}
+                                    </h4>
+                                    <p style="margin: 0; color: #6B7280; font-size: 0.9rem;">
+                                        <i class="fas fa-book"></i> ${data.courseName || 'دورة غير محددة'}
+                                    </p>
+                                    <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 0.85rem;">
+                                        <i class="fab fa-whatsapp"></i> ${customer.whatsapp || 'غير متوفر'}
+                                    </p>
+                                </div>
+                                
+                                <div style="text-align: left;">
+                                    <div style="background: #10B981; color: white; 
+                                                padding: 5px 12px; border-radius: 20px; 
+                                                font-size: 0.85rem; margin-bottom: 8px;">
+                                        ${pricing.finalPrice || '0 ج.م'}
+                                    </div>
+                                    ${data.paymentInfo?.isInstallment ? `
+                                        <div style="background: #F59E0B; color: white; 
+                                                    padding: 3px 10px; border-radius: 15px; 
+                                                    font-size: 0.8rem;">
+                                            أقساط
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            `;
+        });
+        
+        // عرض النافذة
+        const result = await Swal.fire({
+            title: 'اختر الطلبات للمعالجة',
+            html: `
+                <div style="text-align: right; direction: rtl;">
+                    <div style="background: #F0F9FF; padding: 15px; border-radius: 10px; 
+                                margin-bottom: 20px;">
+                        <p style="margin: 0; color: #0369A1;">
+                            <i class="fas fa-info-circle"></i>
+                            يوجد <strong>${snapshot.size}</strong> طلب معلق. 
+                            اختر الطلبات التي تريد معالجتها الآن.
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px; display: flex; gap: 10px;">
+                        <button onclick="
+                            document.querySelectorAll('.booking-checkbox').forEach(cb => cb.checked = true);
+                        " style="background: #3B82F6; color: white; border: none; 
+                                 padding: 8px 16px; border-radius: 8px; cursor: pointer;">
+                            <i class="fas fa-check-square"></i> تحديد الكل
+                        </button>
+                        
+                        <button onclick="
+                            document.querySelectorAll('.booking-checkbox').forEach(cb => cb.checked = false);
+                        " style="background: #6B7280; color: white; border: none; 
+                                 padding: 8px 16px; border-radius: 8px; cursor: pointer;">
+                            <i class="fas fa-square"></i> إلغاء التحديد
+                        </button>
+                    </div>
+                    
+                    <div style="max-height: 400px; overflow-y: auto; padding: 5px;">
+                        ${bookingsHTML}
+                    </div>
+                    
+                    <div style="background: #FEF3C7; padding: 12px; border-radius: 8px; 
+                                margin-top: 15px;">
+                        <p style="margin: 0; color: #92400E; font-size: 0.85rem;">
+                            <i class="fas fa-lightbulb"></i>
+                            الطلبات غير المحددة سيتم تأجيلها للمعالجة لاحقاً
+                        </p>
+                    </div>
+                </div>
+            `,
+            width: '700px',
+            showCancelButton: true,
+            confirmButtonText: 'معالجة المحدد',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981',
+            preConfirm: () => {
+                const selected = [];
+                document.querySelectorAll('.booking-checkbox:checked').forEach(cb => {
+                    selected.push({
+                        id: cb.dataset.id,
+                        name: cb.dataset.name
+                    });
+                });
+                return selected;
+            }
+        });
+        
+        if (result.isConfirmed && result.value && result.value.length > 0) {
+            await processSelectedBookings(result.value);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في عرض نافذة الاختيار:', error);
+        Swal.fire('خطأ', 'حدث خطأ في عرض الطلبات', 'error');
+    }
+}
+
+// دالة معالجة الطلبات المحددة فقط
+async function processSelectedBookings(selectedBookings) {
+    const total = selectedBookings.length;
+    let processed = 0;
+    let succeeded = 0;
+    let failed = 0;
+    
+    Swal.fire({
+        title: 'جاري المعالجة...',
+        html: `
+            <div style="text-align: center;">
+                <div class="loading-spinner" style="margin: 20px auto;"></div>
+                <p>معالجة الطلب <span id="current">1</span> من ${total}</p>
+                <div style="background: #E5E7EB; height: 20px; border-radius: 10px; margin: 20px 0;">
+                    <div id="progress-bar" style="background: linear-gradient(135deg, #3B82F6, #10B981); 
+                                                 height: 100%; border-radius: 10px; width: 0%; 
+                                                 transition: width 0.3s;"></div>
+                </div>
+                <p id="current-name" style="color: #6B7280; font-size: 0.9rem;">جاري البدء...</p>
+                <div style="margin-top: 20px;">
+                    <span style="color: #10B981;">✅ نجح: <span id="success-count">0</span></span>
+                    <span style="color: #EF4444; margin-right: 20px;">❌ فشل: <span id="fail-count">0</span></span>
+                </div>
+            </div>
+        `,
+        allowOutsideClick: false,
+        showConfirmButton: false
+    });
+    
+    for (const booking of selectedBookings) {
+        processed++;
+        document.getElementById('current').textContent = processed;
+        document.getElementById('current-name').textContent = `يتم معالجة: ${booking.name}`;
+        document.getElementById('progress-bar').style.width = `${(processed / total) * 100}%`;
+        
+        try {
+            const result = await autoCreateAccountAndAssignCourse(booking.id, false);
+            
+            if (result && result.success) {
+                succeeded++;
+                document.getElementById('success-count').textContent = succeeded;
+            } else {
+                failed++;
+                document.getElementById('fail-count').textContent = failed;
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+        } catch (error) {
+            failed++;
+            document.getElementById('fail-count').textContent = failed;
+            console.error(`خطأ في معالجة ${booking.id}:`, error);
+        }
+    }
+    
+    await Swal.fire({
+        icon: succeeded > 0 ? 'success' : 'error',
+        title: 'انتهت المعالجة',
+        html: `
+            <div style="text-align: center;">
+                <p>تم معالجة ${succeeded} من أصل ${total} طلب بنجاح</p>
+                ${failed > 0 ? `<p style="color: #EF4444;">فشلت معالجة ${failed} طلب</p>` : ''}
+            </div>
+        `,
+        confirmButtonColor: '#3B82F6'
+    });
+    
+    if (typeof loadStudents === 'function') {
+        await loadStudents();
+    }
+}
 // دالة معالجة كل الطلبات المعلقة
 async function processAllPendingBookings() {
     console.log('🚀 بدء معالجة جميع الطلبات المعلقة...');
@@ -4451,6 +4656,8 @@ async function processAllPendingBookings() {
 
 // إضافة للـ window
 window.processAllPendingBookings = processAllPendingBookings;
+        window.showPendingBookingsSelector = showPendingBookingsSelector;
+window.processSelectedBookings = processSelectedBookings;
 
 console.log('✅ نظام الأتمتة الشاملة جاهز');
         
