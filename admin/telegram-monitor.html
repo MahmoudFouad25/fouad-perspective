@@ -1184,6 +1184,33 @@ function getCurrentStage(chatData) {
         return 'request';
     }
 }
+
+        // مراقبة تغيير المراحل
+function checkStageChanges(chatId, oldStage, newStage) {
+    if (oldStage !== newStage && newStage) {
+        const chatData = chatsData[chatId];
+        const stageName = chatData.bookingType === 'grant_request' ? 
+            bookingStages.grant.stages.find(s => s.id === newStage)?.name :
+            bookingStages.individual.stages.find(s => s.id === newStage)?.name;
+        
+        if (stageName) {
+            const message = `📊 ${chatData.customer?.name || 'عميل'} انتقل إلى مرحلة: ${stageName}`;
+            showToast(message, 'info', 4000);
+            
+            // إضافة للسجل
+            notificationHistory.push({
+                message: message,
+                type: 'stage_change',
+                time: new Date(),
+                chatId: chatId,
+                oldStage: oldStage,
+                newStage: newStage
+            });
+            
+            updateNotificationBadge();
+        }
+    }
+}
         // دالة الحصول على إجراءات المرحلة
 function getStageActions(chatData, stageId, isGrant) {
     let actions = [];
@@ -1737,23 +1764,70 @@ function showNotificationHistory() {
         return;
     }
     
+    // ترتيب الإشعارات من الأحدث للأقدم
+    const sortedHistory = notificationHistory.sort((a, b) => b.time - a.time);
+    
     let historyHTML = '<div style="max-height: 400px; overflow-y: auto;">';
-    notificationHistory.slice(0, 20).forEach(notif => {
-        historyHTML += `
-            <div style="padding: 12px; border-bottom: 1px solid #E5E7EB; 
-                        display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <div style="font-weight: 600; color: #1F2937;">${notif.message}</div>
-                    <div style="font-size: 12px; color: #6B7280; margin-top: 4px;">
-                        ${notif.time.toLocaleString('ar-EG')}
-                    </div>
-                </div>
-                <span class="badge bg-${notif.type}" style="font-size: 11px;">
-                    ${notif.type}
-                </span>
-            </div>
-        `;
+    
+    // تجميع حسب النوع
+    const grouped = {
+        urgent: [],
+        warning: [],
+        stage_change: [],
+        info: [],
+        success: []
+    };
+    
+    sortedHistory.forEach(notif => {
+        const type = notif.type || 'info';
+        if (grouped[type]) {
+            grouped[type].push(notif);
+        }
     });
+    
+    // عرض كل مجموعة
+    Object.entries(grouped).forEach(([type, notifications]) => {
+        if (notifications.length > 0) {
+            const typeLabels = {
+                urgent: '🆘 طلبات عاجلة',
+                warning: '⚠️ تنبيهات مهمة',
+                stage_change: '📊 تغييرات المراحل',
+                info: 'ℹ️ معلومات',
+                success: '✅ نجاح'
+            };
+            
+            historyHTML += `
+                <div style="margin-bottom: 15px;">
+                    <h4 style="color: #6B7280; font-size: 14px; margin-bottom: 8px;">
+                        ${typeLabels[type] || type}
+                    </h4>
+            `;
+            
+            notifications.slice(0, 10).forEach(notif => {
+                historyHTML += `
+                    <div style="padding: 10px; border-bottom: 1px solid #E5E7EB; 
+                                display: flex; justify-content: space-between; align-items: center;
+                                cursor: pointer; transition: background 0.2s;"
+                         onclick="${notif.chatId ? `loadChat('${notif.chatId}')` : ''}"
+                         onmouseover="this.style.background='#F9FAFB'"
+                         onmouseout="this.style.background='transparent'">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 500; color: #1F2937; font-size: 13px;">
+                                ${notif.message}
+                            </div>
+                            <div style="font-size: 11px; color: #9CA3AF; margin-top: 3px;">
+                                ${notif.time.toLocaleTimeString('ar-EG')} - ${notif.time.toLocaleDateString('ar-EG')}
+                            </div>
+                        </div>
+                        ${notif.chatId ? '<i class="fas fa-arrow-left" style="color: #9CA3AF;"></i>' : ''}
+                    </div>
+                `;
+            });
+            
+            historyHTML += '</div>';
+        }
+    });
+    
     historyHTML += '</div>';
     
     Swal.fire({
@@ -1761,14 +1835,18 @@ function showNotificationHistory() {
         html: historyHTML,
         width: 600,
         showConfirmButton: true,
-        confirmButtonText: 'إغلاق',
-        confirmButtonColor: '#3B82F6',
-        showCloseButton: true
+        confirmButtonText: 'مسح الكل',
+        confirmButtonColor: '#EF4444',
+        showCancelButton: true,
+        cancelButtonText: 'إغلاق',
+        cancelButtonColor: '#6B7280'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            notificationHistory = [];
+            updateNotificationBadge();
+            showToast('تم مسح سجل الإشعارات', 'success');
+        }
     });
-    
-    // إعادة تعيين العداد
-    notificationHistory = [];
-    updateNotificationBadge();
 }
 
 // تحديث شارة الإشعارات
@@ -1811,8 +1889,11 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // رسالة ترحيب
     setTimeout(() => {
+                startGrantMonitoring();
+
         showToast('مرحباً! نظام المتابعة جاهز للعمل', 'success', 4000);
-    }, 1000);
+    }, 3000);
+        console.log('✅ نظام الإشعارات مُفعّل بالكامل');
 });
 // دالة جلب الأسماء الحقيقية من الحجوزات
 async function fetchRealNames() {
@@ -1920,6 +2001,40 @@ let criticalAlerts = {
 snapshot.forEach(doc => {
     const data = doc.data();
     const chatId = doc.id;
+
+       
+    // فحص للإشعارات المهمة
+    if (!sessionStorage.getItem(`notified-${chatId}`)) {
+        // إشعار بطلب مساعدة جديد
+        if (data.hasHelpRequest && data.lastActivity) {
+            const timeDiff = Date.now() - data.lastActivity.toDate().getTime();
+            if (timeDiff < 300000) { // أقل من 5 دقائق
+                showToast(`🆘 طلب مساعدة جديد من ${data.customer?.name || 'عميل'}`, 'urgent', 5000);
+                sessionStorage.setItem(`notified-${chatId}`, 'true');
+                notificationHistory.push({
+                    message: `طلب مساعدة من ${data.customer?.name}`,
+                    type: 'urgent',
+                    time: new Date(),
+                    chatId: chatId
+                });
+            }
+        }
+        
+        // إشعار بمنحة جديدة
+        if (data.bookingType === 'grant_request' && data.grantStatus === 'pending') {
+            const timeDiff = data.timestamp ? Date.now() - new Date(data.timestamp).getTime() : Infinity;
+            if (timeDiff < 300000) { // أقل من 5 دقائق
+                showToast(`🎯 طلب منحة جديد من ${data.customer?.name || 'عميل'}`, 'warning', 5000);
+                sessionStorage.setItem(`notified-${chatId}`, 'true');
+                notificationHistory.push({
+                    message: `طلب منحة من ${data.customer?.name}`,
+                    type: 'warning',
+                    time: new Date(),
+                    chatId: chatId
+                });
+            }
+        }
+    }
     
     // فحص الحالات الحرجة
     if (data.hasBooking || data.status) {
