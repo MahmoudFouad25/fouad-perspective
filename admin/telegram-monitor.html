@@ -1126,6 +1126,38 @@ const bookingStages = {
     }
 };
 
+        // نظام عرض المراحل المحسّن
+function createStageIndicator(chatData) {
+    const isGrant = chatData.bookingType === 'grant_request';
+    const currentStage = getCurrentStage(chatData);
+    const stages = isGrant ? bookingStages.grant.stages : bookingStages.individual.stages;
+    const currentIndex = stages.findIndex(s => s.id === currentStage);
+    
+    let html = '<div style="display: flex; align-items: center; gap: 2px; margin-top: 5px;">';
+    
+    stages.forEach((stage, index) => {
+        const isPassed = index < currentIndex;
+        const isCurrent = index === currentIndex;
+        const color = isPassed ? '#10B981' : isCurrent ? stage.color : '#E5E7EB';
+        
+        html += `
+            <div style="flex: 1; height: 3px; background: ${color}; 
+                        border-radius: 2px; position: relative;">
+                ${isCurrent ? `
+                    <div style="position: absolute; top: -8px; left: 50%; 
+                                transform: translateX(-50%); width: 6px; height: 6px; 
+                                background: ${stage.color}; border-radius: 50%;
+                                border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
 // دالة تحديد المرحلة الحالية للحجز
 function getCurrentStage(chatData) {
     const isGrant = chatData.bookingType === 'grant_request';
@@ -1649,7 +1681,7 @@ function startGrantMonitoring() {
         } catch (error) {
             console.error('Error in grant monitoring:', error);
         }
-    }, 30000); // كل 30 ثانية
+    }, 90000); // كل 30 ثانية
 }
 
 // بدء المراقبة عند تحميل الصفحة
@@ -1830,6 +1862,12 @@ async function fetchRealNames() {
         
         // تحميل قائمة المحادثات
         async function loadChats() {
+            // إيقاف التحديث إذا كان هناك محادثة مفتوحة
+if (currentChatId) {
+    console.log('محادثة مفتوحة، تخطي التحديث');
+    return;
+}
+            
             try {
                 console.log('🔄 جاري تحميل المحادثات...');
                 
@@ -2207,14 +2245,8 @@ chatItem.innerHTML = `
                 ${lastMessage}
             </div>
             
-            <!-- شريط التقدم المصغر -->
-            <div style="margin-top: 8px; background: #E5E7EB; height: 4px; 
-                        border-radius: 2px; overflow: hidden;">
-                <div style="background: linear-gradient(to right, ${currentStage.color}, ${currentStage.color}DD); 
-                            height: 100%; width: ${stageProgress.percentage}%; 
-                            transition: width 0.5s ease;">
-                </div>
-            </div>
+            <!-- مؤشر المراحل الجديد -->
+${createStageIndicator(combinedData)}
             
             <!-- الشارات -->
             <div style="margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap;">
@@ -2848,46 +2880,7 @@ grantPanel += `
                 <div style="display: flex; align-items: center; gap: 3px;">
 `;
 
-// مراحل مختصرة محدثة مع الدفع
-const isFullGrant = chatData.isFullGrant || chatData.pricing?.finalPriceNumber === 0;
-const stages = [
-    { name: 'طلب', completed: true },
-    { name: 'مراجعة', completed: chatData.grantStatus !== 'pending' },
-    { name: 'تفاوض', completed: negotiationOffers.length > 0 },
-    { name: 'رد', completed: !!customerResponse },
-    { name: 'اعتماد', completed: chatData.grantStatus === 'approved' },
-    { 
-        name: isFullGrant ? 'منحة كاملة' : 'دفع', 
-        completed: chatData.paymentConfirmed || isFullGrant 
-    },
-    { name: 'حساب', completed: chatData.accountCreated === true },
-    { name: 'دورة', completed: chatData.courseAssigned === true }
-];
 
-stages.forEach((stage, index) => {
-    grantPanel += `
-        <div style="flex: 1; text-align: center;">
-            <div style="width: 25px; height: 25px; margin: 0 auto 3px;
-                        background: ${stage.completed ? '#10B981' : '#E5E7EB'};
-                        border-radius: 50%; display: flex; align-items: center; 
-                        justify-content: center; color: white; font-size: 10px;">
-                ${stage.completed ? '✓' : index + 1}
-            </div>
-            <div style="font-size: 10px; color: ${stage.completed ? '#10B981' : '#9CA3AF'};">
-                ${stage.name}
-            </div>
-        </div>
-        ${index < stages.length - 1 ? `
-            <div style="flex: 0.3; height: 2px; 
-                        background: ${stage.completed ? '#10B981' : '#E5E7EB'}; 
-                        align-self: center; margin-bottom: 15px;"></div>
-        ` : ''}
-    `;
-});
-
-grantPanel += `
-                </div>
-            </div>
         </div>
     </div>
 `;
@@ -4101,42 +4094,43 @@ function updateStagesDashboard() {
 }
 
         // دالة فلترة حسب المرحلة
-// دالة فلترة حسب المرحلة - محدثة
 function filterByStage(stageFilter) {
     const chatItems = document.querySelectorAll('.chat-item');
     let visibleCount = 0;
     
     chatItems.forEach(item => {
-        let shouldShow = false;
-        
-        // محاولة استخراج معلومات المحادثة من العنصر
-        const nameElement = item.querySelector('strong');
-        const chatName = nameElement ? nameElement.textContent : '';
-        
-        // البحث عن المحادثة في البيانات
-        let chatData = null;
-        for (const [id, data] of Object.entries(chatsData)) {
-            if (data.customer?.name === chatName || 
-                data.userInfo?.firstName === chatName ||
-                data.studentName === chatName) {
-                chatData = data;
-                break;
-            }
+        // استخراج ID المحادثة من العنصر
+        const chatItemId = item.getAttribute('onclick');
+        if (!chatItemId) {
+            item.style.display = 'none';
+            return;
         }
+        
+        // استخراج chat ID الحقيقي
+        const matches = chatItemId.match(/loadChat\('([^']+)'\)/);
+        if (!matches || !matches[1]) {
+            item.style.display = 'none';
+            return;
+        }
+        
+        const chatId = matches[1];
+        const chatData = chatsData[chatId];
         
         if (!chatData) {
             item.style.display = 'none';
             return;
         }
         
-        if (!stageFilter) {
+        let shouldShow = false;
+        
+        if (!stageFilter || stageFilter === '') {
             shouldShow = true;
         } else {
             const [type, stage] = stageFilter.split(':');
             const currentStage = getCurrentStage(chatData);
             const isGrant = chatData.bookingType === 'grant_request';
             
-            if (type === 'individual' && !isGrant && chatData.hasBooking) {
+            if (type === 'individual' && !isGrant && (chatData.hasBooking || chatData.status)) {
                 shouldShow = currentStage === stage;
             } else if (type === 'grant' && isGrant) {
                 shouldShow = currentStage === stage;
@@ -4149,12 +4143,6 @@ function filterByStage(stageFilter) {
     
     // تحديث العداد
     updateStageFilterCounter(stageFilter, visibleCount);
-    
-    // إغلاق لوحة الإحصائيات إذا كانت مفتوحة
-    const dashboard = document.getElementById('stages-dashboard');
-    if (dashboard && dashboard.style.display !== 'none') {
-        setTimeout(() => toggleDashboard(), 500);
-    }
 }
 
 // دالة تحديث عداد فلتر المراحل
@@ -4349,7 +4337,7 @@ function updateSearchResultsCount(count, term) {
     setInterval(async () => {
         await fetchRealNames();
         await loadChats();
-    }, 30000);
+    }, 90000);
 };
         
 
