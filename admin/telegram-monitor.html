@@ -1152,6 +1152,117 @@ function getCurrentStage(chatData) {
         return 'request';
     }
 }
+        // دالة الحصول على إجراءات المرحلة
+function getStageActions(chatData, stageId, isGrant) {
+    let actions = [];
+    
+    if (isGrant) {
+        switch(stageId) {
+            case 'review':
+                actions.push(`<button onclick="startNegotiation('${chatData.id}')" 
+                              style="padding: 5px 12px; background: #8B5CF6; color: white; 
+                                     border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                              <i class="fas fa-handshake"></i> بدء التفاوض</button>`);
+                break;
+            case 'negotiation':
+                actions.push(`<button onclick="sendGrantOffer('${chatData.id}')" 
+                              style="padding: 5px 12px; background: #F59E0B; color: white; 
+                                     border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                              <i class="fas fa-paper-plane"></i> إرسال عرض</button>`);
+                break;
+            case 'response':
+                actions.push(`<button onclick="approveGrant('${chatData.id}')" 
+                              style="padding: 5px 12px; background: #10B981; color: white; 
+                                     border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                              <i class="fas fa-check"></i> اعتماد</button>`);
+                break;
+        }
+    } else {
+        switch(stageId) {
+            case 'confirmed':
+                actions.push(`<button onclick="requestPayment('${chatData.id}')" 
+                              style="padding: 5px 12px; background: #F59E0B; color: white; 
+                                     border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                              <i class="fas fa-money-bill"></i> طلب الدفع</button>`);
+                break;
+            case 'payment':
+                actions.push(`<button onclick="confirmPayment('${chatData.id}')" 
+                              style="padding: 5px 12px; background: #10B981; color: white; 
+                                     border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                              <i class="fas fa-check-circle"></i> تأكيد الدفع</button>`);
+                break;
+            case 'receipt':
+                actions.push(`<button onclick="requestReceipt('${chatData.id}')" 
+                              style="padding: 5px 12px; background: #8B5CF6; color: white; 
+                                     border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                              <i class="fas fa-camera"></i> طلب إيصال</button>`);
+                break;
+        }
+    }
+    
+    return actions.join(' ');
+}
+
+// دالة الحصول على معلومات المرحلة
+function getStageInfo(chatData, stageId, isGrant) {
+    let info = '';
+    
+    if (isGrant && stageId === 'negotiation' && chatData.negotiationOffers?.length > 0) {
+        info = `
+            <div style="margin-top: 10px; padding: 10px; background: #F3E8FF; border-radius: 8px;">
+                <i class="fas fa-info-circle" style="color: #9333EA;"></i>
+                عدد العروض المرسلة: <strong>${chatData.negotiationOffers.length}</strong>
+            </div>
+        `;
+    } else if (!isGrant && stageId === 'payment' && chatData.paymentDetails) {
+        info = `
+            <div style="margin-top: 10px; padding: 10px; background: #FFF7ED; border-radius: 8px;">
+                <i class="fas fa-info-circle" style="color: #F59E0B;"></i>
+                طريقة الدفع: <strong>${chatData.paymentMethod || 'غير محدد'}</strong>
+            </div>
+        `;
+    }
+    
+    // إضافة الوقت المنقضي في المرحلة
+    if (chatData.lastActivity) {
+        const hoursInStage = Math.floor((Date.now() - chatData.lastActivity.toDate().getTime()) / (1000 * 60 * 60));
+        if (hoursInStage > 24) {
+            info += `
+                <div style="margin-top: 10px; padding: 10px; background: #FEE2E2; border-radius: 8px;">
+                    <i class="fas fa-clock" style="color: #EF4444;"></i>
+                    في هذه المرحلة منذ: <strong>${Math.floor(hoursInStage / 24)} يوم</strong>
+                </div>
+            `;
+        }
+    }
+    
+    return info;
+}
+
+// دالة عرض تفاصيل المرحلة
+function showStageDetails(stageId, type) {
+    const stagesConfig = type === 'grant' ? bookingStages.grant : bookingStages.individual;
+    const stage = stagesConfig.stages.find(s => s.id === stageId);
+    
+    if (!stage) return;
+    
+    Swal.fire({
+        title: `${stage.icon} ${stage.name}`,
+        html: `
+            <div style="text-align: right;">
+                <p>معلومات عن مرحلة: <strong>${stage.name}</strong></p>
+                <button onclick="filterByStage('${type}:${stageId}')" 
+                        class="swal2-confirm swal2-styled"
+                        style="background: ${stage.color};">
+                    عرض جميع العملاء في هذه المرحلة
+                </button>
+            </div>
+        `,
+        icon: 'info',
+        showConfirmButton: false,
+        showCloseButton: true
+    });
+}
 
 // دالة حساب نسبة الإنجاز
 function getStageProgress(chatData) {
@@ -2784,6 +2895,122 @@ grantPanel += `
     // إدراج اللوحة في الصفحة
     chatInfoContent = grantPanel + '<div style="padding: 0 15px;">' + chatInfoContent + '</div>';
 }
+
+            // إضافة شريط المراحل التفاعلي داخل المحادثة
+const currentStageId = getCurrentStage(chatData);
+const isGrant = chatData?.bookingType === 'grant_request';
+const stagesConfig = isGrant ? bookingStages.grant : bookingStages.individual;
+const stageProgress = getStageProgress(chatData);
+
+// إنشاء شريط المراحل
+let stagesBarHTML = `
+    <div id="chat-stages-bar" style="
+        background: linear-gradient(135deg, #F9FAFB, #F3F4F6);
+        border: 2px solid #E5E7EB;
+        border-radius: 12px;
+        margin: 15px;
+        padding: 20px;
+        position: relative;
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h4 style="margin: 0; color: #1F2937; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-route" style="color: ${isGrant ? '#9333EA' : '#3B82F6'};"></i>
+                مسار ${isGrant ? 'المنحة' : 'الحجز'}
+            </h4>
+            <span style="background: linear-gradient(135deg, #10B981, #059669); 
+                         color: white; padding: 5px 15px; border-radius: 20px; 
+                         font-size: 13px; font-weight: bold;">
+                ${stageProgress.percentage}% مكتمل
+            </span>
+        </div>
+        
+        <!-- شريط المراحل -->
+        <div style="display: flex; align-items: center; gap: 5px; position: relative;">
+`;
+
+// إضافة المراحل
+stagesConfig.stages.forEach((stage, index) => {
+    const isActive = stage.id === currentStageId;
+    const isPassed = index < stagesConfig.stages.findIndex(s => s.id === currentStageId);
+    
+    stagesBarHTML += `
+        <!-- المرحلة ${index + 1} -->
+        <div style="flex: 1; text-align: center; position: relative;">
+            <div style="
+                width: 40px; height: 40px; margin: 0 auto 8px;
+                background: ${isActive ? stage.color : isPassed ? '#10B981' : '#E5E7EB'};
+                border-radius: 50%;
+                display: flex; align-items: center; justify-content: center;
+                color: white; font-size: 18px;
+                box-shadow: ${isActive ? `0 0 0 4px ${stage.color}30` : 'none'};
+                transition: all 0.3s;
+                cursor: pointer;
+                ${isActive ? 'animation: pulse 2s infinite;' : ''}
+            " onclick="showStageDetails('${stage.id}', '${isGrant ? 'grant' : 'individual'}')">
+                ${isPassed ? '✓' : stage.icon}
+            </div>
+            <div style="
+                font-size: 11px; 
+                color: ${isActive ? stage.color : isPassed ? '#10B981' : '#9CA3AF'};
+                font-weight: ${isActive ? 'bold' : 'normal'};
+            ">
+                ${stage.name}
+            </div>
+            ${isActive ? `
+                <div style="
+                    position: absolute; top: -10px; right: 50%; 
+                    transform: translateX(50%);
+                    background: ${stage.color}; color: white;
+                    padding: 2px 8px; border-radius: 10px;
+                    font-size: 10px; white-space: nowrap;
+                ">
+                    الحالي
+                </div>
+            ` : ''}
+        </div>
+        
+        ${index < stagesConfig.stages.length - 1 ? `
+            <!-- خط الربط -->
+            <div style="
+                flex: 0.5; height: 3px;
+                background: ${isPassed || isActive ? '#10B981' : '#E5E7EB'};
+                margin-bottom: 28px;
+                transition: all 0.5s;
+            "></div>
+        ` : ''}
+    `;
+});
+
+stagesBarHTML += `
+        </div>
+        
+        <!-- تفاصيل المرحلة الحالية -->
+        <div style="
+            margin-top: 20px; padding: 15px;
+            background: white; border-radius: 10px;
+            border-right: 4px solid ${stagesConfig.stages.find(s => s.id === currentStageId)?.color || '#6B7280'};
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong style="color: #1F2937;">المرحلة الحالية:</strong>
+                    <span style="color: ${stagesConfig.stages.find(s => s.id === currentStageId)?.color || '#6B7280'}; 
+                                 font-weight: bold; margin-right: 10px;">
+                        ${stagesConfig.stages.find(s => s.id === currentStageId)?.name || 'غير محدد'}
+                    </span>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    ${getStageActions(chatData, currentStageId, isGrant)}
+                </div>
+            </div>
+            
+            <!-- معلومات إضافية حسب المرحلة -->
+            ${getStageInfo(chatData, currentStageId, isGrant)}
+        </div>
+    </div>
+`;
+
+// إدراج شريط المراحل في بداية معلومات المحادثة
+chatInfoContent = stagesBarHTML + chatInfoContent;
             
     document.getElementById('chatInfo').innerHTML = chatInfoContent;
     
@@ -3874,25 +4101,33 @@ function updateStagesDashboard() {
 }
 
         // دالة فلترة حسب المرحلة
+// دالة فلترة حسب المرحلة - محدثة
 function filterByStage(stageFilter) {
     const chatItems = document.querySelectorAll('.chat-item');
     let visibleCount = 0;
     
     chatItems.forEach(item => {
-        // الحصول على ID المحادثة من العنصر
-        const chatId = item.onclick?.toString().match(/loadChat\('([^']+)'\)/)?.[1];
-        if (!chatId) {
-            item.style.display = 'none';
-            return;
+        let shouldShow = false;
+        
+        // محاولة استخراج معلومات المحادثة من العنصر
+        const nameElement = item.querySelector('strong');
+        const chatName = nameElement ? nameElement.textContent : '';
+        
+        // البحث عن المحادثة في البيانات
+        let chatData = null;
+        for (const [id, data] of Object.entries(chatsData)) {
+            if (data.customer?.name === chatName || 
+                data.userInfo?.firstName === chatName ||
+                data.studentName === chatName) {
+                chatData = data;
+                break;
+            }
         }
         
-        const chatData = chatsData[chatId];
         if (!chatData) {
             item.style.display = 'none';
             return;
         }
-        
-        let shouldShow = false;
         
         if (!stageFilter) {
             shouldShow = true;
@@ -3901,7 +4136,7 @@ function filterByStage(stageFilter) {
             const currentStage = getCurrentStage(chatData);
             const isGrant = chatData.bookingType === 'grant_request';
             
-            if (type === 'individual' && !isGrant) {
+            if (type === 'individual' && !isGrant && chatData.hasBooking) {
                 shouldShow = currentStage === stage;
             } else if (type === 'grant' && isGrant) {
                 shouldShow = currentStage === stage;
@@ -3914,6 +4149,12 @@ function filterByStage(stageFilter) {
     
     // تحديث العداد
     updateStageFilterCounter(stageFilter, visibleCount);
+    
+    // إغلاق لوحة الإحصائيات إذا كانت مفتوحة
+    const dashboard = document.getElementById('stages-dashboard');
+    if (dashboard && dashboard.style.display !== 'none') {
+        setTimeout(() => toggleDashboard(), 500);
+    }
 }
 
 // دالة تحديث عداد فلتر المراحل
