@@ -831,6 +831,16 @@
         <h3 style="margin: 0; color: #9333EA; display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-hand-holding-heart"></i> لوحة المنح السريعة
         </h3>
+        <button onclick="manualRefresh()" 
+        style="position: fixed; bottom: 80px; left: 20px; 
+               background: linear-gradient(135deg, #3B82F6, #2563EB); 
+               color: white; border: none; width: 50px; height: 50px; 
+               border-radius: 50%; cursor: pointer; 
+               box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+               transition: all 0.3s; z-index: 1000;"
+        title="تحديث البيانات (F5)">
+    <i class="fas fa-sync" id="manual-refresh-icon"></i>
+</button>
         <button onclick="toggleGrantsPanel()" 
                 style="background: none; border: none; color: #6B7280; 
                        cursor: pointer; font-size: 20px;">×</button>
@@ -2848,42 +2858,7 @@ grantPanel += `
                 <div style="display: flex; align-items: center; gap: 3px;">
 `;
 
-// مراحل مختصرة محدثة مع الدفع
-const isFullGrant = chatData.isFullGrant || chatData.pricing?.finalPriceNumber === 0;
-const stages = [
-    { name: 'طلب', completed: true },
-    { name: 'مراجعة', completed: chatData.grantStatus !== 'pending' },
-    { name: 'تفاوض', completed: negotiationOffers.length > 0 },
-    { name: 'رد', completed: !!customerResponse },
-    { name: 'اعتماد', completed: chatData.grantStatus === 'approved' },
-    { 
-        name: isFullGrant ? 'منحة كاملة' : 'دفع', 
-        completed: chatData.paymentConfirmed || isFullGrant 
-    },
-    { name: 'حساب', completed: chatData.accountCreated === true },
-    { name: 'دورة', completed: chatData.courseAssigned === true }
-];
 
-stages.forEach((stage, index) => {
-    grantPanel += `
-        <div style="flex: 1; text-align: center;">
-            <div style="width: 25px; height: 25px; margin: 0 auto 3px;
-                        background: ${stage.completed ? '#10B981' : '#E5E7EB'};
-                        border-radius: 50%; display: flex; align-items: center; 
-                        justify-content: center; color: white; font-size: 10px;">
-                ${stage.completed ? '✓' : index + 1}
-            </div>
-            <div style="font-size: 10px; color: ${stage.completed ? '#10B981' : '#9CA3AF'};">
-                ${stage.name}
-            </div>
-        </div>
-        ${index < stages.length - 1 ? `
-            <div style="flex: 0.3; height: 2px; 
-                        background: ${stage.completed ? '#10B981' : '#E5E7EB'}; 
-                        align-self: center; margin-bottom: 15px;"></div>
-        ` : ''}
-    `;
-});
 
 grantPanel += `
                 </div>
@@ -4102,61 +4077,151 @@ function updateStagesDashboard() {
 
         // دالة فلترة حسب المرحلة
 // دالة فلترة حسب المرحلة - محدثة
+// دالة فلترة حسب المرحلة - نسخة محسنة نهائياً
 function filterByStage(stageFilter) {
-    const chatItems = document.querySelectorAll('.chat-item');
-    let visibleCount = 0;
+    console.log('🔍 بدء الفلترة:', stageFilter);
     
-    chatItems.forEach(item => {
-        let shouldShow = false;
-        
-        // محاولة استخراج معلومات المحادثة من العنصر
-        const nameElement = item.querySelector('strong');
-        const chatName = nameElement ? nameElement.textContent : '';
-        
-        // البحث عن المحادثة في البيانات
-        let chatData = null;
-        for (const [id, data] of Object.entries(chatsData)) {
-            if (data.customer?.name === chatName || 
-                data.userInfo?.firstName === chatName ||
-                data.studentName === chatName) {
-                chatData = data;
-                break;
-            }
-        }
-        
-        if (!chatData) {
-            item.style.display = 'none';
-            return;
-        }
-        
-        if (!stageFilter) {
-            shouldShow = true;
-        } else {
-            const [type, stage] = stageFilter.split(':');
-            const currentStage = getCurrentStage(chatData);
-            const isGrant = chatData.bookingType === 'grant_request';
+    const chatsList = document.getElementById('chatsList');
+    const chatItems = chatsList.querySelectorAll('.chat-item');
+    let visibleCount = 0;
+    let hiddenCount = 0;
+    
+    // إذا لم يكن هناك فلتر، أظهر الكل
+    if (!stageFilter || stageFilter === '') {
+        chatItems.forEach(item => {
+            item.style.display = 'flex';
+            visibleCount++;
+        });
+        updateStageFilterCounter('', visibleCount);
+        return;
+    }
+    
+    const [filterType, filterStage] = stageFilter.split(':');
+    
+    // المرور على كل عناصر المحادثة
+    chatItems.forEach((item, index) => {
+        try {
+            // محاولة الحصول على بيانات المحادثة
+            let chatData = null;
+            let chatId = null;
             
-            if (type === 'individual' && !isGrant && chatData.hasBooking) {
-                shouldShow = currentStage === stage;
-            } else if (type === 'grant' && isGrant) {
-                shouldShow = currentStage === stage;
+            // طريقة 1: من خلال onclick
+            const onclickAttr = item.getAttribute('onclick');
+            if (onclickAttr) {
+                const match = onclickAttr.match(/loadChat\('([^']+)'\)/);
+                if (match) {
+                    chatId = match[1];
+                    chatData = chatsData[chatId];
+                }
             }
+            
+            // طريقة 2: من خلال البحث في chatsData
+            if (!chatData) {
+                const nameElement = item.querySelector('strong');
+                if (nameElement) {
+                    const name = nameElement.textContent;
+                    for (const [id, data] of Object.entries(chatsData)) {
+                        if (data.customer?.name === name || 
+                            data.userInfo?.firstName === name ||
+                            data.studentName === name) {
+                            chatData = data;
+                            chatId = id;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // إذا لم نجد البيانات
+            if (!chatData) {
+                item.style.display = 'none';
+                hiddenCount++;
+                return;
+            }
+            
+            // تحديد نوع المحادثة
+            const isGrant = chatData.bookingType === 'grant_request';
+            const hasBooking = chatData.hasBooking || chatData.status || chatData.bookingType;
+            
+            // الحصول على المرحلة الحالية
+            const currentStage = getCurrentStage(chatData);
+            
+            // تطبيق الفلتر
+            let shouldShow = false;
+            
+            if (filterType === 'individual' && !isGrant && hasBooking) {
+                shouldShow = (currentStage === filterStage);
+            } else if (filterType === 'grant' && isGrant) {
+                shouldShow = (currentStage === filterStage);
+            }
+            
+            // إظهار أو إخفاء العنصر
+            if (shouldShow) {
+                item.style.display = 'flex';
+                item.style.opacity = '1';
+                visibleCount++;
+                console.log(`✅ إظهار: ${chatData.customer?.name || 'غير محدد'} - المرحلة: ${currentStage}`);
+            } else {
+                item.style.display = 'none';
+                item.style.opacity = '0';
+                hiddenCount++;
+            }
+            
+        } catch (error) {
+            console.error('خطأ في معالجة العنصر:', error);
+            item.style.display = 'none';
+            hiddenCount++;
         }
-        
-        item.style.display = shouldShow ? 'block' : 'none';
-        if (shouldShow) visibleCount++;
     });
+    
+    console.log(`📊 النتائج: ${visibleCount} ظاهر، ${hiddenCount} مخفي`);
     
     // تحديث العداد
     updateStageFilterCounter(stageFilter, visibleCount);
     
-    // إغلاق لوحة الإحصائيات إذا كانت مفتوحة
-    const dashboard = document.getElementById('stages-dashboard');
-    if (dashboard && dashboard.style.display !== 'none') {
-        setTimeout(() => toggleDashboard(), 500);
+    // إظهار رسالة إذا لم توجد نتائج
+    if (visibleCount === 0) {
+        let noResultsMsg = document.getElementById('no-filter-results');
+        if (!noResultsMsg) {
+            noResultsMsg = document.createElement('div');
+            noResultsMsg.id = 'no-filter-results';
+            noResultsMsg.style.cssText = `
+                text-align: center; 
+                padding: 40px; 
+                color: #9CA3AF;
+                background: white;
+                border-radius: 12px;
+                margin: 20px;
+            `;
+            
+            const [type, stage] = stageFilter.split(':');
+            const stageConfig = type === 'grant' ? bookingStages.grant : bookingStages.individual;
+            const stageInfo = stageConfig.stages.find(s => s.id === stage);
+            
+            noResultsMsg.innerHTML = `
+                <div style="font-size: 48px; margin-bottom: 15px;">${stageInfo?.icon || '🔍'}</div>
+                <div style="font-size: 18px; font-weight: bold; color: #6B7280;">
+                    لا توجد محادثات في مرحلة "${stageInfo?.name || 'غير محدد'}"
+                </div>
+                <div style="font-size: 14px; color: #9CA3AF; margin-top: 10px;">
+                    ${type === 'grant' ? 'للمنح' : 'للحجوزات الفردية'}
+                </div>
+                <button onclick="document.getElementById('stageFilter').value=''; filterByStage('');" 
+                        style="margin-top: 20px; padding: 10px 20px; 
+                               background: linear-gradient(135deg, #3B82F6, #2563EB); 
+                               color: white; border: none; border-radius: 8px; 
+                               cursor: pointer; font-weight: bold;">
+                    عرض الكل
+                </button>
+            `;
+            chatsList.appendChild(noResultsMsg);
+        }
+    } else {
+        // إزالة رسالة "لا توجد نتائج" إذا كانت موجودة
+        const existingMsg = document.getElementById('no-filter-results');
+        if (existingMsg) existingMsg.remove();
     }
 }
-
 // دالة تحديث عداد فلتر المراحل
 function updateStageFilterCounter(filter, count) {
     const headerText = document.querySelector('.chats-header');
@@ -4345,12 +4410,14 @@ function updateSearchResultsCount(count, term) {
     // ثم تحميل المحادثات
     await loadChats();
     
-    // تحديث دوري
-    setInterval(async () => {
+    // تحديث دوري أقل إزعاجاً
+setInterval(async () => {
+    // تحديث فقط إذا لم يكن المستخدم يتفاعل
+    if (!currentChatId && !document.querySelector('#quick-replies-modal')) {
         await fetchRealNames();
         await loadChats();
-    }, 30000);
-};
+    }
+}, 480000); // كل دقيقتين بدلاً من 30 ثانية
         
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -4634,9 +4701,39 @@ function showKeyboardShortcuts() {
 }
 
         // نظام التحديث التلقائي المحسّن
-let autoRefreshInterval = 15000; // 15 ثانية
+let autoRefreshInterval = 180000; // 3 دقايق - دقيقة كاملة
 let lastRefreshTime = Date.now();
 
+            // دالة التحديث اليدوي
+async function manualRefresh() {
+    const icon = document.getElementById('manual-refresh-icon');
+    if (icon.classList.contains('fa-spin')) return; // منع التحديث المتكرر
+    
+    icon.classList.add('fa-spin');
+    showToast('جاري تحديث البيانات...', 'info', 2000);
+    
+    try {
+        await fetchRealNames();
+        await loadChats();
+        showToast('تم التحديث بنجاح', 'success', 2000);
+    } catch (error) {
+        console.error('خطأ في التحديث:', error);
+        showToast('فشل التحديث', 'error', 2000);
+    } finally {
+        setTimeout(() => {
+            icon.classList.remove('fa-spin');
+        }, 1000);
+    }
+}
+
+// اختصار F5 للتحديث
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'F5') {
+        e.preventDefault();
+        manualRefresh();
+    }
+});
+            
 function startAutoRefresh() {
     setInterval(async () => {
         // تحديث الإحصائيات فقط إذا لم يكن المستخدم يتفاعل
