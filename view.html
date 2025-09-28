@@ -3278,16 +3278,20 @@ function displayCourseData() {
         instructorBioFinal.textContent = courseData.instructorBio || 'لا توجد معلومات متاحة';
     }
     
-    // عرض صورة المدرب
-    const avatar = document.getElementById('instructorAvatar');
-    if (avatar) {
-        const instructorImage = courseData.instructorImageUrl || courseData.instructorImage;
-        if (instructorImage) {
-            avatar.innerHTML = `<img src="${instructorImage}" alt="${instructorName}" onerror="this.style.display='none'; this.parentElement.innerHTML='<i class=\\'fas fa-user\\'></i>'">`;
-        } else if (instructorName !== 'غير محدد') {
-            avatar.textContent = instructorName.charAt(0).toUpperCase();
-        }
+  // عرض صورة المدرب
+const avatar = document.getElementById('instructorAvatar');
+if (avatar) {
+    const instructorImage = courseData.instructorImageUrl || courseData.instructorImage;
+    if (instructorImage) {
+        // تأكد من أن الصورة في العنصر الصحيح
+        avatar.style.backgroundImage = `url(${instructorImage})`;
+        avatar.style.backgroundSize = 'cover';
+        avatar.style.backgroundPosition = 'center';
+        avatar.innerHTML = ''; // إزالة الأيقونة
+    } else if (instructorName !== 'غير محدد') {
+        avatar.textContent = instructorName.charAt(0).toUpperCase();
     }
+}
     
     // التاريخ الهجري والميلادي
     const createdDate = courseData.createdAt ? new Date(courseData.createdAt.seconds * 1000) : new Date();
@@ -5738,159 +5742,223 @@ function renderAdvancedProgressBar() {
 }
 
        // عرض الإنجازات القادمة
+// عرض الإنجازات القادمة - محسوبة بدقة
 function renderUpcomingAchievements() {
-    const currentProgress = userProgress.completedLessons?.length || 0;
-    const totalLessons = allLessons.length;
+    const completedCount = userProgress.completedLessons?.length || 0;
+    const totalLessonsCount = allLessons.length;
     const currentPoints = userJourneyPoints;
     
-    let upcomingItems = [];
+    let achievements = [];
     
-    // الدرس القادم
-    if (currentProgress < totalLessons) {
-        const nextLesson = allLessons[currentProgress];
-        const nextLessonPoints = lessonPoints[nextLesson?.libraryContentId] || 0;
+    // المستوى 1: الخطوة التالية المباشرة
+    if (completedCount < totalLessonsCount) {
+        const nextLessonIndex = completedCount;
+        const nextLesson = allLessons[nextLessonIndex];
         
-        upcomingItems.push({
-            type: 'lesson',
-            icon: '📚',
-            title: 'الدرس القادم',
-            subtitle: nextLesson?.title || `الدرس ${currentProgress + 1}`,
-            reward: `+${nextLessonPoints} نقطة`,
-            progress: 95,
-            color: '#22c55e'
-        });
-    }
-    
-    // شارة قريبة
-    const nextPointBadge = potentialBadges.find(badge => 
-        badge.type === 'points' && 
-        badge.conditions?.requiredPoints > currentPoints &&
-        !userBadges.some(ub => ub.id === badge.id)
-    );
-    
-    if (nextPointBadge) {
-        const progress = Math.round((currentPoints / nextPointBadge.conditions.requiredPoints) * 100);
-        upcomingItems.push({
-            type: 'badge',
-            icon: nextPointBadge.icon || '🏅',
-            title: 'شارة قريبة',
-            subtitle: nextPointBadge.name,
-            reward: `باقي ${nextPointBadge.conditions.requiredPoints - currentPoints} نقطة`,
-            progress: progress,
-            color: '#fbbf24'
-        });
-    }
-    
-    // إنجاز وحدة
-    const currentModule = allLessons[currentProgress]?.moduleIndex;
-    if (currentModule !== undefined) {
-        const moduleLessons = allLessons.filter(l => l.moduleIndex === currentModule);
-        const completedInModule = moduleLessons.filter(l => 
-            userProgress.completedLessons?.includes(l.globalIndex)
-        ).length;
-        const moduleProgress = Math.round((completedInModule / moduleLessons.length) * 100);
-        
-        if (moduleProgress > 50 && moduleProgress < 100) {
-            upcomingItems.push({
-                type: 'module',
+        if (nextLesson) {
+            let nextPoints = 0;
+            if (nextLesson.libraryContentId && lessonPoints[nextLesson.libraryContentId]) {
+                nextPoints = lessonPoints[nextLesson.libraryContentId];
+            }
+            
+            achievements.push({
+                level: 1,
+                type: 'next_lesson',
                 icon: '🎯',
-                title: 'إكمال الوحدة',
-                subtitle: allModules[currentModule]?.title,
-                reward: '+50 نقطة إضافية',
-                progress: moduleProgress,
-                color: '#a855f7'
+                title: 'خطوتك التالية',
+                subtitle: nextLesson.title || `الدرس ${nextLessonIndex + 1}`,
+                reward: `+${nextPoints} نقطة`,
+                action: `onclick="startLesson(${nextLessonIndex})" style="cursor: pointer;"`,
+                actionButton: true,
+                color: '#22c55e'
             });
         }
     }
     
-    // الإنجاز الكبير
-    const majorMilestone = Math.round((currentProgress / totalLessons) * 100);
-    const nextMilestone = majorMilestone < 25 ? 25 : 
-                          majorMilestone < 50 ? 50 : 
-                          majorMilestone < 75 ? 75 : 
-                          majorMilestone < 100 ? 100 : null;
+    // المستوى 2: قريب جداً (شارة أو إكمال وحدة)
+    // أ- شارة قريبة
+    let closestBadge = null;
+    let closestBadgeProgress = 0;
     
-    if (nextMilestone) {
-        upcomingItems.push({
+    potentialBadges.forEach(badge => {
+        if (userBadges.some(ub => ub.id === badge.id)) return;
+        
+        if (badge.type === 'points' && badge.conditions?.requiredPoints) {
+            const progress = (currentPoints / badge.conditions.requiredPoints) * 100;
+            if (progress >= 60 && progress < 100 && progress > closestBadgeProgress) {
+                closestBadgeProgress = progress;
+                closestBadge = {
+                    ...badge,
+                    progress: Math.round(progress),
+                    remaining: badge.conditions.requiredPoints - currentPoints
+                };
+            }
+        }
+    });
+    
+    // ب- إكمال الوحدة الحالية
+    let currentModuleProgress = null;
+    if (completedCount > 0 && completedCount < totalLessonsCount) {
+        const lastCompletedLesson = allLessons[completedCount - 1];
+        if (lastCompletedLesson) {
+            const moduleIndex = lastCompletedLesson.moduleIndex;
+            const moduleLessons = allLessons.filter(l => l.moduleIndex === moduleIndex);
+            const completedInModule = moduleLessons.filter(l => 
+                userProgress.completedLessons?.includes(l.globalIndex)
+            ).length;
+            
+            const moduleProgress = (completedInModule / moduleLessons.length) * 100;
+            if (moduleProgress >= 50 && moduleProgress < 100) {
+                currentModuleProgress = {
+                    title: allModules[moduleIndex]?.title || `الوحدة ${moduleIndex + 1}`,
+                    progress: Math.round(moduleProgress),
+                    remaining: moduleLessons.length - completedInModule
+                };
+            }
+        }
+    }
+    
+    // اختر الأقرب للإكمال
+    if (closestBadge && (!currentModuleProgress || closestBadge.progress > currentModuleProgress.progress)) {
+        achievements.push({
+            level: 2,
+            type: 'badge',
+            icon: '🏅',
+            title: 'قريب جداً',
+            subtitle: closestBadge.name,
+            progress: closestBadge.progress,
+            progressText: `${closestBadge.progress}% - باقي ${closestBadge.remaining} نقطة`,
+            color: '#fbbf24'
+        });
+    } else if (currentModuleProgress) {
+        achievements.push({
+            level: 2,
+            type: 'module',
+            icon: '📦',
+            title: 'قريب جداً',
+            subtitle: `إكمال ${currentModuleProgress.title}`,
+            progress: currentModuleProgress.progress,
+            progressText: `${currentModuleProgress.progress}% - باقي ${currentModuleProgress.remaining} دروس`,
+            color: '#a855f7'
+        });
+    }
+    
+    // المستوى 3: الإنجاز الكبير
+    const overallProgress = (completedCount / totalLessonsCount) * 100;
+    let majorMilestone = null;
+    
+    if (overallProgress < 25) {
+        majorMilestone = { target: 25, label: 'ربع الطريق', remaining: Math.ceil(totalLessonsCount * 0.25) - completedCount };
+    } else if (overallProgress < 50) {
+        majorMilestone = { target: 50, label: 'نصف الطريق', remaining: Math.ceil(totalLessonsCount * 0.5) - completedCount };
+    } else if (overallProgress < 75) {
+        majorMilestone = { target: 75, label: 'ثلاثة أرباع', remaining: Math.ceil(totalLessonsCount * 0.75) - completedCount };
+    } else if (overallProgress < 100) {
+        majorMilestone = { target: 100, label: 'إكمال الدورة', remaining: totalLessonsCount - completedCount };
+    }
+    
+    if (majorMilestone) {
+        achievements.push({
+            level: 3,
             type: 'milestone',
             icon: '🏆',
-            title: `إنجاز ${nextMilestone}%`,
-            subtitle: 'من الدورة الكاملة',
-            reward: `+${nextMilestone * 2} نقطة`,
-            progress: majorMilestone,
+            title: 'الإنجاز الكبير',
+            subtitle: majorMilestone.label,
+            progress: Math.round(overallProgress),
+            progressText: `${Math.round(overallProgress)}% - باقي ${majorMilestone.remaining} دروس`,
             color: '#ef4444'
         });
     }
     
-    // عرض العناصر
-    if (upcomingItems.length > 0) {
+    // عرض الإنجازات
+    if (achievements.length === 0) {
         return `
-            <div style="display: grid; gap: 15px;">
-                ${upcomingItems.slice(0, 3).map(item => `
-                    <div style="
-                        background: rgba(255, 255, 255, 0.03);
-                        padding: 15px;
-                        border-radius: 12px;
-                        border: 1px solid ${item.color}44;
-                        display: flex;
-                        align-items: center;
-                        gap: 15px;
-                        transition: all 0.3s;
-                        cursor: pointer;
-                    " onmouseover="this.style.transform='translateX(-5px)'; this.style.borderColor='${item.color}'" 
-                       onmouseout="this.style.transform=''; this.style.borderColor='${item.color}44'">
-                        
+            <div style="text-align: center; padding: 30px; color: rgba(255, 255, 255, 0.5);">
+                <i class="fas fa-trophy" style="font-size: 3rem; margin-bottom: 10px; opacity: 0.3;"></i>
+                <p>أحسنت! حققت كل الإنجازات</p>
+            </div>
+        `;
+    }
+    
+    return `
+        <div style="display: grid; gap: 20px;">
+            ${achievements.map(item => `
+                <div style="
+                    background: ${
+                        item.level === 1 ? 'rgba(34, 197, 94, 0.08)' :
+                        item.level === 2 ? 'rgba(251, 191, 36, 0.08)' :
+                        'rgba(239, 68, 68, 0.08)'
+                    };
+                    padding: 20px;
+                    border-radius: 15px;
+                    border: 2px solid ${item.color}33;
+                    transition: all 0.3s;
+                    ${item.action || ''}
+                " onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='${item.color}66'" 
+                   onmouseout="this.style.transform=''; this.style.borderColor='${item.color}33'">
+                    
+                    <div style="display: flex; align-items: center; gap: 15px;">
                         <div style="
                             font-size: 2.5rem;
-                            filter: ${item.progress < 80 ? 'grayscale(50%)' : 'none'};
+                            ${item.level === 1 ? '' : `filter: ${item.progress < 70 ? 'grayscale(30%)' : 'none'};`}
                         ">${item.icon}</div>
                         
                         <div style="flex: 1;">
                             <div style="
                                 color: ${item.color};
                                 font-weight: bold;
+                                font-size: 1.1rem;
                                 margin-bottom: 5px;
                             ">${item.title}</div>
                             <div style="
-                                color: rgba(255, 255, 255, 0.7);
-                                font-size: 0.9rem;
-                                margin-bottom: 8px;
+                                color: rgba(255, 255, 255, 0.8);
+                                margin-bottom: ${item.progress !== undefined ? '10px' : '0'};
                             ">${item.subtitle}</div>
-                            <div style="
-                                background: rgba(255, 255, 255, 0.05);
-                                height: 6px;
-                                border-radius: 3px;
-                                overflow: hidden;
-                            ">
-                                <div style="
-                                    width: ${item.progress}%;
-                                    height: 100%;
-                                    background: ${item.color};
-                                    transition: width 0.5s;
-                                "></div>
-                            </div>
+                            
+                            ${item.progress !== undefined ? `
+                                <div>
+                                    <div style="
+                                        background: rgba(255, 255, 255, 0.05);
+                                        height: 8px;
+                                        border-radius: 4px;
+                                        overflow: hidden;
+                                        margin-bottom: 5px;
+                                    ">
+                                        <div style="
+                                            width: ${item.progress}%;
+                                            height: 100%;
+                                            background: ${item.color};
+                                            transition: width 0.5s;
+                                            box-shadow: 0 0 10px ${item.color}66;
+                                        "></div>
+                                    </div>
+                                    <div style="
+                                        color: rgba(255, 255, 255, 0.6);
+                                        font-size: 0.85rem;
+                                    ">${item.progressText}</div>
+                                </div>
+                            ` : ''}
                         </div>
                         
                         <div style="
                             background: ${item.color}22;
                             color: ${item.color};
-                            padding: 8px 12px;
-                            border-radius: 10px;
+                            padding: 10px 15px;
+                            border-radius: 12px;
                             font-weight: bold;
-                            font-size: 0.9rem;
-                        ">${item.reward}</div>
+                            white-space: nowrap;
+                            ${item.actionButton ? 'cursor: pointer; transition: all 0.3s;' : ''}
+                        " ${item.actionButton ? `
+                            onmouseover="this.style.background='${item.color}'; this.style.color='white';"
+                            onmouseout="this.style.background='${item.color}22'; this.style.color='${item.color}';"
+                        ` : ''}>
+                            ${item.actionButton ? 'ابدأ الآن' : item.reward || '+100 نقطة'}
+                        </div>
                     </div>
-                `).join('')}
-            </div>
-        `;
-    } else {
-        return `
-            <div style="text-align: center; padding: 30px; color: rgba(255, 255, 255, 0.5);">
-                <i class="fas fa-check-circle" style="font-size: 3rem; margin-bottom: 10px;"></i>
-                <p>أحسنت! لقد حققت معظم الإنجازات</p>
-            </div>
-        `;
-    }
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
        
 // عرض شريط نوع النقاط
