@@ -4033,141 +4033,131 @@ async function markLessonCompleted(lessonIndex) {
     try {
         const completedLessons = userProgress.completedLessons || [];
         
-        if (!completedLessons.includes(lessonIndex)) {
-            completedLessons.push(lessonIndex);
-            
-            const totalLessons = allLessons.length;
-            const newPercentage = totalLessons > 0 ? (completedLessons.length / totalLessons) * 100 : 0;
-            
-            // جلب تفاصيل النقاط للدرس
-            const lesson = allLessons[lessonIndex];
-            let pointsDetail = null;
-            let earnedBadges = [];
-            
-            if (lesson && lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
-                pointsDetail = courseContentDetails[lesson.libraryContentId].pointsSystem;
-                
-                // فحص الشارات المستحقة
-                earnedBadges = await checkLessonBadges(lesson, completedLessons.length);
-            }
-            
-            const pointsToAward = pointsDetail?.totalPossible || 0;
-            
-            // تحديث البيانات
-            const updatedProgress = {
-                ...userProgress,
-                completedLessons,
-                percentage: newPercentage,
-                lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            // بناء كائن التحديث
-            const updateData = {
-                [`progress.${courseId}`]: updatedProgress
-            };
-            
-            // إضافة النقاط التفصيلية
-            if (pointsToAward > 0) {
-                // نقاط الرحلة
-                updateData['journeyPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
-                updateData['journeyPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
-                
-                // نقاط المحفظة
-                updateData['walletPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
-                updateData['walletPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
-                
-                // سجل النقاط مع التفاصيل
-                const pointsHistory = {
-                    amount: pointsToAward,
-                    timestamp: new Date().toISOString(),
-                    type: 'journey',
-                    reason: `إكمال درس: ${lesson.title}`,
-                    description: `حصلت على ${pointsToAward} نقطة`,
-                    details: {
-                        achievement: pointsDetail.achievement || 0,
-                        bonus: pointsDetail.bonus || 0,
-                        participation: pointsDetail.participation || 0,
-                        speed: pointsDetail.speed || 0,
-                        doubleForFirst: pointsDetail.doubleForFirst || false
-                    }
-                };
-                
-                updateData['journeyPoints.history'] = firebase.firestore.FieldValue.arrayUnion(pointsHistory);
-                updateData['walletPoints.history'] = firebase.firestore.FieldValue.arrayUnion({
-                    ...pointsHistory,
-                    type: 'wallet'
-                });
-            }
-            
-            // إضافة الشارات المكتسبة
-            if (earnedBadges && earnedBadges.length > 0) {
-                console.log('💾 حفظ الشارات الجديدة:', earnedBadges);
-                
-                // إضافة كل شارة بشكل منفصل للتأكد من عدم التكرار
-                for (const newBadge of earnedBadges) {
-                    // التحقق مرة أخرى من عدم وجود الشارة
-                    const userRef = await db.collection('users').doc(userId).get();
-                    const currentUserBadges = userRef.data().badges || [];
-                    
-                    if (!currentUserBadges.some(b => b.id === newBadge.id)) {
-                        await db.collection('users').doc(userId).update({
-                            badges: firebase.firestore.FieldValue.arrayUnion(newBadge)
-                        });
-                        
-                        // تحديث المتغير المحلي
-                        userBadges.push(newBadge);
-                        
-                        console.log('✅ تم إضافة شارة:', newBadge.name);
-                    }
-                }
-            }
-            
-            // حفظ باقي البيانات في Firebase (بدون الشارات لأنها تمت إضافتها بالأعلى)
-            await db.collection('users').doc(userId).update(updateData);
-            
-            // تحديث المتغيرات المحلية
-            userProgress = updatedProgress;
-            if (pointsToAward > 0) {
-                userJourneyPoints += pointsToAward;
-                userWalletPoints += pointsToAward;
-                detailedPointsSystem.totalEarned += pointsToAward;
-                if (pointsDetail) {
-                    detailedPointsSystem.achievement += pointsDetail.achievement || 0;
-                    detailedPointsSystem.bonus += pointsDetail.bonus || 0;
-                    detailedPointsSystem.participation += pointsDetail.participation || 0;
-                    detailedPointsSystem.speed += pointsDetail.speed || 0;
-                }
-            }
-            
-            // تحديث الواجهة
-            updatePointsDisplay();
-            displayUserProgress();
-            displayModulesAndLessons();
-            updateNavigationButtons();
-            updateContinueButton();
-            
-            // فحص معالم التقدم
-            checkMilestones(newPercentage);
-            
-           // تحديث الواجهة فوراً قبل عرض الإشعار
-            await refreshAllUIElements();
-            
-            // إغلاق نافذة الدرس أولاً
-            closeLessonPlayer();
-            
-            // انتظار قليل ثم إظهار الإشعار
-            setTimeout(() => {
-                showCompletionNotification(pointsDetail, earnedBadges, lesson.title);
-            }, 300);
+        // تحقق من عدم تكرار الإكمال
+        if (completedLessons.includes(lessonIndex)) {
+            console.log('الدرس مكتمل مسبقاً');
+            return;
         }
         
+        // إضافة الدرس للقائمة المكتملة
+        completedLessons.push(lessonIndex);
+        
+        // حساب النسبة المئوية الجديدة
+        const totalLessons = allLessons.length;
+        const newPercentage = totalLessons > 0 ? Math.round((completedLessons.length / totalLessons) * 100) : 0;
+        
+        // جلب تفاصيل النقاط للدرس
+        const lesson = allLessons[lessonIndex];
+        let pointsToAward = 0;
+        let pointsDetail = null;
+        let earnedBadges = [];
+        
+        if (lesson && lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
+            pointsDetail = courseContentDetails[lesson.libraryContentId].pointsSystem;
+            pointsToAward = pointsDetail?.totalPossible || 0;
+            
+            console.log('📊 نقاط الدرس:', {
+                'الدرس': lesson.title,
+                'النقاط': pointsToAward,
+                'التفاصيل': pointsDetail
+            });
+        }
+        
+        // بناء كائن التحديث الأساسي
+        const updateData = {
+            [`progress.${courseId}.completedLessons`]: completedLessons,
+            [`progress.${courseId}.percentage`]: newPercentage,
+            [`progress.${courseId}.lastActivity`]: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        // إضافة النقاط إذا وجدت
+        if (pointsToAward > 0) {
+            // جلب البيانات الحالية أولاً
+            const currentUserDoc = await db.collection('users').doc(userId).get();
+            const currentData = currentUserDoc.data();
+            
+            const currentJourneyBalance = currentData.journeyPoints?.balance || 0;
+            const currentWalletBalance = currentData.walletPoints?.balance || 0;
+            
+            // تحديث الأرصدة
+            updateData['journeyPoints.balance'] = currentJourneyBalance + pointsToAward;
+            updateData['journeyPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
+            updateData['walletPoints.balance'] = currentWalletBalance + pointsToAward;
+            updateData['walletPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
+            
+            // إضافة سجل النقاط
+            const pointsHistoryEntry = {
+                amount: pointsToAward,
+                timestamp: new Date().toISOString(),
+                type: 'lesson_completion',
+                reason: `إكمال درس: ${lesson.title}`,
+                courseId: courseId,
+                lessonIndex: lessonIndex
+            };
+            
+            updateData['journeyPoints.history'] = firebase.firestore.FieldValue.arrayUnion(pointsHistoryEntry);
+            updateData['walletPoints.history'] = firebase.firestore.FieldValue.arrayUnion(pointsHistoryEntry);
+            
+            console.log('💰 منح النقاط:', pointsToAward);
+        }
+        
+        // حفظ في Firebase
+        await db.collection('users').doc(userId).update(updateData);
+        
+        // تحديث المتغيرات المحلية
+        userProgress.completedLessons = completedLessons;
+        userProgress.percentage = newPercentage;
+        
+        if (pointsToAward > 0) {
+            userJourneyPoints += pointsToAward;
+            userWalletPoints += pointsToAward;
+            detailedPointsSystem.totalEarned += pointsToAward;
+            
+            if (pointsDetail) {
+                detailedPointsSystem.achievement += pointsDetail.achievement || 0;
+                detailedPointsSystem.bonus += pointsDetail.bonus || 0;
+                detailedPointsSystem.participation += pointsDetail.participation || 0;
+                detailedPointsSystem.speed += pointsDetail.speed || 0;
+            }
+        }
+        
+        // فحص الشارات
+        earnedBadges = await checkLessonBadges(lesson, completedLessons.length);
+        
+        // حفظ الشارات إن وجدت
+        if (earnedBadges && earnedBadges.length > 0) {
+            for (const badge of earnedBadges) {
+                await db.collection('users').doc(userId).update({
+                    badges: firebase.firestore.FieldValue.arrayUnion(badge)
+                });
+                userBadges.push(badge);
+            }
+        }
+        
+        // تحديث الواجهة
+        displayUserProgress();
+        displayModulesAndLessons();
+        updateNavigationButtons();
+        updateContinueButton();
+        renderPointsDashboard();
+        
+        // إغلاق نافذة الدرس
+        closeLessonPlayer();
+        
+        // عرض الإشعار
+        setTimeout(() => {
+            showCompletionNotification(pointsDetail, earnedBadges, lesson.title);
+        }, 300);
+        
+        console.log('✅ تم إكمال الدرس بنجاح');
+        
     } catch (error) {
-        console.error('خطأ في حفظ التقدم:', error);
+        console.error('❌ خطأ في حفظ التقدم:', error);
         Swal.fire({
             icon: 'error',
             title: 'خطأ',
-            text: 'فشل في حفظ التقدم',
-            confirmButtonColor: 'var(--gold-primary)'
+            text: 'فشل في حفظ التقدم. حاول مرة أخرى.',
+            confirmButtonColor: '#FFD700'
         });
     }
 }
