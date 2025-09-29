@@ -749,17 +749,22 @@ if (currentCourseId) {
 // Check for Active Session
 async function checkActiveSession() {
     try {
-let query = db.collection('liveSessions')
-    .where('status', '==', 'active');
-
-if (currentCourseId) {
-    query = query.where('courseId', '==', currentCourseId);
-}
-
-const snapshot = await query.limit(1).get();
+        const snapshot = await db.collection('liveSessions')
+            .where('status', '==', 'active')
+            .get();
         
-        if (!snapshot.empty) {
-            activeSession = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+        let activeSessionFound = null;
+        
+        snapshot.forEach(doc => {
+            const sessionData = doc.data();
+            // فلترة يدوية للدورة الحالية
+            if (!currentCourseId || sessionData.courseId === currentCourseId) {
+                activeSessionFound = { id: doc.id, ...sessionData };
+            }
+        });
+        
+        if (activeSessionFound) {
+            activeSession = activeSessionFound;
             showLiveSession(activeSession);
         } else {
             hideLiveSession();
@@ -768,9 +773,6 @@ const snapshot = await query.limit(1).get();
         console.error('Error checking session:', error);
     }
 }
-
-// Show Live Session
-// Show Live Session
 // Show Live Session
 function showLiveSession(session) {
     const banner = document.getElementById('liveSessionBanner');
@@ -862,16 +864,10 @@ function joinZoom() {
         // Load All Sessions
 async function loadSessions() {
     try {
-        // فلترة الجلسات حسب الدورة الحالية
-let query = db.collection('liveSessions');
-
-if (currentCourseId) {
-    query = query.where('courseId', '==', currentCourseId);
-}
-
-const snapshot = await query
-    .orderBy('date', 'desc')
-    .get();
+        // جلب كل الجلسات أولاً
+        const snapshot = await db.collection('liveSessions')
+            .orderBy('date', 'desc')
+            .get();
         
         const now = new Date();
         const upcomingSessions = [];
@@ -879,6 +875,12 @@ const snapshot = await query
         
         snapshot.forEach(doc => {
             const session = { id: doc.id, ...doc.data() };
+            
+            // فلترة يدوية حسب الدورة
+            if (currentCourseId && session.courseId !== currentCourseId) {
+                return; // تخطي الجلسات التي ليست للدورة الحالية
+            }
+            
             const sessionDateTime = new Date(`${session.date}T${session.time}`);
             
             if (session.status !== 'active') {
@@ -892,16 +894,17 @@ const snapshot = await query
         
         displayUpcomingSessions(upcomingSessions);
         displayPastSessions(pastSessions);
+        
         // Check attendance after displaying sessions
-setTimeout(checkUserAttendance, 500);
+        setTimeout(checkUserAttendance, 500);
+        
         // Load statistics
-loadUserStatistics();
+        loadUserStatistics();
         
     } catch (error) {
         console.error('Error loading sessions:', error);
     }
 }
-
 // Display Upcoming Sessions
 function displayUpcomingSessions(sessions) {
     const grid = document.getElementById('upcomingSessionsGrid');
