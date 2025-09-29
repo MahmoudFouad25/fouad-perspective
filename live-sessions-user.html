@@ -836,10 +836,113 @@ function showPointsAnimation(points) {
 }
 
 // Join Zoom
-function joinZoom() {
+async function joinZoom() {
     if (activeSession && activeSession.zoomLink) {
         window.open(activeSession.zoomLink, '_blank');
+        
+        // تسجيل الحضور والحصول على النقاط
+        await recordAttendance(activeSession.id);
     }
+}
+
+// إضافة دالة تسجيل الحضور
+async function recordAttendance(sessionId) {
+    if (!userId || !currentUser) {
+        Swal.fire('تنبيه', 'يجب تسجيل الدخول أولاً', 'warning');
+        return;
+    }
+    
+    try {
+        // جلب بيانات الجلسة
+        const sessionDoc = await db.collection('liveSessions').doc(sessionId).get();
+        const sessionData = sessionDoc.data();
+        
+        // التحقق من الحضور المسبق
+        const attendeeDoc = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).get();
+        
+        if (attendeeDoc.exists) {
+            Swal.fire('تنبيه', 'تم تسجيل حضورك مسبقاً', 'info');
+            return;
+        }
+        
+        // حساب النقاط
+        let totalPoints = sessionData.points?.attendance || 50;
+        
+        // مكافأة المبكرين (أول 10)
+        const attendeesSnapshot = await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').get();
+        
+        if (attendeesSnapshot.size < 10) {
+            totalPoints += sessionData.points?.earlyBird || 20;
+        }
+        
+        // تسجيل الحضور
+        await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).set({
+            userId: userId,
+            userName: currentUser?.personalInfo?.name || 'مستخدم',
+            joinedAt: new Date().toISOString(),
+            pointsEarned: totalPoints,
+            sessionId: sessionId,
+            courseId: sessionData.courseId
+        });
+        
+        // تحديث نقاط المستخدم
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(totalPoints)
+        });
+        
+        // إضافة للسجل
+        const pointsHistory = {
+            amount: totalPoints,
+            timestamp: new Date().toISOString(),
+            type: 'attendance',
+            reason: `حضور جلسة: ${sessionData.title}`,
+            description: `حصلت على ${totalPoints} نقطة للحضور المباشر`
+        };
+        
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
+        });
+        
+        // فحص الشارات
+        await checkAndAwardBadges(sessionId, sessionData);
+        
+        // عرض رسالة النجاح
+        let message = `
+            <div style="text-align: center;">
+                <div style="font-size: 3rem; margin: 20px 0;">🎉</div>
+                <p style="font-size: 1.5rem; color: #fbbf24;">
+                    حصلت على <strong>${totalPoints}</strong> نقطة!
+                </p>
+        `;
+        
+        if (attendeesSnapshot.size < 10) {
+            message += '<p style="color: #a855f7;">🏃 مكافأة المبكرين!</p>';
+        }
+        
+        message += '</div>';
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم تسجيل حضورك!',
+            html: message,
+            confirmButtonColor: '#22c55e'
+        });
+        
+    } catch (error) {
+        console.error('خطأ في تسجيل الحضور:', error);
+        Swal.fire('خطأ', 'فشل تسجيل الحضور', 'error');
+    }
+}
+
+// دالة فحص ومنح الشارات
+async function checkAndAwardBadges(sessionId, sessionData) {
+    // هنا يمكن إضافة منطق الشارات لاحقاً
+    console.log('Checking badges for session:', sessionId);
 }
 
         // Load All Sessions
@@ -847,13 +950,7 @@ async function loadSessions() {
     try {
         console.log('Loading sessions for course:', currentCourseId);
         
-        // جلب الجلسات وفلترتها حسب الدورة
-        const snapshot = await db.collection('liveSessions')
-            .where('courseId', '==', currentCourseId)
-            .orderBy('date', 'desc')
-            .get();
-        
-        console.log('Sessions found:', snapshot.size);
+        const snapshot = await db.collection('liveSessions').get();
         
         const now = new Date();
         const upcomingSessions = [];
@@ -861,14 +958,24 @@ async function loadSessions() {
         
         snapshot.forEach(doc => {
             const session = { id: doc.id, ...doc.data() };
-            const sessionDateTime = new Date(`${session.date}T${session.time}`);
             
-            console.log('Session:', session.title, 'Status:', session.status);
+            // فلترة حسب الدورة
+            if (session.courseId !== currentCourseId) return;
             
-            if (session.status !== 'active') {
-                if (session.status === 'scheduled' || sessionDateTime > now) {
+            // التحقق من الحالة أولاً
+            if (session.status === 'active') {
+                // تخطي الجلسات النشطة حالياً
+                return;
+            } else if (session.status === 'completed') {
+                // الجلسات المكتملة
+                pastSessions.push(session);
+            } else if (session.status === 'scheduled') {
+                // الجلسات المجدولة
+                const sessionDateTime = new Date(`${session.date}T${session.time}`);
+                if (sessionDateTime > now) {
                     upcomingSessions.push(session);
-                } else if (session.status === 'completed') {
+                } else {
+                    // جلسة مجدولة لكن وقتها فات - اعتبرها منتهية
                     pastSessions.push(session);
                 }
             }
@@ -884,9 +991,6 @@ async function loadSessions() {
         
     } catch (error) {
         console.error('Error loading sessions:', error);
-        
-        // إذا فشل بسبب الفهرس، جرب الطريقة البديلة
-        loadSessionsAlternative();
     }
 }
 
