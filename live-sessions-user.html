@@ -663,6 +663,7 @@
         // User Data
         let currentUser = null;
         let userId = localStorage.getItem('userId');
+        let currentCourseId = 'malaz-alhayara-course'; // معرف الدورة الثابت
         
         console.log('صفحة اللقاءات المباشرة - نسخة المستخدم');
         // Session Management
@@ -721,12 +722,6 @@ async function loadUserData() {
         if (userDoc.exists) {
             currentUser = userDoc.data();
             console.log('User loaded:', currentUser.personalInfo?.name);
-            
-            // استخراج معرف الدورة من رابط الصفحة أو من آخر دورة دخلها المستخدم
-            const urlParams = new URLSearchParams(window.location.search);
-            currentCourseId = urlParams.get('courseId') || 
-                            localStorage.getItem('lastViewedCourse') ||
-                            (currentUser.enrolledCourses ? currentUser.enrolledCourses[0] : null);
         }
     } catch (error) {
         console.error('Error loading user:', error);
@@ -738,22 +733,27 @@ async function checkActiveSession() {
     try {
         const snapshot = await db.collection('liveSessions')
             .where('status', '==', 'active')
-            .limit(1)
             .get();
         
-        if (!snapshot.empty) {
-            activeSession = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+        let foundSession = null;
+        
+        snapshot.forEach(doc => {
+            const session = doc.data();
+            if (session.courseId === currentCourseId) {
+                foundSession = { id: doc.id, ...session };
+            }
+        });
+        
+        if (foundSession) {
+            activeSession = foundSession;
             showLiveSession(activeSession);
         } else {
             hideLiveSession();
         }
     } catch (error) {
-        console.error('Error checking session:', error);
+        console.error('Error checking active session:', error);
     }
 }
-
-// Show Live Session
-// Show Live Session
 // Show Live Session
 function showLiveSession(session) {
     const banner = document.getElementById('liveSessionBanner');
@@ -845,49 +845,90 @@ function joinZoom() {
         // Load All Sessions
 async function loadSessions() {
     try {
-        let query = db.collection('liveSessions');
+        console.log('Loading sessions for course:', currentCourseId);
         
-        // فلترة حسب الدورة إذا كان المستخدم مسجل في دورة محددة
-        if (currentCourseId) {
-            console.log('Filtering sessions for course:', currentCourseId);
-            const snapshot = await query.orderBy('date', 'desc').get();
+        // جلب الجلسات وفلترتها حسب الدورة
+        const snapshot = await db.collection('liveSessions')
+            .where('courseId', '==', currentCourseId)
+            .orderBy('date', 'desc')
+            .get();
+        
+        console.log('Sessions found:', snapshot.size);
+        
+        const now = new Date();
+        const upcomingSessions = [];
+        const pastSessions = [];
+        
+        snapshot.forEach(doc => {
+            const session = { id: doc.id, ...doc.data() };
+            const sessionDateTime = new Date(`${session.date}T${session.time}`);
             
-            const now = new Date();
-            const upcomingSessions = [];
-            const pastSessions = [];
+            console.log('Session:', session.title, 'Status:', session.status);
             
-            snapshot.forEach(doc => {
-                const session = { id: doc.id, ...doc.data() };
-                
-                // فلترة يدوية للدورة
-                if (session.courseId !== currentCourseId) return;
-                
-                const sessionDateTime = new Date(`${session.date}T${session.time}`);
-                
-                if (session.status !== 'active') {
-                    if (sessionDateTime > now) {
-                        upcomingSessions.push(session);
-                    } else if (session.status === 'completed') {
-                        pastSessions.push(session);
-                    }
+            if (session.status !== 'active') {
+                if (session.status === 'scheduled' || sessionDateTime > now) {
+                    upcomingSessions.push(session);
+                } else if (session.status === 'completed') {
+                    pastSessions.push(session);
                 }
-            });
-            
-            displayUpcomingSessions(upcomingSessions);
-            displayPastSessions(pastSessions);
-        } else {
-            // إذا لم تكن هناك دورة محددة، اعرض كل الجلسات
-            const snapshot = await query.orderBy('date', 'desc').get();
-            // ... باقي الكود كما هو
-        }
+            }
+        });
+        
+        console.log('Upcoming:', upcomingSessions.length, 'Past:', pastSessions.length);
+        
+        displayUpcomingSessions(upcomingSessions);
+        displayPastSessions(pastSessions);
         
         setTimeout(checkUserAttendance, 500);
         loadUserStatistics();
         
     } catch (error) {
         console.error('Error loading sessions:', error);
+        
+        // إذا فشل بسبب الفهرس، جرب الطريقة البديلة
+        loadSessionsAlternative();
     }
 }
+
+// دالة بديلة في حالة فشل الفهرس
+async function loadSessionsAlternative() {
+    try {
+        console.log('Using alternative loading method...');
+        
+        const snapshot = await db.collection('liveSessions').get();
+        
+        const now = new Date();
+        const upcomingSessions = [];
+        const pastSessions = [];
+        
+        snapshot.forEach(doc => {
+            const session = { id: doc.id, ...doc.data() };
+            
+            // فلترة يدوية
+            if (session.courseId !== currentCourseId) return;
+            
+            const sessionDateTime = new Date(`${session.date}T${session.time}`);
+            
+            if (session.status !== 'active') {
+                if (session.status === 'scheduled' || sessionDateTime > now) {
+                    upcomingSessions.push(session);
+                } else if (session.status === 'completed') {
+                    pastSessions.push(session);
+                }
+            }
+        });
+        
+        displayUpcomingSessions(upcomingSessions);
+        displayPastSessions(pastSessions);
+        
+        setTimeout(checkUserAttendance, 500);
+        loadUserStatistics();
+        
+    } catch (error) {
+        console.error('Alternative loading also failed:', error);
+    }
+}
+
 // Display Upcoming Sessions
 function displayUpcomingSessions(sessions) {
     const grid = document.getElementById('upcomingSessionsGrid');
@@ -1291,3 +1332,5 @@ function showBadgeDetails(badgeId) {
     </script>
 </body>
 </html>
+
+    
