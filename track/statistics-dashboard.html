@@ -178,22 +178,28 @@
         <!-- التبويبات -->
         <div class="tab-container">
             <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('lessons')">
-                    <i class="fas fa-book"></i> الدروس
-                </button>
-                <button class="tab-btn" onclick="switchTab('badges')">
-                    <i class="fas fa-medal"></i> الشارات
-                </button>
-                <button class="tab-btn" onclick="switchTab('students')">
-                    <i class="fas fa-users"></i> الطلاب
-                </button>
-                <button class="tab-btn" onclick="switchTab('courses')">
-                    <i class="fas fa-graduation-cap"></i> الدورات
-                </button>
-                <button class="tab-btn" onclick="switchTab('daily')">
-                    <i class="fas fa-calendar-day"></i> النشاط اليومي
-                </button>
-            </div>
+    <button class="tab-btn active" data-tab="lessons" onclick="switchTab('lessons', this)">
+        <i class="fas fa-book"></i> الدروس
+    </button>
+    <button class="tab-btn" data-tab="badges" onclick="switchTab('badges', this)">
+        <i class="fas fa-medal"></i> الشارات
+    </button>
+    <button class="tab-btn" data-tab="students" onclick="switchTab('students', this)">
+        <i class="fas fa-users"></i> الطلاب
+    </button>
+    <button class="tab-btn" data-tab="courses" onclick="switchTab('courses', this)">
+        <i class="fas fa-graduation-cap"></i> الدورات
+    </button>
+    <button class="tab-btn" data-tab="daily" onclick="switchTab('daily', this)">
+        <i class="fas fa-calendar-day"></i> النشاط اليومي
+    </button>
+    <button class="tab-btn" data-tab="realtime" onclick="switchTab('realtime', this)">
+        <i class="fas fa-clock"></i> المباشر
+    </button>
+    <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics', this)">
+        <i class="fas fa-chart-pie"></i> التحليلات
+    </button>
+</div>
             
             <div id="tabContent">
                 <!-- سيتم ملؤه بواسطة JavaScript -->
@@ -264,12 +270,141 @@
                 });
                 
                 displayStats();
-                switchTab('lessons');
+                switchTab('lessons', document.querySelector('.tab-btn[data-tab="lessons"]'));
                 
             } catch (error) {
                 console.error('خطأ في تحميل البيانات:', error);
             }
         }
+
+        // دالة حساب معدلات الإنجاز
+function calculateCompletionRates() {
+    const rates = {
+        daily: [],
+        weekly: [],
+        monthly: []
+    };
+    
+    // تجميع البيانات حسب التاريخ
+    const dateMap = new Map();
+    allData.daily.forEach(activity => {
+        const date = new Date(activity.date);
+        const dateKey = date.toISOString().split('T')[0];
+        
+        if (!dateMap.has(dateKey)) {
+            dateMap.set(dateKey, {
+                lessons: 0,
+                points: 0,
+                students: new Set(),
+                badges: 0
+            });
+        }
+        
+        const dayData = dateMap.get(dateKey);
+        dayData.lessons += activity.lessonsCompleted?.length || 0;
+        dayData.points += activity.totalPointsToday || 0;
+        dayData.students.add(activity.userId);
+        dayData.badges += activity.badgesEarnedToday?.length || 0;
+    });
+    
+    return dateMap;
+}
+
+// دالة تحليل أداء الطلاب
+function analyzeStudentPerformance() {
+    const analysis = {
+        topPerformers: [],
+        strugglingStudents: [],
+        averageProgress: 0,
+        medianPoints: 0
+    };
+    
+    // جمع بيانات كل طالب
+    const studentsData = new Map();
+    
+    allData.lessons.forEach(lesson => {
+        if (lesson.completedBy) {
+            lesson.completedBy.forEach(student => {
+                if (!studentsData.has(student.userId)) {
+                    studentsData.set(student.userId, {
+                        id: student.userId,
+                        name: student.userName,
+                        lessonsCompleted: 0,
+                        totalPoints: 0,
+                        lastActivity: null,
+                        completionSpeed: [],
+                        badges: 0
+                    });
+                }
+                
+                const studentInfo = studentsData.get(student.userId);
+                studentInfo.lessonsCompleted++;
+                studentInfo.totalPoints += student.points || 0;
+                
+                if (student.date) {
+                    const activityDate = new Date(student.date);
+                    if (!studentInfo.lastActivity || activityDate > studentInfo.lastActivity) {
+                        studentInfo.lastActivity = activityDate;
+                    }
+                }
+            });
+        }
+    });
+    
+    // حساب الشارات لكل طالب
+    allData.badgeHistory.forEach(badge => {
+        if (studentsData.has(badge.userId)) {
+            studentsData.get(badge.userId).badges++;
+        }
+    });
+    
+    // تحليل الأداء
+    const studentsArray = Array.from(studentsData.values());
+    
+    // الطلاب المتفوقون (أعلى 5)
+    analysis.topPerformers = studentsArray
+        .sort((a, b) => b.totalPoints - a.totalPoints)
+        .slice(0, 5);
+    
+    // الطلاب الذين يحتاجون دعم (أقل من 30% من المتوسط)
+    const avgPoints = studentsArray.reduce((sum, s) => sum + s.totalPoints, 0) / studentsArray.length;
+    analysis.averageProgress = avgPoints;
+    
+    analysis.strugglingStudents = studentsArray
+        .filter(s => s.totalPoints < avgPoints * 0.3)
+        .sort((a, b) => a.totalPoints - b.totalPoints);
+    
+    // حساب الوسيط
+    const sortedByPoints = studentsArray.sort((a, b) => a.totalPoints - b.totalPoints);
+    analysis.medianPoints = sortedByPoints[Math.floor(sortedByPoints.length / 2)]?.totalPoints || 0;
+    
+    return analysis;
+}
+
+// دالة تحليل محتوى الدورات
+function analyzeCourseContent() {
+    const analysis = {
+        mostCompletedLessons: [],
+        leastCompletedLessons: [],
+        averageCompletionTime: 0,
+        difficultLessons: []
+    };
+    
+    // ترتيب الدروس حسب عدد الإكمالات
+    const sortedLessons = [...allData.lessons].sort((a, b) => 
+        (b.totalCompletions || 0) - (a.totalCompletions || 0)
+    );
+    
+    analysis.mostCompletedLessons = sortedLessons.slice(0, 5);
+    analysis.leastCompletedLessons = sortedLessons.filter(l => l.totalCompletions > 0).slice(-5).reverse();
+    
+    // الدروس الصعبة (التي لم يكملها أحد أو عدد قليل جداً)
+    analysis.difficultLessons = sortedLessons.filter(l => 
+        (l.totalCompletions || 0) < 2
+    );
+    
+    return analysis;
+}
         
         // عرض الإحصائيات العامة
         function displayStats() {
@@ -324,12 +459,19 @@
         }
         
         // تبديل التبويبات
-        function switchTab(tab) {
-            // تحديث أزرار التبويبات
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target?.classList.add('active');
+        function switchTab(tab, buttonElement) {
+    // تحديث أزرار التبويبات
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // إذا كان هناك زر محدد، استخدمه
+    if (buttonElement) {
+        buttonElement.classList.add('active');
+    } else {
+        // وإلا ابحث عن الزر المناسب
+        document.querySelector(`.tab-btn[data-tab="${tab}"]`)?.classList.add('active');
+    }
             
             const content = document.getElementById('tabContent');
             
