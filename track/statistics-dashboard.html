@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة الإحصائيات - منظور الفؤاد</title>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js للرسوم البيانية -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        :root {
+            --dark-bg: #0a1628;
+            --dark-lighter: #1e3a5f;
+            --primary-blue: #3b82f6;
+            --gold-primary: #FFD700;
+            --success-green: #22c55e;
+            --danger-red: #ef4444;
+            --purple: #a855f7;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Tajawal', sans-serif;
+            background: linear-gradient(135deg, #0a1628 0%, #1e3a5f 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .dashboard-header {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(30, 41, 59, 0.8));
+            border: 2px solid var(--primary-blue);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+        }
+        
+        .tab-container {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .tab-btn {
+            background: rgba(59, 130, 246, 0.2);
+            color: white;
+            border: 2px solid transparent;
+            padding: 12px 25px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 1rem;
+        }
+        
+        .tab-btn.active {
+            background: var(--primary-blue);
+            border-color: white;
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .data-table th, .data-table td {
+            padding: 12px;
+            text-align: right;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .data-table th {
+            background: rgba(59, 130, 246, 0.2);
+            font-weight: bold;
+        }
+        
+        .data-table tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .loader {
+            text-align: center;
+            padding: 50px;
+        }
+        
+        .loader i {
+            font-size: 3rem;
+            animation: spin 1s infinite linear;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- رأس الصفحة -->
+        <div class="dashboard-header">
+            <h1 style="font-size: 2.5rem; margin-bottom: 10px;">
+                <i class="fas fa-chart-line"></i> لوحة الإحصائيات الشاملة
+            </h1>
+            <p style="color: rgba(255, 255, 255, 0.8);">تتبع شامل للدروس والشارات والنقاط</p>
+        </div>
+        
+        <!-- البطاقات الإحصائية -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="loader">
+                <i class="fas fa-spinner"></i>
+                <p>جاري تحميل البيانات...</p>
+            </div>
+        </div>
+        
+        <!-- التبويبات -->
+        <div class="tab-container">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('lessons')">
+                    <i class="fas fa-book"></i> الدروس
+                </button>
+                <button class="tab-btn" onclick="switchTab('badges')">
+                    <i class="fas fa-medal"></i> الشارات
+                </button>
+                <button class="tab-btn" onclick="switchTab('students')">
+                    <i class="fas fa-users"></i> الطلاب
+                </button>
+                <button class="tab-btn" onclick="switchTab('courses')">
+                    <i class="fas fa-graduation-cap"></i> الدورات
+                </button>
+                <button class="tab-btn" onclick="switchTab('daily')">
+                    <i class="fas fa-calendar-day"></i> النشاط اليومي
+                </button>
+            </div>
+            
+            <div id="tabContent">
+                <!-- سيتم ملؤه بواسطة JavaScript -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+            authDomain: "fouad-perspective.firebaseapp.com",
+            projectId: "fouad-perspective",
+            storageBucket: "fouad-perspective.firebasestorage.app",
+            messagingSenderId: "1068763865336",
+            appId: "1:1068763865336:web:b791abcd22d536aedd5b0d",
+            measurementId: "G-RY1FYVB3Q9"
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        
+        // متغيرات عامة
+        let allData = {
+            lessons: [],
+            badges: [],
+            students: [],
+            courses: [],
+            daily: []
+        };
+        
+        // دالة تحميل البيانات
+        async function loadAllData() {
+            try {
+                // تحميل إحصائيات الدروس
+                const lessonsSnapshot = await db.collection('lessonStatistics').get();
+                allData.lessons = [];
+                lessonsSnapshot.forEach(doc => {
+                    allData.lessons.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // تحميل إحصائيات الشارات
+                const badgesSnapshot = await db.collection('badges').get();
+                allData.badges = [];
+                badgesSnapshot.forEach(doc => {
+                    allData.badges.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // تحميل سجل الشارات
+                const badgeHistorySnapshot = await db.collection('badgeAwardHistory').get();
+                allData.badgeHistory = [];
+                badgeHistorySnapshot.forEach(doc => {
+                    allData.badgeHistory.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // تحميل إحصائيات الدورات
+                const coursesSnapshot = await db.collection('courseStatistics').get();
+                allData.courses = [];
+                coursesSnapshot.forEach(doc => {
+                    allData.courses.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // تحميل النشاط اليومي
+                const dailySnapshot = await db.collection('dailyActivity').limit(100).get();
+                allData.daily = [];
+                dailySnapshot.forEach(doc => {
+                    allData.daily.push({ id: doc.id, ...doc.data() });
+                });
+                
+                displayStats();
+                switchTab('lessons');
+                
+            } catch (error) {
+                console.error('خطأ في تحميل البيانات:', error);
+            }
+        }
+        
+        // عرض الإحصائيات العامة
+        function displayStats() {
+            const totalLessons = allData.lessons.reduce((sum, lesson) => 
+                sum + (lesson.totalCompletions || 0), 0);
+            
+            const totalBadges = allData.badgeHistory.length;
+            
+            const uniqueStudents = new Set();
+            allData.lessons.forEach(lesson => {
+                if (lesson.completedBy) {
+                    lesson.completedBy.forEach(student => {
+                        uniqueStudents.add(student.userId);
+                    });
+                }
+            });
+            
+            const statsGrid = document.getElementById('statsGrid');
+            statsGrid.innerHTML = `
+                <div class="stat-card" style="border-color: var(--primary-blue);">
+                    <div style="font-size: 3rem; color: var(--primary-blue); margin-bottom: 10px;">
+                        <i class="fas fa-book-open"></i>
+                    </div>
+                    <div style="font-size: 2rem; font-weight: bold;">${totalLessons}</div>
+                    <div style="color: rgba(255, 255, 255, 0.7);">إجمالي الدروس المكتملة</div>
+                </div>
+                
+                <div class="stat-card" style="border-color: var(--gold-primary);">
+                    <div style="font-size: 3rem; color: var(--gold-primary); margin-bottom: 10px;">
+                        <i class="fas fa-trophy"></i>
+                    </div>
+                    <div style="font-size: 2rem; font-weight: bold;">${totalBadges}</div>
+                    <div style="color: rgba(255, 255, 255, 0.7);">إجمالي الشارات الممنوحة</div>
+                </div>
+                
+                <div class="stat-card" style="border-color: var(--success-green);">
+                    <div style="font-size: 3rem; color: var(--success-green); margin-bottom: 10px;">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div style="font-size: 2rem; font-weight: bold;">${uniqueStudents.size}</div>
+                    <div style="color: rgba(255, 255, 255, 0.7);">الطلاب النشطون</div>
+                </div>
+                
+                <div class="stat-card" style="border-color: var(--purple);">
+                    <div style="font-size: 3rem; color: var(--purple); margin-bottom: 10px;">
+                        <i class="fas fa-graduation-cap"></i>
+                    </div>
+                    <div style="font-size: 2rem; font-weight: bold;">${allData.courses.length}</div>
+                    <div style="color: rgba(255, 255, 255, 0.7);">الدورات النشطة</div>
+                </div>
+            `;
+        }
+        
+        // تبديل التبويبات
+        function switchTab(tab) {
+            // تحديث أزرار التبويبات
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target?.classList.add('active');
+            
+            const content = document.getElementById('tabContent');
+            
+            switch(tab) {
+                case 'lessons':
+                    displayLessonsTab();
+                    break;
+                case 'badges':
+                    displayBadgesTab();
+                    break;
+                case 'students':
+                    displayStudentsTab();
+                    break;
+                case 'courses':
+                    displayCoursesTab();
+                    break;
+                case 'daily':
+                    displayDailyTab();
+                    break;
+            }
+        }
+        
+        // عرض تبويب الدروس
+        function displayLessonsTab() {
+            const content = document.getElementById('tabContent');
+            
+            // ترتيب الدروس حسب عدد الإكمالات
+            const sortedLessons = allData.lessons.sort((a, b) => 
+                (b.totalCompletions || 0) - (a.totalCompletions || 0)
+            );
+            
+            content.innerHTML = `
+                <h3 style="margin-bottom: 20px;">
+                    <i class="fas fa-book"></i> إحصائيات الدروس
+                </h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>اسم الدرس</th>
+                            <th>عدد الإكمالات</th>
+                            <th>آخر إكمال</th>
+                            <th>الطلاب</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sortedLessons.map(lesson => `
+                            <tr>
+                                <td>${lesson.lessonTitle || 'غير محدد'}</td>
+                                <td style="text-align: center;">
+                                    <span style="
+                                        background: var(--primary-blue);
+                                        padding: 5px 15px;
+                                        border-radius: 20px;
+                                    ">${lesson.totalCompletions || 0}</span>
+                                </td>
+                                <td>${lesson.lastCompletedAt ? new Date(lesson.lastCompletedAt.seconds * 1000).toLocaleDateString('ar-SA') : '-'}</td>
+                                <td>
+                                    ${lesson.completedBy ? `
+                                        <button onclick="showStudentsList('${lesson.id}')" style="
+                                            background: rgba(59, 130, 246, 0.2);
+                                            color: white;
+                                            border: 1px solid var(--primary-blue);
+                                            padding: 5px 15px;
+                                            border-radius: 5px;
+                                            cursor: pointer;
+                                        ">
+                                            عرض ${lesson.completedBy.length} طالب
+                                        </button>
+                                    ` : '-'}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        // عرض تبويب الشارات
+        function displayBadgesTab() {
+            const content = document.getElementById('tabContent');
+            
+            content.innerHTML = `
+                <h3 style="margin-bottom: 20px;">
+                    <i class="fas fa-medal"></i> إحصائيات الشارات
+                </h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>الشارة</th>
+                            <th>عدد المرات الممنوحة</th>
+                            <th>آخر منح</th>
+                            <th>التفاصيل</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${allData.badges.map(badge => {
+                            const awardCount = allData.badgeHistory.filter(h => h.badgeId === badge.id).length;
+                            return `
+                                <tr>
+                                    <td>
+                                        <span style="font-size: 1.5rem; margin-left: 10px;">${badge.icon}</span>
+                                        ${badge.name}
+                                    </td>
+                                    <td style="text-align: center;">
+                                        <span style="
+                                            background: var(--gold-primary);
+                                            color: var(--dark-bg);
+                                            padding: 5px 15px;
+                                            border-radius: 20px;
+                                            font-weight: bold;
+                                        ">${awardCount}</span>
+                                    </td>
+                                    <td>${badge.lastAwardedAt ? new Date(badge.lastAwardedAt.seconds * 1000).toLocaleDateString('ar-SA') : '-'}</td>
+                                    <td>
+                                        <button onclick="showBadgeHistory('${badge.id}')" style="
+                                            background: rgba(255, 215, 0, 0.2);
+                                            color: var(--gold-primary);
+                                            border: 1px solid var(--gold-primary);
+                                            padding: 5px 15px;
+                                            border-radius: 5px;
+                                            cursor: pointer;
+                                        ">
+                                            عرض السجل
+                                        </button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        // باقي الدوال ستكون في الخطوة التالية
+        
+        // تحميل البيانات عند فتح الصفحة
+        window.onload = loadAllData;
+    </script>
+</body>
+</html>
