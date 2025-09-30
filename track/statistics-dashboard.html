@@ -487,11 +487,12 @@ let currentFilter = {
 }
 
 // دالة تحليل نقاط المستخدم
+// دالة تحليل نقاط المستخدم - محدثة
 function analyzeUserPoints(user) {
     const journeyPoints = user.journeyPoints || {};
     const walletPoints = user.walletPoints || {};
     
-    // تحليل مصادر النقاط
+    // تحليل مصادر النقاط من سجل واحد فقط (نقاط الرحلة)
     const pointsSources = {
         lessons: 0,
         badges: 0,
@@ -500,17 +501,17 @@ function analyzeUserPoints(user) {
         other: 0
     };
     
-    // تحليل سجل نقاط الرحلة
+    // تحليل سجل نقاط الرحلة فقط (لتجنب التكرار)
     if (journeyPoints.history) {
         journeyPoints.history.forEach(entry => {
-            if (entry.type === 'journey' && entry.details) {
-                pointsSources.lessons += entry.amount || 0;
-                
-                // تفصيل أنواع النقاط
-                if (entry.details.achievement) pointsSources.lessons += entry.details.achievement;
-                if (entry.details.bonus) pointsSources.bonuses += entry.details.bonus;
-                if (entry.details.participation) pointsSources.lessons += entry.details.participation;
-                if (entry.details.speed) pointsSources.bonuses += entry.details.speed;
+            if (entry.type === 'journey') {
+                // نقاط الدروس الأساسية
+                if (entry.details) {
+                    pointsSources.lessons += (entry.details.achievement || 0) + (entry.details.participation || 0);
+                    pointsSources.bonuses += (entry.details.bonus || 0) + (entry.details.speed || 0);
+                } else {
+                    pointsSources.lessons += entry.amount || 0;
+                }
             } else if (entry.type === 'badge_reward') {
                 pointsSources.badges += entry.amount || 0;
             } else if (entry.type === 'live_attendance' || entry.type === 'attendance') {
@@ -533,7 +534,8 @@ function analyzeUserPoints(user) {
             history: walletPoints.history || []
         },
         sources: pointsSources,
-        total: (journeyPoints.balance || 0) + (walletPoints.balance || 0)
+        // النقاط الفعلية هي نقاط الرحلة فقط (المحفظة نسخة مطابقة)
+        total: journeyPoints.balance || 0
     };
 }
 
@@ -744,6 +746,7 @@ function calculateCompletionRates() {
 }
 
 // دالة تحليل أداء الطلاب
+// دالة تحليل أداء الطلاب - محدثة
 function analyzeStudentPerformance() {
     const analysis = {
         topPerformers: [],
@@ -752,63 +755,67 @@ function analyzeStudentPerformance() {
         medianPoints: 0
     };
     
-    // جمع بيانات كل طالب
+    // جمع بيانات كل طالب من المصدر الصحيح
     const studentsData = new Map();
     
-    allData.lessons.forEach(lesson => {
-        if (lesson.completedBy) {
-            lesson.completedBy.forEach(student => {
-                if (!studentsData.has(student.userId)) {
-                    studentsData.set(student.userId, {
-                        id: student.userId,
-                        name: student.userName,
-                        lessonsCompleted: 0,
-                        totalPoints: 0,
-                        lastActivity: null,
-                        completionSpeed: [],
-                        badges: 0
-                    });
-                }
-                
-                const studentInfo = studentsData.get(student.userId);
-                studentInfo.lessonsCompleted++;
-                studentInfo.totalPoints += student.points || 0;
-                
-                if (student.date) {
-                    const activityDate = new Date(student.date);
-                    if (!studentInfo.lastActivity || activityDate > studentInfo.lastActivity) {
-                        studentInfo.lastActivity = activityDate;
-                    }
-                }
+    // استخدام بيانات المستخدمين المباشرة
+    allData.users.forEach(user => {
+        const journeyPoints = user.journeyPoints?.balance || 0;
+        const lessonsCompleted = 0;
+        let badgesCount = (user.badges || []).length;
+        
+        // حساب الدروس المكتملة من progress
+        let totalLessonsCompleted = 0;
+        if (user.progress) {
+            Object.values(user.progress).forEach(courseProgress => {
+                totalLessonsCompleted += (courseProgress.completedLessons || []).length;
             });
         }
+        
+        studentsData.set(user.id, {
+            id: user.id,
+            name: user.name,
+            lessonsCompleted: totalLessonsCompleted,
+            totalPoints: journeyPoints, // استخدام نقاط الرحلة فقط
+            badges: badgesCount,
+            lastActivity: null
+        });
     });
     
-    // حساب الشارات لكل طالب
-    allData.badgeHistory.forEach(badge => {
-        if (studentsData.has(badge.userId)) {
-            studentsData.get(badge.userId).badges++;
+    // تحديث من سجل الإكمال
+    allData.completionHistory.forEach(record => {
+        if (studentsData.has(record.userId)) {
+            const student = studentsData.get(record.userId);
+            // لا نضيف النقاط مرة أخرى، فقط نحدث آخر نشاط
+            if (record.completedAt) {
+                const activityDate = new Date(record.completedAt);
+                if (!student.lastActivity || activityDate > student.lastActivity) {
+                    student.lastActivity = activityDate;
+                }
+            }
         }
     });
     
     // تحليل الأداء
     const studentsArray = Array.from(studentsData.values());
     
-    // الطلاب المتفوقون (أعلى 5)
+    // الطلاب المتفوقون
     analysis.topPerformers = studentsArray
         .sort((a, b) => b.totalPoints - a.totalPoints)
         .slice(0, 5);
     
-    // الطلاب الذين يحتاجون دعم (أقل من 30% من المتوسط)
-    const avgPoints = studentsArray.reduce((sum, s) => sum + s.totalPoints, 0) / studentsArray.length;
-    analysis.averageProgress = avgPoints;
+    // حساب المتوسط
+    const avgPoints = studentsArray.length > 0 ? 
+        studentsArray.reduce((sum, s) => sum + s.totalPoints, 0) / studentsArray.length : 0;
+    analysis.averageProgress = Math.round(avgPoints);
     
+    // الطلاب الذين يحتاجون دعم
     analysis.strugglingStudents = studentsArray
         .filter(s => s.totalPoints < avgPoints * 0.3)
         .sort((a, b) => a.totalPoints - b.totalPoints);
     
     // حساب الوسيط
-    const sortedByPoints = studentsArray.sort((a, b) => a.totalPoints - b.totalPoints);
+    const sortedByPoints = [...studentsArray].sort((a, b) => a.totalPoints - b.totalPoints);
     analysis.medianPoints = sortedByPoints[Math.floor(sortedByPoints.length / 2)]?.totalPoints || 0;
     
     return analysis;
@@ -1345,8 +1352,8 @@ function displayStudentsTab() {
                     <!-- العمود الثاني: تفصيل النقاط -->
                     <div>
                         <h5 style="color: var(--purple); margin-bottom: 10px;">
-                            <i class="fas fa-coins"></i> تحليل النقاط (${userDetail.points.total} نقطة)
-                        </h5>
+    <i class="fas fa-coins"></i> تحليل النقاط (${userDetail.points.journey.balance} نقطة)
+</h5>
                         <div class="points-breakdown">
                             <div class="point-item">
                                 <div style="font-size: 1.5rem; color: #3b82f6;">${userDetail.points.sources.lessons}</div>
@@ -1552,6 +1559,248 @@ function showStudentFullDetails(userId) {
     
     document.body.insertAdjacentHTML('beforeend', detailsHTML);
 }
+
+        // دالة توليد تبويب الدورات
+function generateCoursesTab(userDetail) {
+    const coursesList = userDetail.lessons.byCourse;
+    
+    if (Object.keys(coursesList).length === 0) {
+        return '<p style="text-align: center; color: rgba(255,255,255,0.5);">لم يسجل في أي دورة بعد</p>';
+    }
+    
+    return `
+        <div>
+            <h3 style="color: var(--primary-blue); margin-bottom: 20px;">
+                <i class="fas fa-graduation-cap"></i> تفصيل الدورات والتقدم
+            </h3>
+            <div style="display: grid; gap: 20px;">
+                ${Object.entries(coursesList).map(([courseId, courseData]) => `
+                    <div style="
+                        background: rgba(255, 255, 255, 0.05);
+                        padding: 20px;
+                        border-radius: 15px;
+                        border: 1px solid rgba(59, 130, 246, 0.3);
+                    ">
+                        <h4 style="color: var(--primary-blue); margin-bottom: 15px;">
+                            ${courseData.courseName || courseId}
+                        </h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 2rem; color: #3b82f6; font-weight: bold;">
+                                    ${courseData.lessons.length}
+                                </div>
+                                <div style="font-size: 0.9rem; color: rgba(255,255,255,0.6);">دروس مكتملة</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 2rem; color: #22c55e; font-weight: bold;">
+                                    ${courseData.totalPoints}
+                                </div>
+                                <div style="font-size: 0.9rem; color: rgba(255,255,255,0.6);">نقطة مكتسبة</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 2rem; color: #a855f7; font-weight: bold;">
+                                    ${Math.round((courseData.lessons.length / 15) * 100)}%
+                                </div>
+                                <div style="font-size: 0.9rem; color: rgba(255,255,255,0.6);">معدل الإنجاز</div>
+                            </div>
+                        </div>
+                        
+                        <!-- قائمة الدروس -->
+                        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <h5 style="color: rgba(255,255,255,0.7); margin-bottom: 10px;">الدروس المكتملة:</h5>
+                            <div style="max-height: 200px; overflow-y: auto;">
+                                ${courseData.lessons.slice(0, 5).map(lesson => `
+                                    <div style="
+                                        padding: 8px;
+                                        background: rgba(255,255,255,0.03);
+                                        border-radius: 8px;
+                                        margin-bottom: 8px;
+                                        display: flex;
+                                        justify-content: space-between;
+                                        align-items: center;
+                                    ">
+                                        <span>${lesson.lessonTitle}</span>
+                                        <span style="
+                                            background: rgba(34, 197, 94, 0.2);
+                                            color: #22c55e;
+                                            padding: 2px 10px;
+                                            border-radius: 10px;
+                                            font-size: 0.85rem;
+                                        ">+${lesson.pointsEarned} نقطة</span>
+                                    </div>
+                                `).join('')}
+                                ${courseData.lessons.length > 5 ? 
+                                    `<p style="text-align: center; color: rgba(255,255,255,0.5); margin-top: 10px;">
+                                        +${courseData.lessons.length - 5} دروس أخرى
+                                    </p>` : ''
+                                }
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// دالة توليد تبويب الشارات
+function generateBadgesTab(userDetail) {
+    const badges = userDetail.badges;
+    
+    return `
+        <div>
+            <h3 style="color: var(--gold-primary); margin-bottom: 20px;">
+                <i class="fas fa-trophy"></i> الشارات المكتسبة (${badges.total} شارة)
+            </h3>
+            
+            <!-- تصنيف حسب النوع -->
+            <div style="margin-bottom: 30px;">
+                <h4 style="color: rgba(255,255,255,0.7); margin-bottom: 15px;">حسب النوع:</h4>
+                <div style="display: grid; gap: 15px;">
+                    ${Object.entries(badges.byType).map(([type, typeBadges]) => `
+                        <div style="
+                            background: rgba(255, 215, 0, 0.1);
+                            padding: 15px;
+                            border-radius: 10px;
+                            border: 1px solid rgba(255, 215, 0, 0.3);
+                        ">
+                            <h5 style="color: var(--gold-primary); margin-bottom: 10px;">
+                                ${type === 'content' ? '📚 محتوى' :
+                                  type === 'milestone' ? '🎯 إنجاز' :
+                                  type === 'points' ? '💎 نقاط' :
+                                  type === 'live_attendance' ? '🔴 حضور' :
+                                  type === 'automatic' ? '⚡ تلقائي' : type}
+                                (${typeBadges.length})
+                            </h5>
+                            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                                ${typeBadges.map(badge => `
+                                    <div style="
+                                        background: rgba(255,255,255,0.05);
+                                        padding: 10px;
+                                        border-radius: 8px;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 8px;
+                                    " title="${badge.reason || ''}">
+                                        <span style="font-size: 1.5rem;">${badge.icon}</span>
+                                        <div>
+                                            <div style="font-size: 0.9rem;">${badge.name}</div>
+                                            <div style="font-size: 0.75rem; color: rgba(255,255,255,0.5);">
+                                                ${new Date(badge.awardedDate).toLocaleDateString('ar-SA')}
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// دالة توليد تبويب النقاط التفصيلي
+function generatePointsTab(userDetail) {
+    const points = userDetail.points;
+    
+    return `
+        <div>
+            <h3 style="color: var(--purple); margin-bottom: 20px;">
+                <i class="fas fa-coins"></i> تحليل تفصيلي للنقاط
+            </h3>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <!-- نقاط الرحلة -->
+                <div style="
+                    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(30, 41, 59, 0.05));
+                    padding: 20px;
+                    border-radius: 15px;
+                    border: 2px solid var(--primary-blue);
+                ">
+                    <h4 style="color: var(--primary-blue); margin-bottom: 15px;">
+                        <i class="fas fa-route"></i> نقاط الرحلة
+                    </h4>
+                    <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 15px; text-align: center;">
+                        ${points.journey.balance}
+                    </div>
+                    <div style="
+                        padding-top: 15px;
+                        border-top: 1px solid rgba(255,255,255,0.1);
+                    ">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span>الإجمالي المكتسب:</span>
+                            <span style="color: #3b82f6; font-weight: bold;">${points.journey.lifetime}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- نقاط المحفظة -->
+                <div style="
+                    background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.05));
+                    padding: 20px;
+                    border-radius: 15px;
+                    border: 2px solid var(--success-green);
+                ">
+                    <h4 style="color: var(--success-green); margin-bottom: 15px;">
+                        <i class="fas fa-wallet"></i> نقاط المحفظة
+                    </h4>
+                    <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 15px; text-align: center;">
+                        ${points.wallet.balance}
+                    </div>
+                    <div style="
+                        padding-top: 15px;
+                        border-top: 1px solid rgba(255,255,255,0.1);
+                    ">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span>الإجمالي المكتسب:</span>
+                            <span style="color: #22c55e; font-weight: bold;">${points.wallet.lifetime}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- توزيع مصادر النقاط -->
+            <div style="
+                margin-top: 30px;
+                background: rgba(255,255,255,0.03);
+                padding: 20px;
+                border-radius: 15px;
+            ">
+                <h4 style="color: rgba(255,255,255,0.8); margin-bottom: 15px;">
+                    <i class="fas fa-chart-pie"></i> مصادر النقاط
+                </h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
+                    <div style="text-align: center; padding: 10px; background: rgba(59, 130, 246, 0.1); border-radius: 8px;">
+                        <div style="font-size: 1.8rem; color: #3b82f6; font-weight: bold;">
+                            ${points.sources.lessons}
+                        </div>
+                        <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">دروس</div>
+                    </div>
+                    <div style="text-align: center; padding: 10px; background: rgba(255, 215, 0, 0.1); border-radius: 8px;">
+                        <div style="font-size: 1.8rem; color: #fbbf24; font-weight: bold;">
+                            ${points.sources.badges}
+                        </div>
+                        <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">شارات</div>
+                    </div>
+                    <div style="text-align: center; padding: 10px; background: rgba(34, 197, 94, 0.1); border-radius: 8px;">
+                        <div style="font-size: 1.8rem; color: #22c55e; font-weight: bold;">
+                            ${points.sources.attendance}
+                        </div>
+                        <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">حضور</div>
+                    </div>
+                    <div style="text-align: center; padding: 10px; background: rgba(168, 85, 247, 0.1); border-radius: 8px;">
+                        <div style="font-size: 1.8rem; color: #a855f7; font-weight: bold;">
+                            ${points.sources.bonuses}
+                        </div>
+                        <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">مكافآت</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+        
 
 // دالة إغلاق نافذة التفاصيل
 function closeStudentDetails() {
