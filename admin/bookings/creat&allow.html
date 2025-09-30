@@ -692,7 +692,27 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- زر إصلاح البيانات القديمة -->
+    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                padding: 15px; margin: 20px; border-radius: 15px; 
+                display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h4 style="margin: 0; color: #92400E;">
+                <i class="fas fa-tools"></i> أدوات الصيانة
+            </h4>
+            <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 0.9rem;">
+                إصلاح التخصيصات القديمة التي بها courseId خاطئ
+            </p>
+        </div>
+        <button onclick="fixOldEnrollments()" 
+                style="background: linear-gradient(135deg, #F59E0B, #D97706); 
+                       color: white; border: none; padding: 12px 24px; 
+                       border-radius: 10px; cursor: pointer; font-weight: bold;
+                       box-shadow: 0 4px 12px rgba(245,158,11,0.3);">
+            <i class="fas fa-wrench"></i> إصلاح البيانات القديمة
+        </button>
+    </div>
     <!-- التبويبات -->
     <div class="tabs-container">
         <div class="tabs">
@@ -4074,6 +4094,12 @@ async function autoAssignCourse(studentId, userId) {
             console.log('⚠️ لا توجد دورة محددة للتخصيص');
             return;
         }
+
+        // جلب courseId الحقيقي
+const actualCourseId = await EnrollmentManager.getCourseIdByName(student.courseName);
+if (!actualCourseId) {
+    console.error('❌ فشل في جلب معرف الدورة من courses collection');
+}
         
         // جلب بيانات المستخدم
         const userDoc = await db.collection('users').doc(userId).get();
@@ -4112,7 +4138,10 @@ async function autoAssignCourse(studentId, userId) {
             automatedAssignment: true
         };
         
-        const newEnrollment = EnrollmentManager.createEnrollment(student, enrollmentData);
+        const newEnrollment = EnrollmentManager.createEnrollment({
+    ...student,
+    actualCourseId: actualCourseId
+}, enrollmentData);
         const updatedEnrollments = [...existingEnrollments, newEnrollment];
         
         // حساب الإجماليات المالية
@@ -4244,6 +4273,120 @@ buttons: [
 
 // تعريض الدوال للاستخدام العام
 window.autoCreateAccountAndAssignCourse = autoCreateAccountAndAssignCourse;
+        // دالة إصلاح البيانات القديمة المتأثرة
+async function fixOldEnrollments() {
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'إصلاح البيانات القديمة',
+        html: `
+            <div style="text-align: right;">
+                <p>هل تريد إصلاح جميع التخصيصات القديمة التي بها courseId خاطئ؟</p>
+                <p style="color: #EF4444; font-weight: bold; margin-top: 10px;">
+                    ⚠️ هذه العملية قد تستغرق وقتاً
+                </p>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '✅ نعم، أصلح الآن',
+        cancelButtonText: 'لاحقاً',
+        confirmButtonColor: '#10B981'
+    });
+    
+    if (!result.isConfirmed) return;
+    
+    Swal.fire({
+        title: 'جاري الإصلاح...',
+        html: '<div class="loading-spinner"></div>',
+        allowOutsideClick: false,
+        showConfirmButton: false
+    });
+    
+    let fixed = 0;
+    let errors = 0;
+    
+    try {
+        // جلب جميع المستخدمين
+        const usersSnapshot = await db.collection('users').get();
+        
+        for (const userDoc of usersSnapshot.docs) {
+            const userData = userDoc.data();
+            const enrollments = userData.enrollments || [];
+            let needsUpdate = false;
+            
+            for (let enrollment of enrollments) {
+                // التحقق من courseId الخاطئ
+                if (enrollment.courseId && enrollment.courseId.startsWith('course-')) {
+                    // جلب courseId الصحيح
+                    const correctCourseId = await EnrollmentManager.getCourseIdByName(enrollment.title);
+                    
+                    if (correctCourseId) {
+                        enrollment.courseId = correctCourseId;
+                        needsUpdate = true;
+                        fixed++;
+                        console.log(`✅ تم إصلاح: ${enrollment.title} → ${correctCourseId}`);
+                    } else {
+                        errors++;
+                        console.warn(`⚠️ لم يتم العثور على: ${enrollment.title}`);
+                    }
+                }
+            }
+            
+            if (needsUpdate) {
+                await db.collection('users').doc(userDoc.id).update({
+                    enrollments: enrollments,
+                    'timestamps.updatedAt': new Date().toISOString()
+                });
+            }
+        }
+        
+        // إصلاح individualStudents
+        const studentsSnapshot = await db.collection('individualStudents')
+            .where('courseAssigned', '==', true)
+            .get();
+        
+        for (const studentDoc of studentsSnapshot.docs) {
+            const studentData = studentDoc.data();
+            
+            if (studentData.assignedCourseId && studentData.assignedCourseId.startsWith('course-')) {
+                const correctCourseId = await EnrollmentManager.getCourseIdByName(studentData.courseName);
+                
+                if (correctCourseId) {
+                    await db.collection('individualStudents').doc(studentDoc.id).update({
+                        assignedCourseId: correctCourseId
+                    });
+                    fixed++;
+                    console.log(`✅ تم إصلاح individualStudents: ${studentData.courseName}`);
+                }
+            }
+        }
+        
+        await Swal.fire({
+            icon: 'success',
+            title: 'اكتمل الإصلاح',
+            html: `
+                <div style="text-align: center;">
+                    <p style="font-size: 1.2rem; color: #10B981;">تم إصلاح ${fixed} تخصيص</p>
+                    ${errors > 0 ? `<p style="color: #EF4444;">فشل ${errors} تخصيص</p>` : ''}
+                </div>
+            `,
+            confirmButtonColor: '#10B981'
+        });
+        
+        // إعادة تحميل البيانات
+        await loadStudents();
+        
+    } catch (error) {
+        console.error('خطأ في الإصلاح:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: error.message,
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+window.fixOldEnrollments = fixOldEnrollments;
 window.autoAssignCourse = autoAssignCourse;
 window.sendAccountDetailsToTelegram = sendAccountDetailsToTelegram;
 
