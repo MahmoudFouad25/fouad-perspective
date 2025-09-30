@@ -16,6 +16,15 @@
     
     <!-- Chart.js للرسوم البيانية -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- مكتبة للتواريخ -->
+<script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/locale/ar.js"></script>
+
+<!-- مكتبة للرسوم المتقدمة -->
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+<!-- مكتبة للتصدير -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <style>
         :root {
@@ -155,6 +164,119 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+
+        /* أنماط البطاقات التفاعلية */
+.detail-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 15px;
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: all 0.3s;
+    cursor: pointer;
+}
+
+.detail-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2);
+    border-color: var(--primary-blue);
+}
+
+.points-breakdown {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.point-item {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(30, 41, 59, 0.05));
+    padding: 10px;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.badge-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 10px;
+}
+
+.badge-item {
+    text-align: center;
+    padding: 10px;
+    background: rgba(255, 215, 0, 0.1);
+    border-radius: 10px;
+    transition: all 0.3s;
+}
+
+.badge-item:hover {
+    background: rgba(255, 215, 0, 0.2);
+    transform: scale(1.1);
+}
+
+.timeline-container {
+    position: relative;
+    padding-left: 40px;
+}
+
+.timeline-item {
+    position: relative;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -30px;
+    top: 20px;
+    width: 10px;
+    height: 10px;
+    background: var(--primary-blue);
+    border-radius: 50%;
+}
+
+.filter-controls {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    background: rgba(59, 130, 246, 0.2);
+    color: white;
+    border: 1px solid var(--primary-blue);
+    padding: 8px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.filter-btn.active,
+.filter-btn:hover {
+    background: var(--primary-blue);
+}
+
+.export-btn {
+    background: linear-gradient(135deg, var(--success-green), #16a34a);
+    color: white;
+    border: none;
+    padding: 10px 25px;
+    border-radius: 25px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.3s;
+}
+
+.export-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4);
+}
     </style>
 </head>
 <body>
@@ -224,58 +346,369 @@
         
         // متغيرات عامة
         let allData = {
-            lessons: [],
-            badges: [],
-            students: [],
-            courses: [],
-            daily: []
-        };
+    lessons: [],
+    badges: [],
+    students: [],
+    courses: [],
+    daily: [],
+    users: [],           // جديد
+    modules: [],         // جديد
+    completionHistory: [], // جديد
+    detailedProgress: {} // جديد
+};
+
+// متغيرات للفلترة والتحليل
+let currentFilter = {
+    dateRange: 'all',
+    courseId: 'all',
+    studentId: 'all'
+};
         
         // دالة تحميل البيانات
         async function loadAllData() {
-            try {
-                // تحميل إحصائيات الدروس
-                const lessonsSnapshot = await db.collection('lessonStatistics').get();
-                allData.lessons = [];
-                lessonsSnapshot.forEach(doc => {
-                    allData.lessons.push({ id: doc.id, ...doc.data() });
-                });
+    try {
+        console.log('🔄 بدء تحميل البيانات الشاملة...');
+        
+        // 1. تحميل بيانات المستخدمين الكاملة
+        const usersSnapshot = await db.collection('users').get();
+        allData.users = [];
+        usersSnapshot.forEach(doc => {
+            const userData = doc.data();
+            allData.users.push({
+                id: doc.id,
+                name: userData.personalInfo?.name || 'غير محدد',
+                email: userData.personalInfo?.email || '',
+                phone: userData.personalInfo?.phone || '',
+                badges: userData.badges || [],
+                journeyPoints: userData.journeyPoints || {},
+                walletPoints: userData.walletPoints || {},
+                progress: userData.progress || {},
+                enrollments: userData.enrollments || [],
+                attendance: userData.attendance || {}
+            });
+        });
+        console.log(`✅ تم تحميل ${allData.users.length} مستخدم`);
+        
+        // 2. تحميل سجل إكمال الدروس التفصيلي
+        const completionSnapshot = await db.collection('lessonCompletionHistory').get();
+        allData.completionHistory = [];
+        completionSnapshot.forEach(doc => {
+            allData.completionHistory.push({ id: doc.id, ...doc.data() });
+        });
+        console.log(`✅ تم تحميل ${allData.completionHistory.length} سجل إكمال`);
+        
+        // 3. تحميل إحصائيات الوحدات
+        const modulesSnapshot = await db.collection('moduleStatistics').get();
+        allData.modules = [];
+        modulesSnapshot.forEach(doc => {
+            allData.modules.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // 4. تحميل إحصائيات الدروس
+        const lessonsSnapshot = await db.collection('lessonStatistics').get();
+        allData.lessons = [];
+        lessonsSnapshot.forEach(doc => {
+            allData.lessons.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // 5. تحميل الشارات
+        const badgesSnapshot = await db.collection('badges').get();
+        allData.badges = [];
+        badgesSnapshot.forEach(doc => {
+            allData.badges.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // 6. تحميل سجل الشارات
+        const badgeHistorySnapshot = await db.collection('badgeAwardHistory').get();
+        allData.badgeHistory = [];
+        badgeHistorySnapshot.forEach(doc => {
+            allData.badgeHistory.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // 7. تحميل إحصائيات الدورات
+        const coursesSnapshot = await db.collection('courseStatistics').get();
+        allData.courses = [];
+        coursesSnapshot.forEach(doc => {
+            allData.courses.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // 8. تحميل النشاط اليومي
+        const dailySnapshot = await db.collection('dailyActivity').get();
+        allData.daily = [];
+        dailySnapshot.forEach(doc => {
+            allData.daily.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // معالجة البيانات وإنشاء الإحصائيات
+        processDetailedData();
+        
+        // عرض الإحصائيات
+        displayStats();
+        
+        // عرض التبويب الافتراضي مع البيانات المفصلة
+        switchTab('students', document.querySelector('.tab-btn[data-tab="students"]'));
+        
+        console.log('✅ اكتمل تحميل جميع البيانات');
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحميل البيانات:', error);
+        alert('حدث خطأ في تحميل البيانات. تحقق من الاتصال وأعد المحاولة.');
+    }
+}
+
+        function processDetailedData() {
+    console.log('📊 معالجة البيانات التفصيلية...');
+    
+    // بناء ملف شامل لكل طالب
+    allData.users.forEach(user => {
+        allData.detailedProgress[user.id] = {
+            // المعلومات الأساسية
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            
+            // تحليل النقاط التفصيلي
+            points: analyzeUserPoints(user),
+            
+            // تحليل الشارات
+            badges: analyzeUserBadges(user),
+            
+            // تحليل الدروس
+            lessons: analyzeUserLessons(user),
+            
+            // تحليل الحضور
+            attendance: analyzeUserAttendance(user),
+            
+            // الإحصائيات العامة
+            stats: calculateUserStats(user)
+        };
+    });
+}
+
+// دالة تحليل نقاط المستخدم
+function analyzeUserPoints(user) {
+    const journeyPoints = user.journeyPoints || {};
+    const walletPoints = user.walletPoints || {};
+    
+    // تحليل مصادر النقاط
+    const pointsSources = {
+        lessons: 0,
+        badges: 0,
+        attendance: 0,
+        bonuses: 0,
+        other: 0
+    };
+    
+    // تحليل سجل نقاط الرحلة
+    if (journeyPoints.history) {
+        journeyPoints.history.forEach(entry => {
+            if (entry.type === 'journey' && entry.details) {
+                pointsSources.lessons += entry.amount || 0;
                 
-                // تحميل إحصائيات الشارات
-                const badgesSnapshot = await db.collection('badges').get();
-                allData.badges = [];
-                badgesSnapshot.forEach(doc => {
-                    allData.badges.push({ id: doc.id, ...doc.data() });
-                });
-                
-                // تحميل سجل الشارات
-                const badgeHistorySnapshot = await db.collection('badgeAwardHistory').get();
-                allData.badgeHistory = [];
-                badgeHistorySnapshot.forEach(doc => {
-                    allData.badgeHistory.push({ id: doc.id, ...doc.data() });
-                });
-                
-                // تحميل إحصائيات الدورات
-                const coursesSnapshot = await db.collection('courseStatistics').get();
-                allData.courses = [];
-                coursesSnapshot.forEach(doc => {
-                    allData.courses.push({ id: doc.id, ...doc.data() });
-                });
-                
-                // تحميل النشاط اليومي
-                const dailySnapshot = await db.collection('dailyActivity').limit(100).get();
-                allData.daily = [];
-                dailySnapshot.forEach(doc => {
-                    allData.daily.push({ id: doc.id, ...doc.data() });
-                });
-                
-                displayStats();
-                switchTab('lessons', document.querySelector('.tab-btn[data-tab="lessons"]'));
-                
-            } catch (error) {
-                console.error('خطأ في تحميل البيانات:', error);
+                // تفصيل أنواع النقاط
+                if (entry.details.achievement) pointsSources.lessons += entry.details.achievement;
+                if (entry.details.bonus) pointsSources.bonuses += entry.details.bonus;
+                if (entry.details.participation) pointsSources.lessons += entry.details.participation;
+                if (entry.details.speed) pointsSources.bonuses += entry.details.speed;
+            } else if (entry.type === 'badge_reward') {
+                pointsSources.badges += entry.amount || 0;
+            } else if (entry.type === 'live_attendance' || entry.type === 'attendance') {
+                pointsSources.attendance += entry.amount || 0;
+            } else {
+                pointsSources.other += entry.amount || 0;
+            }
+        });
+    }
+    
+    return {
+        journey: {
+            balance: journeyPoints.balance || 0,
+            lifetime: journeyPoints.lifetime || 0,
+            history: journeyPoints.history || []
+        },
+        wallet: {
+            balance: walletPoints.balance || 0,
+            lifetime: walletPoints.lifetime || 0,
+            history: walletPoints.history || []
+        },
+        sources: pointsSources,
+        total: (journeyPoints.balance || 0) + (walletPoints.balance || 0)
+    };
+}
+
+// دالة تحليل شارات المستخدم
+function analyzeUserBadges(user) {
+    const userBadges = user.badges || [];
+    
+    const badgeAnalysis = {
+        total: userBadges.length,
+        byType: {},
+        byCourse: {},
+        timeline: [],
+        recent: []
+    };
+    
+    // تصنيف الشارات
+    userBadges.forEach(badge => {
+        // حسب النوع
+        const type = badge.type || 'other';
+        if (!badgeAnalysis.byType[type]) {
+            badgeAnalysis.byType[type] = [];
+        }
+        badgeAnalysis.byType[type].push(badge);
+        
+        // حسب الدورة
+        if (badge.courseId) {
+            if (!badgeAnalysis.byCourse[badge.courseId]) {
+                badgeAnalysis.byCourse[badge.courseId] = [];
+            }
+            badgeAnalysis.byCourse[badge.courseId].push(badge);
+        }
+        
+        // الجدول الزمني
+        if (badge.awardedDate) {
+            badgeAnalysis.timeline.push({
+                date: badge.awardedDate,
+                badge: badge
+            });
+        }
+    });
+    
+    // ترتيب الجدول الزمني
+    badgeAnalysis.timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    // آخر 5 شارات
+    badgeAnalysis.recent = badgeAnalysis.timeline.slice(0, 5).map(item => item.badge);
+    
+    return badgeAnalysis;
+}
+
+// دالة تحليل دروس المستخدم
+function analyzeUserLessons(user) {
+    const lessonsAnalysis = {
+        total: 0,
+        byCourse: {},
+        byModule: {},
+        timeline: [],
+        speed: {
+            fast: 0,
+            normal: 0,
+            slow: 0
+        }
+    };
+    
+    // تحليل من سجل الإكمال
+    allData.completionHistory.forEach(record => {
+        if (record.userId === user.id) {
+            lessonsAnalysis.total++;
+            
+            // حسب الدورة
+            if (record.courseId) {
+                if (!lessonsAnalysis.byCourse[record.courseId]) {
+                    lessonsAnalysis.byCourse[record.courseId] = {
+                        courseName: record.courseName,
+                        lessons: [],
+                        totalPoints: 0
+                    };
+                }
+                lessonsAnalysis.byCourse[record.courseId].lessons.push(record);
+                lessonsAnalysis.byCourse[record.courseId].totalPoints += record.pointsEarned || 0;
+            }
+            
+            // حسب الوحدة
+            const moduleKey = `${record.courseId}_${record.moduleIndex}`;
+            if (!lessonsAnalysis.byModule[moduleKey]) {
+                lessonsAnalysis.byModule[moduleKey] = {
+                    moduleName: record.moduleName,
+                    lessons: []
+                };
+            }
+            lessonsAnalysis.byModule[moduleKey].lessons.push(record);
+            
+            // الجدول الزمني
+            lessonsAnalysis.timeline.push({
+                date: record.completedAt,
+                lesson: record
+            });
+        }
+    });
+    
+    // ترتيب الجدول الزمني
+    lessonsAnalysis.timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    return lessonsAnalysis;
+}
+
+// دالة تحليل الحضور
+function analyzeUserAttendance(user) {
+    const attendance = user.attendance || {};
+    const attendanceAnalysis = {
+        total: 0,
+        byCourse: {},
+        sessions: []
+    };
+    
+    Object.keys(attendance).forEach(courseId => {
+        const courseAttendance = attendance[courseId];
+        attendanceAnalysis.byCourse[courseId] = {
+            sessions: [],
+            totalPoints: 0
+        };
+        
+        Object.keys(courseAttendance).forEach(sessionId => {
+            const session = courseAttendance[sessionId];
+            attendanceAnalysis.total++;
+            attendanceAnalysis.byCourse[courseId].sessions.push(session);
+            attendanceAnalysis.byCourse[courseId].totalPoints += session.pointsEarned || 0;
+            
+            attendanceAnalysis.sessions.push({
+                ...session,
+                courseId: courseId
+            });
+        });
+    });
+    
+    return attendanceAnalysis;
+}
+
+// دالة حساب الإحصائيات العامة
+function calculateUserStats(user) {
+    const progress = user.progress || {};
+    const stats = {
+        averageProgress: 0,
+        coursesCount: 0,
+        completionRate: 0,
+        lastActivity: null,
+        activityStreak: 0
+    };
+    
+    // حساب متوسط التقدم
+    const progressValues = Object.values(progress).map(p => p.percentage || 0);
+    if (progressValues.length > 0) {
+        stats.averageProgress = Math.round(
+            progressValues.reduce((sum, val) => sum + val, 0) / progressValues.length
+        );
+        stats.coursesCount = progressValues.length;
+    }
+    
+    // آخر نشاط
+    Object.values(progress).forEach(courseProgress => {
+        if (courseProgress.lastActivity) {
+            const activityDate = courseProgress.lastActivity.seconds ? 
+                new Date(courseProgress.lastActivity.seconds * 1000) : 
+                new Date(courseProgress.lastActivity);
+            
+            if (!stats.lastActivity || activityDate > stats.lastActivity) {
+                stats.lastActivity = activityDate;
             }
         }
+    });
+    
+    return stats;
+}
+
+        
 
         // دالة حساب معدلات الإنجاز
 function calculateCompletionRates() {
@@ -545,30 +978,86 @@ function displayStats() {
             margin-bottom: 20px;
         ">
             <h3 style="color: var(--gold-primary); margin-bottom: 15px;">
-                <i class="fas fa-crown"></i> لوحة الشرف - أفضل 5 طلاب
-            </h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
-                ${performanceAnalysis.topPerformers.map((student, index) => `
+    <i class="fas fa-crown"></i> لوحة الشرف - أفضل 5 طلاب (تحليل شامل)
+</h3>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+    ${performanceAnalysis.topPerformers.map((student, index) => {
+        const userDetail = allData.detailedProgress[student.id];
+        const badgeTypes = userDetail ? Object.keys(userDetail.badges.byType) : [];
+        
+        return `
+            <div style="
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 215, 0, 0.02));
+                padding: 20px;
+                border-radius: 15px;
+                text-align: center;
+                border: 2px solid ${index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : 'rgba(255, 255, 255, 0.2)'};
+                cursor: pointer;
+                transition: all 0.3s;
+            " onclick="showStudentFullDetails('${student.id}')"
+               onmouseover="this.style.transform='scale(1.05)'"
+               onmouseout="this.style.transform='scale(1)'"
+            >
+                <div style="font-size: 2.5rem; margin-bottom: 10px;">
+                    ${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '🏆'}
+                </div>
+                <div style="font-weight: bold; font-size: 1.1rem; margin-bottom: 10px;">${student.name}</div>
+                
+                <!-- النقاط الإجمالية -->
+                <div style="
+                    background: linear-gradient(135deg, var(--gold-primary), #f59e0b);
+                    color: var(--dark-bg);
+                    padding: 8px;
+                    border-radius: 10px;
+                    margin-bottom: 10px;
+                    font-size: 1.3rem;
+                    font-weight: bold;
+                ">
+                    ${student.totalPoints} نقطة
+                </div>
+                
+                <!-- تفاصيل الإنجازات -->
+                <div style="
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 8px;
+                    margin-top: 10px;
+                    font-size: 0.85rem;
+                ">
                     <div style="
-                        background: rgba(255, 255, 255, 0.05);
-                        padding: 15px;
-                        border-radius: 10px;
-                        text-align: center;
-                        border: 1px solid ${index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : 'rgba(255, 255, 255, 0.2)'};
+                        background: rgba(59, 130, 246, 0.2);
+                        padding: 5px;
+                        border-radius: 8px;
                     ">
-                        <div style="font-size: 2rem; margin-bottom: 5px;">
-                            ${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '🏆'}
-                        </div>
-                        <div style="font-weight: bold; margin-bottom: 5px;">${student.name}</div>
-                        <div style="color: var(--gold-primary); font-size: 1.2rem; font-weight: bold;">
-                            ${student.totalPoints} نقطة
-                        </div>
-                        <div style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6); margin-top: 5px;">
-                            ${student.lessonsCompleted} درس | ${student.badges} شارة
-                        </div>
+                        <div style="color: var(--primary-blue); font-weight: bold;">${student.lessonsCompleted}</div>
+                        <div style="color: rgba(255,255,255,0.6);">دروس</div>
                     </div>
-                `).join('')}
+                    <div style="
+                        background: rgba(255, 215, 0, 0.2);
+                        padding: 5px;
+                        border-radius: 8px;
+                    ">
+                        <div style="color: var(--gold-primary); font-weight: bold;">${student.badges}</div>
+                        <div style="color: rgba(255,255,255,0.6);">شارات</div>
+                    </div>
+                </div>
+                
+                <!-- أنواع الشارات -->
+                ${badgeTypes.length > 0 ? `
+                    <div style="
+                        margin-top: 10px;
+                        padding-top: 10px;
+                        border-top: 1px solid rgba(255,255,255,0.1);
+                        font-size: 0.75rem;
+                        color: rgba(255,255,255,0.6);
+                    ">
+                        ${badgeTypes.slice(0, 3).join(' • ')}
+                    </div>
+                ` : ''}
             </div>
+        `;
+    }).join('')}
+</div>
         </div>
         
         <!-- الصف الثالث - التنبيهات -->
@@ -768,115 +1257,414 @@ function switchTab(tab, buttonElement) {
 function displayStudentsTab() {
     const content = document.getElementById('tabContent');
     
-    // جمع بيانات الطلاب من كل المصادر
-    const studentsMap = new Map();
-    
-    // من الدروس
-    allData.lessons.forEach(lesson => {
-        if (lesson.completedBy) {
-            lesson.completedBy.forEach(student => {
-                if (!studentsMap.has(student.userId)) {
-                    studentsMap.set(student.userId, {
-                        id: student.userId,
-                        name: student.userName,
-                        lessonsCount: 0,
-                        badgesCount: 0,
-                        totalPoints: 0,
-                        lastActivity: null
-                    });
-                }
-                const studentData = studentsMap.get(student.userId);
-                studentData.lessonsCount++;
-                studentData.totalPoints += student.points || 0;
-                if (student.date) {
-                    const date = new Date(student.date);
-                    if (!studentData.lastActivity || date > studentData.lastActivity) {
-                        studentData.lastActivity = date;
-                    }
-                }
-            });
-        }
-    });
-    
-    // من الشارات
-    allData.badgeHistory.forEach(badge => {
-        if (studentsMap.has(badge.userId)) {
-            studentsMap.get(badge.userId).badgesCount++;
-        }
-    });
-    
-    const studentsArray = Array.from(studentsMap.values()).sort((a, b) => 
-        b.totalPoints - a.totalPoints
-    );
-    
-    content.innerHTML = `
-        <h3 style="margin-bottom: 20px;">
-            <i class="fas fa-users"></i> إحصائيات الطلاب
-        </h3>
-        <div style="
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.05));
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid var(--success-green);
-        ">
-            <i class="fas fa-info-circle"></i>
-            إجمالي الطلاب النشطون: <strong>${studentsArray.length}</strong>
+    // إضافة أزرار الفلترة والتصدير
+    let htmlContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3>
+                <i class="fas fa-users"></i> تحليل شامل للطلاب
+            </h3>
+            <div style="display: flex; gap: 10px;">
+                <button class="export-btn" onclick="exportToExcel()">
+                    <i class="fas fa-download"></i> تصدير Excel
+                </button>
+                <button class="filter-btn" onclick="showFilterOptions()">
+                    <i class="fas fa-filter"></i> فلترة
+                </button>
+            </div>
         </div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>الترتيب</th>
-                    <th>اسم الطالب</th>
-                    <th>الدروس المكتملة</th>
-                    <th>الشارات</th>
-                    <th>النقاط</th>
-                    <th>آخر نشاط</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${studentsArray.map((student, index) => `
-                    <tr>
-                        <td style="text-align: center;">
-                            ${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
-                        </td>
-                        <td style="font-weight: bold;">
-                            ${student.name}
-                        </td>
-                        <td style="text-align: center;">
-                            <span style="
-                                background: var(--primary-blue);
-                                padding: 5px 12px;
-                                border-radius: 15px;
-                            ">${student.lessonsCount}</span>
-                        </td>
-                        <td style="text-align: center;">
-                            <span style="
-                                background: var(--gold-primary);
-                                color: var(--dark-bg);
-                                padding: 5px 12px;
-                                border-radius: 15px;
+        
+        <div class="filter-controls">
+            <button class="filter-btn active" onclick="filterStudents('all')">الكل</button>
+            <button class="filter-btn" onclick="filterStudents('top')">المتميزون</button>
+            <button class="filter-btn" onclick="filterStudents('active')">النشطون</button>
+            <button class="filter-btn" onclick="filterStudents('needSupport')">يحتاجون دعم</button>
+        </div>
+    `;
+    
+    // عرض بطاقة مفصلة لكل طالب
+    htmlContent += '<div id="studentsContainer">';
+    
+    allData.users.forEach(user => {
+        const userDetail = allData.detailedProgress[user.id];
+        if (!userDetail) return;
+        
+        // حساب مستوى الطالب
+        const level = calculateStudentLevel(userDetail);
+        const levelColor = level === 'متميز' ? '#22c55e' : 
+                          level === 'نشط' ? '#3b82f6' : 
+                          level === 'متوسط' ? '#f59e0b' : '#ef4444';
+        
+        htmlContent += `
+            <div class="detail-card" onclick="showStudentFullDetails('${user.id}')">
+                <div style="display: grid; grid-template-columns: 1fr 2fr 3fr; gap: 20px; align-items: start;">
+                    
+                    <!-- العمود الأول: المعلومات الأساسية -->
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                            <div style="
+                                width: 60px;
+                                height: 60px;
+                                background: linear-gradient(135deg, ${levelColor}, ${levelColor}80);
+                                border-radius: 50%;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                font-size: 1.5rem;
                                 font-weight: bold;
-                            ">${student.badgesCount}</span>
-                        </td>
-                        <td style="text-align: center;">
-                            <span style="
-                                background: linear-gradient(135deg, var(--success-green), #16a34a);
-                                padding: 5px 15px;
-                                border-radius: 15px;
-                                font-weight: bold;
-                            ">${student.totalPoints}</span>
-                        </td>
-                        <td>
-                            ${student.lastActivity ? 
-                                student.lastActivity.toLocaleDateString('ar-SA') : '-'}
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
+                            ">
+                                ${user.name.charAt(0)}
+                            </div>
+                            <div>
+                                <h4 style="margin: 0; color: white;">${user.name}</h4>
+                                <span style="
+                                    background: ${levelColor}30;
+                                    color: ${levelColor};
+                                    padding: 2px 10px;
+                                    border-radius: 10px;
+                                    font-size: 0.85rem;
+                                ">${level}</span>
+                            </div>
+                        </div>
+                        
+                        <div style="font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+                            <div style="margin-bottom: 5px;">
+                                <i class="fas fa-envelope"></i> ${user.email || 'غير محدد'}
+                            </div>
+                            <div style="margin-bottom: 5px;">
+                                <i class="fas fa-phone"></i> ${user.phone || 'غير محدد'}
+                            </div>
+                            <div>
+                                <i class="fas fa-calendar"></i> 
+                                آخر نشاط: ${userDetail.stats.lastActivity ? 
+                                    new Date(userDetail.stats.lastActivity).toLocaleDateString('ar-SA') : 
+                                    'غير محدد'}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- العمود الثاني: تفصيل النقاط -->
+                    <div>
+                        <h5 style="color: var(--purple); margin-bottom: 10px;">
+                            <i class="fas fa-coins"></i> تحليل النقاط (${userDetail.points.total} نقطة)
+                        </h5>
+                        <div class="points-breakdown">
+                            <div class="point-item">
+                                <div style="font-size: 1.5rem; color: #3b82f6;">${userDetail.points.sources.lessons}</div>
+                                <div style="font-size: 0.75rem;">دروس</div>
+                            </div>
+                            <div class="point-item">
+                                <div style="font-size: 1.5rem; color: #fbbf24;">${userDetail.points.sources.badges}</div>
+                                <div style="font-size: 0.75rem;">شارات</div>
+                            </div>
+                            <div class="point-item">
+                                <div style="font-size: 1.5rem; color: #22c55e;">${userDetail.points.sources.attendance}</div>
+                                <div style="font-size: 0.75rem;">حضور</div>
+                            </div>
+                            <div class="point-item">
+                                <div style="font-size: 1.5rem; color: #a855f7;">${userDetail.points.sources.bonuses}</div>
+                                <div style="font-size: 0.75rem;">مكافآت</div>
+                            </div>
+                        </div>
+                        
+                        <!-- رصيد المحفظة والرحلة -->
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span style="color: rgba(255,255,255,0.6);">نقاط الرحلة:</span>
+                                <span style="color: #3b82f6; font-weight: bold;">${userDetail.points.journey.balance}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: rgba(255,255,255,0.6);">نقاط المحفظة:</span>
+                                <span style="color: #22c55e; font-weight: bold;">${userDetail.points.wallet.balance}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- العمود الثالث: الإنجازات -->
+                    <div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            
+                            <!-- الدروس -->
+                            <div style="
+                                background: rgba(59, 130, 246, 0.1);
+                                padding: 15px;
+                                border-radius: 10px;
+                                border: 1px solid rgba(59, 130, 246, 0.3);
+                            ">
+                                <h5 style="color: var(--primary-blue); margin-bottom: 10px;">
+                                    <i class="fas fa-book"></i> الدروس
+                                </h5>
+                                <div style="font-size: 2rem; font-weight: bold; margin-bottom: 5px;">
+                                    ${userDetail.lessons.total}
+                                </div>
+                                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">
+                                    ${Object.keys(userDetail.lessons.byCourse).length} دورة
+                                </div>
+                                ${userDetail.lessons.timeline.length > 0 ? `
+                                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                                        <div style="font-size: 0.75rem; color: rgba(255,255,255,0.5);">آخر درس:</div>
+                                        <div style="font-size: 0.85rem; margin-top: 5px;">
+                                            ${userDetail.lessons.timeline[0].lesson.lessonTitle}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            
+                            <!-- الشارات -->
+                            <div style="
+                                background: rgba(255, 215, 0, 0.1);
+                                padding: 15px;
+                                border-radius: 10px;
+                                border: 1px solid rgba(255, 215, 0, 0.3);
+                            ">
+                                <h5 style="color: var(--gold-primary); margin-bottom: 10px;">
+                                    <i class="fas fa-medal"></i> الشارات
+                                </h5>
+                                <div style="font-size: 2rem; font-weight: bold; margin-bottom: 5px;">
+                                    ${userDetail.badges.total}
+                                </div>
+                                <div class="badge-grid" style="margin-top: 10px;">
+                                    ${userDetail.badges.recent.slice(0, 4).map(badge => `
+                                        <div class="badge-item" title="${badge.name}">
+                                            <div style="font-size: 1.5rem;">${badge.icon}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            
+                            <!-- الحضور -->
+                            <div style="
+                                background: rgba(34, 197, 94, 0.1);
+                                padding: 15px;
+                                border-radius: 10px;
+                                border: 1px solid rgba(34, 197, 94, 0.3);
+                            ">
+                                <h5 style="color: var(--success-green); margin-bottom: 10px;">
+                                    <i class="fas fa-user-check"></i> الحضور
+                                </h5>
+                                <div style="font-size: 2rem; font-weight: bold;">
+                                    ${userDetail.attendance.total}
+                                </div>
+                                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">
+                                    جلسة مباشرة
+                                </div>
+                            </div>
+                            
+                            <!-- معدل التقدم -->
+                            <div style="
+                                background: rgba(168, 85, 247, 0.1);
+                                padding: 15px;
+                                border-radius: 10px;
+                                border: 1px solid rgba(168, 85, 247, 0.3);
+                            ">
+                                <h5 style="color: var(--purple); margin-bottom: 10px;">
+                                    <i class="fas fa-chart-line"></i> التقدم
+                                </h5>
+                                <div style="font-size: 2rem; font-weight: bold;">
+                                    ${userDetail.stats.averageProgress}%
+                                </div>
+                                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">
+                                    متوسط الإنجاز
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    htmlContent += '</div>';
+    content.innerHTML = htmlContent;
+}
+
+        // دالة حساب مستوى الطالب
+function calculateStudentLevel(userDetail) {
+    const points = userDetail.points.total;
+    const lessons = userDetail.lessons.total;
+    const badges = userDetail.badges.total;
+    const avgProgress = userDetail.stats.averageProgress;
+    
+    // حساب النقاط الإجمالية للتقييم
+    const score = (points / 100) + (lessons * 10) + (badges * 20) + avgProgress;
+    
+    if (score >= 200) return 'متميز';
+    if (score >= 100) return 'نشط';
+    if (score >= 50) return 'متوسط';
+    return 'يحتاج دعم';
+}
+
+// دالة عرض التفاصيل الكاملة للطالب
+function showStudentFullDetails(userId) {
+    const userDetail = allData.detailedProgress[userId];
+    if (!userDetail) return;
+    
+    // إنشاء نافذة منبثقة بالتفاصيل الكاملة
+    const detailsHTML = `
+        <div style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 10000;
+            overflow-y: auto;
+            padding: 20px;
+        " id="studentDetailsModal">
+            <div style="
+                max-width: 1200px;
+                margin: 0 auto;
+                background: linear-gradient(135deg, #1e3a5f, #0a1628);
+                border-radius: 20px;
+                padding: 30px;
+                border: 2px solid var(--primary-blue);
+            ">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                    <h2 style="color: white;">
+                        <i class="fas fa-user-graduate"></i> ${userDetail.name} - ملف تفصيلي كامل
+                    </h2>
+                    <button onclick="closeStudentDetails()" style="
+                        background: var(--danger-red);
+                        color: white;
+                        border: none;
+                        padding: 10px 20px;
+                        border-radius: 10px;
+                        cursor: pointer;
+                    ">
+                        <i class="fas fa-times"></i> إغلاق
+                    </button>
+                </div>
+                
+                <!-- التبويبات الداخلية -->
+                <div class="tabs" style="margin-bottom: 20px;">
+                    <button class="tab-btn active" onclick="showDetailTab('timeline', this)">الجدول الزمني</button>
+                    <button class="tab-btn" onclick="showDetailTab('courses', this)">الدورات</button>
+                    <button class="tab-btn" onclick="showDetailTab('badges', this)">الشارات</button>
+                    <button class="tab-btn" onclick="showDetailTab('points', this)">تفصيل النقاط</button>
+                </div>
+                
+                <div id="detailTabContent">
+                    ${generateTimelineTab(userDetail)}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', detailsHTML);
+}
+
+// دالة إغلاق نافذة التفاصيل
+function closeStudentDetails() {
+    const modal = document.getElementById('studentDetailsModal');
+    if (modal) modal.remove();
+}
+
+// دالة توليد تبويب الجدول الزمني
+function generateTimelineTab(userDetail) {
+    let events = [];
+    
+    // جمع جميع الأحداث
+    userDetail.lessons.timeline.forEach(item => {
+        events.push({
+            date: item.date,
+            type: 'lesson',
+            icon: '📚',
+            color: '#3b82f6',
+            title: 'أكمل درس',
+            details: item.lesson.lessonTitle,
+            points: item.lesson.pointsEarned
+        });
+    });
+    
+    userDetail.badges.timeline.forEach(item => {
+        events.push({
+            date: item.date,
+            type: 'badge',
+            icon: '🏅',
+            color: '#fbbf24',
+            title: 'حصل على شارة',
+            details: item.badge.name,
+            points: 0
+        });
+    });
+    
+    // ترتيب الأحداث
+    events.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    return `
+        <div class="timeline-container">
+            <h3 style="color: var(--primary-blue); margin-bottom: 20px;">
+                <i class="fas fa-history"></i> السجل الزمني الكامل
+            </h3>
+            ${events.slice(0, 20).map(event => `
+                <div class="timeline-item">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                <span style="font-size: 1.5rem;">${event.icon}</span>
+                                <span style="color: ${event.color}; font-weight: bold;">${event.title}</span>
+                            </div>
+                            <div style="color: rgba(255,255,255,0.8);">${event.details}</div>
+                            ${event.points > 0 ? `
+                                <div style="margin-top: 5px;">
+                                    <span style="
+                                        background: rgba(34, 197, 94, 0.2);
+                                        color: #22c55e;
+                                        padding: 2px 10px;
+                                        border-radius: 10px;
+                                        font-size: 0.85rem;
+                                    ">+${event.points} نقطة</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div style="color: rgba(255,255,255,0.5); font-size: 0.85rem;">
+                            ${new Date(event.date).toLocaleDateString('ar-SA')}
+                            <br>
+                            ${new Date(event.date).toLocaleTimeString('ar-SA')}
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
     `;
 }
+
+// دالة التبديل بين تبويبات التفاصيل
+function showDetailTab(tab, button) {
+    // تحديث الأزرار
+    document.querySelectorAll('#studentDetailsModal .tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    button.classList.add('active');
+    
+    // الحصول على بيانات الطالب
+    const userId = document.querySelector('#studentDetailsModal').getAttribute('data-user-id');
+    const userDetail = allData.detailedProgress[userId];
+    
+    const content = document.getElementById('detailTabContent');
+    
+    switch(tab) {
+        case 'timeline':
+            content.innerHTML = generateTimelineTab(userDetail);
+            break;
+        case 'courses':
+            content.innerHTML = generateCoursesTab(userDetail);
+            break;
+        case 'badges':
+            content.innerHTML = generateBadgesTab(userDetail);
+            break;
+        case 'points':
+            content.innerHTML = generatePointsTab(userDetail);
+            break;
+    }
+}
+
+// دالة تصدير البيانات إلى Excel
+function exportToExcel() {
+    alert('جاري تحضير ملف Excel...\n\nسيتضمن:\n- معلومات كل طالب\n- تفصيل النقاط\n- الدروس المكتملة\n- الشارات المكتسبة');
+    console.log('تصدير البيانات إلى Excel...');
+}
+        
 
 // عرض تبويب الدورات
 function displayCoursesTab() {
