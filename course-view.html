@@ -4891,12 +4891,88 @@ async function markLessonCompleted(lessonIndex) {
             const pointsToAward = pointsDetail?.totalPossible || 0;
             
             // تحديث البيانات
-            const updatedProgress = {
-                ...userProgress,
-                completedLessons,
-                percentage: newPercentage,
-                lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-            };
+            // إنشاء سجل تفصيلي للدرس
+const detailedLessonRecord = {
+    lessonIndex: lessonIndex,
+    lessonTitle: lesson.title,
+    moduleIndex: lesson.moduleIndex,
+    moduleName: lesson.moduleName,
+    completedAt: new Date().toISOString(),
+    pointsEarned: pointsToAward,
+    timeSpent: lesson.duration || 0,
+    earnedBadges: earnedBadges.map(b => ({
+        id: b.id,
+        name: b.name,
+        icon: b.icon
+    }))
+};
+
+const updatedProgress = {
+    ...userProgress,
+    completedLessons,
+    percentage: newPercentage,
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp(),
+    // إضافة السجل التفصيلي
+    detailedLessons: firebase.firestore.FieldValue.arrayUnion(detailedLessonRecord)
+};
+
+            // تحديث إحصائيات الوحدة
+try {
+    const moduleStatId = `${courseId}_module_${lesson.moduleIndex}`;
+    await db.collection('moduleStatistics').doc(moduleStatId).set({
+        courseId: courseId,
+        moduleIndex: lesson.moduleIndex,
+        moduleName: lesson.moduleName,
+        totalLessonsCompleted: firebase.firestore.FieldValue.increment(1),
+        lastActivityAt: firebase.firestore.FieldValue.serverTimestamp(),
+        studentsCompleted: firebase.firestore.FieldValue.arrayUnion(userId)
+    }, { merge: true });
+} catch (error) {
+    console.log('خطأ في تحديث إحصائيات الوحدة:', error);
+}
+
+            // تسجيل النشاط اليومي
+try {
+    const today = new Date().toISOString().split('T')[0];
+    const dailyStatId = `${userId}_${courseId}_${today}`;
+    
+    await db.collection('dailyActivity').doc(dailyStatId).set({
+        userId: userId,
+        courseId: courseId,
+        date: today,
+        lessonsCompleted: firebase.firestore.FieldValue.arrayUnion({
+            lessonId: lessonIndex,
+            lessonTitle: lesson.title,
+            completedAt: new Date().toISOString(),
+            points: pointsToAward
+        }),
+        totalPointsToday: firebase.firestore.FieldValue.increment(pointsToAward),
+        badgesEarnedToday: earnedBadges.length > 0 ? 
+            firebase.firestore.FieldValue.arrayUnion(...earnedBadges.map(b => b.id)) : 
+            firebase.firestore.FieldValue.arrayUnion(),
+        lastActivityTime: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+} catch (error) {
+    console.log('خطأ في تسجيل النشاط اليومي:', error);
+}
+
+            // تحديث إحصائيات الدورة العامة
+try {
+    await db.collection('courseStatistics').doc(courseId).set({
+        courseId: courseId,
+        courseName: courseData.title,
+        totalLessonsCompleted: firebase.firestore.FieldValue.increment(1),
+        uniqueStudents: firebase.firestore.FieldValue.arrayUnion(userId),
+        totalPointsAwarded: firebase.firestore.FieldValue.increment(pointsToAward),
+        totalBadgesAwarded: firebase.firestore.FieldValue.increment(earnedBadges.length),
+        lastActivityAt: firebase.firestore.FieldValue.serverTimestamp(),
+        completionsByLesson: {
+            [lessonIndex]: firebase.firestore.FieldValue.increment(1)
+        }
+    }, { merge: true });
+} catch (error) {
+    console.log('خطأ في تحديث إحصائيات الدورة:', error);
+}
             
             // بناء كائن التحديث
             const updateData = {
@@ -4993,6 +5069,58 @@ try {
                     }
                 }
             }
+
+            // تسجيل تفصيلي لإكمال الدرس
+try {
+    const lessonRecord = {
+        lessonId: lesson.globalIndex,
+        lessonTitle: lesson.title,
+        moduleIndex: lesson.moduleIndex,
+        moduleName: lesson.moduleName,
+        libraryContentId: lesson.libraryContentId || null,
+        userId: userId,
+        userName: userData.personalInfo?.name || 'مستخدم',
+        userEmail: userData.personalInfo?.email || '',
+        courseId: courseId,
+        courseName: courseData.title,
+        completedAt: new Date().toISOString(),
+        pointsEarned: pointsToAward,
+        pointsDetails: pointsDetail || null,
+        duration: lesson.duration || 0,
+        lessonType: lesson.type || 'standard',
+        deviceInfo: {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            language: navigator.language
+        }
+    };
+    
+    // حفظ في سجل الدروس العام
+    await db.collection('lessonCompletionHistory').add(lessonRecord);
+    
+    // تحديث إحصائيات الدرس نفسه
+    const lessonStatId = `${courseId}_${lesson.globalIndex}`;
+    const lessonStatRef = db.collection('lessonStatistics').doc(lessonStatId);
+    
+    await lessonStatRef.set({
+        courseId: courseId,
+        lessonIndex: lesson.globalIndex,
+        lessonTitle: lesson.title,
+        totalCompletions: firebase.firestore.FieldValue.increment(1),
+        lastCompletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        completedBy: firebase.firestore.FieldValue.arrayUnion({
+            userId: userId,
+            userName: userData.personalInfo?.name || 'مستخدم',
+            date: new Date().toISOString(),
+            points: pointsToAward
+        })
+    }, { merge: true });
+    
+    console.log('✅ تم تسجيل إكمال الدرس في السجل العام');
+    
+} catch (error) {
+    console.error('خطأ في تسجيل سجل الدرس:', error);
+}
             
             // حفظ باقي البيانات في Firebase (بدون الشارات لأنها تمت إضافتها بالأعلى)
             await db.collection('users').doc(userId).update(updateData);
