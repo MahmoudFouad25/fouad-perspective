@@ -708,6 +708,8 @@ setTimeout(() => {
         spinner.parentElement.style.display = 'none';
     }
 }, 1000);
+    // Add session end checking
+setInterval(checkSessionEnd, 60000); // Check every minute
 });
 
 // Load User Data
@@ -752,6 +754,66 @@ async function checkActiveSession() {
         }
     } catch (error) {
         console.error('Error checking active session:', error);
+    }
+}
+
+        // Award full session bonus when session ends
+async function checkSessionEnd() {
+    if (!activeSession) return;
+    
+    try {
+        const sessionDoc = await db.collection('liveSessions').doc(activeSession.id).get();
+        const session = sessionDoc.data();
+        
+        if (session.status === 'completed') {
+            // Check if user stayed for full session
+            const attendeeDoc = await db.collection('liveSessions')
+                .doc(activeSession.id)
+                .collection('attendees')
+                .doc(userId)
+                .get();
+            
+            if (attendeeDoc.exists) {
+                const attendance = attendeeDoc.data();
+                const sessionDuration = session.duration || 90;
+                
+                // If user stayed for at least 80% of session
+                if (attendance.durationMinutes >= sessionDuration * 0.8) {
+                    const bonusPoints = session.points?.fullSession || 30;
+                    
+                    // Award bonus points
+                    await db.collection('users').doc(userId).update({
+                        'journeyPoints.balance': firebase.firestore.FieldValue.increment(bonusPoints),
+                        'walletPoints.balance': firebase.firestore.FieldValue.increment(bonusPoints)
+                    });
+                    
+                    // Show notification
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'مكافأة البقاء الكامل!',
+                        html: `
+                            <div style="text-align: center;">
+                                <div style="font-size: 3rem;">⏱️</div>
+                                <p>حصلت على <strong>${bonusPoints}</strong> نقطة إضافية!</p>
+                            </div>
+                        `,
+                        timer: 3000,
+                        showConfirmButton: false
+                    });
+                }
+            }
+            
+            // Clear active session
+            activeSession = null;
+            hideLiveSession();
+            
+            // Clear tracking interval
+            if (window.sessionTrackingInterval) {
+                clearInterval(window.sessionTrackingInterval);
+            }
+        }
+    } catch (error) {
+        console.error('Error checking session end:', error);
     }
 }
 // Show Live Session
@@ -805,23 +867,68 @@ function startTimer(startTime) {
     }, 1000);
 }
 // Send Reaction
+// Send Reaction with Firebase Integration
 async function sendReaction(emoji, points) {
-    if (!activeSession) return;
+    if (!activeSession || !userId) {
+        Swal.fire('تنبيه', 'يجب تسجيل الدخول والانضمام للجلسة أولاً', 'warning');
+        return;
+    }
     
-    // Show points animation
-    showPointsAnimation(points);
+    // Disable button temporarily
+    const button = event.target.closest('button');
+    if (button.disabled) return;
     
-    // Update local points
-    userSessionPoints += points;
-    document.getElementById('sessionPoints').textContent = userSessionPoints;
+    button.disabled = true;
+    button.classList.add('reaction-btn-disabled');
     
-    // Disable button for 5 seconds
-    event.target.classList.add('reaction-btn-disabled');
-    event.target.disabled = true;
+    try {
+        // Record interaction in Firebase
+        await db.collection('liveSessions').doc(activeSession.id)
+            .collection('interactions').add({
+                userId: userId,
+                userName: currentUser?.personalInfo?.name || 'مستخدم',
+                emoji: emoji,
+                points: points,
+                timestamp: new Date().toISOString(),
+                sessionId: activeSession.id
+            });
+        
+        // Update user points in Firebase
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(points),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(points)
+        });
+        
+        // Add to points history
+        const pointsRecord = {
+            amount: points,
+            timestamp: new Date().toISOString(),
+            type: 'interaction',
+            reason: `تفاعل في جلسة: ${activeSession.title}`,
+            description: `${emoji} +${points} نقطة`
+        };
+        
+        await db.collection('users').doc(userId).update({
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsRecord),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsRecord)
+        });
+        
+        // Update local display
+        userSessionPoints += points;
+        document.getElementById('sessionPoints').textContent = userSessionPoints;
+        
+        // Show animation
+        showPointsAnimation(points);
+        
+    } catch (error) {
+        console.error('Error recording interaction:', error);
+        Swal.fire('خطأ', 'فشل تسجيل التفاعل', 'error');
+    }
     
+    // Re-enable button after 5 seconds
     setTimeout(() => {
-        event.target.classList.remove('reaction-btn-disabled');
-        event.target.disabled = false;
+        button.disabled = false;
+        button.classList.remove('reaction-btn-disabled');
     }, 5000);
 }
 
@@ -836,16 +943,56 @@ function showPointsAnimation(points) {
 }
 
 // Join Zoom
+// Complete Join Zoom Function
 async function joinZoom() {
-    if (activeSession && activeSession.zoomLink) {
+    if (!activeSession) {
+        Swal.fire('تنبيه', 'لا توجد جلسة نشطة حالياً', 'warning');
+        return;
+    }
+    
+    if (activeSession.zoomLink) {
+        // Open Zoom in new tab
         window.open(activeSession.zoomLink, '_blank');
         
-        // تسجيل الحضور والحصول على النقاط
-        await recordAttendance(activeSession.id);
+        // Wait 2 seconds then record attendance
+        setTimeout(async () => {
+            await recordAttendance(activeSession.id);
+        }, 2000);
+        
+        // Start tracking session duration
+        startSessionTracking(activeSession.id);
+    } else {
+        Swal.fire('تنبيه', 'رابط الجلسة غير متوفر', 'warning');
     }
 }
 
+// Track session duration for full session bonus
+function startSessionTracking(sessionId) {
+    const startTime = new Date();
+    
+    // Check every 5 minutes if user is still active
+    const trackingInterval = setInterval(async () => {
+        const currentTime = new Date();
+        const durationMinutes = Math.floor((currentTime - startTime) / 60000);
+        
+        // Update last active time
+        try {
+            await db.collection('liveSessions').doc(sessionId)
+                .collection('attendees').doc(userId).update({
+                    lastActiveTime: currentTime.toISOString(),
+                    durationMinutes: durationMinutes
+                });
+        } catch (error) {
+            console.error('Error updating tracking:', error);
+            clearInterval(trackingInterval);
+        }
+    }, 300000); // 5 minutes
+    
+    // Store interval ID for cleanup
+    window.sessionTrackingInterval = trackingInterval;
+}
 // إضافة دالة تسجيل الحضور
+// Complete Attendance Recording System
 async function recordAttendance(sessionId) {
     if (!userId || !currentUser) {
         Swal.fire('تنبيه', 'يجب تسجيل الدخول أولاً', 'warning');
@@ -853,96 +1000,393 @@ async function recordAttendance(sessionId) {
     }
     
     try {
-        // جلب بيانات الجلسة
+        // Get session data
         const sessionDoc = await db.collection('liveSessions').doc(sessionId).get();
+        if (!sessionDoc.exists) {
+            throw new Error('الجلسة غير موجودة');
+        }
         const sessionData = sessionDoc.data();
         
-        // التحقق من الحضور المسبق
+        // Check if already attended
         const attendeeDoc = await db.collection('liveSessions').doc(sessionId)
             .collection('attendees').doc(userId).get();
         
         if (attendeeDoc.exists) {
-            Swal.fire('تنبيه', 'تم تسجيل حضورك مسبقاً', 'info');
+            const attendanceData = attendeeDoc.data();
+            Swal.fire({
+                icon: 'info',
+                title: 'تم تسجيل حضورك مسبقاً',
+                html: `
+                    <div style="text-align: center;">
+                        <p>سجلت حضورك في: ${new Date(attendanceData.joinedAt).toLocaleTimeString('ar-SA')}</p>
+                        <p style="color: #22c55e; font-weight: bold;">النقاط المكتسبة: ${attendanceData.pointsEarned}</p>
+                    </div>
+                `
+            });
             return;
         }
         
-        // حساب النقاط
+        // Calculate points
         let totalPoints = sessionData.points?.attendance || 50;
+        let bonusReasons = [];
         
-        // مكافأة المبكرين (أول 10)
+        // Early bird bonus (first 10)
         const attendeesSnapshot = await db.collection('liveSessions').doc(sessionId)
-            .collection('attendees').get();
+            .collection('attendees').orderBy('joinedAt').get();
         
         if (attendeesSnapshot.size < 10) {
-            totalPoints += sessionData.points?.earlyBird || 20;
+            const earlyBirdBonus = sessionData.points?.earlyBird || 20;
+            totalPoints += earlyBirdBonus;
+            bonusReasons.push({
+                reason: 'مكافأة المبكرين',
+                points: earlyBirdBonus,
+                icon: '🏃'
+            });
         }
         
-        // تسجيل الحضور
-        await db.collection('liveSessions').doc(sessionId)
-            .collection('attendees').doc(userId).set({
+        // Record attendance
+        const attendanceRecord = {
             userId: userId,
             userName: currentUser?.personalInfo?.name || 'مستخدم',
+            userEmail: currentUser?.personalInfo?.email || '',
             joinedAt: new Date().toISOString(),
-            pointsEarned: totalPoints,
             sessionId: sessionId,
-            courseId: sessionData.courseId
-        });
-        
-        // تحديث نقاط المستخدم
-        await db.collection('users').doc(userId).update({
-            'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
-            'walletPoints.balance': firebase.firestore.FieldValue.increment(totalPoints)
-        });
-        
-        // إضافة للسجل
-        const pointsHistory = {
-            amount: totalPoints,
-            timestamp: new Date().toISOString(),
-            type: 'attendance',
-            reason: `حضور جلسة: ${sessionData.title}`,
-            description: `حصلت على ${totalPoints} نقطة للحضور المباشر`
+            sessionTitle: sessionData.title,
+            courseId: sessionData.courseId,
+            pointsEarned: totalPoints,
+            bonuses: bonusReasons,
+            deviceInfo: navigator.userAgent,
+            status: 'active'
         };
         
-        await db.collection('users').doc(userId).update({
-            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory),
-            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
+        await db.collection('liveSessions').doc(sessionId)
+            .collection('attendees').doc(userId).set(attendanceRecord);
+        
+        // Update user points
+        const batch = db.batch();
+        const userRef = db.collection('users').doc(userId);
+        
+        batch.update(userRef, {
+            'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            'walletPoints.balance': firebase.firestore.FieldValue.increment(totalPoints),
+            [`attendance.${sessionData.courseId}.${sessionId}`]: attendanceRecord
         });
         
-        // فحص الشارات
-        await checkAndAwardBadges(sessionId, sessionData);
+        // Add to history
+        const historyEntry = {
+            amount: totalPoints,
+            timestamp: new Date().toISOString(),
+            type: 'live_attendance',
+            sessionId: sessionId,
+            reason: `حضور جلسة: ${sessionData.title}`,
+            description: `حصلت على ${totalPoints} نقطة للحضور المباشر`,
+            bonuses: bonusReasons
+        };
         
-        // عرض رسالة النجاح
-        let message = `
+        batch.update(userRef, {
+            'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(historyEntry),
+            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(historyEntry)
+        });
+        
+        await batch.commit();
+        
+        // Check and award badges
+        const earnedBadges = await checkAndAwardBadges(sessionId, sessionData);
+        
+        // Show success message
+        let messageHTML = `
             <div style="text-align: center;">
-                <div style="font-size: 3rem; margin: 20px 0;">🎉</div>
-                <p style="font-size: 1.5rem; color: #fbbf24;">
-                    حصلت على <strong>${totalPoints}</strong> نقطة!
-                </p>
+                <div style="font-size: 4rem; margin: 20px 0;">🎉</div>
+                <h2 style="color: #22c55e; margin: 15px 0;">تم تسجيل حضورك بنجاح!</h2>
+                
+                <div style="background: rgba(34, 197, 94, 0.1); border-radius: 15px; padding: 20px; margin: 20px 0;">
+                    <p style="font-size: 1.8rem; color: #fbbf24; font-weight: bold;">
+                        +${totalPoints} نقطة
+                    </p>
         `;
         
-        if (attendeesSnapshot.size < 10) {
-            message += '<p style="color: #a855f7;">🏃 مكافأة المبكرين!</p>';
+        if (bonusReasons.length > 0) {
+            messageHTML += '<div style="margin-top: 15px;">';
+            bonusReasons.forEach(bonus => {
+                messageHTML += `
+                    <div style="display: inline-block; margin: 5px 10px;">
+                        <span style="font-size: 1.5rem;">${bonus.icon}</span>
+                        <span style="color: #a855f7;">${bonus.reason} (+${bonus.points})</span>
+                    </div>
+                `;
+            });
+            messageHTML += '</div>';
         }
         
-        message += '</div>';
+        messageHTML += '</div>';
+        
+        if (earnedBadges && earnedBadges.length > 0) {
+            messageHTML += `
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid rgba(168, 85, 247, 0.3);">
+                    <h3 style="color: #a855f7; margin-bottom: 15px;">🏆 شارات جديدة!</h3>
+                    <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+            `;
+            
+            earnedBadges.forEach(badge => {
+                messageHTML += `
+                    <div style="text-align: center; padding: 10px;">
+                        <div style="font-size: 3rem;">${badge.icon}</div>
+                        <div style="font-weight: bold; margin-top: 5px; color: #FFD700;">${badge.name}</div>
+                        ${badge.points > 0 ? `<div style="color: #22c55e;">+${badge.points} نقطة</div>` : ''}
+                    </div>
+                `;
+            });
+            
+            messageHTML += '</div></div>';
+        }
+        
+        messageHTML += '</div>';
         
         Swal.fire({
             icon: 'success',
-            title: 'تم تسجيل حضورك!',
-            html: message,
-            confirmButtonColor: '#22c55e'
+            title: 'مبروك!',
+            html: messageHTML,
+            confirmButtonColor: '#22c55e',
+            confirmButtonText: 'ممتاز!'
         });
         
+        // Update local session points
+        userSessionPoints = totalPoints;
+        document.getElementById('sessionPoints').textContent = userSessionPoints;
+        
     } catch (error) {
-        console.error('خطأ في تسجيل الحضور:', error);
-        Swal.fire('خطأ', 'فشل تسجيل الحضور', 'error');
+        console.error('Error recording attendance:', error);
+        Swal.fire('خطأ', 'فشل تسجيل الحضور. حاول مرة أخرى', 'error');
     }
 }
 
 // دالة فحص ومنح الشارات
+// Complete Badge System
 async function checkAndAwardBadges(sessionId, sessionData) {
-    // هنا يمكن إضافة منطق الشارات لاحقاً
-    console.log('Checking badges for session:', sessionId);
+    if (!userId || !currentUser) return [];
+    
+    try {
+        const earnedBadges = [];
+        const currentBadges = currentUser.badges || [];
+        let totalBadgePoints = 0;
+        
+        // Get user's attendance history
+        const attendanceHistory = await getUserAttendanceHistory(sessionData.courseId);
+        const attendanceCount = attendanceHistory.length;
+        
+        // Get all active badges
+        const badgesSnapshot = await db.collection('badges')
+            .where('type', '==', 'live_attendance')
+            .where('isActive', '==', true)
+            .get();
+        
+        for (let doc of badgesSnapshot.docs) {
+            const badge = { id: doc.id, ...doc.data() };
+            
+            // Skip if user already has this badge
+            if (currentBadges.some(b => b.id === badge.id)) continue;
+            
+            let shouldAward = false;
+            let awardReason = '';
+            
+            // Check badge conditions based on subType
+            switch(badge.subType) {
+                case 'attendance_any':
+                    if (attendanceCount >= 1) {
+                        shouldAward = true;
+                        awardReason = 'أول حضور في المنصة';
+                    }
+                    break;
+                
+                case 'attendance_first':
+                    if (attendanceCount === 1) {
+                        shouldAward = true;
+                        awardReason = 'الحضور الأول';
+                    }
+                    break;
+                
+                case 'attendance_count':
+                    const requiredCount = badge.conditions?.sessionCount || 5;
+                    if (attendanceCount >= requiredCount) {
+                        shouldAward = true;
+                        awardReason = `حضور ${requiredCount} جلسات`;
+                    }
+                    break;
+                
+                case 'attendance_consecutive':
+                    const consecutiveCount = await checkConsecutiveAttendance(attendanceHistory);
+                    const requiredConsecutive = badge.conditions?.consecutive || 3;
+                    if (consecutiveCount >= requiredConsecutive) {
+                        shouldAward = true;
+                        awardReason = `${requiredConsecutive} جلسات متتالية`;
+                    }
+                    break;
+                
+                case 'early_bird':
+                    const attendeeOrder = await getAttendeeOrder(sessionId, userId);
+                    const earlyLimit = badge.conditions?.earlyBird || 10;
+                    if (attendeeOrder > 0 && attendeeOrder <= earlyLimit) {
+                        shouldAward = true;
+                        awardReason = `من أول ${earlyLimit} حاضرين`;
+                    }
+                    break;
+                
+                case 'attendance_perfect':
+                    const totalSessions = await getTotalCourseSessions(sessionData.courseId);
+                    const attendanceRate = (attendanceCount / totalSessions) * 100;
+                    const requiredRate = badge.conditions?.attendancePercentage || 100;
+                    if (attendanceRate >= requiredRate) {
+                        shouldAward = true;
+                        awardReason = `حضور ${requiredRate}% من الجلسات`;
+                    }
+                    break;
+            }
+            
+            // Award badge if conditions met
+            if (shouldAward) {
+                const badgePoints = badge.points || 0;
+                totalBadgePoints += badgePoints;
+                
+                const awardedBadge = {
+                    id: badge.id,
+                    name: badge.name,
+                    icon: badge.icon,
+                    type: 'live_attendance',
+                    awardedDate: new Date().toISOString(),
+                    reason: awardReason,
+                    points: badgePoints,
+                    sessionId: sessionId,
+                    courseId: sessionData.courseId
+                };
+                
+                earnedBadges.push(awardedBadge);
+                
+                // Update badge award count
+                await db.collection('badges').doc(doc.id).update({
+                    timesAwarded: firebase.firestore.FieldValue.increment(1),
+                    lastAwardedDate: new Date().toISOString()
+                });
+            }
+        }
+        
+        // Save earned badges to user profile
+        if (earnedBadges.length > 0) {
+            await db.collection('users').doc(userId).update({
+                badges: firebase.firestore.FieldValue.arrayUnion(...earnedBadges)
+            });
+            
+            // Add badge points
+            if (totalBadgePoints > 0) {
+                await db.collection('users').doc(userId).update({
+                    'journeyPoints.balance': firebase.firestore.FieldValue.increment(totalBadgePoints),
+                    'walletPoints.balance': firebase.firestore.FieldValue.increment(totalBadgePoints)
+                });
+                
+                // Add to history
+                const badgePointsHistory = {
+                    amount: totalBadgePoints,
+                    timestamp: new Date().toISOString(),
+                    type: 'badge_reward',
+                    reason: `مكافأة الشارات`,
+                    description: `${earnedBadges.length} شارة جديدة = ${totalBadgePoints} نقطة`
+                };
+                
+                await db.collection('users').doc(userId).update({
+                    'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(badgePointsHistory),
+                    'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(badgePointsHistory)
+                });
+            }
+            
+            // Update current user object
+            currentUser.badges = [...(currentUser.badges || []), ...earnedBadges];
+        }
+        
+        return earnedBadges;
+        
+    } catch (error) {
+        console.error('Error checking badges:', error);
+        return [];
+    }
+}
+
+// Helper function: Get user attendance history
+async function getUserAttendanceHistory(courseId) {
+    const history = [];
+    const sessionsSnapshot = await db.collection('liveSessions')
+        .where('courseId', '==', courseId)
+        .get();
+    
+    for (let doc of sessionsSnapshot.docs) {
+        const attendeeDoc = await doc.ref.collection('attendees').doc(userId).get();
+        if (attendeeDoc.exists) {
+            history.push({
+                sessionId: doc.id,
+                sessionData: doc.data(),
+                attendanceData: attendeeDoc.data()
+            });
+        }
+    }
+    
+    // Sort by date
+    history.sort((a, b) => 
+        new Date(a.attendanceData.joinedAt) - new Date(b.attendanceData.joinedAt)
+    );
+    
+    return history;
+}
+
+// Helper function: Check consecutive attendance
+async function checkConsecutiveAttendance(history) {
+    if (history.length < 2) return history.length;
+    
+    let maxConsecutive = 1;
+    let currentConsecutive = 1;
+    
+    for (let i = 1; i < history.length; i++) {
+        const prevDate = new Date(history[i-1].sessionData.date);
+        const currDate = new Date(history[i].sessionData.date);
+        const daysDiff = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24));
+        
+        // Consider consecutive if within 7 days
+        if (daysDiff <= 7) {
+            currentConsecutive++;
+            maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
+        } else {
+            currentConsecutive = 1;
+        }
+    }
+    
+    return maxConsecutive;
+}
+
+// Helper function: Get attendee order
+async function getAttendeeOrder(sessionId, userId) {
+    const attendeesSnapshot = await db.collection('liveSessions')
+        .doc(sessionId)
+        .collection('attendees')
+        .orderBy('joinedAt')
+        .get();
+    
+    let order = 0;
+    let index = 1;
+    attendeesSnapshot.forEach(doc => {
+        if (doc.id === userId) {
+            order = index;
+        }
+        index++;
+    });
+    
+    return order;
+}
+
+// Helper function: Get total course sessions
+async function getTotalCourseSessions(courseId) {
+    const snapshot = await db.collection('liveSessions')
+        .where('courseId', '==', courseId)
+        .where('status', 'in', ['completed', 'active'])
+        .get();
+    
+    return snapshot.size;
 }
 
         // Load All Sessions
@@ -1241,39 +1685,55 @@ async function checkUserAttendance() {
 }
 
         // Load User Statistics
+// Complete Statistics Loading
 async function loadUserStatistics() {
     if (!userId || !currentUser) return;
     
     try {
-        // Get all sessions for the course
+        // Get all sessions including active ones
         const allSessionsSnapshot = await db.collection('liveSessions')
-            .where('status', 'in', ['completed', 'active'])
+            .where('courseId', '==', currentCourseId)
             .get();
         
         let totalSessions = 0;
         let attendedSessions = 0;
         let totalPoints = 0;
+        let interactionPoints = 0;
         let attendanceDates = [];
         
-        // Check attendance for each session
         for (let doc of allSessionsSnapshot.docs) {
-            totalSessions++;
+            const session = doc.data();
             
-            const attendeeDoc = await doc.ref.collection('attendees')
-                .doc(userId)
-                .get();
+            // Count all non-scheduled sessions
+            if (session.status === 'active' || session.status === 'completed') {
+                totalSessions++;
+            }
             
+            // Check attendance
+            const attendeeDoc = await doc.ref.collection('attendees').doc(userId).get();
             if (attendeeDoc.exists) {
                 attendedSessions++;
                 const data = attendeeDoc.data();
                 totalPoints += data.pointsEarned || 0;
                 
-                // Add to dates for streak calculation
                 if (data.joinedAt) {
                     attendanceDates.push(new Date(data.joinedAt));
                 }
             }
+            
+            // Count interaction points
+            const interactionsSnapshot = await doc.ref.collection('interactions')
+                .where('userId', '==', userId)
+                .get();
+            
+            interactionsSnapshot.forEach(interDoc => {
+                const interaction = interDoc.data();
+                interactionPoints += interaction.points || 0;
+            });
         }
+        
+        // Add interaction points to total
+        totalPoints += interactionPoints;
         
         // Calculate attendance rate
         const attendanceRate = totalSessions > 0 
@@ -1289,14 +1749,13 @@ async function loadUserStatistics() {
         document.getElementById('attendanceRate').textContent = attendanceRate + '%';
         document.getElementById('currentStreak').textContent = currentStreak;
         
-        // Load badges
-        loadUserBadges();
+        // Update badge display
+        await loadUserBadges();
         
     } catch (error) {
         console.error('Error loading statistics:', error);
     }
-
-    }
+}
 
 // Calculate Consecutive Sessions Streak
 function calculateStreak(dates) {
