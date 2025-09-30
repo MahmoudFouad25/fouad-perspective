@@ -778,17 +778,19 @@ async function loadUserData() {
 }
 
 // Check for Active Session
+// Check for Active Session without index
 async function checkActiveSession() {
     try {
+        // Get all sessions for the course
         const snapshot = await db.collection('liveSessions')
-            .where('status', '==', 'active')
+            .where('courseId', '==', currentCourseId)
             .get();
         
         let foundSession = null;
         
         snapshot.forEach(doc => {
             const session = doc.data();
-            if (session.courseId === currentCourseId) {
+            if (session.status === 'active') {
                 foundSession = { id: doc.id, ...session };
             }
         });
@@ -799,8 +801,32 @@ async function checkActiveSession() {
         } else {
             hideLiveSession();
         }
+        
     } catch (error) {
         console.error('Error checking active session:', error);
+        
+        // Try without filter
+        try {
+            const snapshot = await db.collection('liveSessions').get();
+            
+            let foundSession = null;
+            
+            snapshot.forEach(doc => {
+                const session = doc.data();
+                if (session.courseId === currentCourseId && session.status === 'active') {
+                    foundSession = { id: doc.id, ...session };
+                }
+            });
+            
+            if (foundSession) {
+                activeSession = foundSession;
+                showLiveSession(activeSession);
+            } else {
+                hideLiveSession();
+            }
+        } catch (fallbackError) {
+            console.error('Fallback also failed:', fallbackError);
+        }
     }
 }
 
@@ -1545,13 +1571,14 @@ async function getTotalCourseSessions(courseId) {
 
         // Load All Sessions
 // Complete Sessions Loading with proper filtering
+// Load Sessions without requiring index
 async function loadSessions() {
     try {
         console.log('Loading sessions for course:', currentCourseId);
         
+        // Load ALL sessions first (without ordering)
         const snapshot = await db.collection('liveSessions')
             .where('courseId', '==', currentCourseId)
-            .orderBy('date', 'desc')
             .get();
         
         const now = new Date();
@@ -1559,9 +1586,21 @@ async function loadSessions() {
         const pastSessions = [];
         const activeSessions = [];
         
+        // Convert to array and process
+        const allSessions = [];
         snapshot.forEach(doc => {
-            const session = { id: doc.id, ...doc.data() };
-            
+            allSessions.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // Sort manually in JavaScript
+        allSessions.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
+            const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
+            return dateB - dateA; // Descending order
+        });
+        
+        // Now categorize sessions
+        allSessions.forEach(session => {
             // Handle by status first
             if (session.status === 'active') {
                 activeSessions.push(session);
@@ -1597,12 +1636,7 @@ async function loadSessions() {
             return dateA - dateB;
         });
         
-        // Sort past by date (descending - newest first)
-        pastSessions.sort((a, b) => {
-            const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
-            const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
-            return dateB - dateA;
-        });
+        // Already sorted past sessions (descending)
         
         displayUpcomingSessions(upcomingSessions);
         displayPastSessions(pastSessions);
@@ -1616,7 +1650,79 @@ async function loadSessions() {
     } catch (error) {
         console.error('Error loading sessions:', error);
         
-        // Show error message to user
+        // Try alternative loading method
+        loadSessionsAlternative();
+    }
+}
+
+// Alternative loading method if main fails
+async function loadSessionsAlternative() {
+    try {
+        console.log('Using alternative loading method...');
+        
+        // Load without any filters
+        const snapshot = await db.collection('liveSessions').get();
+        
+        const now = new Date();
+        const upcomingSessions = [];
+        const pastSessions = [];
+        const activeSessions = [];
+        
+        snapshot.forEach(doc => {
+            const session = { id: doc.id, ...doc.data() };
+            
+            // Manual filter for courseId
+            if (session.courseId !== currentCourseId) return;
+            
+            // Categorize
+            if (session.status === 'active') {
+                activeSessions.push(session);
+            } else if (session.status === 'completed') {
+                pastSessions.push(session);
+            } else {
+                const sessionDateTime = new Date(`${session.date}T${session.time || '00:00'}`);
+                
+                if (sessionDateTime > now) {
+                    upcomingSessions.push(session);
+                } else {
+                    pastSessions.push(session);
+                }
+            }
+        });
+        
+        // Sort sessions
+        upcomingSessions.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
+            const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
+            return dateA - dateB;
+        });
+        
+        pastSessions.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
+            const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
+            return dateB - dateA;
+        });
+        
+        // Show active session if exists
+        if (activeSessions.length > 0) {
+            activeSession = activeSessions[0];
+            showLiveSession(activeSession);
+        } else {
+            hideLiveSession();
+        }
+        
+        displayUpcomingSessions(upcomingSessions);
+        displayPastSessions(pastSessions);
+        
+        setTimeout(() => {
+            checkUserAttendance();
+            loadUserStatistics();
+        }, 500);
+        
+    } catch (error) {
+        console.error('Alternative loading also failed:', error);
+        
+        // Show error message
         document.getElementById('upcomingSessionsGrid').innerHTML = `
             <div style="text-align: center; padding: 2rem; color: #ef4444;">
                 <i class="fas fa-exclamation-circle" style="font-size: 2rem;"></i>
@@ -1882,14 +1988,13 @@ async function checkUserAttendance() {
 
         // Load User Statistics
 // Complete Statistics Loading
+// Load User Statistics without index requirements
 async function loadUserStatistics() {
     if (!userId || !currentUser) return;
     
     try {
-        // Get all sessions including active ones
-        const allSessionsSnapshot = await db.collection('liveSessions')
-            .where('courseId', '==', currentCourseId)
-            .get();
+        // Get all sessions for the course (without complex queries)
+        const allSessionsSnapshot = await db.collection('liveSessions').get();
         
         let totalSessions = 0;
         let attendedSessions = 0;
@@ -1899,6 +2004,9 @@ async function loadUserStatistics() {
         
         for (let doc of allSessionsSnapshot.docs) {
             const session = doc.data();
+            
+            // Manual filter
+            if (session.courseId !== currentCourseId) continue;
             
             // Count all non-scheduled sessions
             if (session.status === 'active' || session.status === 'completed') {
@@ -1918,14 +2026,25 @@ async function loadUserStatistics() {
             }
             
             // Count interaction points
-            const interactionsSnapshot = await doc.ref.collection('interactions')
-                .where('userId', '==', userId)
-                .get();
-            
-            interactionsSnapshot.forEach(interDoc => {
-                const interaction = interDoc.data();
-                interactionPoints += interaction.points || 0;
-            });
+            try {
+                const interactionsSnapshot = await doc.ref.collection('interactions')
+                    .where('userId', '==', userId)
+                    .get();
+                
+                interactionsSnapshot.forEach(interDoc => {
+                    const interaction = interDoc.data();
+                    interactionPoints += interaction.points || 0;
+                });
+            } catch (e) {
+                // If interactions query fails, get all and filter manually
+                const allInteractions = await doc.ref.collection('interactions').get();
+                allInteractions.forEach(interDoc => {
+                    const interaction = interDoc.data();
+                    if (interaction.userId === userId) {
+                        interactionPoints += interaction.points || 0;
+                    }
+                });
+            }
         }
         
         // Add interaction points to total
@@ -1950,6 +2069,12 @@ async function loadUserStatistics() {
         
     } catch (error) {
         console.error('Error loading statistics:', error);
+        
+        // Set default values on error
+        document.getElementById('totalLivePoints').textContent = '0';
+        document.getElementById('sessionsAttended').textContent = '0';
+        document.getElementById('attendanceRate').textContent = '0%';
+        document.getElementById('currentStreak').textContent = '0';
     }
 }
 
