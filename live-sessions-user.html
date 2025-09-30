@@ -128,6 +128,34 @@
     cursor: not-allowed !important;
     transform: scale(1) !important;
 }
+
+        /* Disabled button styles */
+.reaction-btn-disabled {
+    opacity: 0.3 !important;
+    cursor: not-allowed !important;
+    transform: scale(1) !important;
+    background: rgba(100, 100, 100, 0.2) !important;
+}
+
+.reaction-btn-disabled:hover {
+    transform: scale(1) !important;
+    background: rgba(100, 100, 100, 0.2) !important;
+}
+
+/* Session tracking indicator */
+.tracking-active {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(34, 197, 94, 0.9);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 50px;
+    font-size: 0.9rem;
+    z-index: 1000;
+    animation: pulse 2s infinite;
+}
+        
     </style>
 </head>
 <body>
@@ -674,6 +702,25 @@ let userSessionPoints = 0;
 // Initialize Page
 // Initialize Page
 window.addEventListener('DOMContentLoaded', async function() {
+    // Check Firebase is loaded
+if (typeof firebase === 'undefined') {
+    document.getElementById('mainContent').innerHTML = `
+        <div style="text-align: center; padding: 5rem;">
+            <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #ef4444;"></i>
+            <p style="margin-top: 1rem; color: rgba(255, 255, 255, 0.7);">خطأ في تحميل Firebase</p>
+            <button onclick="location.reload()" style="
+                margin-top: 1rem;
+                padding: 10px 20px;
+                background: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 25px;
+                cursor: pointer;
+            ">إعادة المحاولة</button>
+        </div>
+    `;
+    return;
+}
         
     await loadUserData();
     
@@ -817,7 +864,8 @@ async function checkSessionEnd() {
     }
 }
 // Show Live Session
-function showLiveSession(session) {
+// Show Live Session with saved points
+async function showLiveSession(session) {
     const banner = document.getElementById('liveSessionBanner');
     const sessionTitle = document.getElementById('sessionTitle');
     
@@ -825,7 +873,43 @@ function showLiveSession(session) {
         sessionTitle.textContent = session.title;
         banner.style.display = 'block';
         
-        // Start Timer
+        // Load user's points for this session
+        if (userId) {
+            try {
+                // Get attendance record
+                const attendeeDoc = await db.collection('liveSessions')
+                    .doc(session.id)
+                    .collection('attendees')
+                    .doc(userId)
+                    .get();
+                
+                let sessionPoints = 0;
+                
+                if (attendeeDoc.exists) {
+                    sessionPoints = attendeeDoc.data().pointsEarned || 0;
+                }
+                
+                // Get interaction points
+                const interactionsSnapshot = await db.collection('liveSessions')
+                    .doc(session.id)
+                    .collection('interactions')
+                    .where('userId', '==', userId)
+                    .get();
+                
+                interactionsSnapshot.forEach(doc => {
+                    sessionPoints += doc.data().points || 0;
+                });
+                
+                // Update display
+                userSessionPoints = sessionPoints;
+                document.getElementById('sessionPoints').textContent = userSessionPoints;
+                
+            } catch (error) {
+                console.error('Error loading session points:', error);
+            }
+        }
+        
+        // Start timer
         if (session.startedAt && !sessionInterval) {
             startTimer(session.startedAt);
         }
@@ -991,9 +1075,33 @@ function startSessionTracking(sessionId) {
     // Store interval ID for cleanup
     window.sessionTrackingInterval = trackingInterval;
 }
+
+        // Show tracking indicator
+function showTrackingIndicator() {
+    // Remove existing indicator
+    const existing = document.querySelector('.tracking-active');
+    if (existing) existing.remove();
+    
+    // Create new indicator
+    const indicator = document.createElement('div');
+    indicator.className = 'tracking-active';
+    indicator.innerHTML = `
+        <i class="fas fa-circle" style="color: red; animation: blink 1s infinite;"></i>
+        تتبع نشط للجلسة
+    `;
+    document.body.appendChild(indicator);
+}
+
+// Hide tracking indicator
+function hideTrackingIndicator() {
+    const indicator = document.querySelector('.tracking-active');
+    if (indicator) indicator.remove();
+}
+        
 // إضافة دالة تسجيل الحضور
 // Complete Attendance Recording System
 async function recordAttendance(sessionId) {
+    showLoading('جاري تسجيل الحضور...');
     if (!userId || !currentUser) {
         Swal.fire('تنبيه', 'يجب تسجيل الدخول أولاً', 'warning');
         return;
@@ -1023,6 +1131,7 @@ async function recordAttendance(sessionId) {
                     </div>
                 `
             });
+            hideLoading();
             return;
         }
         
@@ -1160,6 +1269,51 @@ async function recordAttendance(sessionId) {
     }
 }
 
+    // Show loading overlay
+function showLoading(message = 'جاري التحميل...') {
+    // Remove existing overlay
+    hideLoading();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'loadingOverlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="
+            background: rgba(30, 58, 95, 0.95);
+            padding: 2rem;
+            border-radius: 20px;
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            text-align: center;
+        ">
+            <i class="fas fa-spinner fa-spin" style="
+                font-size: 3rem;
+                color: #FFD700;
+                margin-bottom: 1rem;
+            "></i>
+            <p style="color: white; font-size: 1.2rem;">${message}</p>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+}
+
+// Hide loading overlay
+function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.remove();
+}    
 // دالة فحص ومنح الشارات
 // Complete Badge System
 async function checkAndAwardBadges(sessionId, sessionData) {
@@ -1390,54 +1544,96 @@ async function getTotalCourseSessions(courseId) {
 }
 
         // Load All Sessions
+// Complete Sessions Loading with proper filtering
 async function loadSessions() {
     try {
         console.log('Loading sessions for course:', currentCourseId);
         
-        const snapshot = await db.collection('liveSessions').get();
+        const snapshot = await db.collection('liveSessions')
+            .where('courseId', '==', currentCourseId)
+            .orderBy('date', 'desc')
+            .get();
         
         const now = new Date();
         const upcomingSessions = [];
         const pastSessions = [];
+        const activeSessions = [];
         
         snapshot.forEach(doc => {
             const session = { id: doc.id, ...doc.data() };
             
-            // فلترة حسب الدورة
-            if (session.courseId !== currentCourseId) return;
-            
-            // التحقق من الحالة أولاً
+            // Handle by status first
             if (session.status === 'active') {
-                // تخطي الجلسات النشطة حالياً
-                return;
+                activeSessions.push(session);
             } else if (session.status === 'completed') {
-                // الجلسات المكتملة
                 pastSessions.push(session);
-            } else if (session.status === 'scheduled') {
-                // الجلسات المجدولة
-                const sessionDateTime = new Date(`${session.date}T${session.time}`);
+            } else if (session.status === 'scheduled' || !session.status) {
+                // Check date for scheduled sessions
+                const sessionDateTime = new Date(`${session.date}T${session.time || '00:00'}`);
+                
                 if (sessionDateTime > now) {
                     upcomingSessions.push(session);
                 } else {
-                    // جلسة مجدولة لكن وقتها فات - اعتبرها منتهية
+                    // Past scheduled session that wasn't marked complete
                     pastSessions.push(session);
                 }
             }
         });
         
-        console.log('Upcoming:', upcomingSessions.length, 'Past:', pastSessions.length);
+        console.log(`Found: ${activeSessions.length} active, ${upcomingSessions.length} upcoming, ${pastSessions.length} past`);
+        
+        // Show active session if exists
+        if (activeSessions.length > 0) {
+            activeSession = activeSessions[0];
+            showLiveSession(activeSession);
+        } else {
+            hideLiveSession();
+        }
+        
+        // Sort upcoming by date (ascending - nearest first)
+        upcomingSessions.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
+            const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
+            return dateA - dateB;
+        });
+        
+        // Sort past by date (descending - newest first)
+        pastSessions.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
+            const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
+            return dateB - dateA;
+        });
         
         displayUpcomingSessions(upcomingSessions);
         displayPastSessions(pastSessions);
         
-        setTimeout(checkUserAttendance, 500);
-        loadUserStatistics();
+        // Load attendance status and statistics
+        setTimeout(() => {
+            checkUserAttendance();
+            loadUserStatistics();
+        }, 500);
         
     } catch (error) {
         console.error('Error loading sessions:', error);
+        
+        // Show error message to user
+        document.getElementById('upcomingSessionsGrid').innerHTML = `
+            <div style="text-align: center; padding: 2rem; color: #ef4444;">
+                <i class="fas fa-exclamation-circle" style="font-size: 2rem;"></i>
+                <p style="margin-top: 1rem;">خطأ في تحميل الجلسات</p>
+                <button onclick="location.reload()" style="
+                    margin-top: 1rem;
+                    padding: 8px 16px;
+                    background: #3b82f6;
+                    color: white;
+                    border: none;
+                    border-radius: 20px;
+                    cursor: pointer;
+                ">إعادة المحاولة</button>
+            </div>
+        `;
     }
 }
-
 // دالة بديلة في حالة فشل الفهرس
 async function loadSessionsAlternative() {
     try {
@@ -1891,6 +2087,28 @@ function showBadgeDetails(badgeId) {
         showCloseButton: true
     });
 }
+
+        // Cleanup on page unload
+window.addEventListener('beforeunload', async () => {
+    // Clear intervals
+    if (sessionInterval) clearInterval(sessionInterval);
+    if (window.sessionTrackingInterval) clearInterval(window.sessionTrackingInterval);
+    
+    // Update last seen if in active session
+    if (activeSession && userId) {
+        try {
+            await db.collection('liveSessions')
+                .doc(activeSession.id)
+                .collection('attendees')
+                .doc(userId)
+                .update({
+                    lastSeenAt: new Date().toISOString()
+                });
+        } catch (error) {
+            console.error('Error updating last seen:', error);
+        }
+    }
+});
         
     </script>
 </body>
