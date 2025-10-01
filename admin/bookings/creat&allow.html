@@ -4637,13 +4637,23 @@ async function sendWelcomeMessage(student) {
         // دالة عرض نافذة الاختيار المتقدمة
 async function showPendingBookingsSelector() {
     try {
-        // جلب الطلبات المعلقة
+        // جلب الطلبات المدفوعة فقط (بدون فلترة accountCreated)
         const snapshot = await db.collection('individualStudents')
-            .where('accountCreated', '==', false)
             .where('paymentConfirmed', '==', true)
             .get();
         
-        if (snapshot.empty) {
+        // فلترة يدوية للطلبات التي تحتاج معالجة
+        const pendingDocs = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            // شروط القبول: دفع مؤكد + (بدون حساب أو حساب معلق)
+            if (data.paymentConfirmed === true && 
+                (!data.userId || data.accountStatus === 'pending_creation')) {
+                pendingDocs.push(doc);
+            }
+        });
+        
+        if (pendingDocs.length === 0) {
             Swal.fire({
                 icon: 'info',
                 title: 'لا توجد طلبات معلقة',
@@ -4655,7 +4665,7 @@ async function showPendingBookingsSelector() {
         
         // بناء قائمة HTML للطلبات
         let bookingsHTML = '';
-        snapshot.forEach(doc => {
+        pendingDocs.forEach(doc => {
             const data = doc.data();
             const customer = data.customer || {};
             const pricing = data.pricing || {};
@@ -4715,7 +4725,7 @@ async function showPendingBookingsSelector() {
                                 margin-bottom: 20px;">
                         <p style="margin: 0; color: #0369A1;">
                             <i class="fas fa-info-circle"></i>
-                            يوجد <strong>${snapshot.size}</strong> طلب معلق. 
+                            يوجد <strong>${pendingDocs.length}</strong> طلب معلق. 
                             اختر الطلبات التي تريد معالجتها الآن.
                         </p>
                     </div>
@@ -4852,13 +4862,22 @@ async function processAllPendingBookings() {
     console.log('🚀 بدء معالجة جميع الطلبات المعلقة...');
     
     try {
-        // جلب كل الطلبات التي تحتاج معالجة
+        // جلب كل الطلبات المدفوعة
         const snapshot = await db.collection('individualStudents')
-            .where('accountCreated', '==', false)
             .where('paymentConfirmed', '==', true)
             .get();
         
-        if (snapshot.empty) {
+        // فلترة يدوية للطلبات التي تحتاج معالجة
+        const pendingDocs = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.paymentConfirmed === true && 
+                (!data.userId || data.accountStatus === 'pending_creation')) {
+                pendingDocs.push(doc);
+            }
+        });
+        
+        if (pendingDocs.length === 0) {
             Swal.fire({
                 icon: 'info',
                 title: 'لا توجد طلبات معلقة',
@@ -4868,7 +4887,7 @@ async function processAllPendingBookings() {
             return;
         }
         
-        const pendingCount = snapshot.size;
+        const pendingCount = pendingDocs.length;
         
         // سؤال التأكيد
         const result = await Swal.fire({
@@ -4917,7 +4936,7 @@ async function processAllPendingBookings() {
         });
         
         // معالجة كل طلب
-        for (const doc of snapshot.docs) {
+        for (const doc of pendingDocs) {
             processed++;
             const studentData = doc.data();
             const studentId = doc.id;
