@@ -463,9 +463,16 @@
 
     <script>
         // Firebase Configuration (ضع هنا إعدادات Firebase الخاصة بك)
-        const firebaseConfig = {
-            // سنملأها في الخطوة القادمة
-        };
+        // Firebase Configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+    authDomain: "fouad-perspective.firebaseapp.com",
+    projectId: "fouad-perspective",
+    storageBucket: "fouad-perspective.firebasestorage.app",
+    messagingSenderId: "1068763865336",
+    appId: "1:1068763865336:web:b791abcd22d536aedd5b0d",
+    measurementId: "G-RY1FYVB3Q9"
+};
 
         // Initialize Firebase
         if (!firebase.apps.length) {
@@ -518,10 +525,456 @@
             }
         });
 
-        function initializePage() {
-            console.log('جاري تهيئة الصفحة...');
-            // سنملأ هذه الدالة في الخطوات القادمة
+        // ==================== DATABASE STRUCTURE ====================
+/*
+users/{userId}/pillarProgress/{courseId}/
+  ├── courage/
+  │   ├── totalPoints: 0
+  │   ├── entries: []
+  │   ├── lastEntry: null
+  │   
+  ├── mirror/
+  │   ├── totalPoints: 0
+  │   ├── entries: []
+  │   ├── lastEntry: null
+  │   
+  ├── action/
+  │   ├── totalPoints: 0
+  │   ├── currentStreak: 0
+  │   ├── longestStreak: 0
+  │   ├── lastActionDate: null
+  │   ├── entries: []
+  │   
+  └── witness/
+      ├── totalPoints: 0
+      ├── entries: []
+      ├── weeklyReports: []
+      ├── commitments: []
+*/
+
+// ==================== PILLAR PROGRESS FUNCTIONS ====================
+
+async function getPillarProgress(pillarType) {
+    try {
+        const docRef = db.collection('users')
+            .doc(currentUser.uid)
+            .collection('pillarProgress')
+            .doc(currentCourseId);
+        
+        const doc = await docRef.get();
+        
+        if (doc.exists) {
+            const data = doc.data();
+            return data[pillarType] || createEmptyPillar(pillarType);
+        } else {
+            return createEmptyPillar(pillarType);
         }
+    } catch (error) {
+        console.error('خطأ في جلب تقدم الركيزة:', error);
+        return createEmptyPillar(pillarType);
+    }
+}
+
+function createEmptyPillar(pillarType) {
+    const base = {
+        totalPoints: 0,
+        entries: [],
+        lastEntry: null
+    };
+    
+    if (pillarType === 'action') {
+        base.currentStreak = 0;
+        base.longestStreak = 0;
+        base.lastActionDate = null;
+    } else if (pillarType === 'witness') {
+        base.weeklyReports = [];
+        base.commitments = [];
+    }
+    
+    return base;
+}
+
+async function savePillarEntry(pillarType, entryData) {
+    try {
+        const docRef = db.collection('users')
+            .doc(currentUser.uid)
+            .collection('pillarProgress')
+            .doc(currentCourseId);
+        
+        const entry = {
+            date: firebase.firestore.FieldValue.serverTimestamp(),
+            timestamp: new Date().toISOString(),
+            ...entryData
+        };
+        
+        // جلب البيانات الحالية
+        const currentData = await getPillarProgress(pillarType);
+        
+        // إضافة النقاط
+        const newTotalPoints = currentData.totalPoints + entryData.points;
+        
+        // إضافة الإدخال للقائمة
+        const updatedEntries = [entry, ...currentData.entries];
+        
+        // بناء الكائن المُحدّث
+        const updateData = {
+            [`${pillarType}.totalPoints`]: newTotalPoints,
+            [`${pillarType}.entries`]: updatedEntries,
+            [`${pillarType}.lastEntry`]: entry
+        };
+        
+        // حساب Streak للخطوة
+        if (pillarType === 'action') {
+            const streakData = calculateStreak(currentData, entry);
+            updateData[`${pillarType}.currentStreak`] = streakData.currentStreak;
+            updateData[`${pillarType}.longestStreak`] = streakData.longestStreak;
+            updateData[`${pillarType}.lastActionDate`] = entry.timestamp;
+        }
+        
+        // الحفظ في Firebase
+        await docRef.set(updateData, { merge: true });
+        
+        // تحديث نقاط الرحلة الإجمالية
+        await updateJourneyPoints(entryData.points, pillarType, entry);
+        
+        return { success: true, newTotal: newTotalPoints };
+    } catch (error) {
+        console.error('خطأ في حفظ الإدخال:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+function calculateStreak(currentData, newEntry) {
+    const today = new Date(newEntry.timestamp);
+    today.setHours(0, 0, 0, 0);
+    
+    let currentStreak = 1;
+    let longestStreak = currentData.longestStreak || 1;
+    
+    if (currentData.lastActionDate) {
+        const lastDate = new Date(currentData.lastActionDate);
+        lastDate.setHours(0, 0, 0, 0);
+        
+        const diffDays = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+        
+        if (diffDays === 0) {
+            // نفس اليوم - نحافظ على السلسلة الحالية
+            currentStreak = currentData.currentStreak || 1;
+        } else if (diffDays === 1) {
+            // اليوم التالي مباشرة - نزيد السلسلة
+            currentStreak = (currentData.currentStreak || 0) + 1;
+        } else {
+            // انقطعت السلسلة - نبدأ من جديد
+            currentStreak = 1;
+        }
+    }
+    
+    if (currentStreak > longestStreak) {
+        longestStreak = currentStreak;
+    }
+    
+    return { currentStreak, longestStreak };
+}
+
+async function updateJourneyPoints(points, pillarType, entryDetails) {
+    try {
+        const userRef = db.collection('users').doc(currentUser.uid);
+        
+        // جلب النقاط الحالية
+        const userDoc = await userRef.get();
+        const userData = userDoc.data();
+        
+        const currentJourneyPoints = userData.journeyPoints?.total || 0;
+        const newJourneyPoints = currentJourneyPoints + points;
+        
+        // تحديث النقاط
+        await userRef.update({
+            'journeyPoints.total': newJourneyPoints,
+            'journeyPoints.lastUpdated': firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // إضافة سجل في التاريخ
+        await userRef.collection('journeyPoints').doc('history').set({
+            entries: firebase.firestore.FieldValue.arrayUnion({
+                date: firebase.firestore.FieldValue.serverTimestamp(),
+                amount: points,
+                type: `pillar_${pillarType}`,
+                courseId: currentCourseId,
+                details: entryDetails
+            })
+        }, { merge: true });
+        
+    } catch (error) {
+        console.error('خطأ في تحديث نقاط الرحلة:', error);
+    }
+}
+
+// ==================== PAGE INITIALIZATION ====================
+
+function initializePage() {
+    console.log('جاري تهيئة الصفحة...');
+    loadCourageTab();
+}
+
+// ==================== TAB LOADERS ====================
+
+async function loadCourageTab() {
+    const container = document.getElementById('courageTab');
+    container.innerHTML = '<div class="loading">جاري التحميل...</div>';
+    
+    try {
+        const progress = await getPillarProgress('courage');
+        
+        container.innerHTML = `
+            <div class="pillar-card">
+                <div class="pillar-header">
+                    <span class="pillar-icon">🔥</span>
+                    <div class="pillar-info">
+                        <h2>مفتاح الجرأة</h2>
+                        <p>الخروج من منطقة الراحة والمخاطرة بالكشف</p>
+                    </div>
+                </div>
+                
+                <div class="progress-section">
+                    <div class="progress-header">
+                        <span style="color: rgba(255, 255, 255, 0.8);">تقدمك</span>
+                        <span style="color: var(--gold-primary); font-weight: bold; font-size: 1.2rem;">
+                            ${progress.totalPoints} / 1000 نقطة
+                        </span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: ${(progress.totalPoints / 1000) * 100}%">
+                            ${Math.round((progress.totalPoints / 1000) * 100)}%
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="action-btn" onclick="openCourageModal()">
+                    <i class="fas fa-plus-circle"></i>
+                    سجّل لحظة جرأة
+                </button>
+                
+                <div class="entries-list">
+                    <h3 style="color: var(--gold-primary); margin-bottom: 15px;">
+                        <i class="fas fa-history"></i> آخر الإنجازات
+                    </h3>
+                    ${renderEntries(progress.entries)}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>حدث خطأ في تحميل البيانات</p>
+            </div>
+        `;
+    }
+}
+
+async function loadMirrorTab() {
+    const container = document.getElementById('mirrorTab');
+    container.innerHTML = '<div class="loading">جاري التحميل...</div>';
+    
+    try {
+        const progress = await getPillarProgress('mirror');
+        
+        container.innerHTML = `
+            <div class="pillar-card">
+                <div class="pillar-header">
+                    <span class="pillar-icon">🪞</span>
+                    <div class="pillar-info">
+                        <h2>مفتاح المرآة</h2>
+                        <p>الاستعداد لسماع الحقيقة عن النفس</p>
+                    </div>
+                </div>
+                
+                <div class="progress-section">
+                    <div class="progress-header">
+                        <span style="color: rgba(255, 255, 255, 0.8);">تقدمك</span>
+                        <span style="color: var(--gold-primary); font-weight: bold; font-size: 1.2rem;">
+                            ${progress.totalPoints} / 1000 نقطة
+                        </span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: ${(progress.totalPoints / 1000) * 100}%">
+                            ${Math.round((progress.totalPoints / 1000) * 100)}%
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="action-btn" onclick="openMirrorModal()">
+                    <i class="fas fa-plus-circle"></i>
+                    سجّل استقبال فيدباك
+                </button>
+                
+                <div class="entries-list">
+                    <h3 style="color: var(--gold-primary); margin-bottom: 15px;">
+                        <i class="fas fa-history"></i> آخر الإنجازات
+                    </h3>
+                    ${renderEntries(progress.entries)}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>حدث خطأ في تحميل البيانات</p>
+            </div>
+        `;
+    }
+}
+
+async function loadActionTab() {
+    const container = document.getElementById('actionTab');
+    container.innerHTML = '<div class="loading">جاري التحميل...</div>';
+    
+    try {
+        const progress = await getPillarProgress('action');
+        
+        container.innerHTML = `
+            <div class="pillar-card">
+                <div class="pillar-header">
+                    <span class="pillar-icon">🚶</span>
+                    <div class="pillar-info">
+                        <h2>مفتاح الخطوة</h2>
+                        <p>الانتقال من النظرية إلى التطبيق الفعلي</p>
+                    </div>
+                </div>
+                
+                <div class="streak-display">
+                    <div class="streak-number">🔥 ${progress.currentStreak || 0}</div>
+                    <div class="streak-label">يوم متتالي</div>
+                    <div class="streak-rewards">
+                        <div class="reward-item">
+                            <span>7 أيام</span>
+                            <span style="color: var(--gold-primary);">+50 نقطة</span>
+                        </div>
+                        <div class="reward-item">
+                            <span>14 يوم</span>
+                            <span style="color: var(--gold-primary);">+120 نقطة</span>
+                        </div>
+                        <div class="reward-item">
+                            <span>21 يوم</span>
+                            <span style="color: var(--gold-primary);">+200 نقطة</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="progress-section">
+                    <div class="progress-header">
+                        <span style="color: rgba(255, 255, 255, 0.8);">تقدمك</span>
+                        <span style="color: var(--gold-primary); font-weight: bold; font-size: 1.2rem;">
+                            ${progress.totalPoints} / 1000 نقطة
+                        </span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: ${(progress.totalPoints / 1000) * 100}%">
+                            ${Math.round((progress.totalPoints / 1000) * 100)}%
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="action-btn" onclick="openActionModal()">
+                    <i class="fas fa-plus-circle"></i>
+                    طبّقت اليوم
+                </button>
+                
+                <div class="entries-list">
+                    <h3 style="color: var(--gold-primary); margin-bottom: 15px;">
+                        <i class="fas fa-history"></i> آخر الإنجازات
+                    </h3>
+                    ${renderEntries(progress.entries)}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>حدث خطأ في تحميل البيانات</p>
+            </div>
+        `;
+    }
+}
+
+async function loadWitnessTab() {
+    const container = document.getElementById('witnessTab');
+    container.innerHTML = '<div class="loading">جاري التحميل...</div>';
+    
+    try {
+        const progress = await getPillarProgress('witness');
+        
+        container.innerHTML = `
+            <div class="pillar-card">
+                <div class="pillar-header">
+                    <span class="pillar-icon">👥</span>
+                    <div class="pillar-info">
+                        <h2>مفتاح الشهود</h2>
+                        <p>تحمل المسؤولية أمام الآخرين</p>
+                    </div>
+                </div>
+                
+                <div class="progress-section">
+                    <div class="progress-header">
+                        <span style="color: rgba(255, 255, 255, 0.8);">تقدمك</span>
+                        <span style="color: var(--gold-primary); font-weight: bold; font-size: 1.2rem;">
+                            ${progress.totalPoints} / 1000 نقطة
+                        </span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: ${(progress.totalPoints / 1000) * 100}%">
+                            ${Math.round((progress.totalPoints / 1000) * 100)}%
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="action-btn" onclick="openWitnessModal()">
+                    <i class="fas fa-plus-circle"></i>
+                    سجّل تقرير محاسبة
+                </button>
+                
+                <div class="entries-list">
+                    <h3 style="color: var(--gold-primary); margin-bottom: 15px;">
+                        <i class="fas fa-history"></i> آخر الإنجازات
+                    </h3>
+                    ${renderEntries(progress.entries)}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>حدث خطأ في تحميل البيانات</p>
+            </div>
+        `;
+    }
+}
+
+function renderEntries(entries) {
+    if (!entries || entries.length === 0) {
+        return `
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <p>لم تسجل أي إنجاز بعد</p>
+                <p style="font-size: 0.9rem; margin-top: 10px;">ابدأ رحلتك الآن!</p>
+            </div>
+        `;
+    }
+    
+    return entries.slice(0, 5).map(entry => {
+        const date = entry.timestamp ? new Date(entry.timestamp).toLocaleDateString('ar-EG') : 'تاريخ غير محدد';
+        return `
+            <div class="entry-item">
+                <div class="entry-date">${date} - ${entry.points} نقطة</div>
+                <div class="entry-note">${entry.note || entry.type || 'إنجاز'}</div>
+            </div>
+        `;
+    }).join('');
+}
+        
     </script>
 </body>
 </html>
