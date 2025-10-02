@@ -1380,20 +1380,35 @@ function checkCoursesAvailability() {
 }
 
         // تحميل جميع الدورات
-        async function loadAllCourses() {
+        // تحميل جميع الدورات
+async function loadAllCourses() {
     try {
         console.log('📚 تحميل الدورات...');
         
-        // الحصول على الدورات من enrollments في بيانات المستخدم
         const enrollments = userData.enrollments || userData.courses || [];
-        
         allCourses = [];
         
-        enrollments.forEach(enrollment => {
-            // تحديد الحالة بناءً على التقدم
-            const learningProgress = enrollment.courseInfo?.progress || enrollment.progress || 0;
-            let status;
+        // نجيب بيانات كل دورة من Firebase
+        for (const enrollment of enrollments) {
+            const actualCourseId = enrollment.courseId || enrollment.courseInfo?.id || enrollment.id;
             
+            // جلب بيانات الدورة الفعلية من Firestore
+            let courseData = null;
+            try {
+                const courseDoc = await db.collection('courses').doc(actualCourseId).get();
+                if (courseDoc.exists) {
+                    courseData = courseDoc.data();
+                }
+            } catch (error) {
+                console.warn('لم نتمكن من جلب بيانات الدورة:', actualCourseId);
+            }
+            
+            // حساب التقدم
+            const learningProgress = (typeof enrollment.learningProgress === 'object' && enrollment.learningProgress !== null) 
+                ? (enrollment.learningProgress.overallProgress || 0) 
+                : (enrollment.learningProgress || 0);
+            
+            let status;
             if (learningProgress >= 100) {
                 status = 'completed';
             } else if (learningProgress > 0 || enrollment.status?.current === 'active') {
@@ -1402,32 +1417,47 @@ function checkCoursesAvailability() {
                 status = 'pending';
             }
             
-            // استخراج معرف الدورة الحقيقي
-            const actualCourseId = enrollment.courseId || enrollment.courseInfo?.id || enrollment.id;
+            // حساب عدد الدروس من courseData
+            let lessonsCount = 0;
+            if (courseData && courseData.modules) {
+                lessonsCount = courseData.modules.reduce((total, module) => 
+                    total + (module.lessons?.length || 0), 0);
+            }
+            
+            // حساب المدة من courseData
+            let totalDuration = 0;
+            if (courseData && courseData.modules) {
+                courseData.modules.forEach(module => {
+                    if (module.lessons) {
+                        module.lessons.forEach(lesson => {
+                            totalDuration += parseInt(lesson.duration) || 0;
+                        });
+                    }
+                });
+            }
             
             allCourses.push({
-                id: actualCourseId, // المعرف الحقيقي للدورة
-                enrollmentId: enrollment.id, // معرف التسجيل
-                title: enrollment.title || 'رحلة غير معنونة',
-                type: enrollment.type || 'course',
+                id: actualCourseId,
+                enrollmentId: enrollment.id,
+                title: enrollment.title || courseData?.title || 'رحلة غير معنونة',
+                type: enrollment.type || courseData?.type || 'course',
                 status: status,
                 createdAt: enrollment.enrolledAt || new Date(),
                 
                 // التقدم
-                learningProgress: learningProgress,
+                learningProgress: enrollment.learningProgress,
                 completedLessons: enrollment.completedLessons || [],
                 lastActivity: enrollment.lastActivity || null,
                 
-                // معلومات إضافية
-                description: enrollment.description || 'استكشف رحلة تحويلية جديدة في منظور الفؤاد',
-                instructor: enrollment.instructorName || 'كوتش محمود فؤاد',
-                duration: enrollment.duration || 0,
-                lessonsCount: enrollment.lessonsCount || enrollment.modules?.reduce((total, module) => 
-                    total + (module.lessons?.length || 0), 0) || 0,
-                objectives: enrollment.objectives || [],
-                thumbnail: enrollment.thumbnailUrl || enrollment.thumbnail || null
+                // معلومات من courseData
+                description: courseData?.description || enrollment.description || 'استكشف رحلة تحويلية جديدة في منظور الفؤاد',
+                instructor: courseData?.instructor || enrollment.instructorName || 'كوتش محمود فؤاد',
+                duration: totalDuration,
+                lessonsCount: lessonsCount,
+                objectives: courseData?.objectives || enrollment.objectives || [],
+                thumbnail: courseData?.thumbnail || enrollment.thumbnailUrl || enrollment.thumbnail || null
             });
-        });
+        }
         
         filteredCourses = [...allCourses];
         console.log('✅ تم تحميل', allCourses.length, 'دورة');
