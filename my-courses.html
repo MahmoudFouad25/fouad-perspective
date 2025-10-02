@@ -1380,7 +1380,7 @@ function checkCoursesAvailability() {
 }
 
         // تحميل جميع الدورات
-        // تحميل جميع الدورات
+    // تحميل جميع الدورات
 async function loadAllCourses() {
     try {
         console.log('📚 تحميل الدورات...');
@@ -1388,11 +1388,10 @@ async function loadAllCourses() {
         const enrollments = userData.enrollments || userData.courses || [];
         allCourses = [];
         
-        // نجيب بيانات كل دورة من Firebase
         for (const enrollment of enrollments) {
             const actualCourseId = enrollment.courseId || enrollment.courseInfo?.id || enrollment.id;
             
-            // جلب بيانات الدورة الفعلية من Firestore
+            // جلب بيانات الدورة من Firestore
             let courseData = null;
             try {
                 const courseDoc = await db.collection('courses').doc(actualCourseId).get();
@@ -1403,28 +1402,33 @@ async function loadAllCourses() {
                 console.warn('لم نتمكن من جلب بيانات الدورة:', actualCourseId);
             }
             
-            // حساب التقدم
-            const learningProgress = (typeof enrollment.learningProgress === 'object' && enrollment.learningProgress !== null) 
-                ? (enrollment.learningProgress.overallProgress || 0) 
-                : (enrollment.learningProgress || 0);
+            // **هنا المفتاح:** جلب التقدم الفعلي من userData.progress
+            const courseProgress = userData.progress?.[actualCourseId] || {
+                percentage: 0,
+                completedLessons: [],
+                timeSpent: 0
+            };
+            
+            const completedCount = (courseProgress.completedLessons || []).length;
+            const actualProgress = courseProgress.percentage || 0;
             
             let status;
-            if (learningProgress >= 100) {
+            if (actualProgress >= 100) {
                 status = 'completed';
-            } else if (learningProgress > 0 || enrollment.status?.current === 'active') {
+            } else if (actualProgress > 0) {
                 status = 'active';
             } else {
                 status = 'pending';
             }
             
-            // حساب عدد الدروس من courseData
+            // حساب عدد الدروس
             let lessonsCount = 0;
             if (courseData && courseData.modules) {
                 lessonsCount = courseData.modules.reduce((total, module) => 
                     total + (module.lessons?.length || 0), 0);
             }
             
-            // حساب المدة من courseData
+            // حساب المدة
             let totalDuration = 0;
             if (courseData && courseData.modules) {
                 courseData.modules.forEach(module => {
@@ -1436,6 +1440,9 @@ async function loadAllCourses() {
                 });
             }
             
+            // آخر نشاط من courseProgress
+            const lastActivity = courseProgress.lastActivity || enrollment.lastActivity;
+            
             allCourses.push({
                 id: actualCourseId,
                 enrollmentId: enrollment.id,
@@ -1444,10 +1451,11 @@ async function loadAllCourses() {
                 status: status,
                 createdAt: enrollment.enrolledAt || new Date(),
                 
-                // التقدم
-                learningProgress: enrollment.learningProgress,
-                completedLessons: enrollment.completedLessons || [],
-                lastActivity: enrollment.lastActivity || null,
+                // التقدم الفعلي من userData.progress
+                learningProgress: actualProgress,
+                completedLessons: courseProgress.completedLessons || [],
+                lastActivity: lastActivity,
+                timeSpent: courseProgress.timeSpent || 0,
                 
                 // معلومات من courseData
                 description: courseData?.description || enrollment.description || 'استكشف رحلة تحويلية جديدة في منظور الفؤاد',
@@ -1461,6 +1469,7 @@ async function loadAllCourses() {
         
         filteredCourses = [...allCourses];
         console.log('✅ تم تحميل', allCourses.length, 'دورة');
+        console.log('📊 بيانات الدورات:', allCourses);
         
     } catch (error) {
         console.error('خطأ في تحميل الدورات:', error);
@@ -1532,16 +1541,10 @@ function renderCourses() {
     coursesGrid.innerHTML = coursesHtml;
 }
         // إنشاء بطاقة الدورة/المسار
-// إنشاء بطاقة الدورة/المسار - النسخة الصحيحة
 function createCourseCard(course) {
-    // استخراج البيانات الصحيحة
-    const completedCount = Array.isArray(course.completedLessons) ? course.completedLessons.length : 0;
+    const completedCount = (course.completedLessons || []).length;
     const totalLessonsInCourse = course.lessonsCount || 0;
-    
-    // learningProgress هو object، نحتاج overallProgress
-    const actualProgress = (typeof course.learningProgress === 'object' && course.learningProgress !== null) 
-        ? (course.learningProgress.overallProgress || 0) 
-        : (course.learningProgress || 0);
+    const actualProgress = course.learningProgress || 0;
     
     // حالة الدورة
     let statusText, statusClass, statusIcon;
@@ -1559,7 +1562,7 @@ function createCourseCard(course) {
         statusIcon = 'lock';
     }
 
-    // الإنجازات بناءً على التقدم الفعلي
+    // الإنجازات
     let achievementBadges = '';
     if (actualProgress >= 100) {
         achievementBadges = '<span class="achievement-badge"><i class="fas fa-trophy"></i> بطل الرحلة</span>';
@@ -1591,13 +1594,13 @@ function createCourseCard(course) {
         lastActivityText = `أكملت ${completedCount} درس`;
     }
 
-    // حساب الوقت - إذا كان 0، نستخدم تقدير
-    const totalDuration = course.duration || (totalLessonsInCourse * 15); // 15 دقيقة لكل درس
+    // الوقت
+    const totalDuration = course.duration || 0;
     const durationHours = Math.floor(totalDuration / 60);
     const durationMinutes = totalDuration % 60;
     const durationText = durationHours > 0 ? 
-        `${durationHours} ساعة ${durationMinutes > 0 ? durationMinutes + ' دقيقة' : ''}` : 
-        `${durationMinutes || totalDuration} دقيقة`;
+        `${durationHours} ساعة` : 
+        `${durationMinutes} دقيقة`;
 
     const canAccess = course.status === 'active' || course.status === 'completed' || actualProgress > 0;
     const buttonText = actualProgress >= 100 ? 'مراجعة' : 
@@ -1624,7 +1627,6 @@ function createCourseCard(course) {
                     <i class="fas fa-${statusIcon}"></i> ${statusText}
                 </span>
                 
-                <!-- مؤشر التقدم المحسّن -->
                 <div class="course-progress-overlay">
                     <div class="progress-info" style="
                         display: flex;
@@ -1632,31 +1634,15 @@ function createCourseCard(course) {
                         align-items: center;
                         margin-bottom: 8px;
                     ">
-                        <span style="
-                            font-size: 0.85rem;
-                            color: rgba(255, 255, 255, 0.8);
-                            font-weight: 600;
-                        ">التقدم</span>
-                        <span style="
-                            font-size: 1.1rem;
-                            font-weight: 700;
-                            background: linear-gradient(135deg, #3b82f6, #10b981);
-                            -webkit-background-clip: text;
-                            -webkit-text-fill-color: transparent;
-                        ">${Math.round(actualProgress)}%</span>
+                        <span style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">التقدم</span>
+                        <span style="font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">${Math.round(actualProgress)}%</span>
                     </div>
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: ${actualProgress}%"></div>
                     </div>
-                    <div style="
-                        display: flex;
-                        justify-content: space-between;
-                        margin-top: 8px;
-                        font-size: 0.8rem;
-                        color: rgba(255, 255, 255, 0.7);
-                    ">
-                        <span><i class="fas fa-check-circle" style="color: #10b981;"></i> ${completedCount} ${completedCount === 1 ? 'درس' : 'دروس'}</span>
-                        <span><i class="fas fa-list" style="color: #3b82f6;"></i> ${totalLessonsInCourse || '...'} إجمالي</span>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.8rem; color: rgba(255, 255, 255, 0.7);">
+                        <span><i class="fas fa-check-circle" style="color: #10b981;"></i> ${completedCount} درس</span>
+                        <span><i class="fas fa-list" style="color: #3b82f6;"></i> ${totalLessonsInCourse} إجمالي</span>
                     </div>
                 </div>
             </div>
@@ -1672,7 +1658,7 @@ function createCourseCard(course) {
                     </div>
                     <div class="meta-item">
                         <i class="fas fa-book-reader"></i>
-                        <span>${totalLessonsInCourse || '...'} ${totalLessonsInCourse === 1 ? 'درس' : 'دروس'}</span>
+                        <span>${totalLessonsInCourse} درس</span>
                     </div>
                     <div class="meta-item">
                         <i class="fas fa-clock"></i>
@@ -1680,23 +1666,14 @@ function createCourseCard(course) {
                     </div>
                     <div class="meta-item" style="grid-column: 1 / -1;">
                         <i class="fas fa-history"></i>
-                        <span style="
-                            font-size: 0.85rem;
-                            color: ${completedCount > 0 ? 'rgba(16, 185, 129, 0.9)' : 'rgba(255, 255, 255, 0.5)'};
-                        ">${lastActivityText}</span>
+                        <span style="font-size: 0.85rem; color: ${completedCount > 0 ? 'rgba(16, 185, 129, 0.9)' : 'rgba(255, 255, 255, 0.5)'};">${lastActivityText}</span>
                     </div>
                 </div>
                 
-                ${achievementBadges ? `
-                    <div class="achievement-badges">
-                        ${achievementBadges}
-                    </div>
-                ` : ''}
+                ${achievementBadges ? `<div class="achievement-badges">${achievementBadges}</div>` : ''}
                 
                 <div class="course-actions">
-                    <button class="btn btn-primary" 
-                            ${canAccess ? '' : 'disabled'} 
-                            onclick="${canAccess ? `openContent('${course.id}', '${course.type}')` : 'void(0)'}">
+                    <button class="btn btn-primary" ${canAccess ? '' : 'disabled'} onclick="${canAccess ? `openContent('${course.id}', '${course.type}')` : 'void(0)'}">
                         <i class="fas fa-${buttonIcon}"></i>
                         ${buttonText}
                     </button>
@@ -1708,6 +1685,11 @@ function createCourseCard(course) {
             </div>
         </div>
     `;
+}
+
+function openContent(courseId, courseType) {
+    localStorage.setItem('currentCourseId', courseId);
+    window.location.href = `./course-view.html?id=${courseId}`;
 }
 
 // فتح محتوى الدورة
