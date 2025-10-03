@@ -6876,20 +6876,26 @@ window.saveBadge = saveBadge;
                             </div>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 8px;">
-                            <button onclick="editBadge('${badge.id}')" 
-                                    style="background: #3b82f6; color: white; 
-                                           border: none; padding: 8px 15px; 
-                                           border-radius: 8px; cursor: pointer;">
-                                ✏️ تعديل
-                            </button>
-                            <button onclick="deleteBadge('${badge.id}')" 
-                                    style="background: #dc2626; color: white; 
-                                           border: none; padding: 8px 15px; 
-                                           border-radius: 8px; cursor: pointer;">
-                                🗑️ حذف
-                            </button>
-                        </div>
-                    </div>
+    <button onclick="viewBadgeRecipients('${badge.id}', '${badge.name.replace(/'/g, "\\'")}', '${badge.icon}')" 
+            style="background: #10b981; color: white; 
+                   border: none; padding: 8px 15px; 
+                   border-radius: 8px; cursor: pointer;
+                   font-size: 0.85rem;">
+        👥 التفاصيل
+    </button>
+    <button onclick="editBadge('${badge.id}')" 
+            style="background: #3b82f6; color: white; 
+                   border: none; padding: 8px 15px; 
+                   border-radius: 8px; cursor: pointer;">
+        ✏️ تعديل
+    </button>
+    <button onclick="deleteBadge('${badge.id}')" 
+            style="background: #dc2626; color: white; 
+                   border: none; padding: 8px 15px; 
+                   border-radius: 8px; cursor: pointer;">
+        🗑️ حذف
+    </button>
+</div>
                 `;
             }
             
@@ -7369,70 +7375,87 @@ async function checkAndAwardBadges(userId, userPoints, completedContentType) {
         const badgesSnapshot = await db.collection('badges').get();
         const userDoc = await db.collection('users').doc(userId).get();
         const userData = userDoc.data();
+        const userName = userData.displayName || userData.name || 'طالب';
         const currentBadges = userData.badges || [];
         
-        const newBadges = [];
-        
-        badgesSnapshot.forEach(doc => {
+        for (const doc of badgesSnapshot.docs) {
             const badge = { id: doc.id, ...doc.data() };
             
             // تحقق من عدم حصول المستخدم على الشارة مسبقاً
             const alreadyHas = currentBadges.some(b => b.id === badge.id);
-            if (alreadyHas) return;
+            if (alreadyHas) continue;
             
-            // تحقق من الشروط
             let shouldAward = false;
+            let reason = '';
             
             switch(badge.type) {
                 case 'points':
-                    if (userPoints >= badge.conditions.requiredPoints) {
+                    if (userPoints >= badge.conditions?.requiredPoints) {
                         shouldAward = true;
+                        reason = `الوصول إلى ${badge.conditions.requiredPoints} نقطة`;
                     }
                     break;
                     
                 case 'content':
-                    if (badge.conditions.linkedContent === completedContentType ||
-                        badge.conditions.linkedContent === 'any_lesson') {
+                    if (!badge.conditions) break;
+                    
+                    const linkType = badge.conditions.linkType;
+                    
+                    // التحقق من الدروس
+                    if (linkType === 'any_lesson') {
                         shouldAward = true;
+                        reason = 'إكمال درس';
+                    } else if (linkType === 'specific_lesson' && 
+                               badge.conditions.specificContentId === completedContentType) {
+                        shouldAward = true;
+                        reason = 'إكمال درس محدد';
+                    }
+                    
+                    // التحقق من الوحدات
+                    if (linkType === 'any_module') {
+                        // يحتاج فحص إكمال وحدة
+                        const completedModules = userData.completedModules || [];
+                        if (completedModules.length > 0) {
+                            shouldAward = true;
+                            reason = 'إكمال وحدة';
+                        }
+                    } else if (linkType === 'specific_module' && badge.conditions.specificModuleId) {
+                        const completedModules = userData.completedModules || [];
+                        if (completedModules.includes(badge.conditions.specificModuleId)) {
+                            shouldAward = true;
+                            reason = 'إكمال وحدة محددة';
+                        }
+                    }
+                    
+                    // التحقق من القوالب
+                    if (linkType === 'any_template') {
+                        if (courseId) {
+                            shouldAward = true;
+                            reason = 'التفاعل مع القالب';
+                        }
+                    } else if (linkType === 'specific_template' && 
+                               badge.conditions.specificTemplateId === courseId) {
+                        shouldAward = true;
+                        reason = 'التفاعل مع قالب محدد';
                     }
                     break;
                     
                 case 'streak':
-                    // يحتاج لنظام تتبع الأيام المتتالية
                     const streak = userData.currentStreak || 0;
-                    if (streak >= badge.conditions.streakDays) {
+                    if (streak >= badge.conditions?.streakDays) {
                         shouldAward = true;
+                        reason = `الحفاظ على ${badge.conditions.streakDays} يوم متتالي`;
                     }
+                    break;
+                    
+                case 'manual':
+                    // الشارات اليدوية لا تُمنح تلقائياً
                     break;
             }
             
             if (shouldAward) {
-                newBadges.push({
-                    id: badge.id,
-                    name: badge.name,
-                    icon: badge.icon,
-                    awardedDate: new Date().toISOString(),
-                    type: badge.type
-                });
-                
-                // زيادة عداد المنح
-                db.collection('badges').doc(doc.id).update({
-                    timesAwarded: firebase.firestore.FieldValue.increment(1)
-                });
+                await awardBadgeToStudent(userId, userName, badge.id, badge, reason);
             }
-        });
-        
-        // إضافة الشارات الجديدة للمستخدم
-        if (newBadges.length > 0) {
-            const allBadges = [...currentBadges, ...newBadges];
-            
-            await db.collection('users').doc(userId).update({
-                badges: allBadges,
-                lastBadgeEarned: new Date().toISOString()
-            });
-            
-            // إشعار بالشارات الجديدة
-            showBadgeNotification(newBadges);
         }
         
     } catch (error) {
@@ -7466,6 +7489,199 @@ window.showBadgeNotification = showBadgeNotification;
 window.viewAllBadges = viewAllBadges;
 window.deleteBadge = deleteBadge;
     
+    // دالة منح شارة للطالب مع تسجيل التفاصيل
+async function awardBadgeToStudent(userId, userName, badgeId, badgeData, reason) {
+    try {
+        const batch = db.batch();
+        
+        // 1. إضافة الشارة لمصفوفة شارات المستخدم
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        const userData = userDoc.data();
+        const currentBadges = userData.badges || [];
+        
+        // التحقق من عدم وجود الشارة مسبقاً
+        const alreadyHas = currentBadges.some(b => b.id === badgeId);
+        if (alreadyHas) {
+            console.log('الطالب لديه الشارة بالفعل');
+            return false;
+        }
+        
+        // إضافة الشارة مع التفاصيل
+        const newBadge = {
+            id: badgeId,
+            name: badgeData.name,
+            icon: badgeData.icon,
+            awardedDate: new Date().toISOString(),
+            type: badgeData.type,
+            reason: reason,
+            courseId: courseId,
+            courseName: courseData?.title || ''
+        };
+        
+        currentBadges.push(newBadge);
+        batch.update(userRef, {
+            badges: currentBadges,
+            lastBadgeEarned: new Date().toISOString()
+        });
+        
+        // 2. زيادة عداد المنح في الشارة
+        const badgeRef = db.collection('badges').doc(badgeId);
+        batch.update(badgeRef, {
+            timesAwarded: firebase.firestore.FieldValue.increment(1)
+        });
+        
+        // 3. تسجيل التفاصيل في مجموعة منفصلة
+        const awardRef = db.collection('badgeAwards').doc();
+        batch.set(awardRef, {
+            badgeId: badgeId,
+            badgeName: badgeData.name,
+            badgeIcon: badgeData.icon,
+            userId: userId,
+            userName: userName,
+            userEmail: userData.email || '',
+            awardedDate: firebase.firestore.FieldValue.serverTimestamp(),
+            reason: reason,
+            courseId: courseId,
+            courseName: courseData?.title || ''
+        });
+        
+        // تنفيذ جميع العمليات
+        await batch.commit();
+        
+        console.log(`✅ تم منح شارة "${badgeData.name}" للطالب ${userName}`);
+        
+        // إظهار إشعار للطالب
+        showBadgeNotification([newBadge]);
+        
+        return true;
+        
+    } catch (error) {
+        console.error('خطأ في منح الشارة:', error);
+        return false;
+    }
+}
+
+// إضافة للـ window
+window.awardBadgeToStudent = awardBadgeToStudent;
+
+// دالة عرض قائمة الطلاب الحاصلين على شارة معينة
+async function viewBadgeRecipients(badgeId, badgeName, badgeIcon) {
+    try {
+        const awardsSnapshot = await db.collection('badgeAwards')
+            .where('badgeId', '==', badgeId)
+            .orderBy('awardedDate', 'desc')
+            .get();
+        
+        let recipientsHTML = '';
+        
+        if (awardsSnapshot.empty) {
+            recipientsHTML = `
+                <div style="text-align: center; padding: 40px; color: #94a3b8;">
+                    <div style="font-size: 3rem; margin-bottom: 15px; opacity: 0.5;">📭</div>
+                    <p>لم يحصل أي طالب على هذه الشارة بعد</p>
+                </div>
+            `;
+        } else {
+            recipientsHTML = `
+                <div style="max-height: 60vh; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead style="position: sticky; top: 0; background: #1e293b; z-index: 10;">
+                            <tr style="border-bottom: 2px solid #334155;">
+                                <th style="padding: 12px; text-align: right; color: #60a5fa; font-weight: 600;">الطالب</th>
+                                <th style="padding: 12px; text-align: right; color: #60a5fa; font-weight: 600;">التاريخ</th>
+                                <th style="padding: 12px; text-align: right; color: #60a5fa; font-weight: 600;">السبب</th>
+                                <th style="padding: 12px; text-align: right; color: #60a5fa; font-weight: 600;">الدورة</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            awardsSnapshot.forEach(doc => {
+                const award = doc.data();
+                const awardDate = award.awardedDate?.toDate?.();
+                const dateStr = awardDate ? 
+                    awardDate.toLocaleString('ar-SA', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : 'غير محدد';
+                
+                recipientsHTML += `
+                    <tr style="border-bottom: 1px solid #334155; transition: background 0.2s;"
+                        onmouseover="this.style.background='rgba(59, 130, 246, 0.1)'"
+                        onmouseout="this.style.background=''">
+                        <td style="padding: 12px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <div style="width: 35px; height: 35px; border-radius: 50%; 
+                                           background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+                                           display: flex; align-items: center; justify-content: center;
+                                           color: white; font-weight: bold;">
+                                    ${(award.userName || 'ط').charAt(0)}
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600; color: white;">${award.userName || 'غير معروف'}</div>
+                                    <div style="font-size: 0.8rem; color: #94a3b8;">${award.userEmail || ''}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td style="padding: 12px; color: #cbd5e1; font-size: 0.9rem;">
+                            ${dateStr}
+                        </td>
+                        <td style="padding: 12px; color: #94a3b8; font-size: 0.85rem;">
+                            ${award.reason || '-'}
+                        </td>
+                        <td style="padding: 12px; color: #94a3b8; font-size: 0.85rem;">
+                            ${award.courseName || '-'}
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            recipientsHTML += `
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 15px; padding: 12px; background: rgba(59, 130, 246, 0.1); 
+                           border-radius: 8px; text-align: center; color: #60a5fa;">
+                    <strong>إجمالي: ${awardsSnapshot.size} طالب</strong>
+                </div>
+            `;
+        }
+        
+        Swal.fire({
+            title: `
+                <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
+                    <span style="font-size: 2.5rem;">${badgeIcon}</span>
+                    <span style="color: #60a5fa;">${badgeName}</span>
+                </div>
+            `,
+            html: recipientsHTML,
+            width: '900px',
+            showConfirmButton: false,
+            showCloseButton: true,
+            background: '#0f172a',
+            customClass: {
+                popup: 'badge-recipients-popup'
+            }
+        });
+        
+    } catch (error) {
+        console.error('خطأ في عرض التفاصيل:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'فشل تحميل تفاصيل الشارة',
+            background: '#0f172a'
+        });
+    }
+}
+
+// إضافة للـ window
+window.viewBadgeRecipients = viewBadgeRecipients;
+
     
 // رسالة تأكيد تحميل نظام النقاط
 console.log('✅ نظام النقاط تم تحميله بنجاح');
