@@ -1642,46 +1642,76 @@ function closeLessonStudentsModal() {
     if (modal) modal.remove();
 }
         
-        // دالة لعرض المحتوى المرتبط بالشارة بشكل مختصر
-function getLinkedContentBadgeText(badge) {
-    if (badge.type === 'content' && badge.conditions) {
-        const linkType = badge.conditions.linkType;
-        
-        if (linkType === 'any_lesson') {
-            return '<i class="fas fa-link"></i> عام - أي درس';
-        } else if (linkType === 'specific_lesson') {
-            return '<i class="fas fa-link"></i> درس محدد';
-        } else if (linkType === 'any_module') {
-            return '<i class="fas fa-link"></i> عام - أي وحدة';
-        } else if (linkType === 'specific_module') {
-            return '<i class="fas fa-link"></i> وحدة محددة';
-        } else if (linkType === 'any_template') {
-            return '<i class="fas fa-link"></i> عام - أي قالب';
-        } else if (linkType === 'specific_template') {
-            return '<i class="fas fa-link"></i> قالب محدد';
-        }
-    } else if (badge.type === 'points' && badge.conditions?.requiredPoints) {
-        return `<i class="fas fa-star"></i> ${badge.conditions.requiredPoints} نقطة`;
-    } else if (badge.type === 'milestone') {
-        return '<i class="fas fa-trophy"></i> إنجاز عام';
-    } else if (badge.type === 'live_attendance' || badge.type === 'attendance') {
-        return '<i class="fas fa-video"></i> حضور مباشر';
-    }
-    
-    return '<i class="fas fa-certificate"></i> شارة عامة';
-}
-
-window.getLinkedContentBadgeText = getLinkedContentBadgeText;
-        
+       
         // عرض تبويب الشارات
-        function displayBadgesTab() {
+        // تحويل الدالة إلى async
+async function displayBadgesTab() {
     const content = document.getElementById('tabContent');
     
     // تجميع بيانات الشارات بشكل شامل
     const badgesData = [];
     
-    allData.badges.forEach(badge => {
+    // استخدام for...of بدلاً من forEach للسماح بـ await
+    for (const badge of allData.badges) {
         const awardHistory = allData.badgeHistory.filter(h => h.badgeId === badge.id);
+        
+        // جلب اسم المحتوى المرتبط
+        let linkedContentName = '';
+        if (badge.type === 'content' && badge.conditions) {
+            const linkType = badge.conditions.linkType;
+            
+            if (linkType === 'any_lesson') {
+                linkedContentName = 'عام - أي درس';
+            } else if (linkType === 'specific_lesson' && badge.conditions.specificContentId) {
+                try {
+                    const contentDoc = await db.collection('courseContentLibrary').doc(badge.conditions.specificContentId).get();
+                    if (contentDoc.exists) {
+                        const contentData = contentDoc.data();
+                        const typeIcons = {'video': '🎥', 'pdf': '📄', 'audio': '🎧', 'text': '📝', 'quiz': '❓'};
+                        const icon = typeIcons[contentData.type] || '📄';
+                        linkedContentName = `${icon} درس: ${contentData.name}`;
+                    } else {
+                        linkedContentName = '⚠️ الدرس غير موجود';
+                    }
+                } catch (error) {
+                    linkedContentName = '❌ خطأ في التحميل';
+                }
+            } else if (linkType === 'any_module') {
+                linkedContentName = 'عام - أي وحدة';
+            } else if (linkType === 'specific_module' && badge.conditions.specificModuleId) {
+                try {
+                    const moduleDoc = await db.collection('contentModules').doc(badge.conditions.specificModuleId).get();
+                    if (moduleDoc.exists) {
+                        linkedContentName = `📦 وحدة: ${moduleDoc.data().name}`;
+                    } else {
+                        linkedContentName = '⚠️ الوحدة غير موجودة';
+                    }
+                } catch (error) {
+                    linkedContentName = '❌ خطأ';
+                }
+            } else if (linkType === 'any_template') {
+                linkedContentName = 'عام - أي قالب';
+            } else if (linkType === 'specific_template' && badge.conditions.specificTemplateId) {
+                try {
+                    const templateDoc = await db.collection('courseTemplates').doc(badge.conditions.specificTemplateId).get();
+                    if (templateDoc.exists) {
+                        linkedContentName = `🎓 قالب: ${templateDoc.data().name}`;
+                    } else {
+                        linkedContentName = '⚠️ القالب غير موجود';
+                    }
+                } catch (error) {
+                    linkedContentName = '❌ خطأ';
+                }
+            }
+        } else if (badge.type === 'points' && badge.conditions?.requiredPoints) {
+            linkedContentName = `⭐ ${badge.conditions.requiredPoints} نقطة`;
+        } else if (badge.type === 'milestone') {
+            linkedContentName = '🎯 إنجاز عام';
+        } else if (badge.type === 'live_attendance' || badge.type === 'attendance') {
+            linkedContentName = '🔴 حضور مباشر';
+        } else {
+            linkedContentName = 'شارة عامة';
+        }
         
         badgesData.push({
             id: badge.id,
@@ -1689,7 +1719,8 @@ window.getLinkedContentBadgeText = getLinkedContentBadgeText;
             icon: badge.icon,
             type: badge.type || 'other',
             conditions: badge.conditions,
-            description: badge.description || '', // ✅ إضافة الوصف
+            description: badge.description || '',
+            linkedContentName: linkedContentName, // ✅ حفظ الاسم
             totalAwarded: awardHistory.length,
             awardedTo: awardHistory.map(h => ({
                 userId: h.userId,
@@ -1888,8 +1919,8 @@ window.getLinkedContentBadgeText = getLinkedContentBadgeText;
         ${typeNames[badge.type] || badge.type}
     </div>
     <div style="font-size: 0.8rem; color: rgba(255,255,255,0.5);">
-        ${getLinkedContentBadgeText(badge)}
-    </div>
+    <i class="fas fa-link"></i> ${badge.linkedContentName}
+</div>
 </div>
                             </div>
                             <div style="display: flex; gap: 20px; align-items: center;">
