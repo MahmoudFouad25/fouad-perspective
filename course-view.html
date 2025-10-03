@@ -3837,10 +3837,118 @@ async function updatePointsDisplay() {
     
     // تحديث نقاط الوحدات في العرض
     updateModulesPointsDisplay();
+
+
+       // تحديث الملخص المركزي في Firebase
+    await updateCourseProgressSummary();
     
     // تم نقل عرض النقاط والشارات إلى renderPointsDashboard
 }
 
+       // ====================================
+// دالة التخزين المركزي للتقدم
+// ====================================
+async function updateCourseProgressSummary() {
+    try {
+        const userId = localStorage.getItem('userId') || auth.currentUser?.uid;
+        if (!userId || !courseId) {
+            console.log('⚠️ لا يوجد userId أو courseId');
+            return;
+        }
+
+        console.log('🔄 بدء تحديث ملخص التقدم...');
+        
+        // 1️⃣ حساب نقاط المحتوى من النظام التفصيلي الموجود
+        const contentPoints = {
+            achievement: detailedPointsSystem.achievement || 0,
+            bonus: detailedPointsSystem.bonus || 0,
+            participation: detailedPointsSystem.participation || 0,
+            speed: detailedPointsSystem.speed || 0,
+            multiplier: detailedPointsSystem.multiplier || 0,
+            total: detailedPointsSystem.totalEarned || 0
+        };
+        
+        console.log('📚 نقاط المحتوى:', contentPoints);
+        
+        // 2️⃣ جلب نقاط الركائز الأربعة من مكانها الأصلي
+        const pillarDoc = await db.collection('users')
+            .doc(userId)
+            .collection('pillarProgress')
+            .doc(courseId)
+            .get();
+        
+        const pillarData = pillarDoc.exists ? pillarDoc.data() : {};
+        
+        const pillarPoints = {
+            courage: pillarData['courage.totalPoints'] || 0,
+            mirror: pillarData['mirror.totalPoints'] || 0,
+            action: pillarData['action.totalPoints'] || 0,
+            witness: pillarData['witness.totalPoints'] || 0,
+            total: (pillarData['courage.totalPoints'] || 0) +
+                   (pillarData['mirror.totalPoints'] || 0) +
+                   (pillarData['action.totalPoints'] || 0) +
+                   (pillarData['witness.totalPoints'] || 0)
+        };
+        
+        console.log('🔑 نقاط الركائز:', pillarPoints);
+        
+        // 3️⃣ حساب نقاط الحضور المباشر
+        let liveAttendance = 0;
+        if (userData && userData.attendance && userData.attendance[courseId]) {
+            Object.values(userData.attendance[courseId]).forEach(session => {
+                liveAttendance += session.pointsEarned || 0;
+            });
+        }
+        
+        console.log('🔴 نقاط الحضور:', liveAttendance);
+        
+        // 4️⃣ حساب نقاط الشارات
+        let badgesPoints = 0;
+        if (userData && userData.journeyPoints && userData.journeyPoints.history) {
+            userData.journeyPoints.history.forEach(entry => {
+                if (entry.type === 'badge_reward') {
+                    badgesPoints += entry.amount || 0;
+                }
+            });
+        }
+        
+        console.log('🏅 نقاط الشارات:', badgesPoints);
+        
+        // 5️⃣ تجميع النقاط الإضافية
+        const additionalPoints = {
+            liveAttendance: liveAttendance,
+            badges: badgesPoints,
+            pillarPoints: pillarPoints,
+            total: liveAttendance + badgesPoints + pillarPoints.total
+        };
+        
+        console.log('✨ النقاط الإضافية:', additionalPoints);
+        
+        // 6️⃣ حساب المجموع النهائي
+        const totalPoints = contentPoints.total + additionalPoints.total;
+        
+        console.log('🎯 المجموع الكلي:', totalPoints);
+        
+        // 7️⃣ التخزين في Firebase
+        await db.collection('users')
+            .doc(userId)
+            .collection('courseProgress')
+            .doc(courseId)
+            .set({
+                contentPoints: contentPoints,
+                additionalPoints: additionalPoints,
+                totalPoints: totalPoints,
+                completedLessons: userProgress.completedLessons || [],
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+                courseName: courseTitle || 'ملاذ الحيارى'
+            }, { merge: true });
+        
+        console.log('✅ تم حفظ ملخص التقدم بنجاح في Firebase');
+        
+    } catch (error) {
+        console.error('❌ خطأ في updateCourseProgressSummary:', error);
+    }
+}
 // دالة عرض قسم الشارات
 function renderBadgesSection() {
     // فلترة الشارات الخاصة بالدورة الحالية
