@@ -6704,15 +6704,28 @@ window.saveBadge = saveBadge;
 
    async function viewAllBadges() {
     try {
-        const snapshot = await db.collection('badges').orderBy('sortOrder', 'asc').get();
+        const snapshot = await db.collection('badges').get();
         const badges = [];
         
         snapshot.forEach(doc => {
-            badges.push({
-                id: doc.id,
-                ...doc.data()
-            });
-        });
+    const data = doc.data();
+    badges.push({
+        id: doc.id,
+        ...data,
+        sortOrder: data.sortOrder !== undefined ? data.sortOrder : 999999
+    });
+});
+
+// ترتيب الشارات: الأقدم أولاً (حسب تاريخ الإنشاء إذا لم يكن هناك sortOrder)
+badges.sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) {
+        return a.sortOrder - b.sortOrder;
+    }
+    // إذا كان sortOrder متساوي، رتب حسب تاريخ الإنشاء
+    const dateA = a.createdDate?.toDate?.() || new Date(0);
+    const dateB = b.createdDate?.toDate?.() || new Date(0);
+    return dateA - dateB;
+});
         
         let badgesHTML = '';
         
@@ -6926,6 +6939,45 @@ window.saveBadge = saveBadge;
     }
 }
 
+    // دالة لتحديث الشارات القديمة مرة واحدة فقط
+async function fixOldBadgesSortOrder() {
+    try {
+        const snapshot = await db.collection('badges').get();
+        const batch = db.batch();
+        let updated = 0;
+        
+        snapshot.forEach((doc, index) => {
+            const data = doc.data();
+            if (data.sortOrder === undefined) {
+                batch.update(doc.ref, { sortOrder: index });
+                updated++;
+            }
+        });
+        
+        if (updated > 0) {
+            await batch.commit();
+            console.log(`✅ تم تحديث ${updated} شارة قديمة`);
+            Swal.fire({
+                icon: 'success',
+                title: 'تم التحديث',
+                text: `تم إضافة نظام الترتيب لـ ${updated} شارة`,
+                timer: 2000
+            });
+        } else {
+            console.log('✅ جميع الشارات محدثة بالفعل');
+        }
+        
+        // إعادة عرض الشارات
+        viewAllBadges();
+        
+    } catch (error) {
+        console.error('خطأ في التحديث:', error);
+        Swal.fire('خطأ', 'فشل تحديث الشارات', 'error');
+    }
+}
+
+// إضافة للـ window
+window.fixOldBadgesSortOrder = fixOldBadgesSortOrder;
 // حذف شارة
 async function deleteBadge(badgeId) {
     const result = await Swal.fire({
