@@ -766,7 +766,18 @@
                 width: 100%;
             }
         }
+
+        .sortable-ghost {
+    opacity: 0.4;
+    background: #f59e0b !important;
+}
+
+.badge-item:hover {
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+    transform: translateY(-2px);
+}
     </style>
+    
 </head>
 <body>
 
@@ -1017,7 +1028,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js"></script>
     <!-- SweetAlert2 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
+ <!-- ترتيب محتوي -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>    
 <script>
 // Firebase Configuration
 const firebaseConfig = {
@@ -6646,13 +6658,27 @@ function collectBadgeConditions() {
     
     return conditions;
 }
+    
 async function saveBadge(badgeData) {
     try {
+        // الحصول على آخر ترتيب
+        const lastBadge = await db.collection('badges')
+            .orderBy('sortOrder', 'desc')
+            .limit(1)
+            .get();
+        
+        let newSortOrder = 0;
+        if (!lastBadge.empty) {
+            const lastData = lastBadge.docs[0].data();
+            newSortOrder = (lastData.sortOrder || 0) + 1;
+        }
+        
         const badge = {
             ...badgeData,
             createdDate: firebase.firestore.FieldValue.serverTimestamp(),
             isActive: true,
-            timesAwarded: 0
+            timesAwarded: 0,
+            sortOrder: newSortOrder
         };
         
         await db.collection('badges').add(badge);
@@ -6676,10 +6702,9 @@ window.updateBadgeTypeFields = updateBadgeTypeFields;
 window.collectBadgeConditions = collectBadgeConditions;
 window.saveBadge = saveBadge;
 
-    // عرض جميع الشارات
-async function viewAllBadges() {
+   async function viewAllBadges() {
     try {
-        const snapshot = await db.collection('badges').get();
+        const snapshot = await db.collection('badges').orderBy('sortOrder', 'asc').get();
         const badges = [];
         
         snapshot.forEach(doc => {
@@ -6694,144 +6719,150 @@ async function viewAllBadges() {
         if (badges.length === 0) {
             badgesHTML = '<p style="text-align: center; color: #999;">لا توجد شارات بعد</p>';
         } else {
-            badgesHTML = '<div style="display: grid; gap: 15px; max-height: 60vh; overflow-y: auto;">';
-            
-           for (const badge of badges) {
-    const typeLabel = {
-        'manual': 'يدوية',
-        'points': 'نقاط',
-        'content': 'محتوى',
-        'streak': 'انتظام'
-    };
-    
-    // جلب تفاصيل المحتوى المرتبط
-    let contentDetails = '';
-    let contentIcon = '';
-    
-    if (badge.type === 'content' && badge.conditions) {
-        const linkType = badge.conditions.linkType;
-        
-        if (linkType === 'any_lesson') {
-            contentIcon = '🎯';
-            contentDetails = '<span style="background: #dbeafe; color: #1e40af; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">🎯 عام - أي درس</span>';
-            
-        } else if (linkType === 'specific_lesson' && badge.conditions.specificContentId) {
-            try {
-                const contentDoc = await db.collection('courseContentLibrary').doc(badge.conditions.specificContentId).get();
-                if (contentDoc.exists) {
-                    const contentData = contentDoc.data();
-                    const typeIcons = {
-                        'video': '🎥',
-                        'pdf': '📄',
-                        'audio': '🎧',
-                        'text': '📝',
-                        'quiz': '❓'
-                    };
-                    contentIcon = typeIcons[contentData.type] || '📄';
-                    contentDetails = `<span style="background: #dcfce7; color: #15803d; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">${contentIcon} درس: ${contentData.name}</span>`;
-                } else {
-                    contentDetails = '<span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⚠️ الدرس غير موجود</span>';
-                }
-            } catch (error) {
-                contentDetails = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">❌ خطأ في جلب البيانات</span>';
-            }
-            
-        } else if (linkType === 'any_module') {
-            contentIcon = '📦';
-            contentDetails = '<span style="background: #e0e7ff; color: #3730a3; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">📦 عام - أي وحدة</span>';
-            
-        } else if (linkType === 'specific_module' && badge.conditions.specificModuleId) {
-            try {
-                const moduleDoc = await db.collection('contentModules').doc(badge.conditions.specificModuleId).get();
-                if (moduleDoc.exists) {
-                    const moduleData = moduleDoc.data();
-                    contentIcon = '📦';
-                    contentDetails = `<span style="background: #fae8ff; color: #6b21a8; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">📦 وحدة: ${moduleData.name}</span>`;
-                } else {
-                    contentDetails = '<span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⚠️ الوحدة غير موجودة</span>';
-                }
-            } catch (error) {
-                contentDetails = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">❌ خطأ في جلب البيانات</span>';
-            }
-            
-        } else if (linkType === 'any_template') {
-            contentIcon = '🎓';
-            contentDetails = '<span style="background: #fef3c7; color: #78350f; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">🎓 عام - أي قالب</span>';
-            
-        } else if (linkType === 'specific_template' && badge.conditions.specificTemplateId) {
-            try {
-                const templateDoc = await db.collection('courseTemplates').doc(badge.conditions.specificTemplateId).get();
-                if (templateDoc.exists) {
-                    const templateData = templateDoc.data();
-                    contentIcon = '🎓';
-                    contentDetails = `<span style="background: #fed7aa; color: #9a3412; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">🎓 قالب: ${templateData.name}</span>`;
-                } else {
-                    contentDetails = '<span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⚠️ القالب غير موجود</span>';
-                }
-            } catch (error) {
-                contentDetails = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">❌ خطأ في جلب البيانات</span>';
-            }
-        }
-    } else if (badge.type === 'points') {
-        contentIcon = '⭐';
-        contentDetails = `<span style="background: #fef3c7; color: #78350f; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⭐ نقاط - عام</span>`;
-    }
-    
-    badgesHTML += `
-        <div style="background: linear-gradient(135deg, #fef3c7, #fed7aa); 
-                    padding: 20px; border-radius: 12px; 
-                    border: 2px solid #f59e0b;
-                    display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
-                <div style="font-size: 3rem;">${badge.icon || '🏅'}</div>
-                <div style="flex: 1;">
-                    <h4 style="margin: 0; color: #92400e;">${badge.name}</h4>
-                    <p style="margin: 5px 0; color: #78350f; font-size: 0.9rem;">
-                        ${badge.description || 'بدون وصف'}
-                    </p>
-                    <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; align-items: center;">
-                        <span style="background: white; padding: 3px 10px; 
-                                     border-radius: 15px; font-size: 0.8rem;">
-                            نوع: ${typeLabel[badge.type] || badge.type}
-                        </span>
-                        ${badge.conditions?.requiredPoints ? `
-                            <span style="background: white; padding: 3px 10px; 
-                                         border-radius: 15px; font-size: 0.8rem;">
-                                ${badge.conditions.requiredPoints} نقطة
-                            </span>
-                        ` : ''}
-                        ${badge.conditions?.streakDays ? `
-                            <span style="background: white; padding: 3px 10px; 
-                                         border-radius: 15px; font-size: 0.8rem;">
-                                ${badge.conditions.streakDays} يوم
-                            </span>
-                        ` : ''}
-                        <span style="background: #10b981; color: white; 
-                                     padding: 3px 10px; border-radius: 15px; 
-                                     font-size: 0.8rem;">
-                            مُنحت ${badge.timesAwarded || 0} مرة
-                        </span>
+            badgesHTML = `
+                <div style="background: linear-gradient(135deg, #1e3a5f, #0f172a); padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; gap: 10px; color: #60a5fa;">
+                        <i class="fas fa-info-circle"></i>
+                        <span style="font-size: 0.9rem;">اسحب الشارات لإعادة ترتيبها. الترتيب يُحفظ تلقائياً</span>
                     </div>
-                    ${contentDetails}
                 </div>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <button onclick="editBadge('${badge.id}')" 
-                        style="background: #3b82f6; color: white; 
-                               border: none; padding: 8px 15px; 
-                               border-radius: 8px; cursor: pointer;">
-                    ✏️ تعديل
-                </button>
-                <button onclick="deleteBadge('${badge.id}')" 
-                        style="background: #dc2626; color: white; 
-                               border: none; padding: 8px 15px; 
-                               border-radius: 8px; cursor: pointer;">
-                    🗑️ حذف
-                </button>
-            </div>
-        </div>
-    `;
-}
+                <div id="badgesSortableContainer" style="display: grid; gap: 15px; max-height: 60vh; overflow-y: auto;">
+            `;
+            
+            for (const badge of badges) {
+                const typeLabel = {
+                    'manual': 'يدوية',
+                    'points': 'نقاط',
+                    'content': 'محتوى',
+                    'streak': 'انتظام'
+                };
+                
+                // جلب تفاصيل المحتوى المرتبط
+                let contentDetails = '';
+                
+                if (badge.type === 'content' && badge.conditions) {
+                    const linkType = badge.conditions.linkType;
+                    
+                    if (linkType === 'any_lesson') {
+                        contentDetails = '<span style="background: #dbeafe; color: #1e40af; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">🎯 عام - أي درس</span>';
+                        
+                    } else if (linkType === 'specific_lesson' && badge.conditions.specificContentId) {
+                        try {
+                            const contentDoc = await db.collection('courseContentLibrary').doc(badge.conditions.specificContentId).get();
+                            if (contentDoc.exists) {
+                                const contentData = contentDoc.data();
+                                const typeIcons = {
+                                    'video': '🎥',
+                                    'pdf': '📄',
+                                    'audio': '🎧',
+                                    'text': '📝',
+                                    'quiz': '❓'
+                                };
+                                const contentIcon = typeIcons[contentData.type] || '📄';
+                                contentDetails = `<span style="background: #dcfce7; color: #15803d; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">${contentIcon} درس: ${contentData.name}</span>`;
+                            } else {
+                                contentDetails = '<span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⚠️ الدرس غير موجود</span>';
+                            }
+                        } catch (error) {
+                            contentDetails = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">❌ خطأ في جلب البيانات</span>';
+                        }
+                        
+                    } else if (linkType === 'any_module') {
+                        contentDetails = '<span style="background: #e0e7ff; color: #3730a3; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">📦 عام - أي وحدة</span>';
+                        
+                    } else if (linkType === 'specific_module' && badge.conditions.specificModuleId) {
+                        try {
+                            const moduleDoc = await db.collection('contentModules').doc(badge.conditions.specificModuleId).get();
+                            if (moduleDoc.exists) {
+                                const moduleData = moduleDoc.data();
+                                contentDetails = `<span style="background: #fae8ff; color: #6b21a8; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">📦 وحدة: ${moduleData.name}</span>`;
+                            } else {
+                                contentDetails = '<span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⚠️ الوحدة غير موجودة</span>';
+                            }
+                        } catch (error) {
+                            contentDetails = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">❌ خطأ في جلب البيانات</span>';
+                        }
+                        
+                    } else if (linkType === 'any_template') {
+                        contentDetails = '<span style="background: #fef3c7; color: #78350f; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">🎓 عام - أي قالب</span>';
+                        
+                    } else if (linkType === 'specific_template' && badge.conditions.specificTemplateId) {
+                        try {
+                            const templateDoc = await db.collection('courseTemplates').doc(badge.conditions.specificTemplateId).get();
+                            if (templateDoc.exists) {
+                                const templateData = templateDoc.data();
+                                contentDetails = `<span style="background: #fed7aa; color: #9a3412; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">🎓 قالب: ${templateData.name}</span>`;
+                            } else {
+                                contentDetails = '<span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⚠️ القالب غير موجود</span>';
+                            }
+                        } catch (error) {
+                            contentDetails = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">❌ خطأ في جلب البيانات</span>';
+                        }
+                    }
+                } else if (badge.type === 'points') {
+                    contentDetails = `<span style="background: #fef3c7; color: #78350f; padding: 4px 12px; border-radius: 15px; font-size: 0.85rem; display: inline-block; margin-top: 5px;">⭐ نقاط - عام</span>`;
+                }
+                
+                badgesHTML += `
+                    <div class="badge-item" data-badge-id="${badge.id}" style="background: linear-gradient(135deg, #fef3c7, #fed7aa); 
+                                padding: 20px; border-radius: 12px; 
+                                border: 2px solid #f59e0b;
+                                display: flex; justify-content: space-between; align-items: center;
+                                cursor: move;
+                                transition: all 0.3s;">
+                        <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
+                            <div style="font-size: 2rem; cursor: move; color: #92400e;">
+                                <i class="fas fa-grip-vertical"></i>
+                            </div>
+                            <div style="font-size: 3rem;">${badge.icon || '🏅'}</div>
+                            <div style="flex: 1;">
+                                <h4 style="margin: 0; color: #92400e;">${badge.name}</h4>
+                                <p style="margin: 5px 0; color: #78350f; font-size: 0.9rem;">
+                                    ${badge.description || 'بدون وصف'}
+                                </p>
+                                <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; align-items: center;">
+                                    <span style="background: white; padding: 3px 10px; 
+                                                 border-radius: 15px; font-size: 0.8rem;">
+                                        نوع: ${typeLabel[badge.type] || badge.type}
+                                    </span>
+                                    ${badge.conditions?.requiredPoints ? `
+                                        <span style="background: white; padding: 3px 10px; 
+                                                     border-radius: 15px; font-size: 0.8rem;">
+                                            ${badge.conditions.requiredPoints} نقطة
+                                        </span>
+                                    ` : ''}
+                                    ${badge.conditions?.streakDays ? `
+                                        <span style="background: white; padding: 3px 10px; 
+                                                     border-radius: 15px; font-size: 0.8rem;">
+                                            ${badge.conditions.streakDays} يوم
+                                        </span>
+                                    ` : ''}
+                                    <span style="background: #10b981; color: white; 
+                                                 padding: 3px 10px; border-radius: 15px; 
+                                                 font-size: 0.8rem;">
+                                        مُنحت ${badge.timesAwarded || 0} مرة
+                                    </span>
+                                </div>
+                                ${contentDetails}
+                            </div>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <button onclick="editBadge('${badge.id}')" 
+                                    style="background: #3b82f6; color: white; 
+                                           border: none; padding: 8px 15px; 
+                                           border-radius: 8px; cursor: pointer;">
+                                ✏️ تعديل
+                            </button>
+                            <button onclick="deleteBadge('${badge.id}')" 
+                                    style="background: #dc2626; color: white; 
+                                           border: none; padding: 8px 15px; 
+                                           border-radius: 8px; cursor: pointer;">
+                                🗑️ حذف
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
             
             badgesHTML += '</div>';
         }
@@ -6842,6 +6873,42 @@ async function viewAllBadges() {
             width: '800px',
             showConfirmButton: false,
             showCloseButton: true,
+            didOpen: () => {
+                // تفعيل السحب والإفلات
+                const container = document.getElementById('badgesSortableContainer');
+                if (container) {
+                    new Sortable(container, {
+                        animation: 150,
+                        handle: '.badge-item',
+                        ghostClass: 'sortable-ghost',
+                        onEnd: async function(evt) {
+                            // حفظ الترتيب الجديد
+                            const items = container.querySelectorAll('.badge-item');
+                            const batch = db.batch();
+                            
+                            items.forEach((item, index) => {
+                                const badgeId = item.getAttribute('data-badge-id');
+                                const badgeRef = db.collection('badges').doc(badgeId);
+                                batch.update(badgeRef, { sortOrder: index });
+                            });
+                            
+                            await batch.commit();
+                            
+                            // إشعار بسيط
+                            const Toast = Swal.mixin({
+                                toast: true,
+                                position: 'top-end',
+                                showConfirmButton: false,
+                                timer: 2000
+                            });
+                            Toast.fire({
+                                icon: 'success',
+                                title: 'تم حفظ الترتيب'
+                            });
+                        }
+                    });
+                }
+            },
             footer: `
                 <button onclick="openBadgeManager()" 
                         style="background: #f59e0b; color: white; 
@@ -6913,6 +6980,62 @@ async function editBadge(badgeId) {
                         <textarea id="editBadgeDescription" class="swal2-textarea" 
                                   style="width: 100%; height: 60px;">${badgeData.description || ''}</textarea>
                     </div>
+
+${badge.type === 'content' && badge.conditions ? `
+    <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin-top: 15px; border: 2px solid #3b82f6;">
+        <h4 style="color: #1e40af; margin-bottom: 10px;">
+            <i class="fas fa-link"></i> المحتوى المرتبط
+        </h4>
+        ${await (async () => {
+            const linkType = badge.conditions.linkType;
+            
+            if (linkType === 'any_lesson') {
+                return '<p style="color: #1e40af;">🎯 عام - أي درس</p>';
+            } else if (linkType === 'specific_lesson' && badge.conditions.specificContentId) {
+                try {
+                    const contentDoc = await db.collection('courseContentLibrary').doc(badge.conditions.specificContentId).get();
+                    if (contentDoc.exists) {
+                        const contentData = contentDoc.data();
+                        return `<p style="color: #15803d;">📄 درس: ${contentData.name}</p>`;
+                    } else {
+                        return '<p style="color: #92400e;">⚠️ الدرس غير موجود</p>';
+                    }
+                } catch (error) {
+                    return '<p style="color: #991b1b;">❌ خطأ في جلب البيانات</p>';
+                }
+            } else if (linkType === 'any_module') {
+                return '<p style="color: #3730a3;">📦 عام - أي وحدة</p>';
+            } else if (linkType === 'specific_module' && badge.conditions.specificModuleId) {
+                try {
+                    const moduleDoc = await db.collection('contentModules').doc(badge.conditions.specificModuleId).get();
+                    if (moduleDoc.exists) {
+                        const moduleData = moduleDoc.data();
+                        return `<p style="color: #6b21a8;">📦 وحدة: ${moduleData.name}</p>`;
+                    } else {
+                        return '<p style="color: #92400e;">⚠️ الوحدة غير موجودة</p>';
+                    }
+                } catch (error) {
+                    return '<p style="color: #991b1b;">❌ خطأ في جلب البيانات</p>';
+                }
+            } else if (linkType === 'any_template') {
+                return '<p style="color: #78350f;">🎓 عام - أي قالب</p>';
+            } else if (linkType === 'specific_template' && badge.conditions.specificTemplateId) {
+                try {
+                    const templateDoc = await db.collection('courseTemplates').doc(badge.conditions.specificTemplateId).get();
+                    if (templateDoc.exists) {
+                        const templateData = templateDoc.data();
+                        return `<p style="color: #9a3412;">🎓 قالب: ${templateData.name}</p>`;
+                    } else {
+                        return '<p style="color: #92400e;">⚠️ القالب غير موجود</p>';
+                    }
+                } catch (error) {
+                    return '<p style="color: #991b1b;">❌ خطأ في جلب البيانات</p>';
+                }
+            }
+            return '';
+        })()}
+    </div>
+` : ''}
                     
                     <div class="form-group" style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #0369a1;">
@@ -7066,8 +7189,8 @@ async function editBadge(badgeId) {
                                    min="1" style="width: 100%; margin-top: 8px;">
                         </div>
                     ` : ''}
-                    
-                    ${badgeData.type === 'streak' ? `
+
+                                        ${badgeData.type === 'streak' ? `
                         <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin-top: 15px;">
                             <label style="color: #0369a1; font-weight: bold;">عدد الأيام المتتالية:</label>
                             <input type="number" id="editStreakDays" class="swal2-input" 
