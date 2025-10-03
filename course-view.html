@@ -5617,7 +5617,7 @@ try {
     
     // تحديث عداد الشارة
     await db.collection('badges').doc(newBadge.id).update({
-        totalAwarded: firebase.firestore.FieldValue.increment(1),
+    timesAwarded: firebase.firestore.FieldValue.increment(1),
         lastAwardedAt: firebase.firestore.FieldValue.serverTimestamp(),
         awardedUsers: firebase.firestore.FieldValue.arrayUnion({
             userId: userId,
@@ -5769,7 +5769,7 @@ async function recordBadgeAward(badge, userId, courseId, reason) {
         
         // تحديث إحصائيات الشارة نفسها
         await db.collection('badges').doc(badge.id).update({
-            totalAwarded: firebase.firestore.FieldValue.increment(1),
+            timesAwarded: firebase.firestore.FieldValue.increment(1),
             lastAwardedAt: firebase.firestore.FieldValue.serverTimestamp(),
             lastAwardedTo: userId
         });
@@ -6174,15 +6174,44 @@ async function checkAttendanceBadges(sessionId) {
         });
         
         // حفظ الشارات الجديدة
-        if (earnedBadges.length > 0) {
-            const allBadges = [...userBadges, ...earnedBadges];
-            await db.collection('users').doc(userId).update({
-                badges: allBadges
+if (earnedBadges.length > 0) {
+    for (const badge of earnedBadges) {
+        // إضافة للمستخدم
+        await db.collection('users').doc(userId).update({
+            badges: firebase.firestore.FieldValue.arrayUnion(badge)
+        });
+        
+        // تحديث عداد الشارة
+        try {
+            await db.collection('badges').doc(badge.id).update({
+                timesAwarded: firebase.firestore.FieldValue.increment(1),
+                lastAwardedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                awardedUsers: firebase.firestore.FieldValue.arrayUnion({
+                    userId: userId,
+                    userName: userData.personalInfo?.name || 'مستخدم',
+                    date: new Date().toISOString()
+                })
             });
             
-            userBadges = allBadges;
-            showAttendanceBadgeNotification(earnedBadges);
+            // تسجيل في السجل
+            await db.collection('badgeAwardHistory').add({
+                badgeId: badge.id,
+                badgeName: badge.name,
+                userId: userId,
+                userName: userData.personalInfo?.name || 'مستخدم',
+                courseId: courseId,
+                courseName: courseData.title,
+                awardedAt: new Date().toISOString(),
+                reason: badge.reason
+            });
+        } catch (error) {
+            console.log('خطأ في تحديث عداد الحضور:', error);
         }
+    }
+    
+    userBadges = [...userBadges, ...earnedBadges];
+    showAttendanceBadgeNotification(earnedBadges);
+}
         
     } catch (error) {
         console.error('خطأ في فحص شارات الحضور:', error);
