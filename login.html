@@ -1721,6 +1721,161 @@ window.addEventListener('beforeunload', () => {
         
 // تشغيل عند تحميل الصفحة
 window.addEventListener('load', () => {
+    // ==================== 🔐 نظام الدخول التلقائي من التليجرام ====================
+async function handleAutoLogin() {
+    try {
+        // قراءة المعاملات من الـ URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('uid');
+        const token = urlParams.get('token');
+        
+        // إذا لم يكن هناك معاملات - تجاهل
+        if (!userId || !token) {
+            console.log('لا يوجد معاملات دخول تلقائي');
+            return;
+        }
+        
+        console.log('🔍 محاولة الدخول التلقائي للمستخدم:', userId);
+        
+        // إخفاء منطقة تسجيل الدخول وإظهار رسالة تحميل
+        const loginArea = document.getElementById('loginArea');
+        const welcomeText = document.getElementById('welcomeText');
+        
+        if (loginArea) {
+            loginArea.style.display = 'none';
+        }
+        
+        if (welcomeText) {
+            welcomeText.textContent = 'جاري تسجيل الدخول...';
+            welcomeText.classList.add('show');
+        }
+        
+        // جلب بيانات المستخدم من Firebase
+        const userDoc = await db.collection('users').doc(userId).get();
+        
+        if (!userDoc.exists) {
+            throw new Error('المستخدم غير موجود');
+        }
+        
+        const userData = userDoc.data();
+        
+        // التحقق من الـ token
+        const savedToken = userData.auth?.telegramAutoLoginToken;
+        
+        if (!savedToken || savedToken !== token) {
+            throw new Error('رابط غير صالح أو منتهي الصلاحية');
+        }
+        
+        // التحقق من حالة الحساب
+        if (userData.accountStatus?.status === 'inactive' || 
+            userData.accountStatus?.suspended === true) {
+            throw new Error('الحساب محجوب - تواصل مع الدعم');
+        }
+        
+        // الحصول على البيانات
+        const email = userData.personalInfo?.email;
+        const tempPassword = userData.auth?.tempPassword;
+        
+        if (!email || !tempPassword) {
+            throw new Error('بيانات تسجيل الدخول غير مكتملة');
+        }
+        
+        const password = atob(tempPassword);
+        
+        // محاولة تسجيل الدخول
+        let authSuccess = false;
+        
+        try {
+            await auth.signInWithEmailAndPassword(email, password);
+            authSuccess = true;
+        } catch (authError) {
+            // محاولة إنشاء حساب إذا لم يكن موجود
+            try {
+                await auth.createUserWithEmailAndPassword(email, password);
+                authSuccess = true;
+            } catch (e) {
+                console.error('خطأ في المصادقة:', e);
+            }
+        }
+        
+        if (!authSuccess) {
+            throw new Error('فشل في تسجيل الدخول');
+        }
+        
+        // تحديث آخر دخول
+        await db.collection('users').doc(userId).update({
+            'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+            'auth.loginCount': firebase.firestore.FieldValue.increment(1),
+            'auth.lastLoginSource': 'telegram-auto'
+        });
+        
+        // حفظ البيانات في localStorage
+        localStorage.setItem('userId', userId);
+        localStorage.setItem('userEmail', email);
+        localStorage.setItem('userName', userData.personalInfo?.name || 'روح باحثة');
+        localStorage.setItem('userLevel', userData.accountStatus?.level || 'STANDARD');
+        localStorage.setItem('userStatus', userData.accountStatus?.status || 'active');
+        
+        // حفظ نسخة مشفرة
+        SecureStorage.setItem('user', {
+            id: userId,
+            email: email,
+            name: userData.personalInfo?.name || 'روح باحثة',
+            level: userData.accountStatus?.level || 'STANDARD',
+            status: userData.accountStatus?.status || 'active',
+            timestamp: Date.now()
+        });
+        
+        // حفظ في الجلسة
+        sessionStorage.setItem('_session', SecureStorage.encrypt({
+            uid: userId,
+            name: userData.personalInfo?.name || 'روح باحثة',
+            timestamp: Date.now()
+        }));
+        
+        // تحديث الرسالة
+        if (welcomeText) {
+            welcomeText.textContent = 'مرحباً بعودتك ✨';
+        }
+        
+        // تأثير الانتقال
+        startPortalTransition();
+        
+        // التوجيه للصفحة المناسبة
+        setTimeout(() => {
+            const isAdmin = email === 'admin@fouad-academy.com' || 
+                           userData.auth?.role === 'admin';
+            
+            if (isAdmin) {
+                window.location.href = './admin/dashboard.html';
+            } else {
+                window.location.href = './my-courses.html';
+            }
+        }, 1500);
+        
+    } catch (error) {
+        console.error('❌ خطأ في الدخول التلقائي:', error);
+        
+        // إظهار منطقة تسجيل الدخول مرة أخرى
+        const loginArea = document.getElementById('loginArea');
+        const welcomeText = document.getElementById('welcomeText');
+        
+        if (loginArea) {
+            loginArea.style.display = 'block';
+        }
+        
+        if (welcomeText) {
+            welcomeText.textContent = 'أهلاً بك بين الرحماء';
+        }
+        
+        // إظهار رسالة خطأ
+        showError(error.message || 'حدث خطأ في تسجيل الدخول التلقائي');
+    }
+}
+
+// تشغيل الدخول التلقائي عند التحميل
+handleAutoLogin();
+// ==================== نهاية نظام الدخول التلقائي ====================
     // تفعيل التنفس للصفحة
     document.querySelector('.portal-container').classList.add('breathing');
     
