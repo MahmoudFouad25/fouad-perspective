@@ -1810,12 +1810,13 @@
         });
 
        async function initializePage() {
-            console.log('🎯 جاري تهيئة صفحة صحوة الحائر...');
-            
-            await loadProgress();
-            await loadQuestionsStatus();
-            await loadScale();
-        }
+    console.log('🎯 جاري تهيئة صفحة صحوة الحائر...');
+    
+    await loadProgress();
+    await loadQuestionsStatus();
+    await loadScale();
+    await loadDailyTools(); // ← NEW
+}
 
         async function loadProgress() {
             try {
@@ -2256,32 +2257,60 @@
             }
         }
        function calculateTotalPoints(data) {
-            let total = 0;
-            
-            console.log('🔍 حساب النقاط من البيانات:', data);
-            
-            // Points from Personal Map (خريطتي الشخصية)
-            // البيانات محفوظة بشكل flat: "personalMap.question1"
-            for (let i = 1; i <= 4; i++) {
-                const key = `personalMap.question${i}`;
-                if (data[key] && data[key].points) {
-                    total += data[key].points;
-                    console.log(`✅ السؤال ${i}: +${data[key].points} نقطة`);
-                }
-            }
-            
-            console.log('📊 المجموع النهائي:', total);
-            
-            // Points from Scale (مقياس صحوتي)
-            if (data['scale.points']) {
-                total += data['scale.points'];
-                console.log(`✅ المقياس: +${data['scale.points']} نقطة`);
-            }
-            
-            // سنضيف بقية الأقسام في الخطوات القادمة
-            
-            return total;
+    let total = 0;
+    
+    console.log('🔍 حساب النقاط من البيانات:', data);
+    
+    // 1. Points from Personal Map
+    for (let i = 1; i <= 4; i++) {
+        const key = `personalMap.question${i}`;
+        if (data[key] && data[key].points) {
+            total += data[key].points;
+            console.log(`✅ السؤال ${i}: +${data[key].points} نقطة`);
         }
+    }
+    
+    // 2. Points from Scale
+    if (data['scale.points']) {
+        total += data['scale.points'];
+        console.log(`✅ المقياس: +${data['scale.points']} نقطة`);
+    }
+    
+    // 3. Points from Morning Ritual (3 points per day × entries count)
+    if (data['dailyTools.morningRitual.entries']) {
+        const morningEntries = data['dailyTools.morningRitual.entries'].filter(e => e.completed);
+        const morningPoints = morningEntries.length * 3;
+        total += morningPoints;
+        console.log(`✅ طقس الصباح: ${morningEntries.length} يوم × 3 = +${morningPoints} نقطة`);
+    }
+    
+    // 4. Points from Journal (5 points per day × entries count)
+    if (data['dailyTools.journal.entries']) {
+        const journalPoints = data['dailyTools.journal.entries'].length * 5;
+        total += journalPoints;
+        console.log(`✅ اليوميات: ${data['dailyTools.journal.entries'].length} يوم × 5 = +${journalPoints} نقطة`);
+    }
+    
+    // 5. Points from Streak Rewards
+    if (data['streakRewards']) {
+        let streakTotal = 0;
+        Object.keys(data['streakRewards']).forEach(type => {
+            Object.keys(data['streakRewards'][type]).forEach(day => {
+                if (data['streakRewards'][type][day].points) {
+                    streakTotal += data['streakRewards'][type][day].points;
+                }
+            });
+        });
+        if (streakTotal > 0) {
+            total += streakTotal;
+            console.log(`✅ مكافآت السلاسل: +${streakTotal} نقطة`);
+        }
+    }
+    
+    console.log('📊 المجموع النهائي:', total);
+    
+    return total;
+}
 
         function updateProgressDisplay(points) {
             const maxPoints = 500;
@@ -2346,6 +2375,8 @@
                 setTimeout(() => notification.remove(), 300);
             }, 3000);
         }
+
+
 
         // ==== Daily Tools Functions ====
 
@@ -2485,11 +2516,11 @@ async function completeMorningRitual() {
         }
         
         // Add new entry
-entries.push({
-    date: today,
-    completed: true,
-    timestamp: new Date().toISOString()
-});
+        entries.push({
+            date: today,
+            completed: true,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
         
         // Save to Firebase
         await docRef.set({
@@ -2721,6 +2752,67 @@ async function saveJournal() {
         btn.innerHTML = originalHTML;
     }
 }
+
+        // ==== Streak Rewards Function ====
+
+async function checkStreakRewards(type, streak) {
+    const rewards = {
+        7: { points: 20, message: '🌱 7 أيام متتالية! +20 نقطة إضافية!' },
+        14: { points: 50, message: '🌿 14 يوم متتالي! +50 نقطة إضافية!' },
+        21: { points: 100, message: '🌳 21 يوم متتالي! +100 نقطة إضافية!' },
+        30: { points: 200, message: '🏆 30 يوم متتالي! +200 نقطة إضافية!' }
+    };
+    
+    if (rewards[streak]) {
+        try {
+            const userId = localStorage.getItem('userId') || currentUser.uid;
+            const docRef = db.collection('users')
+                .doc(userId)
+                .collection('awakening_progress')
+                .doc(currentCourseId);
+            
+            const rewardKey = `streakRewards.${type}.day${streak}`;
+            
+            // Check if already claimed
+            const doc = await docRef.get();
+            if (doc.exists) {
+                const data = doc.data();
+                if (data[rewardKey]) {
+                    console.log('⚠️ مكافأة السلسلة تم استلامها مسبقاً');
+                    return;
+                }
+            }
+            
+            // Give reward
+            await addPointsToPillar('witness', rewards[streak].points, {
+                type: 'streak_reward',
+                toolType: type,
+                streakDays: streak
+            });
+            
+            // Mark as claimed
+            await docRef.set({
+                [rewardKey]: {
+                    claimed: true,
+                    date: new Date().toISOString().split('T')[0],
+                    points: rewards[streak].points
+                }
+            }, { merge: true });
+            
+            // Show special notification
+            setTimeout(() => {
+                showNotification(rewards[streak].message, 'success');
+            }, 1000);
+            
+            console.log(`🎁 تم منح مكافأة السلسلة: ${streak} أيام - ${rewards[streak].points} نقطة`);
+            
+        } catch (error) {
+            console.error('خطأ في منح مكافأة السلسلة:', error);
+        }
+    }
+}
+
+        
     </script>
 </body>
 </html>
