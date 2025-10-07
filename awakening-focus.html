@@ -2714,7 +2714,24 @@
     }
     
     console.log('📊 المجموع النهائي:', total);
-    
+    // 6. Points from Companion
+if (data['companion.name']) {
+    // 10 points for setting companion
+    total += 10;
+    console.log('✅ تحديد الرفيق: +10 نقطة');
+}
+
+if (data['companion.meetings']) {
+    const meetingPoints = data['companion.meetings'].length * 25;
+    total += meetingPoints;
+    console.log(`✅ اللقاءات: ${data['companion.meetings'].length} × 25 = +${meetingPoints} نقطة`);
+}
+
+// 7. Points from Return Point
+if (data['returnPoint.type']) {
+    total += 10;
+    console.log('✅ نقطة الرجوع: +10 نقطة');
+}
     return total;
 }
 
@@ -2806,6 +2823,16 @@ async function loadDailyTools() {
             
             // Load Journal
             await loadJournal(data);
+            
+            // Load Companion
+            await loadCompanion(data); // ← NEW
+            
+            // Load Return Point
+            await loadReturnPoint(data); // ← NEW
+        } else {
+            // Load empty state
+            await loadCompanion(null);
+            await loadReturnPoint(null);
         }
         
     } catch (error) {
@@ -3217,7 +3244,414 @@ async function checkStreakRewards(type, streak) {
         }
     }
 }
+// ==== Companion Functions ====
 
+async function loadCompanion(data) {
+    try {
+        // Check if companion is set
+        if (data && data['companion.name']) {
+            const companionName = data['companion.name'];
+            const companionSince = data['companion.since'];
+            
+            // Hide form, show companion info
+            document.getElementById('companionForm').style.display = 'none';
+            document.getElementById('meetingForm').style.display = 'grid';
+            
+            // Update status
+            const statusDiv = document.getElementById('companionStatus');
+            const sinceDate = companionSince ? new Date(companionSince).toLocaleDateString('ar-EG', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            }) : '';
+            
+            statusDiv.innerHTML = `
+                <div class="companion-selected">
+                    <div class="companion-info">
+                        <div class="companion-avatar">👤</div>
+                        <div class="companion-details">
+                            <div class="companion-name">${companionName}</div>
+                            <div class="companion-since">رفيقك منذ ${sinceDate}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Load meetings count
+            let meetingsCount = 0;
+            if (data['companion.meetings']) {
+                meetingsCount = data['companion.meetings'].length;
+            }
+            document.getElementById('companionMeetings').textContent = meetingsCount;
+            
+            // Check this week's meeting
+            await loadWeeklyMeeting(data);
+            
+            console.log('✅ تم تحميل رفيق الرحلة:', companionName, '- اللقاءات:', meetingsCount);
+        } else {
+            // No companion set
+            document.getElementById('companionForm').style.display = 'grid';
+            document.getElementById('meetingForm').style.display = 'none';
+            console.log('⚠️ لم يتم تحديد رفيق بعد');
+        }
+        
+    } catch (error) {
+        console.error('خطأ في تحميل رفيق الرحلة:', error);
+    }
+}
+
+async function loadWeeklyMeeting(data) {
+    try {
+        // Get current week number
+        const now = new Date();
+        const weekNumber = getWeekNumber(now);
+        
+        // Check if meeting recorded this week
+        let meetingThisWeek = false;
+        if (data && data['companion.meetings']) {
+            meetingThisWeek = data['companion.meetings'].some(meeting => {
+                const meetingWeek = getWeekNumber(new Date(meeting.date));
+                return meetingWeek === weekNumber;
+            });
+        }
+        
+        const statusDiv = document.getElementById('weeklyMeetingStatus');
+        const btn = document.getElementById('meetingBtn');
+        
+        if (meetingThisWeek) {
+            statusDiv.innerHTML = `
+                <div class="status-icon">✅</div>
+                <div class="status-text">رائع! سجّلت لقاء هذا الأسبوع</div>
+            `;
+            statusDiv.classList.add('completed');
+            
+            btn.disabled = true;
+            btn.innerHTML = `
+                <i class="fas fa-check-circle"></i>
+                <span>تم التسجيل هذا الأسبوع ✓</span>
+            `;
+        } else {
+            statusDiv.innerHTML = `
+                <div class="status-icon">⏳</div>
+                <div class="status-text">لم تسجل لقاء هذا الأسبوع</div>
+            `;
+            statusDiv.classList.remove('completed');
+        }
+        
+        console.log('✅ حالة اللقاء الأسبوعي:', meetingThisWeek);
+        
+    } catch (error) {
+        console.error('خطأ في تحميل حالة اللقاء:', error);
+    }
+}
+
+// Helper function to get week number
+function getWeekNumber(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+// Update companion name counter
+document.addEventListener('DOMContentLoaded', function() {
+    const companionInput = document.getElementById('companionName');
+    if (companionInput) {
+        companionInput.addEventListener('input', function() {
+            document.getElementById('companionNameCount').textContent = this.value.length;
+        });
+    }
+    
+    const meetingNotes = document.getElementById('meetingNotes');
+    if (meetingNotes) {
+        meetingNotes.addEventListener('input', function() {
+            document.getElementById('meetingNotesCount').textContent = this.value.length;
+        });
+    }
+});
+
+async function setCompanion() {
+    const name = document.getElementById('companionName').value.trim();
+    
+    if (!name) {
+        showNotification('من فضلك أدخل اسم الرفيق', 'error');
+        return;
+    }
+
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Save companion
+        await docRef.set({
+            'companion.name': name,
+            'companion.since': today,
+            'companion.meetings': []
+        }, { merge: true });
+        
+        // Add 10 points to witness pillar
+        await addPointsToPillar('witness', 10, {
+            type: 'companion_set',
+            companionName: name
+        });
+        
+        showNotification('رائع! تم تحديد رفيقك 🎉', 'success');
+        
+        // Update UI
+        await loadProgress();
+        await loadCompanion({
+            'companion.name': name,
+            'companion.since': today,
+            'companion.meetings': []
+        });
+        
+    } catch (error) {
+        console.error('خطأ في تحديد الرفيق:', error);
+        showNotification('حدث خطأ. حاول مرة أخرى', 'error');
+    }
+}
+
+async function recordMeeting() {
+    const notes = document.getElementById('meetingNotes').value.trim();
+    
+    const btn = document.getElementById('meetingBtn');
+    const originalHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        const today = new Date().toISOString().split('T')[0];
+        const weekNumber = getWeekNumber(new Date());
+        
+        // Get current meetings
+        const doc = await docRef.get();
+        let meetings = [];
+        
+        if (doc.exists) {
+            const data = doc.data();
+            if (data['companion.meetings']) {
+                meetings = data['companion.meetings'];
+            }
+        }
+        
+        // Check if already recorded this week
+        const alreadyRecorded = meetings.some(meeting => {
+            const meetingWeek = getWeekNumber(new Date(meeting.date));
+            return meetingWeek === weekNumber;
+        });
+        
+        if (alreadyRecorded) {
+            showNotification('لقد سجّلت لقاء هذا الأسبوع بالفعل!', 'error');
+            await loadWeeklyMeeting(doc.data());
+            return;
+        }
+        
+        // Add new meeting
+        meetings.push({
+            date: today,
+            weekNumber: weekNumber,
+            notes: notes,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Save to Firebase
+        await docRef.set({
+            'companion.meetings': meetings
+        }, { merge: true });
+        
+        // Add 25 points to witness pillar
+        await addPointsToPillar('witness', 25, {
+            type: 'companion_meeting',
+            weekNumber: weekNumber
+        });
+        
+        showNotification('رائع! حصلت على 25 نقطة 🎉', 'success');
+        
+        // Clear notes
+        document.getElementById('meetingNotes').value = '';
+        document.getElementById('meetingNotesCount').textContent = '0';
+        
+        // Update UI
+        await loadProgress();
+        await loadCompanion({ 'companion.meetings': meetings });
+        
+    } catch (error) {
+        console.error('خطأ في تسجيل اللقاء:', error);
+        showNotification('حدث خطأ. حاول مرة أخرى', 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+    }
+}
+
+async function changeCompanion() {
+    const confirmed = confirm('هل أنت متأكد من تغيير الرفيق؟ سيتم الاحتفاظ بسجل اللقاءات السابقة.');
+    
+    if (confirmed) {
+        document.getElementById('companionForm').style.display = 'grid';
+        document.getElementById('meetingForm').style.display = 'none';
+        document.getElementById('companionName').value = '';
+        document.getElementById('companionNameCount').textContent = '0';
+        
+        const statusDiv = document.getElementById('companionStatus');
+        statusDiv.innerHTML = `
+            <div class="no-companion">
+                <div class="status-icon">🔍</div>
+                <div class="status-text">لم تختر رفيقاً بعد</div>
+            </div>
+        `;
+    }
+}
+
+        // ==== Return Point Functions ====
+
+async function loadReturnPoint(data) {
+    try {
+        if (data && data['returnPoint.type']) {
+            const type = data['returnPoint.type'];
+            const customText = data['returnPoint.customText'] || '';
+            
+            // Check the selected radio
+            document.getElementById(`rp${type.charAt(0).toUpperCase() + type.slice(1)}`).checked = true;
+            
+            if (type === 'custom' && customText) {
+                document.getElementById('customReturnPoint').style.display = 'block';
+                document.getElementById('customReturnPointText').value = customText;
+            }
+            
+            // Update status
+            const statusDiv = document.getElementById('returnPointStatus');
+            const labels = {
+                'paper': 'ورقة بجانب السرير',
+                'alarm': 'منبه يومي',
+                'verse': 'آية أو صورة',
+                'companion': 'رفيقي يتصل',
+                'custom': customText || 'طريقة خاصة'
+            };
+            
+            statusDiv.innerHTML = `
+                <div class="status-icon">✅</div>
+                <div class="status-text">نقطة رجوعك: ${labels[type]}</div>
+            `;
+            statusDiv.classList.add('completed');
+            
+            console.log('✅ تم تحميل نقطة الرجوع:', type);
+        }
+        
+    } catch (error) {
+        console.error('خطأ في تحميل نقطة الرجوع:', error);
+    }
+}
+
+// Show/hide custom input
+document.addEventListener('DOMContentLoaded', function() {
+    const radios = document.querySelectorAll('input[name="returnPoint"]');
+    radios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            const customDiv = document.getElementById('customReturnPoint');
+            if (this.value === 'custom') {
+                customDiv.style.display = 'block';
+            } else {
+                customDiv.style.display = 'none';
+            }
+        });
+    });
+});
+
+async function setReturnPoint() {
+    const selectedRadio = document.querySelector('input[name="returnPoint"]:checked');
+    
+    if (!selectedRadio) {
+        showNotification('من فضلك اختر نقطة رجوع', 'error');
+        return;
+    }
+    
+    const type = selectedRadio.value;
+    let customText = '';
+    
+    if (type === 'custom') {
+        customText = document.getElementById('customReturnPointText').value.trim();
+        if (!customText) {
+            showNotification('من فضلك اكتب نقطة الرجوع الخاصة بك', 'error');
+            return;
+        }
+    }
+
+    const btn = document.getElementById('returnPointBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        // Check if already set
+        const doc = await docRef.get();
+        let isFirstTime = true;
+        
+        if (doc.exists) {
+            const data = doc.data();
+            if (data['returnPoint.type']) {
+                isFirstTime = false;
+            }
+        }
+        
+        // Save return point
+        const updateData = {
+            'returnPoint.type': type,
+            'returnPoint.date': new Date().toISOString().split('T')[0]
+        };
+        
+        if (type === 'custom') {
+            updateData['returnPoint.customText'] = customText;
+        }
+        
+        await docRef.set(updateData, { merge: true });
+        
+        // Add 10 points only if first time
+        if (isFirstTime) {
+            await addPointsToPillar('courage', 10, {
+                type: 'return_point_set',
+                returnPointType: type
+            });
+            
+            showNotification('رائع! حصلت على 10 نقاط 🎉', 'success');
+        } else {
+            showNotification('تم تحديث نقطة الرجوع ✅', 'success');
+        }
+        
+        // Update UI
+        await loadProgress();
+        await loadReturnPoint(updateData);
+        
+    } catch (error) {
+        console.error('خطأ في حفظ نقطة الرجوع:', error);
+        showNotification('حدث خطأ. حاول مرة أخرى', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+            <i class="fas fa-save"></i>
+            <span>حفظ نقطة الرجوع</span>
+            <span class="btn-reward">+10 نقاط 🔥</span>
+        `;
+    }
+}
+
+        
         
     </script>
 </body>
