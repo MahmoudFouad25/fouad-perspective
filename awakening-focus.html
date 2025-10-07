@@ -2485,11 +2485,11 @@ async function completeMorningRitual() {
         }
         
         // Add new entry
-        entries.push({
-            date: today,
-            completed: true,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
+entries.push({
+    date: today,
+    completed: true,
+    timestamp: new Date().toISOString()
+});
         
         // Save to Firebase
         await docRef.set({
@@ -2526,6 +2526,199 @@ async function completeMorningRitual() {
             <span>أكملت طقس الصباح اليوم</span>
             <span class="btn-reward">+3 نقاط 🚶</span>
         `;
+    }
+}
+
+        // ==== Journal Functions ====
+
+async function loadJournal(data) {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Get streak
+        let streak = 0;
+        if (data && data['dailyTools.journal.currentStreak']) {
+            streak = data['dailyTools.journal.currentStreak'];
+        }
+        
+        // Update streak display
+        document.getElementById('journalStreak').textContent = streak;
+        
+        // Check if completed today
+        let todayEntry = null;
+        if (data && data['dailyTools.journal.entries']) {
+            const entries = data['dailyTools.journal.entries'];
+            todayEntry = entries.find(entry => entry.date === today);
+        }
+        
+        // Update UI
+        const statusDiv = document.getElementById('journalStatus');
+        const btn = document.getElementById('journalSaveBtn');
+        
+        if (todayEntry) {
+            // Load today's answers
+            document.getElementById('journal1').value = todayEntry.text1 || '';
+            document.getElementById('journal2').value = todayEntry.text2 || '';
+            document.getElementById('journal3').value = todayEntry.text3 || '';
+            
+            updateJournalCounters();
+            
+            statusDiv.innerHTML = `
+                <div class="status-icon">✅</div>
+                <div class="status-text">رائع! كتبت يومياتك اليوم</div>
+            `;
+            statusDiv.classList.add('completed');
+            
+            btn.innerHTML = `
+                <i class="fas fa-edit"></i>
+                <span>تحديث اليوميات</span>
+                <span class="btn-reward">تم الحفظ ✓</span>
+            `;
+        }
+        
+        console.log('✅ تم تحميل اليوميات - Streak:', streak, 'Today:', !!todayEntry);
+        
+    } catch (error) {
+        console.error('خطأ في تحميل اليوميات:', error);
+    }
+}
+
+function updateJournalCounters() {
+    ['journal1', 'journal2', 'journal3'].forEach(id => {
+        const textarea = document.getElementById(id);
+        const countSpan = document.getElementById(id + 'Count');
+        if (textarea && countSpan) {
+            countSpan.textContent = textarea.value.length;
+        }
+    });
+}
+
+// Add oninput handlers for journal textareas
+document.addEventListener('DOMContentLoaded', function() {
+    ['journal1', 'journal2', 'journal3'].forEach(id => {
+        const textarea = document.getElementById(id);
+        if (textarea) {
+            textarea.addEventListener('input', updateJournalCounters);
+        }
+    });
+});
+
+async function saveJournal() {
+    const text1 = document.getElementById('journal1').value.trim();
+    const text2 = document.getElementById('journal2').value.trim();
+    const text3 = document.getElementById('journal3').value.trim();
+    
+    if (!text1 && !text2 && !text3) {
+        showNotification('من فضلك اكتب شيئاً في اليوميات أولاً', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('journalSaveBtn');
+    const originalHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Get current data
+        const doc = await docRef.get();
+        let currentStreak = 0;
+        let entries = [];
+        let lastDate = null;
+        let isFirstTime = true;
+        
+        if (doc.exists) {
+            const data = doc.data();
+            if (data['dailyTools.journal.currentStreak']) {
+                currentStreak = data['dailyTools.journal.currentStreak'];
+            }
+            if (data['dailyTools.journal.entries']) {
+                entries = data['dailyTools.journal.entries'];
+                // Check if already has entry today
+                const existingIndex = entries.findIndex(entry => entry.date === today);
+                if (existingIndex !== -1) {
+                    isFirstTime = false;
+                    // Update existing entry
+                    entries[existingIndex] = {
+                        date: today,
+                        text1: text1,
+                        text2: text2,
+                        text3: text3,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                }
+            }
+            if (data['dailyTools.journal.lastDate']) {
+                lastDate = data['dailyTools.journal.lastDate'];
+            }
+        }
+        
+        // Calculate new streak (only if first time today)
+        let newStreak = currentStreak;
+        if (isFirstTime) {
+            newStreak = 1;
+            if (lastDate) {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = yesterday.toISOString().split('T')[0];
+                
+                if (lastDate === yesterdayStr) {
+                    newStreak = currentStreak + 1;
+                }
+            }
+            
+            // Add new entry
+            entries.push({
+                date: today,
+                text1: text1,
+                text2: text2,
+                text3: text3,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        }
+        
+        // Save to Firebase
+        await docRef.set({
+            'dailyTools.journal.currentStreak': newStreak,
+            'dailyTools.journal.lastDate': today,
+            'dailyTools.journal.entries': entries
+        }, { merge: true });
+        
+        // Add 5 points only if first time today
+        if (isFirstTime) {
+            await addPointsToPillar('action', 5, {
+                type: 'journal',
+                date: today,
+                streak: newStreak
+            });
+            
+            // Check for streak rewards
+            await checkStreakRewards('journal', newStreak);
+            
+            showNotification('رائع! حصلت على 5 نقاط 🎉', 'success');
+        } else {
+            showNotification('تم تحديث يومياتك بنجاح ✅', 'success');
+        }
+        
+        // Update UI
+        await loadProgress();
+        await loadJournal({ 
+            'dailyTools.journal.currentStreak': newStreak,
+            'dailyTools.journal.entries': entries 
+        });
+        
+    } catch (error) {
+        console.error('خطأ في حفظ اليوميات:', error);
+        showNotification('حدث خطأ في الحفظ. حاول مرة أخرى', 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
     }
 }
     </script>
