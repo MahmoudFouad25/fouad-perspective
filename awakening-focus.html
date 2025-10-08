@@ -5918,7 +5918,6 @@ async function loadPillarReflections() {
     }
 }
 
-// Save Pillar Reflection
 async function savePillarReflection(pillarType, points) {
     const textarea = document.getElementById(`${pillarType}Reflection`);
     const checkbox = document.getElementById(`${pillarType}Public`);
@@ -5951,44 +5950,67 @@ async function savePillarReflection(pillarType, points) {
             .collection('awakening_progress')
             .doc(currentCourseId);
         
-        // Check if already saved
+        const today = new Date().toISOString().split('T')[0];
+        const weekNumber = getWeekNumber(new Date());
+        
+        // Get existing reflections
         const doc = await docRef.get();
-        let isFirstTime = true;
+        let reflections = [];
         
         if (doc.exists) {
             const data = doc.data();
-            const key = `pillars.${pillarType}.reflection`;
+            const key = `pillars.${pillarType}.reflections`;
             if (data[key]) {
-                isFirstTime = false;
+                reflections = data[key];
             }
         }
         
-        // Save reflection
+        // Check if first reflection this week
+        const thisWeekReflection = reflections.find(r => r.weekNumber === weekNumber);
+        const shouldGivePoints = !thisWeekReflection;
+        
+        // Create new reflection entry
+        const newReflection = {
+            text: text,
+            isPublic: checkbox.checked,
+            date: today,
+            weekNumber: weekNumber,
+            timestamp: new Date().toISOString(),
+            pointsEarned: shouldGivePoints ? points : 0
+        };
+        
+        // Add to array
+        reflections.push(newReflection);
+        
+        // Save to Firebase
         await docRef.set({
-            [`pillars.${pillarType}.reflection`]: {
-                text: text,
-                isPublic: checkbox.checked,
-                date: new Date().toISOString().split('T')[0],
-                timestamp: new Date().toISOString()
-            }
+            [`pillars.${pillarType}.reflections`]: reflections,
+            [`pillars.${pillarType}.lastUpdate`]: today
         }, { merge: true });
         
-        // Add points if first time
-        if (isFirstTime) {
+        // Add points only if first this week
+        if (shouldGivePoints) {
             await addPointsToPillar(pillarType, points, {
                 type: 'pillar_reflection',
                 pillar: pillarType,
+                weekNumber: weekNumber,
                 isPublic: checkbox.checked
             });
             
             showNotification(`رائع! حصلت على ${points} نقطة 🎉`, 'success');
         } else {
-            showNotification('تم تحديث تأملك بنجاح ✅', 'success');
+            showNotification('تم حفظ تأملك بنجاح ✅ (تم استلام نقاط هذا الأسبوع)', 'success');
         }
+        
+        // Clear textarea
+        textarea.value = '';
+        updatePillarCounter(pillarType);
+        checkbox.checked = false;
         
         // Update UI
         await loadProgress();
         await loadPillarsPoints();
+        await loadPillarReflections(pillarType);
         
     } catch (error) {
         console.error('خطأ في حفظ التأمل:', error);
@@ -5999,7 +6021,7 @@ async function savePillarReflection(pillarType, points) {
             btn.innerHTML = `
                 <i class="fas fa-save"></i>
                 <span>حفظ تأمل ${getPillarName(pillarType)}</span>
-                <span class="btn-reward">تم الحفظ ✔</span>
+                <span class="btn-reward">+${points} نقطة</span>
             `;
         }
     }
