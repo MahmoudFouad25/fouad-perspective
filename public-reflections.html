@@ -629,12 +629,17 @@ auth.onAuthStateChanged(async user => {
             console.error('⚠️ فشل جلب بيانات المستخدم:', error);
         }
         
-        loadPublicReflections();
+loadPublicReflections();
+        
+        // 🔥 ابدأ المراقبة الفورية بعد التحميل
+        setTimeout(() => {
+            startRealtimeSync();
+        }, 2000);
+        
     } else {
         window.location.href = 'login.html';
     }
-});
-
+});    
         // Load Public Reflections
         async function loadPublicReflections() {
             try {
@@ -1040,7 +1045,10 @@ if (currentFilter !== 'all') {
 }
 displayReflections(filtered);
 
-console.log('🔄 تم تحديث العرض');
+console.log('📄 تم تحديث العرض');
+
+                // 🔥 بث التحديث لكل المستخدمين
+                broadcastSupportUpdate(reflectionId, supports.length);
                 
             } catch (error) {
                 console.error('❌ خطأ في تحديث الدعم:', error);
@@ -1048,6 +1056,60 @@ console.log('🔄 تم تحديث العرض');
             }
         }
 
+        // 🔥 بث التحديث الفوري لكل المستخدمين
+        function broadcastSupportUpdate(reflectionId, newSupportCount) {
+            // حدّث في الـ allReflections
+            const reflection = allReflections.find(r => r.id === reflectionId);
+            if (reflection) {
+                // أعد تحميل بيانات هذا التأمل فقط
+                setTimeout(() => {
+                    reloadSingleReflection(reflectionId);
+                }, 500);
+            }
+        }
+
+        // 🔄 إعادة تحميل تأمل واحد فقط
+        async function reloadSingleReflection(reflectionId) {
+            try {
+                const parts = reflectionId.split('_');
+                const userId = parts[0];
+                const courseId = parts[1];
+                const pillar = parts[2];
+                
+                const docRef = db.collection('users')
+                    .doc(userId)
+                    .collection('awakening_progress')
+                    .doc(courseId);
+                
+                const doc = await docRef.get();
+                if (!doc.exists) return;
+                
+                const data = doc.data();
+                const reflectionKey = `pillars.${pillar}.reflection`;
+                const reflection = data[reflectionKey];
+                
+                if (!reflection) return;
+                
+                // حدّث في الـ allReflections
+                const reflectionInList = allReflections.find(r => r.id === reflectionId);
+                if (reflectionInList) {
+                    reflectionInList.supports = reflection.supports || [];
+                    reflectionInList.supportCount = reflectionInList.supports.length;
+                    
+                    // أعد عرض التأملات
+                    let filtered = allReflections;
+                    if (currentFilter !== 'all') {
+                        filtered = allReflections.filter(r => r.pillar === currentFilter);
+                    }
+                    displayReflections(filtered);
+                    updateStatsBar();
+                }
+                
+            } catch (error) {
+                console.error('❌ خطأ في إعادة تحميل التأمل:', error);
+            }
+        }
+        
         // Show Notification
         function showNotification(message, type = 'success') {
             const notification = document.createElement('div');
@@ -1230,6 +1292,64 @@ function updateStatsBar() {
         support: totalSupportCount
     });
 }
+
+        // 🎧 مراقبة فورية لكل تغيير في قاعدة البيانات
+        let realtimeUnsubscribe = null;
+
+        function startRealtimeSync() {
+            if (realtimeUnsubscribe) {
+                realtimeUnsubscribe(); // أوقف المراقبة القديمة
+            }
+
+            console.log('🎧 بدء المراقبة الفورية...');
+
+            // راقب كل تغيير في awakening_progress
+            realtimeUnsubscribe = db.collectionGroup('awakening_progress')
+                .onSnapshot((snapshot) => {
+                    // تجاهل التحديث الأول (initial load)
+                    if (snapshot.metadata.hasPendingWrites) {
+                        return;
+                    }
+
+                    console.log('🔔 تم اكتشاف تحديث!');
+
+                    // أعد تحميل التأملات بدون loading screen
+                    snapshot.docChanges().forEach((change) => {
+                        if (change.type === 'modified') {
+                            const docData = change.doc.data();
+                            const userId = change.doc.ref.parent.parent.id;
+                            const courseId = change.doc.id;
+
+                            // حدّث كل الـ pillars
+                            ['courage', 'mirror', 'action', 'witness'].forEach(pillar => {
+                                const reflectionKey = `pillars.${pillar}.reflection`;
+                                const reflection = docData[reflectionKey];
+
+                                if (reflection && reflection.isPublic) {
+                                    const reflectionId = `${userId}_${courseId}_${pillar}`;
+                                    
+                                    // حدّث في allReflections
+                                    const existingReflection = allReflections.find(r => r.id === reflectionId);
+                                    if (existingReflection) {
+                                        existingReflection.supports = reflection.supports || [];
+                                        existingReflection.supportCount = existingReflection.supports.length;
+                                    }
+                                }
+                            });
+
+                            // أعد عرض التأملات
+                            let filtered = allReflections;
+                            if (currentFilter !== 'all') {
+                                filtered = allReflections.filter(r => r.pillar === currentFilter);
+                            }
+                            displayReflections(filtered);
+                            updateStatsBar();
+                        }
+                    });
+                }, (error) => {
+                    console.error('❌ خطأ في المراقبة:', error);
+                });
+        }
         
     </script>
 </body>
