@@ -522,7 +522,7 @@
     </div>
 
     <script>
-        // Firebase Configuration
+       // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
             authDomain: "fouad-perspective.firebaseapp.com",
@@ -542,6 +542,7 @@
         let currentUser = null;
         let allReflections = [];
         let currentFilter = 'all';
+        let usersCache = {}; // Cache لأسماء المستخدمين
 
         // Initialize
         auth.onAuthStateChanged(user => {
@@ -570,11 +571,21 @@
                 let uniqueUsers = new Set();
                 let totalSupportCount = 0;
                 
+                // Build users cache
+                usersSnapshot.docs.forEach(doc => {
+                    const userData = doc.data();
+                    usersCache[doc.id] = {
+                        name: userData.displayName || userData.name || userData.email?.split('@')[0] || 'مستخدم',
+                        email: userData.email
+                    };
+                });
+                
+                console.log('👥 تم تحميل', Object.keys(usersCache).length, 'مستخدم');
+                
                 // Loop through all users
                 for (const userDoc of usersSnapshot.docs) {
                     const userId = userDoc.id;
-                    const userData = userDoc.data();
-                    const userName = userData.displayName || userData.email?.split('@')[0] || 'مستخدم';
+                    const userName = usersCache[userId].name;
                     
                     // Get all courses for this user
                     const coursesSnapshot = await db.collection('users')
@@ -675,6 +686,18 @@
                 
                 const isSupported = reflection.supports.includes(currentUser.uid);
                 
+                // Get supporters names
+                const supportersNames = reflection.supports
+                    .map(uid => usersCache[uid]?.name || 'مستخدم')
+                    .slice(0, 3)
+                    .join('، ');
+                
+                const moreSupporters = reflection.supports.length > 3 ? 
+                    ` وآخرون (${reflection.supports.length - 3})` : '';
+                
+                const supportersTooltip = reflection.supports.length > 0 ? 
+                    `title="دعمه: ${supportersNames}${moreSupporters}"` : '';
+                
                 return `
                     <div class="reflection-card ${reflection.pillar}">
                         <div class="reflection-header">
@@ -701,7 +724,8 @@
                         <div class="reflection-footer">
                             <div class="reflection-actions">
                                 <button class="action-btn ${isSupported ? 'active' : ''}" 
-                                        onclick="toggleSupport('${reflection.id}')">
+                                        onclick="toggleSupport('${reflection.id}')"
+                                        ${supportersTooltip}>
                                     <i class="fas fa-heart"></i>
                                     <span class="support-count">${reflection.supportCount}</span>
                                     ${isSupported ? 'دعمت' : 'ادعم'}
@@ -714,19 +738,33 @@
         }
 
         // Filter by Pillar
-        function filterByPillar(pillar) {
-            currentFilter = pillar;
+        function filterByPillar(pillarType) {
+            currentFilter = pillarType;
             
             // Update button states
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            event.target.classList.add('active');
+            
+            // Find the button that was clicked
+            const buttons = document.querySelectorAll('.filter-btn');
+            buttons.forEach(btn => {
+                const btnText = btn.textContent;
+                if (
+                    (pillarType === 'all' && btnText.includes('كل التأملات')) ||
+                    (pillarType === 'courage' && btnText.includes('الجرأة')) ||
+                    (pillarType === 'mirror' && btnText.includes('المرآة')) ||
+                    (pillarType === 'action' && btnText.includes('الخطوة')) ||
+                    (pillarType === 'witness' && btnText.includes('الشهود'))
+                ) {
+                    btn.classList.add('active');
+                }
+            });
             
             // Filter reflections
             let filtered = allReflections;
-            if (pillar !== 'all') {
-                filtered = allReflections.filter(r => r.pillar === pillar);
+            if (pillarType !== 'all') {
+                filtered = allReflections.filter(r => r.pillar === pillarType);
             }
             
             displayReflections(filtered);
@@ -735,6 +773,8 @@
         // Toggle Support
         async function toggleSupport(reflectionId) {
             try {
+                console.log('❤️ تحديث الدعم للتأمل:', reflectionId);
+                
                 // Parse reflection ID
                 const parts = reflectionId.split('_');
                 const userId = parts[0];
@@ -747,13 +787,19 @@
                     .doc(courseId);
                 
                 const doc = await docRef.get();
-                if (!doc.exists) return;
+                if (!doc.exists) {
+                    console.error('❌ المستند غير موجود');
+                    return;
+                }
                 
                 const data = doc.data();
                 const reflectionKey = `pillars.${pillar}.reflection`;
                 const reflection = data[reflectionKey];
                 
-                if (!reflection) return;
+                if (!reflection) {
+                    console.error('❌ التأمل غير موجود');
+                    return;
+                }
                 
                 let supports = reflection.supports || [];
                 const currentUserSupported = supports.includes(currentUser.uid);
@@ -761,10 +807,14 @@
                 if (currentUserSupported) {
                     // Remove support
                     supports = supports.filter(id => id !== currentUser.uid);
+                    showNotification('تم إلغاء الدعم', 'success');
                 } else {
                     // Add support
                     supports.push(currentUser.uid);
+                    showNotification('شكراً لدعمك! ❤️', 'success');
                 }
+                
+                console.log('💾 حفظ التحديث... الداعمين الجدد:', supports.length);
                 
                 // Update in Firebase
                 await docRef.set({
@@ -774,16 +824,24 @@
                     }
                 }, { merge: true });
                 
-                // Reload reflections
-                await loadPublicReflections();
+                console.log('✅ تم التحديث بنجاح');
                 
-                // Re-apply current filter
-                if (currentFilter !== 'all') {
-                    filterByPillar(currentFilter);
+                // Update the reflection in memory
+                const reflectionInList = allReflections.find(r => r.id === reflectionId);
+                if (reflectionInList) {
+                    reflectionInList.supports = supports;
+                    reflectionInList.supportCount = supports.length;
                 }
                 
+                // Re-display with current filter
+                let filtered = allReflections;
+                if (currentFilter !== 'all') {
+                    filtered = allReflections.filter(r => r.pillar === currentFilter);
+                }
+                displayReflections(filtered);
+                
             } catch (error) {
-                console.error('خطأ في تحديث الدعم:', error);
+                console.error('❌ خطأ في تحديث الدعم:', error);
                 showNotification('حدث خطأ. حاول مرة أخرى', 'error');
             }
         }
