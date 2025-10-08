@@ -574,60 +574,45 @@ auth.onAuthStateChanged(async user => {
     if (user) {
         currentUser = user;
         
-        // 🆕 جيب document ID من Auth UID
+        // 🆕 جيب document ID من Email (case-insensitive)
         try {
-            const usersSnapshot = await db.collection('users')
-                .where('authUid', '==', user.uid)
-                .limit(1)
-                .get();
+            const usersSnapshot = await db.collection('users').get();
             
             let userDocId = null;
             let userName = 'مستخدم';
             
-            if (!usersSnapshot.empty) {
-                // لو لقينا user بـ authUid
-                const userDoc = usersSnapshot.docs[0];
-                userDocId = userDoc.id;
-                const userData = userDoc.data();
+            // دور على المستخدم بالإيميل (lowercase comparison)
+            const userEmail = user.email.toLowerCase();
+            
+            usersSnapshot.forEach(doc => {
+                const data = doc.data();
+                const docEmail = (data.personalInfo?.email || data.email || '').toLowerCase();
                 
-                if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
-                    userName = userData.personalInfo.name;
-                } else if (userData.displayName) {
-                    userName = userData.displayName;
-                } else if (userData.name) {
-                    userName = userData.name;
-                }
-            } else {
-                // لو مفيش authUid، جرب تدور بالـ email
-                const emailSnapshot = await db.collection('users')
-                    .where('personalInfo.email', '==', user.email)
-                    .limit(1)
-                    .get();
-                
-                if (!emailSnapshot.empty) {
-                    const userDoc = emailSnapshot.docs[0];
-                    userDocId = userDoc.id;
-                    const userData = userDoc.data();
+                if (docEmail === userEmail) {
+                    userDocId = doc.id;
                     
-                    if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
-                        userName = userData.personalInfo.name;
-                    } else if (userData.displayName) {
-                        userName = userData.displayName;
-                    } else if (userData.name) {
-                        userName = userData.name;
+                    // استخرج الاسم
+                    if (data.personalInfo?.name && data.personalInfo.name.trim() !== '') {
+                        userName = data.personalInfo.name;
+                    } else if (data.displayName) {
+                        userName = data.displayName;
+                    } else if (data.name) {
+                        userName = data.name;
+                    } else if (data.enrollments?.[0]?.payment?.installments?.schedule?.[0]?.reference) {
+                        userName = data.enrollments[0].payment.installments.schedule[0].reference.split('_')[0].trim();
                     }
                 }
-            }
+            });
             
             if (userDocId) {
                 // 🆕 احفظ الربط بين Auth UID و Document ID
                 currentUser.docId = userDocId;
                 currentUser.displayName = userName;
                 
-                // أضف للـ usersCache
+                // أضف للـ usersCache بـ Auth UID
                 usersCache[user.uid] = {
                     name: userName,
-                    email: user.email,
+                    email: userEmail,
                     userId: userDocId,
                     authUid: user.uid
                 };
@@ -635,6 +620,9 @@ auth.onAuthStateChanged(async user => {
                 console.log('✅ المستخدم الحالي - Auth UID:', user.uid);
                 console.log('✅ Document ID:', userDocId);
                 console.log('✅ الاسم:', userName);
+                console.log('✅ تم إضافة المستخدم للـ usersCache');
+            } else {
+                console.warn('⚠️ لم يتم العثور على document للمستخدم');
             }
             
         } catch (error) {
@@ -711,25 +699,28 @@ usersSnapshot.docs.forEach(doc => {
     }
     
     // حفظ بـ Document ID
+const userEmail = (userData.personalInfo?.email || userData.email || '').toLowerCase(); // 🆕 حوّل لـ lowercase
+
 usersCache[doc.id] = {
     name: userName,
-    email: userData.personalInfo?.email || userData.email,
+    email: userEmail,
     userId: doc.id,
-    authUid: userData.authUid || null // 🆕 لو موجود
+    authUid: userData.authUid || null
 };
 
 // 🆕 حفظ كمان بـ Auth UID لو موجود
 if (userData.authUid) {
     usersCache[userData.authUid] = {
         name: userName,
-        email: userData.personalInfo?.email || userData.email,
+        email: userEmail,
         userId: doc.id,
         authUid: userData.authUid
     };
     console.log('✅ ربط Auth UID:', userData.authUid, '→', userName);
 }
 
-console.log('✅ مستخدم:', doc.id, '- الاسم:', userName);
+console.log('✅ مستخدم:', doc.id, '- الاسم:', userName, '- الإيميل:', userEmail);
+
 });
 
 console.log('👥 تم تحميل', Object.keys(usersCache).length, 'مستخدم');
