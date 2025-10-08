@@ -569,19 +569,27 @@
         let currentFilter = 'all';
         let usersCache = {}; // Cache لأسماء المستخدمين
 
-       // Initialize
+      // Initialize
 auth.onAuthStateChanged(async user => {
     if (user) {
         currentUser = user;
         
-        // 🆕 جيب اسم المستخدم الحالي من Firestore
+        // 🆕 جيب document ID من Auth UID
         try {
-            const userDoc = await db.collection('users').doc(user.uid).get();
-            if (userDoc.exists) {
+            const usersSnapshot = await db.collection('users')
+                .where('authUid', '==', user.uid)
+                .limit(1)
+                .get();
+            
+            let userDocId = null;
+            let userName = 'مستخدم';
+            
+            if (!usersSnapshot.empty) {
+                // لو لقينا user بـ authUid
+                const userDoc = usersSnapshot.docs[0];
+                userDocId = userDoc.id;
                 const userData = userDoc.data();
                 
-                // استخرج الاسم
-                let userName = 'مستخدم';
                 if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
                     userName = userData.personalInfo.name;
                 } else if (userData.displayName) {
@@ -589,11 +597,46 @@ auth.onAuthStateChanged(async user => {
                 } else if (userData.name) {
                     userName = userData.name;
                 }
+            } else {
+                // لو مفيش authUid، جرب تدور بالـ email
+                const emailSnapshot = await db.collection('users')
+                    .where('personalInfo.email', '==', user.email)
+                    .limit(1)
+                    .get();
                 
-                // احفظ الاسم في currentUser
-                currentUser.displayName = userName;
-                console.log('✅ المستخدم الحالي:', userName);
+                if (!emailSnapshot.empty) {
+                    const userDoc = emailSnapshot.docs[0];
+                    userDocId = userDoc.id;
+                    const userData = userDoc.data();
+                    
+                    if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
+                        userName = userData.personalInfo.name;
+                    } else if (userData.displayName) {
+                        userName = userData.displayName;
+                    } else if (userData.name) {
+                        userName = userData.name;
+                    }
+                }
             }
+            
+            if (userDocId) {
+                // 🆕 احفظ الربط بين Auth UID و Document ID
+                currentUser.docId = userDocId;
+                currentUser.displayName = userName;
+                
+                // أضف للـ usersCache
+                usersCache[user.uid] = {
+                    name: userName,
+                    email: user.email,
+                    userId: userDocId,
+                    authUid: user.uid
+                };
+                
+                console.log('✅ المستخدم الحالي - Auth UID:', user.uid);
+                console.log('✅ Document ID:', userDocId);
+                console.log('✅ الاسم:', userName);
+            }
+            
         } catch (error) {
             console.error('⚠️ فشل جلب بيانات المستخدم:', error);
         }
@@ -667,13 +710,26 @@ usersSnapshot.docs.forEach(doc => {
         userName = emailName;
     }
     
-    usersCache[doc.id] = {
+    // حفظ بـ Document ID
+usersCache[doc.id] = {
+    name: userName,
+    email: userData.personalInfo?.email || userData.email,
+    userId: doc.id,
+    authUid: userData.authUid || null // 🆕 لو موجود
+};
+
+// 🆕 حفظ كمان بـ Auth UID لو موجود
+if (userData.authUid) {
+    usersCache[userData.authUid] = {
         name: userName,
         email: userData.personalInfo?.email || userData.email,
-        userId: doc.id
+        userId: doc.id,
+        authUid: userData.authUid
     };
-    
-    console.log('✅ مستخدم:', doc.id, '- الاسم:', userName);
+    console.log('✅ ربط Auth UID:', userData.authUid, '→', userName);
+}
+
+console.log('✅ مستخدم:', doc.id, '- الاسم:', userName);
 });
 
 console.log('👥 تم تحميل', Object.keys(usersCache).length, 'مستخدم');
