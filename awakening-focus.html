@@ -12,7 +12,8 @@
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    
+    <!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
     
@@ -2727,6 +2728,29 @@
                         يمكنك تحديث المقياس مرة واحدة كل أسبوع
                     </span>
                 </div>
+                <!-- Scale History Section -->
+<div class="scale-history-section" id="scaleHistorySection" style="margin-top: 30px; padding-top: 25px; border-top: 2px solid rgba(77, 163, 255, 0.2); display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div style="font-size: 1.2rem; color: var(--dawn-blue); font-weight: 600; display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-chart-line"></i>
+            <span>تطور مقياسك عبر الأسابيع</span>
+        </div>
+        <div style="font-size: 0.9rem; color: var(--text-dim);">
+            <i class="fas fa-history"></i>
+            <span id="scaleHistoryCount">0</span> قياسات
+        </div>
+    </div>
+    
+    <!-- Chart Container -->
+    <div style="background: rgba(0, 0, 0, 0.2); border: 2px solid rgba(77, 163, 255, 0.3); border-radius: 15px; padding: 25px; margin-bottom: 20px;">
+        <canvas id="scaleChart" style="max-height: 300px;"></canvas>
+    </div>
+    
+    <!-- Weekly History List -->
+    <div id="scaleHistoryList" style="display: grid; gap: 15px;">
+        <!-- سيتم ملؤها بـ JavaScript -->
+    </div>
+</div>
             </div>
 
            <!-- Section 3: الأدوات العملية -->
@@ -3520,10 +3544,10 @@
     await loadProgress();
     await loadQuestionsStatus();
     await loadScale();
+    await loadScaleHistory(); // ← NEW
     await loadDailyTools();
-    await loadPillarsPoints(); // ← NEW
+    await loadPillarsPoints();
 }
-
         async function loadProgress() {
             try {
                 const userId = localStorage.getItem('userId') || currentUser.uid;
@@ -3896,72 +3920,355 @@
             }
         }
 
-        async function saveScale() {
-            const btn = document.querySelector('.save-scale-btn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+        // ==== Load Scale History ====
+async function loadScaleHistory() {
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        const doc = await docRef.get();
+        
+        const historySection = document.getElementById('scaleHistorySection');
+        const historyList = document.getElementById('scaleHistoryList');
+        const historyCount = document.getElementById('scaleHistoryCount');
+        
+        if (!doc.exists || !doc.data()['scale.history'] || doc.data()['scale.history'].length === 0) {
+            historySection.style.display = 'none';
+            return;
+        }
+        
+        const data = doc.data();
+        const history = data['scale.history'];
+        
+        // Show section
+        historySection.style.display = 'block';
+        
+        // Update count
+        historyCount.textContent = history.length;
+        
+        // Create chart
+        createScaleChart(history);
+        
+        // Display history list (reverse order - newest first)
+        const sortedHistory = [...history].sort((a, b) => b.week - a.week);
+        
+        historyList.innerHTML = sortedHistory.map(entry => {
+            const dateStr = new Date(entry.date).toLocaleDateString('ar-EG', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            
+            const avgScore = ((entry.strength + entry.clarity + entry.response) / 3).toFixed(1);
+            
+            return `
+                <div style="background: rgba(0, 0, 0, 0.3); border: 2px solid rgba(77, 163, 255, 0.3); border-radius: 15px; padding: 20px; transition: all 0.3s;" 
+                     onmouseover="this.style.borderColor='var(--dawn-blue)'; this.style.boxShadow='0 5px 20px rgba(77, 163, 255, 0.2)';"
+                     onmouseout="this.style.borderColor='rgba(77, 163, 255, 0.3)'; this.style.boxShadow='none';">
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 2px solid rgba(77, 163, 255, 0.2);">
+                        <div>
+                            <div style="font-size: 1.2rem; color: var(--dawn-blue); font-weight: 600; margin-bottom: 5px;">
+                                الأسبوع ${entry.week}
+                            </div>
+                            <div style="font-size: 0.9rem; color: var(--text-dim);">
+                                <i class="fas fa-calendar"></i> ${dateStr}
+                            </div>
+                        </div>
+                        <div style="text-align: center; padding: 10px 20px; background: rgba(77, 163, 255, 0.2); border-radius: 12px; border: 2px solid var(--dawn-blue);">
+                            <div style="font-size: 1.8rem; font-weight: 700; color: var(--dawn-blue);">
+                                ${avgScore}
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-dim);">
+                                متوسط الصحوة
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px;">
+                        <div style="text-align: center; padding: 12px; background: rgba(255, 68, 68, 0.1); border-radius: 10px; border: 1px solid rgba(255, 68, 68, 0.3);">
+                            <div style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 5px;">⚡ قوة الصحوة</div>
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">${entry.strength}</div>
+                        </div>
+                        <div style="text-align: center; padding: 12px; background: rgba(251, 191, 36, 0.1); border-radius: 10px; border: 1px solid rgba(251, 191, 36, 0.3);">
+                            <div style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 5px;">💡 وضوح الصحوة</div>
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #fbbf24;">${entry.clarity}</div>
+                        </div>
+                        <div style="text-align: center; padding: 12px; background: rgba(16, 185, 129, 0.1); border-radius: 10px; border: 1px solid rgba(16, 185, 129, 0.3);">
+                            <div style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 5px;">✅ الاستجابة</div>
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #10b981;">${entry.response}</div>
+                        </div>
+                    </div>
+                    
+                    ${entry.reflection ? `
+                        <div style="background: rgba(255, 159, 64, 0.1); padding: 15px; border-radius: 12px; border-right: 3px solid var(--sunrise-orange);">
+                            <div style="font-size: 0.9rem; color: var(--sunrise-orange); font-weight: 600; margin-bottom: 8px;">
+                                <i class="fas fa-feather-alt"></i> تأملك:
+                            </div>
+                            <div style="color: var(--text-light); font-size: 0.95rem; line-height: 1.6;">
+                                "${entry.reflection}"
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+        
+        console.log('✅ تم تحميل سجل المقياس:', history.length, 'قياسات');
+        
+    } catch (error) {
+        console.error('خطأ في تحميل سجل المقياس:', error);
+    }
+}
 
-            try {
-                const userId = localStorage.getItem('userId') || currentUser.uid;
-                const docRef = db.collection('users')
-                    .doc(userId)
-                    .collection('awakening_progress')
-                    .doc(currentCourseId);
-                
-                const strength = parseInt(document.getElementById('strengthSlider').value);
-                const clarity = parseInt(document.getElementById('claritySlider').value);
-                const response = parseInt(document.getElementById('responseSlider').value);
-                const reflection = document.getElementById('scaleReflection').value.trim();
-                
-                // Check if this is first time
-                const doc = await docRef.get();
-                let isFirstTime = true;
-                
-                if (doc.exists) {
-                    const data = doc.data();
-                    if (data['scale.strength'] !== undefined) {
-                        isFirstTime = false;
+// ==== Create Scale Chart ====
+function createScaleChart(history) {
+    const canvas = document.getElementById('scaleChart');
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart if any
+    if (window.scaleChartInstance) {
+        window.scaleChartInstance.destroy();
+    }
+    
+    // Sort by week
+    const sortedHistory = [...history].sort((a, b) => a.week - b.week);
+    
+    // Prepare data
+    const labels = sortedHistory.map(entry => `أ${entry.week}`);
+    const strengthData = sortedHistory.map(entry => entry.strength);
+    const clarityData = sortedHistory.map(entry => entry.clarity);
+    const responseData = sortedHistory.map(entry => entry.response);
+    
+    // Create chart
+    window.scaleChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'قوة الصحوة',
+                    data: strengthData,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 3,
+                    pointRadius: 6,
+                    pointBackgroundColor: '#ef4444',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    tension: 0.4
+                },
+                {
+                    label: 'وضوح الصحوة',
+                    data: clarityData,
+                    borderColor: '#fbbf24',
+                    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+                    borderWidth: 3,
+                    pointRadius: 6,
+                    pointBackgroundColor: '#fbbf24',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    tension: 0.4
+                },
+                {
+                    label: 'الاستجابة',
+                    data: responseData,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 3,
+                    pointRadius: 6,
+                    pointBackgroundColor: '#10b981',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    tension: 0.4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        color: '#e0e7ff',
+                        font: {
+                            family: 'Tajawal',
+                            size: 14
+                        },
+                        padding: 15,
+                        usePointStyle: true
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(10, 14, 39, 0.9)',
+                    titleColor: '#e0e7ff',
+                    bodyColor: '#e0e7ff',
+                    borderColor: 'rgba(255, 159, 64, 0.5)',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: true,
+                    titleFont: {
+                        family: 'Tajawal',
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        family: 'Tajawal',
+                        size: 13
                     }
                 }
-                
-                // Save data
-                await docRef.set({
-                    'scale.strength': strength,
-                    'scale.clarity': clarity,
-                    'scale.response': response,
-                    'scale.reflection': reflection,
-                    'scale.lastUpdated': firebase.firestore.FieldValue.serverTimestamp(),
-                    'scale.points': 15
-                }, { merge: true });
-                
-                // Add points if first time
-                if (isFirstTime) {
-                    await addPointsToPillar('action', 15, {
-                        type: 'scale_update',
-                        values: { strength, clarity, response }
-                    });
-                    
-                    showNotification('رائع! حصلت على 15 نقطة 🎉', 'success');
-                } else {
-                    showNotification('تم تحديث المقياس بنجاح ✅', 'success');
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 10,
+                    ticks: {
+                        color: '#e0e7ff',
+                        font: {
+                            family: 'Tajawal',
+                            size: 12
+                        },
+                        stepSize: 1
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)',
+                        drawBorder: false
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#e0e7ff',
+                        font: {
+                            family: 'Tajawal',
+                            size: 12
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
+                    }
                 }
-                
-                // Update UI
-                await loadProgress();
-                await loadScale();
-                
-            } catch (error) {
-                console.error('خطأ في الحفظ:', error);
-                showNotification('حدث خطأ في الحفظ. حاول مرة أخرى', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = `
-                    <i class="fas fa-save"></i>
-                    <span>حفظ المقياس</span>
-                    <span class="btn-reward">+15 نقطة 🚶</span>
-                `;
             }
         }
+    });
+    
+    console.log('📊 تم إنشاء الرسم البياني');
+}
+
+        async function saveScale() {
+    const btn = document.querySelector('.save-scale-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        const strength = parseInt(document.getElementById('strengthSlider').value);
+        const clarity = parseInt(document.getElementById('claritySlider').value);
+        const response = parseInt(document.getElementById('responseSlider').value);
+        const reflection = document.getElementById('scaleReflection').value.trim();
+        
+        // Get current data
+        const doc = await docRef.get();
+        let scaleHistory = [];
+        let weekNumber = 1;
+        let isFirstTime = true;
+        
+        if (doc.exists) {
+            const data = doc.data();
+            
+            // Get existing history
+            if (data['scale.history']) {
+                scaleHistory = data['scale.history'];
+                isFirstTime = false;
+                
+                // Calculate current week number
+                const lastEntry = scaleHistory[scaleHistory.length - 1];
+                if (lastEntry && lastEntry.week) {
+                    weekNumber = lastEntry.week;
+                    
+                    // Check if it's been a week since last entry
+                    const lastDate = new Date(lastEntry.date);
+                    const now = new Date();
+                    const daysDiff = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+                    
+                    if (daysDiff >= 7) {
+                        // New week
+                        weekNumber++;
+                    }
+                } else {
+                    weekNumber = scaleHistory.length + 1;
+                }
+            }
+        }
+        
+        // Create new entry
+        const newEntry = {
+            week: weekNumber,
+            date: new Date().toISOString().split('T')[0],
+            strength: strength,
+            clarity: clarity,
+            response: response,
+            reflection: reflection,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Check if updating current week or adding new week
+        const currentWeekIndex = scaleHistory.findIndex(entry => entry.week === weekNumber);
+        
+        if (currentWeekIndex !== -1) {
+            // Update existing week
+            scaleHistory[currentWeekIndex] = newEntry;
+            showNotification('تم تحديث المقياس بنجاح ✅', 'success');
+        } else {
+            // Add new week
+            scaleHistory.push(newEntry);
+            
+            // Add points only for new week
+            await addPointsToPillar('action', 15, {
+                type: 'scale_update',
+                week: weekNumber,
+                values: { strength, clarity, response }
+            });
+            
+            showNotification(`رائع! حصلت على 15 نقطة 🎉`, 'success');
+        }
+        
+        // Save to Firebase
+        await docRef.set({
+            'scale.history': scaleHistory,
+            'scale.lastUpdated': new Date().toISOString().split('T')[0],
+            'scale.currentWeek': weekNumber
+        }, { merge: true });
+        
+        // Update UI
+        await loadProgress();
+        await loadScale();
+        await loadScaleHistory(); // ← NEW
+        
+    } catch (error) {
+        console.error('خطأ في الحفظ:', error);
+        showNotification('حدث خطأ في الحفظ. حاول مرة أخرى', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+            <i class="fas fa-save"></i>
+            <span>حفظ المقياس</span>
+            <span class="btn-reward">+15 نقطة 🚶</span>
+        `;
+    }
+}
+
+        
        function calculateTotalPoints(data) {
     let total = 0;
     
