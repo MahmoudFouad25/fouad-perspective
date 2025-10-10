@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Migration Script</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <style>
+        body {
+            font-family: 'Tajawal', Arial, sans-serif;
+            background: #0a0e27;
+            color: white;
+            padding: 40px;
+            direction: rtl;
+        }
+        .log {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            font-family: monospace;
+        }
+        .success { border-right: 4px solid #10b981; }
+        .error { border-right: 4px solid #ef4444; }
+        .warning { border-right: 4px solid #f59e0b; }
+        button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #FF9F40, #FFB627);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 1.1rem;
+            cursor: pointer;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Migration Script - نقل بيانات كل المستخدمين</h1>
+    <button onclick="startMigration()">ابدأ Migration</button>
+    <div id="logs"></div>
+
+    <script>
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+            authDomain: "fouad-perspective.firebaseapp.com",
+            projectId: "fouad-perspective",
+            storageBucket: "fouad-perspective.firebasestorage.app",
+            messagingSenderId: "1068763865336",
+            appId: "1:1068763865336:web:b791abcd22d536aedd5b0d"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+
+        function addLog(message, type = 'success') {
+            const logsDiv = document.getElementById('logs');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log ${type}`;
+            logEntry.textContent = message;
+            logsDiv.appendChild(logEntry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+
+        async function startMigration() {
+            addLog('🚀 بدء Migration لجميع المستخدمين...', 'warning');
+            
+            try {
+                // Get all users
+                const usersSnapshot = await db.collection('users').get();
+                addLog(`📊 عدد المستخدمين: ${usersSnapshot.size}`, 'success');
+                
+                let processedCount = 0;
+                let migratedCount = 0;
+                let skippedCount = 0;
+                
+                for (const userDoc of usersSnapshot.docs) {
+                    const userId = userDoc.id;
+                    addLog(`\n👤 معالجة المستخدم: ${userId}`, 'warning');
+                    
+                    // Get awakening_progress collection
+                    const progressSnapshot = await db.collection('users')
+                        .doc(userId)
+                        .collection('awakening_progress')
+                        .get();
+                    
+                    if (progressSnapshot.empty) {
+                        addLog(`  ⏭️ لا توجد بيانات - تخطي`, 'warning');
+                        skippedCount++;
+                        continue;
+                    }
+                    
+                    for (const progressDoc of progressSnapshot.docs) {
+                        const courseId = progressDoc.id;
+                        const data = progressDoc.data();
+                        
+                        // Check if migration needed
+                        const hasOldData = Object.keys(data).some(key => 
+                            !key.startsWith('week') && 
+                            (key.startsWith('personalMap') || 
+                             key.startsWith('scale') || 
+                             key.startsWith('dailyTools') ||
+                             key.startsWith('companion') ||
+                             key.startsWith('returnPoint') ||
+                             key.startsWith('pillars'))
+                        );
+                        
+                        if (!hasOldData) {
+                            addLog(`  ✅ ${courseId}: البيانات محدثة بالفعل`, 'success');
+                            skippedCount++;
+                            continue;
+                        }
+                        
+                        addLog(`  🔄 ${courseId}: جاري Migration...`, 'warning');
+                        
+                        // Perform migration
+                        const updateData = {};
+                        const fieldsToMigrate = [
+                            'personalMap.question1', 'personalMap.question2', 
+                            'personalMap.question3', 'personalMap.question4',
+                            'scale.strength', 'scale.clarity', 'scale.response',
+                            'scale.reflection', 'scale.lastUpdated', 'scale.points', 'scale.history',
+                            'dailyTools.morningRitual.entries', 'dailyTools.morningRitual.currentStreak',
+                            'dailyTools.morningRitual.lastDate', 'dailyTools.journal.entries',
+                            'dailyTools.journal.currentStreak', 'dailyTools.journal.lastDate',
+                            'companion.name', 'companion.since', 'companion.meetings',
+                            'returnPoint.type', 'returnPoint.customText', 'returnPoint.date',
+                            'pillars.courage.reflections', 'pillars.courage.reflection', 'pillars.courage.lastUpdate',
+                            'pillars.mirror.reflections', 'pillars.mirror.reflection', 'pillars.mirror.lastUpdate',
+                            'pillars.action.reflections', 'pillars.action.reflection', 'pillars.action.lastUpdate',
+                            'pillars.witness.reflections', 'pillars.witness.reflection', 'pillars.witness.lastUpdate'
+                        ];
+                        
+                        let fieldsMigrated = 0;
+                        fieldsToMigrate.forEach(field => {
+                            if (data[field] !== undefined) {
+                                updateData[`week1.${field}`] = data[field];
+                                fieldsMigrated++;
+                            }
+                        });
+                        
+                        if (fieldsMigrated > 0) {
+                            await progressDoc.ref.set(updateData, { merge: true });
+                            addLog(`  ✅ ${courseId}: تم نقل ${fieldsMigrated} بيانة`, 'success');
+                            migratedCount++;
+                        }
+                    }
+                    
+                    processedCount++;
+                    addLog(`✅ تمت معالجة المستخدم ${processedCount}/${usersSnapshot.size}`, 'success');
+                }
+                
+                addLog(`\n🎉 انتهى Migration!`, 'success');
+                addLog(`📊 الإحصائيات:`, 'success');
+                addLog(`   - إجمالي المستخدمين: ${usersSnapshot.size}`, 'success');
+                addLog(`   - تم Migration: ${migratedCount}`, 'success');
+                addLog(`   - تم التخطي: ${skippedCount}`, 'success');
+                
+            } catch (error) {
+                addLog(`❌ خطأ: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>
