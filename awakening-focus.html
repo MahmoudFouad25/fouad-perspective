@@ -2420,6 +2420,15 @@
                 <span id="timelineStatus">أنت في الأسبوع الثاني من رحلتك 🎯</span>
             </div>
 
+            <!-- View Previous Weeks Button -->
+<div style="text-align: center; margin-top: 20px;">
+    <button onclick="viewPreviousWeeks()" style="padding: 12px 30px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(124, 58, 237, 0.2)); 
+                    border: 2px solid rgba(139, 92, 246, 0.5); border-radius: 12px; color: var(--text-light); 
+                    font-size: 1rem; cursor: pointer; transition: all 0.3s; display: inline-flex; align-items: center; gap: 10px;">
+        <i class="fas fa-history"></i>
+        <span>عرض الأسابيع السابقة</span>
+    </button>
+</div>
             <!-- Pillars Summary -->
             <div class="pillars-summary">
                 <!-- Courage -->
@@ -3573,15 +3582,23 @@ let currentWeekNumber = 1;
        async function initializePage() {
     console.log('🎯 جاري تهيئة صفحة صحوة الحائر...');
     
-    // Calculate current week
-    currentWeekNumber = calculateCurrentWeek(COURSE_START_DATE);
-    console.log(`📅 الأسبوع الحالي: ${currentWeekNumber}`);
+    // Check if viewing previous week
+    const viewingWeek = sessionStorage.getItem('viewingWeek');
+    if (viewingWeek) {
+        currentWeekNumber = parseInt(viewingWeek);
+        console.log(`👁️ عرض الأسبوع ${currentWeekNumber} (وضع المشاهدة)`);
+        sessionStorage.removeItem('viewingWeek');
+    } else {
+        // Calculate current week
+        currentWeekNumber = calculateCurrentWeek(COURSE_START_DATE);
+        console.log(`📅 الأسبوع الحالي: ${currentWeekNumber}`);
+    }
     
     // Update timeline UI
     updateTimelineDisplay(currentWeekNumber);
     
     // Check if week is unlocked
-    if (currentWeekNumber < 1 || currentWeekNumber > 4) {
+    if (!viewingWeek && (currentWeekNumber < 1 || currentWeekNumber > 4)) {
         showWeekLockedMessage();
         return;
     }
@@ -6517,6 +6534,179 @@ function getPillarName(pillarType) {
     };
     return names[pillarType] || pillarType;
 }   
+
+        // ==== View Previous Weeks ====
+async function viewPreviousWeeks() {
+    try {
+        const userId = localStorage.getItem('userId') || currentUser.uid;
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        const doc = await docRef.get();
+        
+        if (!doc.exists) {
+            showNotification('لا توجد بيانات للأسابيع السابقة', 'error');
+            return;
+        }
+        
+        const data = doc.data();
+        
+        // Check which weeks have data
+        const weeksWithData = [];
+        for (let i = 1; i < currentWeekNumber; i++) {
+            const weekKey = `week${i}`;
+            const hasData = Object.keys(data).some(key => key.startsWith(weekKey));
+            if (hasData) {
+                weeksWithData.push(i);
+            }
+        }
+        
+        if (weeksWithData.length === 0) {
+            showNotification('لا توجد أسابيع سابقة', 'error');
+            return;
+        }
+        
+        // Create modal
+        let modalHTML = `
+            <div class="modal-overlay" id="previousWeeksModal" style="display: flex !important;">
+                <div class="journal-full-modal">
+                    <div class="journal-full-header">
+                        <div class="journal-full-title">
+                            <i class="fas fa-history" style="font-size: 2rem; color: var(--sunrise-orange);"></i>
+                            <h3>الأسابيع السابقة</h3>
+                        </div>
+                        <div class="pillar-details-close" onclick="closePreviousWeeksModal()">
+                            <i class="fas fa-times"></i>
+                        </div>
+                    </div>
+                    
+                    <div style="padding: 30px;">
+                        <div style="display: grid; gap: 20px;">
+        `;
+        
+        // Add each week
+        for (const weekNum of weeksWithData) {
+            const weekKey = `week${weekNum}`;
+            
+            // Count data for this week
+            let questionsCount = 0;
+            let hasScale = false;
+            let journalDays = 0;
+            let morningDays = 0;
+            
+            for (let q = 1; q <= 4; q++) {
+                if (data[`${weekKey}.personalMap.question${q}`]) questionsCount++;
+            }
+            
+            if (data[`${weekKey}.scale.strength`] !== undefined) hasScale = true;
+            if (data[`${weekKey}.dailyTools.journal.entries`]) journalDays = data[`${weekKey}.dailyTools.journal.entries`].length;
+            if (data[`${weekKey}.dailyTools.morningRitual.entries`]) morningDays = data[`${weekKey}.dailyTools.morningRitual.entries`].length;
+            
+            const weekNames = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع'];
+            
+            modalHTML += `
+                <div style="background: linear-gradient(135deg, rgba(255, 159, 64, 0.1), rgba(77, 163, 255, 0.05)); 
+                            border: 2px solid rgba(255, 159, 64, 0.3); border-radius: 20px; padding: 25px; 
+                            transition: all 0.3s; cursor: pointer;"
+                     onclick="viewWeekDetails(${weekNum})"
+                     onmouseover="this.style.borderColor='var(--sunrise-orange)'; this.style.boxShadow='0 5px 20px rgba(255, 159, 64, 0.3)';"
+                     onmouseout="this.style.borderColor='rgba(255, 159, 64, 0.3)'; this.style.boxShadow='none';">
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div>
+                            <h3 style="font-size: 1.5rem; color: var(--sunrise-orange); margin-bottom: 5px;">
+                                🌅 الأسبوع ${weekNames[weekNum]}
+                            </h3>
+                            <p style="color: var(--text-dim); font-size: 0.95rem;">
+                                ${getWeekDateRange(weekNum)}
+                            </p>
+                        </div>
+                        <i class="fas fa-chevron-left" style="font-size: 1.5rem; color: var(--sunrise-orange);"></i>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                        <div style="text-align: center; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 12px;">
+                            <div style="font-size: 2rem; margin-bottom: 5px;">📝</div>
+                            <div style="color: var(--text-light); font-weight: 600;">${questionsCount}/4</div>
+                            <div style="color: var(--text-dim); font-size: 0.85rem;">أسئلة</div>
+                        </div>
+                        
+                        <div style="text-align: center; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 12px;">
+                            <div style="font-size: 2rem; margin-bottom: 5px;">📊</div>
+                            <div style="color: var(--text-light); font-weight: 600;">${hasScale ? '✓' : '✗'}</div>
+                            <div style="color: var(--text-dim); font-size: 0.85rem;">المقياس</div>
+                        </div>
+                        
+                        <div style="text-align: center; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 12px;">
+                            <div style="font-size: 2rem; margin-bottom: 5px;">📖</div>
+                            <div style="color: var(--text-light); font-weight: 600;">${journalDays}</div>
+                            <div style="color: var(--text-dim); font-size: 0.85rem;">يوميات</div>
+                        </div>
+                        
+                        <div style="text-align: center; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 12px;">
+                            <div style="font-size: 2rem; margin-bottom: 5px;">☀️</div>
+                            <div style="color: var(--text-light); font-weight: 600;">${morningDays}</div>
+                            <div style="color: var(--text-dim); font-size: 0.85rem;">طقس صباح</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        modalHTML += `
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Remove old modal if exists
+        const oldModal = document.getElementById('previousWeeksModal');
+        if (oldModal) oldModal.remove();
+        
+        // Add new modal
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+    } catch (error) {
+        console.error('خطأ في عرض الأسابيع السابقة:', error);
+        showNotification('حدث خطأ في تحميل البيانات', 'error');
+    }
+}
+
+function closePreviousWeeksModal() {
+    const modal = document.getElementById('previousWeeksModal');
+    if (modal) modal.remove();
+}
+
+function getWeekDateRange(weekNumber) {
+    const startDate = new Date(COURSE_START_DATE);
+    startDate.setDate(startDate.getDate() + ((weekNumber - 1) * 7));
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6);
+    
+    const formatDate = (date) => {
+        return date.toLocaleDateString('ar-EG', {
+            day: 'numeric',
+            month: 'long'
+        });
+    };
+    
+    return `${formatDate(startDate)} - ${formatDate(endDate)}`;
+}
+
+function viewWeekDetails(weekNumber) {
+    // Save selected week temporarily
+    sessionStorage.setItem('viewingWeek', weekNumber);
+    
+    // Reload page with this week
+    showNotification(`جاري عرض بيانات الأسبوع ${weekNumber}...`, 'success');
+    
+    setTimeout(() => {
+        location.reload();
+    }, 1000);
+}
         
     </script>
 </body>
