@@ -642,162 +642,158 @@ loadPublicReflections();
 });    
         // Load Public Reflections
         async function loadPublicReflections() {
-            try {
-                console.log('🔄 جاري تحميل التأملات العامة...');
-                
-                // Show loading
-                document.getElementById('loadingState').style.display = 'block';
-                document.getElementById('reflectionsGrid').style.display = 'none';
-                document.getElementById('emptyState').style.display = 'none';
-                
-                // Get all users
-                const usersSnapshot = await db.collection('users').get();
-                
-                allReflections = [];
-                let uniqueUsers = new Set();
-                let totalSupportCount = 0;
-                
-                // Build users cache
-usersSnapshot.docs.forEach(doc => {
-    const userData = doc.data();
-    
-    // محاولة الحصول على الاسم من مصادر متعددة
-    let userName = 'مستخدم';
-    
-    // 🆕 1️⃣ من personalInfo.name (المكان الصحيح!)
-    if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
-        userName = userData.personalInfo.name;
-    }
-    // 2️⃣ من displayName أو name في الـ root
-    else if (userData.displayName && userData.displayName.trim() !== '') {
-        userName = userData.displayName;
-    } else if (userData.name && userData.name.trim() !== '') {
-        userName = userData.name;
-    } 
-    // 3️⃣ من firstName + lastName
-    else if (userData.firstName && userData.lastName) {
-        userName = `${userData.firstName} ${userData.lastName}`;
-    } else if (userData.firstName) {
-        userName = userData.firstName;
-    } 
-    // 4️⃣ من payment reference في enrollments
-    else if (userData.enrollments && userData.enrollments.length > 0) {
-        try {
-            const enrollment = userData.enrollments[0];
-            if (enrollment.payment?.installments?.schedule?.[0]?.reference) {
-                const reference = enrollment.payment.installments.schedule[0].reference;
-                userName = reference.split('_')[0].trim();
+    try {
+        console.log('📄 جاري تحميل التأملات العامة من كل الأسابيع...');
+        
+        // Show loading
+        document.getElementById('loadingState').style.display = 'block';
+        document.getElementById('reflectionsGrid').style.display = 'none';
+        document.getElementById('emptyState').style.display = 'none';
+        
+        // Get all users
+        const usersSnapshot = await db.collection('users').get();
+        
+        allReflections = [];
+        let uniqueUsers = new Set();
+        let totalSupportCount = 0;
+        
+        // Build users cache (نفس الكود القديم)
+        usersSnapshot.docs.forEach(doc => {
+            const userData = doc.data();
+            let userName = 'مستخدم';
+            
+            if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
+                userName = userData.personalInfo.name;
+            } else if (userData.displayName && userData.displayName.trim() !== '') {
+                userName = userData.displayName;
+            } else if (userData.name && userData.name.trim() !== '') {
+                userName = userData.name;
+            } else if (userData.firstName && userData.lastName) {
+                userName = `${userData.firstName} ${userData.lastName}`;
+            } else if (userData.firstName) {
+                userName = userData.firstName;
+            } else if (userData.enrollments && userData.enrollments.length > 0) {
+                try {
+                    const enrollment = userData.enrollments[0];
+                    if (enrollment.payment?.installments?.schedule?.[0]?.reference) {
+                        const reference = enrollment.payment.installments.schedule[0].reference;
+                        userName = reference.split('_')[0].trim();
+                    }
+                } catch (e) {
+                    console.warn('⚠️ فشل استخراج الاسم من enrollments');
+                }
+            } else if (userData.personalInfo?.email) {
+                const emailName = userData.personalInfo.email.split('@')[0];
+                userName = emailName;
+            } else if (userData.email) {
+                const emailName = userData.email.split('@')[0];
+                userName = emailName;
             }
-        } catch (e) {
-            console.warn('⚠️ فشل استخراج الاسم من enrollments');
-        }
-    }
-    // 5️⃣ من personalInfo.email كخيار أخير
-    else if (userData.personalInfo?.email) {
-        const emailName = userData.personalInfo.email.split('@')[0];
-        userName = emailName;
-    }
-    // 6️⃣ من email في الـ root
-    else if (userData.email) {
-        const emailName = userData.email.split('@')[0];
-        userName = emailName;
-    }
-    
-    // حفظ بـ Document ID
-const userEmail = (userData.personalInfo?.email || userData.email || '').toLowerCase(); // 🆕 حوّل لـ lowercase
-
-usersCache[doc.id] = {
-    name: userName,
-    email: userEmail,
-    userId: doc.id,
-    authUid: userData.authUid || null
-};
-
-// 🆕 حفظ كمان بـ Auth UID لو موجود
-if (userData.authUid) {
-    usersCache[userData.authUid] = {
-        name: userName,
-        email: userEmail,
-        userId: doc.id,
-        authUid: userData.authUid
-    };
-    console.log('✅ ربط Auth UID:', userData.authUid, '→', userName);
-}
-
-console.log('✅ مستخدم:', doc.id, '- الاسم:', userName, '- الإيميل:', userEmail);
-
-});
-
-console.log('👥 تم تحميل', Object.keys(usersCache).length, 'مستخدم');
-console.log('📋 usersCache الكامل:', usersCache);
+            
+            const userEmail = (userData.personalInfo?.email || userData.email || '').toLowerCase();
+            
+            usersCache[doc.id] = {
+                name: userName,
+                email: userEmail,
+                userId: doc.id,
+                authUid: userData.authUid || null
+            };
+            
+            if (userData.authUid) {
+                usersCache[userData.authUid] = {
+                    name: userName,
+                    email: userEmail,
+                    userId: doc.id,
+                    authUid: userData.authUid
+                };
+            }
+        });
+        
+        console.log('👥 تم تحميل', Object.keys(usersCache).length, 'مستخدم');
+        
+        // 🆕 الجزء الجديد: Loop through all users واحصل على تأملات كل الأسابيع
+        for (const userDoc of usersSnapshot.docs) {
+            const userId = userDoc.id;
+            const userName = usersCache[userId].name;
+            
+            // Get all courses for this user
+            const coursesSnapshot = await db.collection('users')
+                .doc(userId)
+                .collection('awakening_progress')
+                .get();
+            
+            // Loop through all courses
+            for (const courseDoc of coursesSnapshot.docs) {
+                const courseData = courseDoc.data();
                 
-                // Loop through all users
-                for (const userDoc of usersSnapshot.docs) {
-                    const userId = userDoc.id;
-                    const userName = usersCache[userId].name;
+                // 🆕 Loop through all 4 weeks
+                for (let weekNum = 1; weekNum <= 4; weekNum++) {
+                    const weekKey = `week${weekNum}`;
                     
-                    // Get all courses for this user
-                    const coursesSnapshot = await db.collection('users')
-                        .doc(userId)
-                        .collection('awakening_progress')
-                        .get();
+                    // Check all 4 pillars
+                    const pillars = ['courage', 'mirror', 'action', 'witness'];
                     
-                    // Loop through all courses
-                    for (const courseDoc of coursesSnapshot.docs) {
-                        const courseData = courseDoc.data();
+                    for (const pillar of pillars) {
+                        const reflectionsKey = `${weekKey}.pillars.${pillar}.reflections`;
+                        const reflections = courseData[reflectionsKey];
                         
-                        // Check all 4 pillars
-                        const pillars = ['courage', 'mirror', 'action', 'witness'];
-                        
-                        for (const pillar of pillars) {
-                            const reflectionKey = `pillars.${pillar}.reflection`;
-                            const reflection = courseData[reflectionKey];
-                            
-                            // If reflection exists and is public
-                            if (reflection && reflection.isPublic && reflection.text) {
-                                uniqueUsers.add(userId);
-                                
-                                const supportCount = reflection.supports ? reflection.supports.length : 0;
-                                totalSupportCount += supportCount;
-                                
-                                allReflections.push({
-                                    id: `${userId}_${courseDoc.id}_${pillar}`,
-                                    userId: userId,
-                                    courseId: courseDoc.id,
-                                    userName: userName,
-                                    pillar: pillar,
-                                    text: reflection.text,
-                                    date: reflection.date || reflection.timestamp,
-                                    supports: reflection.supports || [],
-                                    supportCount: supportCount
-                                });
-                            }
+                        // 🆕 التأملات الآن array وليس object
+                        if (reflections && Array.isArray(reflections)) {
+                            // Loop through each reflection in the array
+                            reflections.forEach((reflection, index) => {
+                                // Only show public reflections
+                                if (reflection.isPublic && reflection.text) {
+                                    uniqueUsers.add(userId);
+                                    
+                                    // 🆕 الدعم محفوظ في كل reflection
+                                    const supportCount = reflection.supports ? reflection.supports.length : 0;
+                                    totalSupportCount += supportCount;
+                                    
+                                    // 🆕 ID فريد لكل تأمل يشمل الأسبوع والـ index
+                                    allReflections.push({
+                                        id: `${userId}_${courseDoc.id}_week${weekNum}_${pillar}_${index}`,
+                                        userId: userId,
+                                        courseId: courseDoc.id,
+                                        weekNumber: weekNum,
+                                        pillar: pillar,
+                                        reflectionIndex: index,
+                                        userName: userName,
+                                        text: reflection.text,
+                                        date: reflection.date || reflection.timestamp,
+                                        supports: reflection.supports || [],
+                                        supportCount: supportCount,
+                                        pointsEarned: reflection.pointsEarned || 0
+                                    });
+                                }
+                            });
                         }
                     }
                 }
-                
-                console.log(`✅ تم تحميل ${allReflections.length} تأمل من ${uniqueUsers.size} مستخدم`);
-                
-                // Update stats
-                document.getElementById('totalReflections').textContent = allReflections.length;
-                document.getElementById('activeUsers').textContent = uniqueUsers.size;
-                document.getElementById('totalSupport').textContent = totalSupportCount;
-                
-                // Sort by date (newest first)
-                allReflections.sort((a, b) => {
-                    const dateA = new Date(a.date || 0);
-                    const dateB = new Date(b.date || 0);
-                    return dateB - dateA;
-                });
-                
-                // Display reflections
-                displayReflections(allReflections);
-                
-            } catch (error) {
-                console.error('❌ خطأ في تحميل التأملات:', error);
-                showNotification('حدث خطأ في تحميل التأملات', 'error');
             }
         }
+        
+        console.log(`✅ تم تحميل ${allReflections.length} تأمل من ${uniqueUsers.size} مستخدم`);
+        
+        // Update stats
+        document.getElementById('totalReflections').textContent = allReflections.length;
+        document.getElementById('activeUsers').textContent = uniqueUsers.size;
+        document.getElementById('totalSupport').textContent = totalSupportCount;
+        
+        // Sort by date (newest first)
+        allReflections.sort((a, b) => {
+            const dateA = new Date(a.date || 0);
+            const dateB = new Date(b.date || 0);
+            return dateB - dateA;
+        });
+        
+        // Display reflections
+        displayReflections(allReflections);
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحميل التأملات:', error);
+        showNotification('حدث خطأ في تحميل التأملات', 'error');
+    }
+}
 
         // Display Reflections
        function displayReflections(reflections) {
@@ -858,6 +854,24 @@ console.log('📋 usersCache الكامل:', usersCache);
                     <div class="pillar-badge ${reflection.pillar}">
                         ${info.icon} ${info.name}
                     </div>
+                    <span style="
+                    position: absolute;
+                    top: 15px;
+                    left: 15px;
+                    background: linear-gradient(135deg, rgba(77, 163, 255, 0.3), rgba(139, 92, 246, 0.3));
+                    color: var(--dawn-blue);
+                    padding: 5px 12px;
+                    border-radius: 20px;
+                    font-size: 0.85rem;
+                    font-weight: 600;
+                    border: 1px solid rgba(77, 163, 255, 0.5);
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                ">
+                    <i class="fas fa-calendar-week"></i>
+                    أسبوع ${reflection.weekNumber}
+                </span>
                 </div>
                 
                 <div class="reflection-content">
@@ -929,102 +943,142 @@ console.log('📋 usersCache الكامل:', usersCache);
         }
 
         // Toggle Support
-        async function toggleSupport(reflectionId) {
-            try {
-                console.log('❤️ تحديث الدعم للتأمل:', reflectionId);
-                
-                // Parse reflection ID
-                const parts = reflectionId.split('_');
-                const userId = parts[0];
-                const courseId = parts[1];
-                const pillar = parts[2];
-                
-                const docRef = db.collection('users')
-                    .doc(userId)
-                    .collection('awakening_progress')
-                    .doc(courseId);
-                
-                const doc = await docRef.get();
-                if (!doc.exists) {
-                    console.error('❌ المستند غير موجود');
-                    return;
-                }
-                
-                const data = doc.data();
-                const reflectionKey = `pillars.${pillar}.reflection`;
-                const reflection = data[reflectionKey];
-                
-                if (!reflection) {
-                    console.error('❌ التأمل غير موجود');
-                    return;
-                }
-                
-               let supports = reflection.supports || [];
-
-// 🆕 استخدم Document ID فقط
-const userIdentifier = currentUser.docId || currentUser.uid;
-
-// 🔍 فحص بسيط: هل userIdentifier موجود في القائمة؟
-const isSupported = supports.includes(userIdentifier);
-
-console.log('🔍 فحص الدعم:');
-console.log('  - معرّف المستخدم:', userIdentifier);
-console.log('  - هل داعم؟', isSupported);
-console.log('  - القائمة الحالية:', supports);
-
-if (isSupported) {
-    // ❌ المستخدم داعم بالفعل → إلغاء الدعم
-    supports = supports.filter(id => id !== userIdentifier);
-    console.log('🗑️ تم إلغاء الدعم');
-    console.log('📋 القائمة بعد الإلغاء:', supports);
-    showNotification('تم إلغاء الدعم بنجاح', 'success');
-} else {
-    // ✅ المستخدم مش داعم → إضافة الدعم
-    supports.push(userIdentifier);
-    console.log('➕ تم إضافة الدعم');
-    console.log('📋 القائمة بعد الإضافة:', supports);
-    showNotification('شكراً لدعمك! ❤️', 'success');
-}
-
-console.log('💾 حفظ التحديث... الداعمين الجدد:', supports.length);
-console.log('📋 القائمة:', supports);
-                
-                // Update in Firebase
-                await docRef.set({
-                    [reflectionKey]: {
-                        ...reflection,
-                        supports: supports
-                    }
-                }, { merge: true });
-                
-                console.log('✅ تم التحديث بنجاح');
-                // 🆕 أعد تحميل بيانات المستخدم اللي دعم عشان الاسم يظهر
-if (!usersCache[currentUser.uid]) {
+       async function toggleSupport(reflectionId) {
     try {
-        const userDoc = await db.collection('users').doc(currentUser.uid).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            let userName = 'مستخدم';
-            
-            if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
-                userName = userData.personalInfo.name;
-            } else if (userData.displayName) {
-                userName = userData.displayName;
-            } else if (userData.name) {
-                userName = userData.name;
-            }
-            
-            usersCache[currentUser.uid] = {
-                name: userName,
-                email: (userData.personalInfo?.email || userData.email || '').toLowerCase(),
-                userId: currentUser.uid,
-                authUid: currentUser.uid
-            };
-            
-            console.log('✅ تم إضافة المستخدم للـ cache:', userName);
+        console.log('❤️ تحديث الدعم للتأمل:', reflectionId);
+        
+        // 🆕 Parse reflection ID الجديد (يشمل week و index)
+        const parts = reflectionId.split('_');
+        const userId = parts[0];
+        const courseId = parts[1];
+        const weekPart = parts[2]; // "week1"
+        const pillar = parts[3];
+        const reflectionIndex = parseInt(parts[4]);
+        
+        const weekNum = parseInt(weekPart.replace('week', ''));
+        
+        console.log('📝 التفاصيل:', {
+            userId,
+            courseId,
+            weekNum,
+            pillar,
+            reflectionIndex
+        });
+        
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(courseId);
+        
+        const doc = await docRef.get();
+        if (!doc.exists) {
+            console.error('❌ المستند غير موجود');
+            return;
         }
+        
+        const data = doc.data();
+        const reflectionsKey = `week${weekNum}.pillars.${pillar}.reflections`;
+        const reflections = data[reflectionsKey];
+        
+        if (!reflections || !Array.isArray(reflections) || !reflections[reflectionIndex]) {
+            console.error('❌ التأمل غير موجود');
+            return;
+        }
+        
+        // 🆕 Get the specific reflection from the array
+        const reflection = reflections[reflectionIndex];
+        let supports = reflection.supports || [];
+        
+        // استخدم Document ID فقط
+        const userIdentifier = currentUser.docId || currentUser.uid;
+        
+        const isSupported = supports.includes(userIdentifier);
+        
+        console.log('🔍 فحص الدعم:', {
+            userIdentifier,
+            isSupported,
+            currentSupports: supports
+        });
+        
+        if (isSupported) {
+            // إلغاء الدعم
+            supports = supports.filter(id => id !== userIdentifier);
+            console.log('🗑️ تم إلغاء الدعم');
+            showNotification('تم إلغاء الدعم بنجاح', 'success');
+        } else {
+            // إضافة الدعم
+            supports.push(userIdentifier);
+            console.log('➕ تم إضافة الدعم');
+            showNotification('شكراً لدعمك! ❤️', 'success');
+        }
+        
+        // 🆕 Update the specific reflection in the array
+        reflections[reflectionIndex].supports = supports;
+        
+        console.log('💾 حفظ التحديث... الدعم الجديد:', supports.length);
+        
+        // Update in Firebase
+        await docRef.set({
+            [reflectionsKey]: reflections
+        }, { merge: true });
+        
+        console.log('✅ تم التحديث بنجاح');
+        
+        // Update current user cache if needed
+        if (!usersCache[currentUser.uid]) {
+            try {
+                const userDoc = await db.collection('users').doc(currentUser.uid).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    let userName = 'مستخدم';
+                    
+                    if (userData.personalInfo?.name && userData.personalInfo.name.trim() !== '') {
+                        userName = userData.personalInfo.name;
+                    } else if (userData.displayName) {
+                        userName = userData.displayName;
+                    } else if (userData.name) {
+                        userName = userData.name;
+                    }
+                    
+                    usersCache[currentUser.uid] = {
+                        name: userName,
+                        email: (userData.personalInfo?.email || userData.email || '').toLowerCase(),
+                        userId: currentUser.uid,
+                        authUid: currentUser.uid
+                    };
+                    
+                    console.log('✅ تم إضافة المستخدم للـ cache:', userName);
+                }
+            } catch (error) {
+                console.error('⚠️ فشل تحديث usersCache:', error);
+            }
+        }
+        
+        // 🆕 Update the reflection in memory
+        const reflectionInList = allReflections.find(r => r.id === reflectionId);
+        if (reflectionInList) {
+            reflectionInList.supports = supports;
+            reflectionInList.supportCount = supports.length;
+        }
+        
+        // Update stats bar
+        updateStatsBar();
+        
+        // Re-display with current filter
+        let filtered = allReflections;
+        if (currentFilter !== 'all') {
+            filtered = allReflections.filter(r => r.pillar === currentFilter);
+        }
+        displayReflections(filtered);
+        
+        console.log('🔄 تم تحديث العرض');
+        
+        // بث التحديث لكل المستخدمين
+        broadcastSupportUpdate(reflectionId, supports.length);
+        
     } catch (error) {
-        console.error('⚠️ فشل تحديث usersCache:', error);
+        console.error('❌ خطأ في تحديث الدعم:', error);
+        showNotification('حدث خطأ. حاول مرة أخرى', 'error');
     }
 }
                 
@@ -1070,45 +1124,53 @@ console.log('📄 تم تحديث العرض');
 
         // 🔄 إعادة تحميل تأمل واحد فقط
         async function reloadSingleReflection(reflectionId) {
-            try {
-                const parts = reflectionId.split('_');
-                const userId = parts[0];
-                const courseId = parts[1];
-                const pillar = parts[2];
-                
-                const docRef = db.collection('users')
-                    .doc(userId)
-                    .collection('awakening_progress')
-                    .doc(courseId);
-                
-                const doc = await docRef.get();
-                if (!doc.exists) return;
-                
-                const data = doc.data();
-                const reflectionKey = `pillars.${pillar}.reflection`;
-                const reflection = data[reflectionKey];
-                
-                if (!reflection) return;
-                
-                // حدّث في الـ allReflections
-                const reflectionInList = allReflections.find(r => r.id === reflectionId);
-                if (reflectionInList) {
-                    reflectionInList.supports = reflection.supports || [];
-                    reflectionInList.supportCount = reflectionInList.supports.length;
-                    
-                    // أعد عرض التأملات
-                    let filtered = allReflections;
-                    if (currentFilter !== 'all') {
-                        filtered = allReflections.filter(r => r.pillar === currentFilter);
-                    }
-                    displayReflections(filtered);
-                    updateStatsBar();
-                }
-                
-            } catch (error) {
-                console.error('❌ خطأ في إعادة تحميل التأمل:', error);
+    try {
+        // 🆕 Parse the new reflection ID format
+        const parts = reflectionId.split('_');
+        const userId = parts[0];
+        const courseId = parts[1];
+        const weekPart = parts[2];
+        const pillar = parts[3];
+        const reflectionIndex = parseInt(parts[4]);
+        
+        const weekNum = parseInt(weekPart.replace('week', ''));
+        
+        const docRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(courseId);
+        
+        const doc = await docRef.get();
+        if (!doc.exists) return;
+        
+        const data = doc.data();
+        const reflectionsKey = `week${weekNum}.pillars.${pillar}.reflections`;
+        const reflections = data[reflectionsKey];
+        
+        if (!reflections || !Array.isArray(reflections) || !reflections[reflectionIndex]) return;
+        
+        // 🆕 Get the specific reflection
+        const reflection = reflections[reflectionIndex];
+        
+        // Update in allReflections
+        const reflectionInList = allReflections.find(r => r.id === reflectionId);
+        if (reflectionInList) {
+            reflectionInList.supports = reflection.supports || [];
+            reflectionInList.supportCount = reflectionInList.supports.length;
+            
+            // Re-display
+            let filtered = allReflections;
+            if (currentFilter !== 'all') {
+                filtered = allReflections.filter(r => r.pillar === currentFilter);
             }
+            displayReflections(filtered);
+            updateStatsBar();
         }
+        
+    } catch (error) {
+        console.error('❌ خطأ في إعادة تحميل التأمل:', error);
+    }
+}
         
         // Show Notification
         function showNotification(message, type = 'success') {
@@ -1297,59 +1359,65 @@ function updateStatsBar() {
         let realtimeUnsubscribe = null;
 
         function startRealtimeSync() {
-            if (realtimeUnsubscribe) {
-                realtimeUnsubscribe(); // أوقف المراقبة القديمة
+    if (realtimeUnsubscribe) {
+        realtimeUnsubscribe();
+    }
+
+    console.log('🎧 بدء المراقبة الفورية...');
+
+    realtimeUnsubscribe = db.collectionGroup('awakening_progress')
+        .onSnapshot((snapshot) => {
+            if (snapshot.metadata.hasPendingWrites) {
+                return;
             }
 
-            console.log('🎧 بدء المراقبة الفورية...');
+            console.log('🔔 تم اكتشاف تحديث!');
 
-            // راقب كل تغيير في awakening_progress
-            realtimeUnsubscribe = db.collectionGroup('awakening_progress')
-                .onSnapshot((snapshot) => {
-                    // تجاهل التحديث الأول (initial load)
-                    if (snapshot.metadata.hasPendingWrites) {
-                        return;
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === 'modified') {
+                    const docData = change.doc.data();
+                    const userId = change.doc.ref.parent.parent.id;
+                    const courseId = change.doc.id;
+
+                    // 🆕 Loop through all weeks
+                    for (let weekNum = 1; weekNum <= 4; weekNum++) {
+                        const weekKey = `week${weekNum}`;
+                        
+                        // Update all pillars
+                        ['courage', 'mirror', 'action', 'witness'].forEach(pillar => {
+                            const reflectionsKey = `${weekKey}.pillars.${pillar}.reflections`;
+                            const reflections = docData[reflectionsKey];
+
+                            if (reflections && Array.isArray(reflections)) {
+                                reflections.forEach((reflection, index) => {
+                                    if (reflection.isPublic) {
+                                        const reflectionId = `${userId}_${courseId}_week${weekNum}_${pillar}_${index}`;
+                                        
+                                        // Update in allReflections
+                                        const existingReflection = allReflections.find(r => r.id === reflectionId);
+                                        if (existingReflection) {
+                                            existingReflection.supports = reflection.supports || [];
+                                            existingReflection.supportCount = existingReflection.supports.length;
+                                        }
+                                    }
+                                });
+                            }
+                        });
                     }
 
-                    console.log('🔔 تم اكتشاف تحديث!');
-
-                    // أعد تحميل التأملات بدون loading screen
-                    snapshot.docChanges().forEach((change) => {
-                        if (change.type === 'modified') {
-                            const docData = change.doc.data();
-                            const userId = change.doc.ref.parent.parent.id;
-                            const courseId = change.doc.id;
-
-                            // حدّث كل الـ pillars
-                            ['courage', 'mirror', 'action', 'witness'].forEach(pillar => {
-                                const reflectionKey = `pillars.${pillar}.reflection`;
-                                const reflection = docData[reflectionKey];
-
-                                if (reflection && reflection.isPublic) {
-                                    const reflectionId = `${userId}_${courseId}_${pillar}`;
-                                    
-                                    // حدّث في allReflections
-                                    const existingReflection = allReflections.find(r => r.id === reflectionId);
-                                    if (existingReflection) {
-                                        existingReflection.supports = reflection.supports || [];
-                                        existingReflection.supportCount = existingReflection.supports.length;
-                                    }
-                                }
-                            });
-
-                            // أعد عرض التأملات
-                            let filtered = allReflections;
-                            if (currentFilter !== 'all') {
-                                filtered = allReflections.filter(r => r.pillar === currentFilter);
-                            }
-                            displayReflections(filtered);
-                            updateStatsBar();
-                        }
-                    });
-                }, (error) => {
-                    console.error('❌ خطأ في المراقبة:', error);
-                });
-        }
+                    // Re-display
+                    let filtered = allReflections;
+                    if (currentFilter !== 'all') {
+                        filtered = allReflections.filter(r => r.pillar === currentFilter);
+                    }
+                    displayReflections(filtered);
+                    updateStatsBar();
+                }
+            });
+        }, (error) => {
+            console.error('❌ خطأ في المراقبة:', error);
+        });
+}
         
     </script>
 </body>
