@@ -5097,157 +5097,298 @@ async function sendWelcomeMessage(student) {
 // ==================== ======================== ====================
 // ==================== 🤖 نظام الأتمتة الذكية الشاملة ====================
 
-        // دالة عرض نافذة الاختيار المتقدمة
+     // دالة عرض صندوق اختيار الطلبات المعلقة
 async function showPendingBookingsSelector() {
     try {
-        // جلب الطلبات المدفوعة فقط (بدون فلترة accountCreated)
+        // جلب الطلبات المعلقة
         const snapshot = await db.collection('individualStudents')
             .where('paymentConfirmed', '==', true)
             .get();
         
-        // فلترة يدوية للطلبات التي تحتاج معالجة
-        const pendingDocs = [];
-        snapshot.forEach(doc => {
+        const pendingBookings = [];
+        
+        // فحص كل طلب وتحديد حالته
+        for (const doc of snapshot.docs) {
             const data = doc.data();
-            // شروط القبول: دفع مؤكد + (بدون حساب أو حساب معلق)
+            
+            // التحقق من أن الطلب معلق فعلاً
             if (data.paymentConfirmed === true && 
                 (!data.userId || data.accountStatus === 'pending_creation')) {
-                pendingDocs.push(doc);
+                
+                // 🔍 فحص هل العميل موجود مسبقاً
+                const customerPhone = data.customer?.phone || data.phone;
+                const customerEmail = data.customer?.email || data.email;
+                
+                const existingAccount = await findExistingUserAccount(customerPhone, customerEmail);
+                
+                pendingBookings.push({
+                    id: doc.id,
+                    data: data,
+                    isExistingCustomer: existingAccount.found,
+                    existingUserId: existingAccount.userId
+                });
             }
-        });
+        }
         
-        if (pendingDocs.length === 0) {
-            Swal.fire({
+        if (pendingBookings.length === 0) {
+            await Swal.fire({
                 icon: 'info',
                 title: 'لا توجد طلبات معلقة',
-                text: 'جميع الطلبات تم معالجتها بالفعل',
+                text: 'جميع الطلبات تم معالجتها',
+                confirmButtonText: 'حسناً',
                 confirmButtonColor: '#3B82F6'
             });
             return;
         }
         
-        // بناء قائمة HTML للطلبات
-        let bookingsHTML = '';
-        pendingDocs.forEach(doc => {
-            const data = doc.data();
-            const customer = data.customer || {};
-            const pricing = data.pricing || {};
+        // بناء HTML للطلبات
+        let bookingsHtml = `
+            <div style="max-height: 500px; overflow-y: auto; padding: 10px;">
+        `;
+        
+        pendingBookings.forEach((booking, index) => {
+            const student = booking.data;
+            const name = student.customer?.name || 'غير محدد';
+            const phone = student.customer?.phone || student.phone || 'غير محدد';
+            const course = student.courseName || 'غير محددة';
+            const email = student.customer?.email || student.email || 'غير محدد';
             
-            bookingsHTML += `
-                <div style="background: white; border: 2px solid #E5E7EB; 
-                            border-radius: 12px; padding: 15px; margin-bottom: 15px;
-                            transition: all 0.3s;">
-                    <label style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" 
-                               class="booking-checkbox"
-                               data-id="${doc.id}"
-                               data-name="${customer.name || 'غير محدد'}"
-                               style="width: 20px; height: 20px; margin-left: 15px;">
-                        
+            // تحديد نوع العميل
+            const customerType = booking.isExistingCustomer ? 
+                `<span style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white; 
+                              padding: 5px 12px; border-radius: 8px; font-size: 0.85rem; 
+                              font-weight: bold; display: inline-flex; align-items: center; gap: 5px;">
+                    🔄 عميل سابق - سيتم تخصيص الدورة للحساب الموجود
+                </span>` :
+                `<span style="background: linear-gradient(135deg, #10B981, #059669); color: white; 
+                              padding: 5px 12px; border-radius: 8px; font-size: 0.85rem; 
+                              font-weight: bold; display: inline-flex; align-items: center; gap: 5px;">
+                    🆕 عميل جديد - سيتم إنشاء حساب جديد
+                </span>`;
+            
+            bookingsHtml += `
+                <div style="border: 2px solid #E5E7EB; border-radius: 12px; padding: 15px; 
+                            margin-bottom: 15px; background: white; transition: all 0.3s;
+                            cursor: pointer; position: relative;"
+                     onmouseover="this.style.borderColor='#3B82F6'; this.style.background='#F0F9FF';"
+                     onmouseout="this.style.borderColor='#E5E7EB'; this.style.background='white';">
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
                         <div style="flex: 1;">
-                            <div style="display: flex; justify-content: space-between; align-items: start;">
-                                <div>
-                                    <h4 style="margin: 0 0 5px 0; color: #1F2937;">
-                                        ${customer.name || 'غير محدد'}
-                                    </h4>
-                                    <p style="margin: 0; color: #6B7280; font-size: 0.9rem;">
-                                        <i class="fas fa-book"></i> ${data.courseName || 'دورة غير محددة'}
-                                    </p>
-                                    <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 0.85rem;">
-                                        <i class="fab fa-whatsapp"></i> ${customer.whatsapp || 'غير متوفر'}
-                                    </p>
-                                </div>
-                                
-                                <div style="text-align: left;">
-                                    <div style="background: #10B981; color: white; 
-                                                padding: 5px 12px; border-radius: 20px; 
-                                                font-size: 0.85rem; margin-bottom: 8px;">
-                                        ${pricing.finalPrice || '0 ج.م'}
-                                    </div>
-                                    ${data.paymentInfo?.isInstallment ? `
-                                        <div style="background: #F59E0B; color: white; 
-                                                    padding: 3px 10px; border-radius: 15px; 
-                                                    font-size: 0.8rem;">
-                                            أقساط
-                                        </div>
-                                    ` : ''}
-                                </div>
+                            <div style="font-size: 1.1rem; font-weight: bold; color: #1F2937; margin-bottom: 8px;">
+                                <i class="fas fa-user-circle"></i> ${name}
+                            </div>
+                            <div style="margin-bottom: 8px;">
+                                ${customerType}
                             </div>
                         </div>
-                    </label>
+                        <div style="background: #3B82F6; color: white; width: 35px; height: 35px; 
+                                    border-radius: 50%; display: flex; align-items: center; 
+                                    justify-content: center; font-weight: bold; font-size: 0.9rem;">
+                            ${index + 1}
+                        </div>
+                    </div>
+                    
+                    <div style="background: #F9FAFB; padding: 12px; border-radius: 8px; 
+                                margin-bottom: 10px; border-right: 3px solid #3B82F6;">
+                        <div style="color: #6B7280; font-size: 0.9rem; line-height: 1.8;">
+                            <div><i class="fas fa-phone" style="color: #10B981; width: 20px;"></i> ${phone}</div>
+                            <div><i class="fas fa-envelope" style="color: #3B82F6; width: 20px;"></i> ${email}</div>
+                            <div><i class="fas fa-graduation-cap" style="color: #F59E0B; width: 20px;"></i> ${course}</div>
+                        </div>
+                    </div>
+                    
+                    ${booking.isExistingCustomer ? `
+                        <div style="background: #FEF3C7; border: 1px solid #FCD34D; 
+                                    border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                            <div style="color: #92400E; font-size: 0.85rem; display: flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-info-circle"></i>
+                                <strong>ملاحظة:</strong> العميل لديه حساب سابق
+                            </div>
+                            <div style="color: #78350F; font-size: 0.8rem; margin-top: 5px; padding-right: 25px;">
+                                User ID: <code style="background: white; padding: 2px 6px; border-radius: 4px;">${booking.existingUserId}</code>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 12px;">
+                        <button onclick="processSingleBooking('${booking.id}', ${booking.isExistingCustomer})" 
+                                style="flex: 1; background: linear-gradient(135deg, #10B981, #059669); 
+                                       color: white; border: none; padding: 10px; border-radius: 8px; 
+                                       cursor: pointer; font-weight: bold; transition: all 0.3s;"
+                                onmouseover="this.style.transform='scale(1.02)'"
+                                onmouseout="this.style.transform='scale(1)'">
+                            <i class="fas fa-check-circle"></i> معالجة الآن
+                        </button>
+                        
+                        <button onclick="viewBookingDetails('${booking.id}')" 
+                                style="background: #3B82F6; color: white; border: none; 
+                                       padding: 10px 15px; border-radius: 8px; cursor: pointer;"
+                                title="عرض التفاصيل">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
                 </div>
             `;
         });
         
-        // عرض النافذة
-        const result = await Swal.fire({
-            title: 'اختر الطلبات للمعالجة',
+        bookingsHtml += `</div>`;
+        
+        // عرض الصندوق
+        await Swal.fire({
+            title: '⚡ الطلبات المعلقة',
             html: `
-                <div style="text-align: right; direction: rtl;">
-                    <div style="background: #F0F9FF; padding: 15px; border-radius: 10px; 
-                                margin-bottom: 20px;">
-                        <p style="margin: 0; color: #0369A1;">
-                            <i class="fas fa-info-circle"></i>
-                            يوجد <strong>${pendingDocs.length}</strong> طلب معلق. 
-                            اختر الطلبات التي تريد معالجتها الآن.
-                        </p>
+                <div style="text-align: right;">
+                    <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                                padding: 15px; border-radius: 10px; margin-bottom: 20px;
+                                border-right: 4px solid #3B82F6;">
+                        <div style="color: #1E40AF; font-weight: bold; margin-bottom: 5px;">
+                            📊 إجمالي الطلبات المعلقة: ${pendingBookings.length}
+                        </div>
+                        <div style="color: #1E40AF; font-size: 0.9rem;">
+                            🔄 عملاء سابقون: ${pendingBookings.filter(b => b.isExistingCustomer).length} • 
+                            🆕 عملاء جدد: ${pendingBookings.filter(b => !b.isExistingCustomer).length}
+                        </div>
                     </div>
-                    
-                    <div style="margin-bottom: 20px; display: flex; gap: 10px;">
-                        <button onclick="
-                            document.querySelectorAll('.booking-checkbox').forEach(cb => cb.checked = true);
-                        " style="background: #3B82F6; color: white; border: none; 
-                                 padding: 8px 16px; border-radius: 8px; cursor: pointer;">
-                            <i class="fas fa-check-square"></i> تحديد الكل
-                        </button>
-                        
-                        <button onclick="
-                            document.querySelectorAll('.booking-checkbox').forEach(cb => cb.checked = false);
-                        " style="background: #6B7280; color: white; border: none; 
-                                 padding: 8px 16px; border-radius: 8px; cursor: pointer;">
-                            <i class="fas fa-square"></i> إلغاء التحديد
-                        </button>
-                    </div>
-                    
-                    <div style="max-height: 400px; overflow-y: auto; padding: 5px;">
-                        ${bookingsHTML}
-                    </div>
-                    
-                    <div style="background: #FEF3C7; padding: 12px; border-radius: 8px; 
-                                margin-top: 15px;">
-                        <p style="margin: 0; color: #92400E; font-size: 0.85rem;">
-                            <i class="fas fa-lightbulb"></i>
-                            الطلبات غير المحددة سيتم تأجيلها للمعالجة لاحقاً
-                        </p>
+                    ${bookingsHtml}
+                    <div style="margin-top: 20px; padding: 15px; background: #FEF3C7; 
+                                border-radius: 10px; border-right: 4px solid #F59E0B;">
+                        <div style="color: #92400E; font-size: 0.9rem;">
+                            <strong>💡 ملاحظة:</strong>
+                            <ul style="margin: 5px 0; padding-right: 20px; text-align: right;">
+                                <li>العملاء السابقون: سيتم تخصيص الدورة لحساباتهم الموجودة</li>
+                                <li>العملاء الجدد: سيتم إنشاء حسابات جديدة لهم</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             `,
-            width: '700px',
-            showCancelButton: true,
-            confirmButtonText: 'معالجة المحدد',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: '#10B981',
-            preConfirm: () => {
-                const selected = [];
-                document.querySelectorAll('.booking-checkbox:checked').forEach(cb => {
-                    selected.push({
-                        id: cb.dataset.id,
-                        name: cb.dataset.name
-                    });
-                });
-                return selected;
+            width: '800px',
+            showConfirmButton: false,
+            showCloseButton: true,
+            customClass: {
+                container: 'pending-bookings-modal'
             }
         });
         
-        if (result.isConfirmed && result.value && result.value.length > 0) {
-            await processSelectedBookings(result.value);
+    } catch (error) {
+        console.error('خطأ في عرض الطلبات المعلقة:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ في تحميل الطلبات المعلقة',
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+        // دالة معالجة طلب واحد من الصندوق
+async function processSingleBooking(bookingId, isExistingCustomer) {
+    const actionText = isExistingCustomer ? 
+        'تخصيص الدورة للحساب الموجود' : 
+        'إنشاء حساب جديد وتخصيص الدورة';
+    
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'تأكيد المعالجة',
+        html: `
+            <div style="text-align: right; padding: 10px;">
+                <p>سيتم ${actionText}</p>
+                ${isExistingCustomer ? 
+                    '<p style="color: #F59E0B; font-weight: bold;"><i class="fas fa-info-circle"></i> هذا عميل سابق - لن يتم إنشاء حساب جديد</p>' : 
+                    '<p style="color: #10B981; font-weight: bold;"><i class="fas fa-plus-circle"></i> هذا عميل جديد - سيتم إنشاء حساب جديد</p>'}
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '✅ متابعة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981'
+    });
+    
+    if (!result.isConfirmed) return;
+    
+    Swal.fire({
+        title: 'جاري المعالجة...',
+        html: '<div class="loading-spinner"></div>',
+        allowOutsideClick: false,
+        showConfirmButton: false
+    });
+    
+    try {
+        const processResult = await autoCreateAccountAndAssignCourse(bookingId, true);
+        
+        if (processResult && processResult.success) {
+            await Swal.fire({
+                icon: 'success',
+                title: 'تمت المعالجة بنجاح!',
+                html: `
+                    <div style="text-align: right;">
+                        ${processResult.accountExisted ? 
+                            '<p>✅ تم تخصيص الدورة للحساب الموجود</p>' : 
+                            '<p>✅ تم إنشاء الحساب وتخصيص الدورة</p>'}
+                        <p>📱 تم إرسال التفاصيل للعميل عبر التليجرام</p>
+                    </div>
+                `,
+                confirmButtonColor: '#10B981'
+            });
+            
+            // إعادة تحميل البيانات
+            if (typeof loadStudents === 'function') {
+                await loadStudents();
+            }
+            
+        } else {
+            throw new Error(processResult?.error || 'فشلت المعالجة');
         }
         
     } catch (error) {
-        console.error('خطأ في عرض نافذة الاختيار:', error);
-        Swal.fire('خطأ', 'حدث خطأ في عرض الطلبات', 'error');
+        console.error('خطأ في المعالجة:', error);
+        await Swal.fire({
+            icon: 'error',
+            title: 'خطأ في المعالجة',
+            text: error.message,
+            confirmButtonColor: '#EF4444'
+        });
     }
 }
+
+// دالة عرض تفاصيل الحجز
+async function viewBookingDetails(bookingId) {
+    try {
+        const doc = await db.collection('individualStudents').doc(bookingId).get();
+        
+        if (!doc.exists) {
+            throw new Error('الحجز غير موجود');
+        }
+        
+        const data = doc.data();
+        
+        await Swal.fire({
+            title: 'تفاصيل الحجز',
+            html: `
+                <div style="text-align: right; padding: 10px;">
+                    <p><strong>الاسم:</strong> ${data.customer?.name || 'غير محدد'}</p>
+                    <p><strong>التليفون:</strong> ${data.customer?.phone || 'غير محدد'}</p>
+                    <p><strong>البريد:</strong> ${data.customer?.email || 'غير محدد'}</p>
+                    <p><strong>الدورة:</strong> ${data.courseName || 'غير محددة'}</p>
+                    <p><strong>تاريخ الحجز:</strong> ${data.bookingDate || 'غير محدد'}</p>
+                </div>
+            `,
+            confirmButtonText: 'إغلاق',
+            confirmButtonColor: '#3B82F6'
+        });
+        
+    } catch (error) {
+        console.error('خطأ في عرض التفاصيل:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'فشل تحميل التفاصيل',
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+        
 
 // دالة معالجة الطلبات المحددة فقط
 async function processSelectedBookings(selectedBookings) {
