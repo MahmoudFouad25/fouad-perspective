@@ -4605,6 +4605,7 @@ console.log('✅ تم إضافة 50 نقطة ثابتة للتخصيص (أتمت
 }
 
 // دالة إرسال البيانات للتليجرام
+// دالة إرسال البيانات للتليجرام
 async function sendAccountDetailsToTelegram(student, accountData) {
     try {
         console.log('📱 إرسال بيانات الحساب للتليجرام...');
@@ -4621,7 +4622,32 @@ async function sendAccountDetailsToTelegram(student, accountData) {
         // بناء رابط الدخول التلقائي
         const autoLoginUrl = `https://mahmoudfouad25.github.io/fouad-perspective/login.html?uid=${accountData.slug}&token=${autoLoginToken}`;
         
-        const message = `
+        // 🔍 جلب رابط الواتساب الصحيح من الدورة
+        let whatsappLink = null;
+        let courseName = student.courseName || 'غير محدد';
+        
+        if (student.courseName) {
+            try {
+                // البحث عن الدورة في courses collection
+                const coursesSnapshot = await db.collection('courses')
+                    .where('title', '==', student.courseName)
+                    .limit(1)
+                    .get();
+                
+                if (!coursesSnapshot.empty) {
+                    const courseData = coursesSnapshot.docs[0].data();
+                    whatsappLink = courseData.whatsappGroupLink || null;
+                    console.log('✅ تم جلب رابط الواتساب:', whatsappLink);
+                } else {
+                    console.warn('⚠️ لم يتم العثور على الدورة في courses');
+                }
+            } catch (error) {
+                console.error('❌ خطأ في جلب رابط الواتساب:', error);
+            }
+        }
+        
+        // بناء الرسالة
+        let message = `
 🎓 *تم إنشاء حسابك بنجاح!*
 ━━━━━━━━━━━━━━━━━━
 
@@ -4630,7 +4656,7 @@ async function sendAccountDetailsToTelegram(student, accountData) {
 تم إنشاء حسابك الجديد والفريد في منظور الفؤاد وتخصيص الدورة لك بنجاح!
 ━━━━━━━━━━━━━━━━━━
 📚 *الدورة المخصصة:*
-${student.courseName || 'سيتم تحديدها قريباً'}
+${courseName}
 
 🎯 *اللقب:* ملبي النداء (حيث النداء هو المرحلة الأولى من رحلاتنا)
 💎 *نظام النقاط والشارات:* بدأت رحلتك بمجموعة من النقاط والشارات استكشفها
@@ -4648,7 +4674,19 @@ ${student.courseName || 'سيتم تحديدها قريباً'}
 
 🌐 *رابط المنصة:*
 https://mahmoudfouad25.github.io/fouad-perspective/login.html
-━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━`;
+
+        // إضافة معلومات الواتساب إذا كان موجود
+        if (whatsappLink) {
+            message += `
+💬 *انضم لمجموعة الواتساب الخاصة بالدورة:*
+اضغط على زرار "📱 انضم للمجموعة" أدناه
+
+⚠️ *مهم:* الرابط خاص بالمشتركين فقط
+━━━━━━━━━━━━━━━━━━`;
+        }
+
+        message += `
 ⚠️ *مهم جداً:*
 - احفظ هذه البيانات في مكان آمن 🔐
 - يمكنك تغيير كلمة المرور لاحقاً
@@ -4657,6 +4695,20 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
 مع تحيات فريق منظور الفؤاد 💜
         `.trim();
         
+        // بناء الأزرار
+        const buttons = [
+            [{ text: '⚡ دخول سريع للمنصة', url: autoLoginUrl }]
+        ];
+        
+        // إضافة زر الواتساب إذا كان موجود
+        if (whatsappLink) {
+            buttons.push([{ text: '📱 انضم للمجموعة', url: whatsappLink }]);
+        }
+        
+        buttons.push([{ text: '✅ الحساب يعمل بنجاح', callback_data: `account_working_${student.courseName}` }]);
+        buttons.push([{ text: '🆘 أحتاج مساعدة', callback_data: 'need_help_login' }]);
+        
+        // إرسال الرسالة
         const response = await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-custom-message', {
             method: 'POST',
             headers: {
@@ -4665,11 +4717,7 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
             body: JSON.stringify({
                 chatId: student.telegramChatId,
                 message: message,
-                buttons: [
-                    [{ text: '⚡ دخول سريع للمنصة', url: autoLoginUrl }],
-                    [{ text: '✅ الحساب يعمل بنجاح', callback_data: 'account_working' }],
-                    [{ text: '🆘 أحتاج مساعدة', callback_data: 'need_help_login' }]
-                ]
+                buttons: buttons
             })
         });
         
@@ -4679,7 +4727,8 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
             await db.collection('individualStudents').doc(student.id).update({
                 'automationCompleted.credentialsSent': true,
                 'automationCompleted.sentAt': new Date().toISOString(),
-                'automationCompleted.autoLoginUrl': autoLoginUrl
+                'automationCompleted.autoLoginUrl': autoLoginUrl,
+                'automationCompleted.whatsappLinkSent': whatsappLink ? true : false
             });
         } else {
             console.error('⚠️ فشل إرسال البيانات للتليجرام');
