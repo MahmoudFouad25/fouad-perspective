@@ -5509,16 +5509,50 @@ async function loadActiveUsers() {
             .where('userId', '!=', null)
             .get();
         
-        allActiveUsers = [];
+        // تجميع البيانات حسب userId
+        const usersMap = new Map();
         
         for (const doc of studentsSnapshot.docs) {
             const student = { id: doc.id, ...doc.data() };
             
             // التحقق من وجود telegramChatId
-            if (student.telegramChatId) {
-                allActiveUsers.push(student);
+            if (student.telegramChatId && student.userId) {
+                
+                // إذا العميل موجود في الـ Map، نضيف الدورة الجديدة
+                if (usersMap.has(student.userId)) {
+                    const existingUser = usersMap.get(student.userId);
+                    
+                    // إضافة الدورة للقائمة
+                    if (student.courseName && !existingUser.courses.includes(student.courseName)) {
+                        existingUser.courses.push(student.courseName);
+                    }
+                    
+                    // تحديث أحدث تاريخ
+                    const newDate = student.accountCreatedAt ? new Date(student.accountCreatedAt) : new Date(0);
+                    const existingDate = existingUser.accountCreatedAt ? new Date(existingUser.accountCreatedAt) : new Date(0);
+                    
+                    if (newDate > existingDate) {
+                        existingUser.accountCreatedAt = student.accountCreatedAt;
+                    }
+                    
+                } else {
+                    // إنشاء سجل جديد للعميل
+                    usersMap.set(student.userId, {
+                        id: student.id, // نستخدم أول ID
+                        userId: student.userId,
+                        customer: student.customer,
+                        userEmail: student.userEmail,
+                        accountStatus: student.accountStatus,
+                        accountCreatedAt: student.accountCreatedAt,
+                        telegramChatId: student.telegramChatId,
+                        courses: student.courseName ? [student.courseName] : []
+                    });
+                }
             }
         }
+        
+        // تحويل Map إلى Array
+        allActiveUsers = Array.from(usersMap.values());
         
         // ترتيب حسب التاريخ (الأحدث أولاً)
         allActiveUsers.sort((a, b) => {
@@ -5559,25 +5593,27 @@ function displayUsersList(users) {
     let html = '';
     
     users.forEach(student => {
-        const isSelected = selectedUsers.has(student.id);
+        const isSelected = selectedUsers.has(student.userId);
         const name = student.customer?.name || 'غير محدد';
         const email = student.userEmail || student.customer?.email || 'غير متوفر';
-        const course = student.courseName || 'لا توجد دورة';
+        const coursesText = student.courses && student.courses.length > 0 ? 
+            student.courses.join(' • ') : 'لا توجد دورات';
+        const coursesCount = student.courses ? student.courses.length : 0;
         const date = student.accountCreatedAt ? 
             new Date(student.accountCreatedAt).toLocaleDateString('ar-EG') : 'غير محدد';
         
         html += `
-    <div class="user-item" data-user-id="${student.id}" 
+    <div class="user-item" data-user-id="${student.userId}" 
          style="padding: 15px; margin-bottom: 10px; border: 2px solid ${isSelected ? '#3B82F6' : '#E5E7EB'}; 
                 border-radius: 10px; cursor: pointer; transition: all 0.3s;
                 background: ${isSelected ? '#EFF6FF' : 'white'};"
-         onclick="toggleUserSelection('${student.id}')">
+         onclick="toggleUserSelection('${student.userId}')">
         
         <div style="display: flex; align-items: center; gap: 15px;">
             <div style="flex-shrink: 0;">
                 <input type="checkbox" ${isSelected ? 'checked' : ''} 
                        style="width: 20px; height: 20px; cursor: pointer;"
-                       onclick="event.stopPropagation(); toggleUserSelection('${student.id}')">
+                       onclick="event.stopPropagation(); toggleUserSelection('${student.userId}')">
             </div>
             
             <div style="flex: 1;">
@@ -5588,13 +5624,21 @@ function displayUsersList(users) {
                     ${student.accountStatus === 'active' ? 
                         '<span style="background: #10B981; color: white; padding: 2px 8px; border-radius: 5px; font-size: 0.75rem;">نشط</span>' : 
                         '<span style="background: #6B7280; color: white; padding: 2px 8px; border-radius: 5px; font-size: 0.75rem;">غير نشط</span>'}
+                    ${coursesCount > 1 ? 
+                        `<span style="background: #F59E0B; color: white; padding: 2px 8px; border-radius: 5px; font-size: 0.75rem;">
+                            <i class="fas fa-graduation-cap"></i> ${coursesCount} دورات
+                        </span>` : ''}
                 </div>
-                
                 <div style="color: #6B7280; font-size: 0.9rem;">
                     <div><i class="fas fa-envelope"></i> ${email}</div>
-                    <div style="margin-top: 3px;">
-                        <i class="fas fa-book"></i> ${course}
-                        <span style="margin: 0 10px;">•</span>
+                    <div style="margin-top: 5px; padding: 8px; background: #F9FAFB; border-radius: 5px; border-right: 3px solid #3B82F6;">
+                        <i class="fas fa-book"></i> 
+                        <strong style="color: #1F2937;">الدورات:</strong>
+                        <div style="margin-top: 3px; padding-right: 20px; color: #374151;">
+                            ${coursesText}
+                        </div>
+                    </div>
+                    <div style="margin-top: 5px;">
                         <i class="fas fa-calendar"></i> ${date}
                     </div>
                     <div style="margin-top: 5px; display: flex; align-items: center; gap: 8px;">
@@ -5609,16 +5653,16 @@ function displayUsersList(users) {
                         </button>
                     </div>
                     <div style="margin-top: 5px; display: flex; align-items: center; gap: 8px;">
-    <i class="fas fa-id-card" style="color: #10B981;"></i>
-    <code style="background: #ECFDF5; padding: 4px 8px; border-radius: 5px; 
-                 font-size: 0.85rem; color: #065F46; user-select: all;">${student.id || 'غير متوفر'}</code>
-    <button onclick="event.stopPropagation(); copyStudentId('${student.id || ''}')" 
-            style="background: #10B981; color: white; border: none; 
-                   padding: 4px 10px; border-radius: 5px; cursor: pointer;
-                   font-size: 0.75rem; display: ${student.id ? 'inline-block' : 'none'};">
-        <i class="fas fa-copy"></i> نسخ
-    </button>
-</div>
+                        <i class="fas fa-id-card" style="color: #10B981;"></i>
+                        <code style="background: #ECFDF5; padding: 4px 8px; border-radius: 5px; 
+                                     font-size: 0.85rem; color: #065F46; user-select: all;">${student.id || 'غير متوفر'}</code>
+                        <button onclick="event.stopPropagation(); copyStudentId('${student.id || ''}')" 
+                                style="background: #10B981; color: white; border: none; 
+                                       padding: 4px 10px; border-radius: 5px; cursor: pointer;
+                                       font-size: 0.75rem; display: ${student.id ? 'inline-block' : 'none'};">
+                            <i class="fas fa-copy"></i> نسخ
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -5639,12 +5683,14 @@ function toggleUserSelection(userId) {
     
     // تحديث العرض
     const userItem = document.querySelector(`[data-user-id="${userId}"]`);
-    const checkbox = userItem.querySelector('input[type="checkbox"]');
-    const isSelected = selectedUsers.has(userId);
-    
-    userItem.style.border = isSelected ? '2px solid #3B82F6' : '2px solid #E5E7EB';
-    userItem.style.background = isSelected ? '#EFF6FF' : 'white';
-    checkbox.checked = isSelected;
+    if (userItem) {
+        const checkbox = userItem.querySelector('input[type="checkbox"]');
+        const isSelected = selectedUsers.has(userId);
+        
+        userItem.style.border = isSelected ? '2px solid #3B82F6' : '2px solid #E5E7EB';
+        userItem.style.background = isSelected ? '#EFF6FF' : 'white';
+        checkbox.checked = isSelected;
+    }
     
     document.getElementById('selectedCount').textContent = selectedUsers.size;
 }
