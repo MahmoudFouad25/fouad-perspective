@@ -4231,8 +4231,22 @@ async function autoCreateAccountAndAssignCourse(studentId, fromTelegram = false)
                 await autoAssignCourse(studentId, existingUserId);
             }
             
-            // إرسال رسالة للتليجرام (بدون رابط دخول سريع جديد)
+          // إرسال رسالة للتليجرام مع رابط دخول سريع جديد
             if (fromTelegram && student.telegramChatId) {
+                console.log('📱 إرسال رسالة مع رابط دخول سريع للعميل السابق...');
+                
+                // توليد token جديد للدخول السريع
+                const autoLoginToken = generateSecureToken();
+                
+                // حفظ الـ token في حساب المستخدم
+                await db.collection('users').doc(existingUserId).update({
+                    'auth.telegramAutoLoginToken': autoLoginToken,
+                    'auth.tokenGeneratedAt': new Date().toISOString()
+                });
+                
+                // بناء رابط الدخول السريع
+                const autoLoginUrl = `https://mahmoudfouad25.github.io/fouad-perspective/login.html?uid=${existingUserId}&token=${autoLoginToken}`;
+                
                 const message = `
 ✅ *تم تخصيص الدورة بنجاح!*
 ━━━━━━━━━━━━━━━━━━
@@ -4245,10 +4259,10 @@ async function autoCreateAccountAndAssignCourse(studentId, fromTelegram = false)
 ${student.courseName}
 
 ━━━━━━━━━━━━━━━━━━
-🔐 *للدخول:*
-استخدم نفس بيانات الدخول السابقة التي تستخدمها دائماً
+*للدخول السريع:*
+اضغط على الزرار أدناه .. المكتوب عليه "⚡دخول سريع للمنصة" 👇
 
-🌐 *رابط المنصة:*
+🌐 *أو استخدم رابط المنصة:*
 https://mahmoudfouad25.github.io/fouad-perspective/login.html
 
 ━━━━━━━━━━━━━━━━━━
@@ -4258,14 +4272,29 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
 مع تحيات فريق منظور الفؤاد 💜
                 `.trim();
                 
-                await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
+                await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-custom-message', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         chatId: student.telegramChatId,
-                        message: message
+                        message: message,
+                        buttons: [
+                            [{ text: '⚡ دخول سريع للمنصة', url: autoLoginUrl }],
+                            [{ text: '✅ الحساب يعمل بنجاح', callback_data: 'account_working' }],
+                            [{ text: '🆘 أحتاج مساعدة', callback_data: 'need_help_login' }]
+                        ]
                     })
                 });
+                
+                // حفظ رابط الدخول السريع في سجل الطالب
+                await db.collection('individualStudents').doc(studentId).update({
+                    'automationCompleted.autoLoginUrl': autoLoginUrl,
+                    'automationCompleted.credentialsSent': true,
+                    'automationCompleted.sentAt': new Date().toISOString()
+                });
+                
+                console.log('📱 تم إرسال رسالة التخصيص مع رابط الدخول السريع');
+            }
                 
                 console.log('📱 تم إرسال رسالة التخصيص للتليجرام');
             }
