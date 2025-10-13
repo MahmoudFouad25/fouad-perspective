@@ -5921,6 +5921,7 @@ function getFilteredUsers() {
 }
 
 // إرسال الرسائل
+// إرسال الرسائل
 async function sendQuickLoginMessages() {
     if (selectedUsers.size === 0) {
         Swal.fire({
@@ -5947,7 +5948,7 @@ async function sendQuickLoginMessages() {
     // إظهار شريط التقدم
     Swal.fire({
         title: 'جاري الإرسال...',
-        html: `تم إرسال <strong>0</strong> من <strong>${selectedUsers.size}</strong>`,
+        html: `تم إرسال <strong id="sent-count">0</strong> من <strong>${selectedUsers.size}</strong>`,
         allowOutsideClick: false,
         didOpen: () => {
             Swal.showLoading();
@@ -5956,21 +5957,26 @@ async function sendQuickLoginMessages() {
     
     let sentCount = 0;
     let errorCount = 0;
+    const errors = [];
     
     for (const userId of selectedUsers) {
         try {
-            const student = allActiveUsers.find(u => u.id === userId);
+            const student = allActiveUsers.find(u => u.userId === userId);
             
             if (!student || !student.userId) {
+                console.error('❌ لم يتم العثور على الطالب:', userId);
                 errorCount++;
+                errors.push(`${student?.customer?.name || 'غير معروف'}: بيانات غير كاملة`);
                 continue;
             }
             
-            // جلب بيانات المستخدم
+            // جلب بيانات المستخدم من Firebase
             const userDoc = await db.collection('users').doc(student.userId).get();
             
             if (!userDoc.exists) {
+                console.error('❌ الحساب غير موجود في users:', student.userId);
                 errorCount++;
+                errors.push(`${student.customer?.name || 'غير معروف'}: الحساب غير موجود`);
                 continue;
             }
             
@@ -5979,30 +5985,104 @@ async function sendQuickLoginMessages() {
             const tempPassword = userData.auth?.tempPassword;
             
             if (!email || !tempPassword) {
+                console.error('❌ بيانات الدخول غير متوفرة:', student.userId);
                 errorCount++;
+                errors.push(`${student.customer?.name || 'غير معروف'}: بيانات الدخول غير متوفرة`);
                 continue;
             }
             
-            // إعادة إرسال الرسالة
-            await sendAccountDetailsToTelegram(student, {
-                slug: student.userId,
-                email: email,
-                password: atob(tempPassword)
+            // توليد token جديد للدخول السريع
+            const autoLoginToken = generateSecureToken();
+            
+            // حفظ الـ token في Firebase
+            await db.collection('users').doc(student.userId).update({
+                'auth.telegramAutoLoginToken': autoLoginToken,
+                'auth.tokenGeneratedAt': new Date().toISOString()
             });
             
-            sentCount++;
+            // بناء رابط الدخول السريع
+            const autoLoginUrl = `https://mahmoudfouad25.github.io/fouad-perspective/login.html?uid=${student.userId}&token=${autoLoginToken}`;
             
-            // تحديث العداد
-            Swal.update({
-                html: `تم إرسال <strong>${sentCount}</strong> من <strong>${selectedUsers.size}</strong>`
+            // بناء قائمة الدورات
+            const coursesText = student.courses && student.courses.length > 0 ? 
+                student.courses.join('\n• ') : 'لا توجد دورات';
+            
+            // بناء الرسالة
+            const message = `
+🎓 *تحديث بيانات الدخول*
+━━━━━━━━━━━━━━━━━━
+
+مرحباً ${student.customer?.name || 'عميلنا العزيز'} 🌟
+
+هذه رسالة لتذكيرك ببيانات دخولك إلى منصة منظور الفؤاد
+
+📚 *دوراتك المخصصة:*
+- ${coursesText}
+
+━━━━━━━━━━━━━━━━━━
+*للدخول السريع:*
+اضغط على الزرار أدناه .. المكتوب عليه "⚡دخول سريع للمنصة" 👇
+
+أو استخدم بيانات الدخول التالية:
+
+📧 *البريد الإلكتروني:*
+\`${email}\`
+
+🔑 *كلمة المرور:*
+\`${atob(tempPassword)}\`
+
+🌐 *رابط المنصة:*
+https://mahmoudfouad25.github.io/fouad-perspective/login.html
+
+━━━━━━━━━━━━━━━━━━
+⚠️ *مهم جداً:*
+- احفظ هذه البيانات في مكان آمن 🔐
+- يمكنك تغيير كلمة المرور من إعدادات حسابك
+- رابط "الدخول السريع" خاص بك - لا تشاركه مع أحد
+
+مع تحيات فريق منظور الفؤاد 💜
+            `.trim();
+            
+            // إرسال الرسالة
+            const response = await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-custom-message', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    chatId: student.telegramChatId,
+                    message: message,
+                    buttons: [
+                        [{ text: '⚡ دخول سريع للمنصة', url: autoLoginUrl }],
+                        [{ text: '🔐 تغيير كلمة المرور', callback_data: 'change_password' }],
+                        [{ text: '🆘 أحتاج مساعدة', callback_data: 'need_help_login' }]
+                    ]
+                })
             });
+            
+            if (response.ok) {
+                sentCount++;
+                console.log(`✅ تم الإرسال: ${student.customer?.name}`);
+                
+                // تحديث العداد
+                const sentCountElement = document.getElementById('sent-count');
+                if (sentCountElement) {
+                    sentCountElement.textContent = sentCount;
+                }
+            } else {
+                errorCount++;
+                errors.push(`${student.customer?.name || 'غير معروف'}: فشل الإرسال`);
+                console.error('❌ فشل الإرسال:', await response.text());
+            }
             
             // تأخير بسيط لتجنب الحظر
             await new Promise(resolve => setTimeout(resolve, 500));
             
         } catch (error) {
-            console.error('خطأ في إرسال الرسالة:', error);
+            console.error('❌ خطأ في إرسال الرسالة:', error);
             errorCount++;
+            const student = allActiveUsers.find(u => u.userId === userId);
+            errors.push(`${student?.customer?.name || 'غير معروف'}: ${error.message}`);
         }
     }
     
@@ -6010,16 +6090,36 @@ async function sendQuickLoginMessages() {
     closeQuickLoginModal();
     
     // إظهار النتيجة
+    let resultHtml = `
+        <div style="text-align: right; padding: 10px;">
+            <p><i class="fas fa-check-circle" style="color: #10B981;"></i> تم الإرسال بنجاح: <strong>${sentCount}</strong></p>
+    `;
+    
+    if (errorCount > 0) {
+        resultHtml += `
+            <p><i class="fas fa-times-circle" style="color: #EF4444;"></i> فشل الإرسال: <strong>${errorCount}</strong></p>
+        `;
+        
+        if (errors.length > 0) {
+            resultHtml += `
+                <div style="margin-top: 15px; padding: 10px; background: #FEF2F2; border-radius: 8px; max-height: 200px; overflow-y: auto;">
+                    <strong style="color: #991B1B;">تفاصيل الأخطاء:</strong>
+                    <ul style="margin: 5px 0; padding-right: 20px; text-align: right; font-size: 0.85rem;">
+                        ${errors.map(err => `<li>${err}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+    }
+    
+    resultHtml += `</div>`;
+    
     Swal.fire({
         icon: sentCount > 0 ? 'success' : 'error',
         title: 'اكتمل الإرسال',
-        html: `
-            <div style="text-align: right; padding: 10px;">
-                <p><i class="fas fa-check-circle" style="color: #10B981;"></i> تم الإرسال بنجاح: <strong>${sentCount}</strong></p>
-                ${errorCount > 0 ? `<p><i class="fas fa-times-circle" style="color: #EF4444;"></i> فشل الإرسال: <strong>${errorCount}</strong></p>` : ''}
-            </div>
-        `,
-        confirmButtonText: 'حسناً'
+        html: resultHtml,
+        confirmButtonText: 'حسناً',
+        width: '600px'
     });
 }
 
