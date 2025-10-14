@@ -135,20 +135,50 @@
             }
             
             body {
-                -webkit-touch-callout: none !important;
-                -webkit-user-select: none !important;
-                -khtml-user-select: none !important;
-                -moz-user-select: none !important;
-                -ms-user-select: none !important;
-                user-select: none !important;
-            }
-            
-            input, textarea {
-                -webkit-user-select: text !important;
-                -moz-user-select: text !important;
-                -ms-user-select: text !important;
-                user-select: text !important;
-            }
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    -khtml-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+}
+
+/* السماح بالتفاعل مع حقول الإدخال */
+input, textarea {
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+    user-select: text !important;
+}
+
+/* 🎯 حماية خاصة للمقياس - السماح بالضغط على الأزرار */
+input[type="radio"],
+input[type="checkbox"],
+.likert-input,
+.likert-label,
+.likert-circle,
+.likert-option,
+.scale-type-input,
+.scale-type-label {
+    pointer-events: auto !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    user-select: none !important;
+    cursor: pointer !important;
+}
+
+/* السماح بالضغط على labels */
+label {
+    cursor: pointer !important;
+    pointer-events: auto !important;
+}
+
+/* السماح بالتفاعل مع الأزرار */
+button {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}
             
             /* منع السحب والإفلات للصور */
             img {
