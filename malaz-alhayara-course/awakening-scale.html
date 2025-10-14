@@ -674,16 +674,13 @@ if (!firebase.apps.length) {
 const db = firebase.firestore();
 const auth = firebase.auth();
 
-// 🔒 تفعيل حفظ الجلسة - الحل الأول
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
-    .then(() => console.log('✅ تم تفعيل حفظ الجلسة'))
-    .catch(err => console.error('❌ خطأ في حفظ الجلسة:', err));
+// 🔒 حفظ تسجيل الدخول
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
 let userId = null;
-let currentCourseId = 'malath_alhayari';
-let currentWeekNumber = 1;
-let scaleType = 'current';
-let isAuthChecked = false; // 🔒 منع التحقق المتكرر
+let currentCourseId = 'malath_alhayari'; // معرّف الدورة
+let currentWeekNumber = 1; // سيتم حسابه لاحقاً
+let scaleType = 'current'; // current, pre, post
 
 console.log('✅ Firebase تم تهيئته');
         // ============================================
@@ -1425,36 +1422,17 @@ console.log('✅ Firebase تم تهيئته');
 // 🔐 التحقق من المصادقة
 // ============================================
 
-// 🔍 التحقق من تسجيل الدخول بطريقة آمنة
 console.log('🔍 جاري التحقق من تسجيل الدخول...');
 
-// محاولة قراءة userId من localStorage أولاً
-const cachedUserId = localStorage.getItem('userId');
-if (cachedUserId) {
-    console.log('📦 وجدنا userId في الكاش:', cachedUserId);
-    userId = cachedUserId;
-}
+// منع التنفيذ المتكرر
+let isInitialized = false;
 
-// عرض شاشة انتظار
-document.querySelector('.container').innerHTML = `
-    <div style="text-align: center; margin-top: 150px;">
-        <div style="font-size: 5rem; animation: pulse 1.5s ease-in-out infinite;">⚙️</div>
-        <h2 style="font-size: 1.8rem; color: white; margin-top: 1rem;">
-            جاري التحقق من حسابك...
-        </h2>
-        <div style="color: #94a3b8; margin-top: 0.5rem;">رجاءً الانتظار لحظات</div>
-    </div>
-`;
-
-// الانتظار لحظة لإعطاء Firebase وقت للتحقق
+// الانتظار قليلاً لـ Firebase
 setTimeout(() => {
     auth.onAuthStateChanged(async (user) => {
-        // منع التنفيذ المتكرر
-        if (isAuthChecked) {
-            console.log('⏭️ تم التحقق مسبقاً، تخطي...');
-            return;
-        }
-        isAuthChecked = true;
+        // تنفيذ مرة واحدة فقط
+        if (isInitialized) return;
+        isInitialized = true;
 
         if (user) {
             userId = user.uid;
@@ -1471,55 +1449,19 @@ setTimeout(() => {
             currentWeekNumber = calculateCurrentWeek(COURSE_START_DATE);
             console.log(`📅 الأسبوع الحالي: ${currentWeekNumber}`);
             
-            // إعادة بناء الصفحة الأصلية
-            document.querySelector('.container').innerHTML = `
-                <!-- الـ Header -->
-                <div class="scale-header">
-                    <div class="scale-icon">🌅</div>
-                    <h1 class="scale-title">مقياس صحوة الحائر</h1>
-                    <p class="scale-subtitle">قبل أن نبدأ الرحلة... أين أنت الآن؟</p>
-                </div>
-
-                <!-- شريط التقدم -->
-                <div class="progress-container">
-                    <div class="progress-header">
-                        <span class="progress-title">تقدمك في المقياس</span>
-                        <span class="progress-count" id="progressCount">0 / 24</span>
-                    </div>
-                    <div class="progress-bar-bg">
-                        <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <!-- المقياس سيتم بناؤه ديناميكياً هنا -->
-                <div id="scaleQuestions"></div>
-
-                <!-- زر الحفظ -->
-                <div class="save-button-container">
-                    <button class="save-button" id="saveScaleBtn" disabled>
-                        <i class="fas fa-save"></i>
-                        <span>حفظ المقياس</span>
-                        <span class="btn-reward">+15 نقطة 🚶</span>
-                    </button>
-                </div>
-            `;
-            
-            // بناء الأسئلة
+            // 🎯 بناء الأسئلة
             console.log('🎨 بناء الأسئلة...');
             buildScaleQuestions();
             
-            // تحميل البيانات الموجودة
+            // تحميل البيانات الموجودة إن وجدت
             await loadExistingData();
-            
-            // ربط زر الحفظ
-            document.getElementById('saveScaleBtn').addEventListener('click', saveScale);
             
             console.log('✅ كل شيء جاهز!');
             
         } else {
             console.log('❌ المستخدم غير مسجل');
             
-            // عرض رسالة ثم Redirect
+            // عرض رسالة ثم redirect
             document.querySelector('.container').innerHTML = `
                 <div style="text-align: center; margin-top: 100px;">
                     <div style="font-size: 5rem; margin-bottom: 1rem;">🔒</div>
@@ -1529,25 +1471,16 @@ setTimeout(() => {
                     <p style="color: #94a3b8; font-size: 1.2rem; margin-bottom: 2rem;">
                         للوصول إلى المقياس، يرجى تسجيل الدخول لحسابك
                     </p>
-                    <button onclick="window.location.href='login.html'" 
-                            style="background: linear-gradient(135deg, #3b82f6, #10b981);
-                                   color: white; border: none; padding: 1rem 2rem;
-                                   border-radius: 50px; font-size: 1.2rem;
-                                   font-weight: 700; cursor: pointer;
-                                   box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);">
-                        <i class="fas fa-sign-in-alt"></i>
-                        تسجيل الدخول
-                    </button>
                 </div>
             `;
             
-            // Redirect بعد 3 ثواني
+            // redirect بعد 2 ثانية
             setTimeout(() => {
                 window.location.href = 'login.html';
-            }, 3000);
+            }, 2000);
         }
     });
-}, 500); // انتظار نصف ثانية لـ Firebase
+}, 300); // انتظار 300ms لـ Firebase
        
 
         // ============================================
