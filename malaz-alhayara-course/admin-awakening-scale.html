@@ -829,55 +829,130 @@
 
         // 📥 Load all users data
         async function loadAllUsersData() {
-            try {
-                const usersSnapshot = await db.collection('users').get();
-                allUsersData = [];
+    try {
+        console.log('🔍 جاري جلب بيانات المستخدمين...');
+        
+        const usersSnapshot = await db.collection('users').get();
+        allUsersData = [];
+        
+        let processedUsers = 0;
 
-                for (const userDoc of usersSnapshot.docs) {
-                    const userId = userDoc.id;
-                    const userEmail = userDoc.data().email || userDoc.data().phoneNumber || userId;
+        for (const userDoc of usersSnapshot.docs) {
+            const userId = userDoc.id;
+            const userData = userDoc.data();
+            
+            // جلب البريد الإلكتروني من أماكن متعددة
+            let userEmail = userData.email || 
+                          userData.phoneNumber || 
+                          userData.displayName || 
+                          userId;
+            
+            console.log(`🔍 فحص المستخدم: ${userId}`);
 
-                    // جلب بيانات المقياس
-                    const progressDoc = await db.collection('users')
-                        .doc(userId)
-                        .collection('awakening_progress')
-                        .doc(COURSE_ID)
-                        .get();
+            // جلب بيانات المقياس
+            const progressDoc = await db.collection('users')
+                .doc(userId)
+                .collection('awakening_progress')
+                .doc(COURSE_ID)
+                .get();
 
-                    if (progressDoc.exists) {
-                        const data = progressDoc.data();
+            if (progressDoc.exists) {
+                const data = progressDoc.data();
+                console.log(`📊 بيانات ${userId}:`, Object.keys(data));
+                
+                // معالجة كل أسبوع (1-4)
+                for (let week = 1; week <= 4; week++) {
+                    const weekKey = `week${week}`;
+                    
+                    // البحث في الـ data عن أي key يبدأ بـ weekKey
+                    let preScale = null;
+                    let postScale = null;
+                    let lastUpdated = null;
+                    
+                    // طريقة 1: nested object (التصميم الأصلي)
+                    if (data[weekKey] && data[weekKey].scale) {
+                        preScale = data[weekKey].scale.pre;
+                        postScale = data[weekKey].scale.post;
+                        lastUpdated = data[weekKey].scale.lastUpdated;
+                    }
+                    // طريقة 2: dot notation في Firebase
+                    else {
+                        // البحث عن scale.pre و scale.post
+                        const preKey = `${weekKey}.scale.pre`;
+                        const postKey = `${weekKey}.scale.post`;
+                        const updateKey = `${weekKey}.scale.lastUpdated`;
                         
-                        // معالجة كل أسبوع
-                        for (let week = 1; week <= 4; week++) {
-                            const weekKey = `week${week}`;
-                            const weekData = data[weekKey];
-
-                            if (weekData && weekData.scale) {
-                                const preScale = weekData.scale.pre;
-                                const postScale = weekData.scale.post;
-
-                                allUsersData.push({
-                                    userId,
-                                    userEmail,
-                                    week,
-                                    preScale,
-                                    postScale,
-                                    lastUpdated: weekData.scale.lastUpdated
+                        if (data[preKey]) {
+                            preScale = data[preKey];
+                        }
+                        if (data[postKey]) {
+                            postScale = data[postKey];
+                        }
+                        if (data[updateKey]) {
+                            lastUpdated = data[updateKey];
+                        }
+                        
+                        // محاولة أخرى: قراءة nested
+                        if (!preScale && !postScale) {
+                            // تجميع الـ keys المتعلقة بهذا الأسبوع
+                            const weekKeys = Object.keys(data).filter(k => k.startsWith(weekKey));
+                            
+                            if (weekKeys.length > 0) {
+                                // إعادة بناء الـ object
+                                const reconstructed = {};
+                                weekKeys.forEach(key => {
+                                    const parts = key.split('.');
+                                    let current = reconstructed;
+                                    
+                                    for (let i = 1; i < parts.length - 1; i++) {
+                                        if (!current[parts[i]]) {
+                                            current[parts[i]] = {};
+                                        }
+                                        current = current[parts[i]];
+                                    }
+                                    current[parts[parts.length - 1]] = data[key];
                                 });
+                                
+                                if (reconstructed.scale) {
+                                    preScale = reconstructed.scale.pre;
+                                    postScale = reconstructed.scale.post;
+                                    lastUpdated = reconstructed.scale.lastUpdated;
+                                }
                             }
                         }
                     }
-                }
 
-                console.log(`✅ Loaded ${allUsersData.length} records`);
-                filteredData = [...allUsersData];
-                renderDashboard();
-                
-            } catch (error) {
-                console.error('❌ Error loading data:', error);
-                showError('حدث خطأ في تحميل البيانات');
+                    // إذا وجدنا أي بيانات، نضيفها
+                    if (preScale || postScale) {
+                        console.log(`✅ وجدت بيانات للأسبوع ${week}: Pre=${!!preScale}, Post=${!!postScale}`);
+                        
+                        allUsersData.push({
+                            userId,
+                            userEmail,
+                            week,
+                            preScale,
+                            postScale,
+                            lastUpdated: lastUpdated || (preScale ? preScale.timestamp : postScale ? postScale.timestamp : new Date().toISOString())
+                        });
+                        
+                        processedUsers++;
+                    }
+                }
             }
         }
+
+        console.log(`✅ تم تحميل ${allUsersData.length} سجل من ${processedUsers} مستخدم`);
+        console.log('📊 عينة من البيانات:', allUsersData.slice(0, 3));
+        
+        filteredData = [...allUsersData];
+        renderDashboard();
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحميل البيانات:', error);
+        console.error('Stack:', error.stack);
+        showError('حدث خطأ في تحميل البيانات: ' + error.message);
+    }
+}
 
         // 🎨 Render Dashboard
         function renderDashboard() {
