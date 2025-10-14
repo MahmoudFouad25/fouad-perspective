@@ -755,8 +755,484 @@
             // بناء الأسئلة
             buildScaleQuestions();
             
-            console.log('✅ تم بناء 24 سؤال عبر 7 أبعاد');
+            // ============================================
+        // 🔥 إعداد Firebase
+        // ============================================
+        
+        const firebaseConfig = {
+            apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+            authDomain: "fouad-perspective.firebaseapp.com",
+            projectId: "fouad-perspective",
+            storageBucket: "fouad-perspective.firebasestorage.app",
+            messagingSenderId: "1068763865336",
+            appId: "1:1068763865336:web:b791abcd22d536aedd5b0d",
+            measurementId: "G-RY1FYVB3Q9"
+        };
+
+        // تهيئة Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let userId = null;
+        let currentCourseId = 'malath_alhayari'; // معرف الدورة
+        let currentWeekNumber = 1; // سيتم حسابه لاحقاً
+
+        // ============================================
+        // 📅 دوال مساعدة
+        // ============================================
+        
+        function getWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+
+        function calculateCurrentWeek(courseStartDate) {
+            const start = new Date(courseStartDate);
+            const now = new Date();
+            
+            start.setDate(start.getDate() - start.getDay() + 3);
+            
+            const diffTime = now - start;
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            const weekNumber = Math.floor(diffDays / 7) + 1;
+            
+            return Math.max(1, Math.min(weekNumber, 4));
+        }
+
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'success' ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #ef4444, #dc2626)'};
+                color: white;
+                padding: 1rem 1.5rem;
+                border-radius: 15px;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                z-index: 10000;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 0.8rem;
+                animation: slideIn 0.5s ease;
+            `;
+            
+            notification.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                ${message}
+            `;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.5s ease';
+                setTimeout(() => notification.remove(), 500);
+            }, 3000);
+        }
+
+        // ============================================
+        // 💰 إضافة النقاط للركيزة
+        // ============================================
+        
+        async function addPointsToPillar(pillarKey, points, details) {
+            if (!userId) {
+                console.error('❌ لا يوجد مستخدم مسجل');
+                return;
+            }
+
+            try {
+                // 1. إضافة النقاط إلى pillarProgress
+                const pillarRef = db.collection('users')
+                    .doc(userId)
+                    .collection('pillarProgress')
+                    .doc(currentCourseId);
+                
+                const pillarDoc = await pillarRef.get();
+                let currentPillarPoints = 0;
+                
+                if (pillarDoc.exists) {
+                    const data = pillarDoc.data();
+                    currentPillarPoints = data[`${pillarKey}.totalPoints`] || 0;
+                }
+                
+                const newPillarPoints = currentPillarPoints + points;
+                
+                await pillarRef.set({
+                    [`${pillarKey}.totalPoints`]: newPillarPoints,
+                    [`${pillarKey}.lastEntry`]: {
+                        date: new Date().toISOString(),
+                        points: points,
+                        source: 'awakening_scale',
+                        details: details
+                    }
+                }, { merge: true });
+                
+                console.log(`✅ تم إضافة ${points} نقطة لركيزة ${pillarKey}`);
+                
+                // 2. إضافة النقاط إلى Journey Points
+                const userRef = db.collection('users').doc(userId);
+                const userDoc = await userRef.get();
+                
+                let currentJourneyPoints = 0;
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    currentJourneyPoints = userData.journeyPoints?.total || 0;
+                }
+                
+                const newJourneyPoints = currentJourneyPoints + points;
+                
+                await userRef.set({
+                    journeyPoints: {
+                        total: newJourneyPoints,
+                        lastUpdated: new Date().toISOString()
+                    }
+                }, { merge: true });
+                
+                console.log(`✅ تم إضافة ${points} نقطة للرحلة الكلية`);
+                
+            } catch (error) {
+                console.error('❌ خطأ في إضافة النقاط:', error);
+                throw error;
+            }
+        }
+
+        // ============================================
+        // 💾 حفظ المقياس
+        // ============================================
+        
+        async function saveScale() {
+            if (!userId) {
+                showNotification('الرجاء تسجيل الدخول أولاً', 'error');
+                return;
+            }
+
+            const saveBtn = document.getElementById('saveScaleBtn');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+            try {
+                // جمع الإجابات
+                const answers = {};
+                let totalScore = 0;
+                const dimensionScores = {};
+
+                scaleDimensions.forEach(dimension => {
+                    const dimensionInputs = document.querySelectorAll(
+                        `.likert-input[data-dimension="${dimension.id}"]:checked`
+                    );
+                    
+                    const dimensionAnswers = [];
+                    let dimensionTotal = 0;
+
+                    dimensionInputs.forEach(input => {
+                        const value = parseInt(input.value);
+                        dimensionAnswers.push(value);
+                        dimensionTotal += value;
+                    });
+
+                    answers[dimension.id] = dimensionAnswers;
+                    dimensionScores[dimension.id] = dimensionTotal;
+                    totalScore += dimensionTotal;
+                });
+
+                // التحقق من وجود مقياس سابق هذا الأسبوع
+                const docRef = db.collection('users')
+                    .doc(userId)
+                    .collection('awakening_progress')
+                    .doc(currentCourseId);
+
+                const doc = await docRef.get();
+                let isFirstTime = true;
+                let scaleType = 'current'; // قد يكون: pre, post, current
+
+                if (doc.exists) {
+                    const data = doc.data();
+                    const weekKey = `week${currentWeekNumber}`;
+                    
+                    // التحقق من وجود مقياس في history لهذا الأسبوع
+                    const history = data[`${weekKey}.scale.history`] || [];
+                    const thisWeekEntry = history.find(entry => 
+                        getWeekNumber(new Date(entry.date)) === getWeekNumber(new Date())
+                    );
+                    
+                    if (thisWeekEntry) {
+                        isFirstTime = false;
+                    }
+                }
+
+                // حفظ البيانات
+                const today = new Date().toISOString().split('T')[0];
+                const weekKey = `week${currentWeekNumber}`;
+                
+                const scaleData = {
+                    date: today,
+                    timestamp: new Date().toISOString(),
+                    week: currentWeekNumber,
+                    totalScore: totalScore,
+                    maxScore: 120,
+                    answers: answers,
+                    dimensionScores: dimensionScores,
+                    type: scaleType
+                };
+
+                // تحديث current
+                await docRef.set({
+                    [`${weekKey}.scale.current`]: scaleData,
+                    [`${weekKey}.scale.lastUpdated`]: new Date().toISOString()
+                }, { merge: true });
+
+                // إضافة للـ history
+                const currentHistory = doc.exists ? 
+                    (doc.data()[`${weekKey}.scale.history`] || []) : [];
+                
+                // إضافة الإدخال الجديد
+                currentHistory.push(scaleData);
+
+                await docRef.set({
+                    [`${weekKey}.scale.history`]: currentHistory
+                }, { merge: true });
+
+                console.log('✅ تم حفظ المقياس بنجاح');
+
+                // إضافة النقاط فقط إذا كانت المرة الأولى
+                if (isFirstTime) {
+                    await addPointsToPillar('action', 15, {
+                        type: 'awakening_scale',
+                        week: currentWeekNumber,
+                        totalScore: totalScore
+                    });
+                    
+                    showNotification('🎉 رائع! تم حفظ المقياس وحصلت على 15 نقطة!', 'success');
+                } else {
+                    showNotification('✅ تم تحديث المقياس بنجاح', 'success');
+                }
+
+                // الانتقال لصفحة النتائج
+                setTimeout(() => {
+                    showResults(scaleData, isFirstTime);
+                }, 1500);
+
+            } catch (error) {
+                console.error('❌ خطأ في حفظ المقياس:', error);
+                showNotification('حدث خطأ في الحفظ. حاول مرة أخرى', 'error');
+                
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = `
+                    <i class="fas fa-save"></i>
+                    <span>حفظ المقياس</span>
+                    <span class="btn-reward">+15 نقطة 🚶</span>
+                `;
+            }
+        }
+
+        // ============================================
+        // 📊 عرض النتائج
+        // ============================================
+        
+        function showResults(data, earnedPoints) {
+            const container = document.getElementById('scaleQuestions');
+            const progressContainer = document.querySelector('.progress-container');
+            const saveContainer = document.querySelector('.save-button-container');
+            
+            // إخفاء العناصر القديمة
+            container.style.display = 'none';
+            progressContainer.style.display = 'none';
+            saveContainer.style.display = 'none';
+            
+            // إنشاء صفحة النتائج
+            const resultsDiv = document.createElement('div');
+            resultsDiv.id = 'resultsPage';
+            resultsDiv.style.animation = 'fadeIn 1s ease';
+            
+            // حساب مستوى الصحوة
+            let level = '';
+            let levelColor = '';
+            let levelIcon = '';
+            
+            if (data.totalScore <= 30) {
+                level = 'الصحوة في بدايتها المبكرة جداً';
+                levelColor = '#64748b';
+                levelIcon = '🌱';
+            } else if (data.totalScore <= 50) {
+                level = 'الصحوة بدأت تتشكل';
+                levelColor = '#8b5cf6';
+                levelIcon = '🌿';
+            } else if (data.totalScore <= 70) {
+                level = 'الصحوة متوسطة';
+                levelColor = '#3b82f6';
+                levelIcon = '🌊';
+            } else if (data.totalScore <= 90) {
+                level = 'الصحوة قوية ومتقدمة';
+                levelColor = '#10b981';
+                levelIcon = '🌳';
+            } else if (data.totalScore <= 108) {
+                level = 'الصحوة عميقة جداً';
+                levelColor = '#f59e0b';
+                levelIcon = '⭐';
+            } else {
+                level = 'الصحوة الكاملة';
+                levelColor = '#ec4899';
+                levelIcon = '💎';
+            }
+            
+            resultsDiv.innerHTML = `
+                <div style="text-align: center; margin-bottom: 2rem;">
+                    <div style="font-size: 5rem; margin-bottom: 1rem; animation: bounce 1s ease infinite;">
+                        ${earnedPoints ? '🎉' : '✅'}
+                    </div>
+                    <h2 style="font-size: 2rem; font-weight: 900; margin-bottom: 0.5rem;">
+                        ${earnedPoints ? 'رائع! أكملت المقياس' : 'تم تحديث المقياس'}
+                    </h2>
+                    ${earnedPoints ? '<p style="color: var(--golden); font-size: 1.2rem; font-weight: 700;">🚶 حصلت على 15 نقطة في ركيزة الخطوة!</p>' : ''}
+                </div>
+
+                <div style="background: var(--card-bg); border-radius: 20px; padding: 2rem; margin-bottom: 2rem; border: 2px solid ${levelColor};">
+                    <div style="text-align: center; margin-bottom: 1.5rem;">
+                        <div style="font-size: 3rem; margin-bottom: 0.5rem;">${levelIcon}</div>
+                        <div style="font-size: 2.5rem; font-weight: 900; color: ${levelColor};">
+                            ${data.totalScore} / 120
+                        </div>
+                        <div style="font-size: 1.2rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                            ${level}
+                        </div>
+                    </div>
+                    
+                    <div style="background: rgba(0,0,0,0.3); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 1rem;">
+                        <div style="height: 100%; background: linear-gradient(90deg, var(--primary-blue), var(--success-green)); width: ${(data.totalScore / 120) * 100}%; border-radius: 10px; transition: width 2s ease;"></div>
+                    </div>
+                </div>
+
+                <div style="background: var(--card-bg); border-radius: 20px; padding: 2rem; margin-bottom: 2rem;">
+                    <h3 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; text-align: center;">
+                        📊 توزيع النقاط على الأبعاد
+                    </h3>
+                    ${scaleDimensions.map(dim => {
+                        const score = data.dimensionScores[dim.id];
+                        const percentage = (score / dim.maxScore) * 100;
+                        return `
+                            <div style="margin-bottom: 1.5rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <span style="font-size: 1.5rem;">${dim.icon}</span>
+                                        <span style="font-weight: 600;">${dim.title}</span>
+                                    </div>
+                                    <span style="font-weight: 700; color: ${dim.color};">
+                                        ${score} / ${dim.maxScore}
+                                    </span>
+                                </div>
+                                <div style="background: rgba(0,0,0,0.3); height: 8px; border-radius: 5px; overflow: hidden;">
+                                    <div style="height: 100%; background: ${dim.color}; width: ${percentage}%; border-radius: 5px; transition: width 1.5s ease;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                <div style="text-align: center;">
+                    <button onclick="location.reload()" style="background: linear-gradient(135deg, var(--primary-blue), var(--success-green)); color: white; border: none; padding: 1rem 2rem; border-radius: 50px; font-size: 1.1rem; font-weight: 700; cursor: pointer;">
+                        <i class="fas fa-arrow-right"></i> العودة للمقياس
+                    </button>
+                </div>
+            `;
+            
+            container.parentElement.appendChild(resultsDiv);
+        }
+
+        // ============================================
+        // 🎬 ربط زر الحفظ
+        // ============================================
+        
+        document.getElementById('saveScaleBtn').addEventListener('click', saveScale);
         });
+        // ============================================
+        // 🔐 التحقق من المصادقة
+        // ============================================
+        
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                userId = user.uid;
+                console.log('✅ المستخدم مسجل:', userId);
+                
+                // حساب رقم الأسبوع الحالي
+                const COURSE_START_DATE = '2025-10-08';
+                currentWeekNumber = calculateCurrentWeek(COURSE_START_DATE);
+                console.log(`📅 الأسبوع الحالي: ${currentWeekNumber}`);
+                
+                // تحميل البيانات الموجودة
+                await loadExistingData();
+                
+            } else {
+                console.log('⚠️ المستخدم غير مسجل');
+                showNotification('الرجاء تسجيل الدخول أولاً', 'error');
+                
+                // إعادة التوجيه لصفحة تسجيل الدخول بعد 2 ثانية
+                setTimeout(() => {
+                    window.location.href = 'login.html';
+                }, 2000);
+            }
+        });
+
+        // ============================================
+        // 📥 تحميل البيانات الموجودة
+        // ============================================
+        
+        async function loadExistingData() {
+            try {
+                const docRef = db.collection('users')
+                    .doc(userId)
+                    .collection('awakening_progress')
+                    .doc(currentCourseId);
+
+                const doc = await docRef.get();
+
+                if (doc.exists) {
+                    const data = doc.data();
+                    const weekKey = `week${currentWeekNumber}`;
+                    const currentScale = data[`${weekKey}.scale.current`];
+
+                    if (currentScale && currentScale.answers) {
+                        console.log('📊 تم العثور على مقياس سابق، جاري التحميل...');
+                        
+                        // ملء الإجابات
+                        Object.keys(currentScale.answers).forEach(dimensionId => {
+                            const answers = currentScale.answers[dimensionId];
+                            const dimension = scaleDimensions.find(d => d.id === dimensionId);
+                            
+                            if (dimension) {
+                                answers.forEach((value, index) => {
+                                    const questionNumber = scaleDimensions
+                                        .slice(0, scaleDimensions.indexOf(dimension))
+                                        .reduce((sum, d) => sum + d.questions.length, 0) + index + 1;
+                                    
+                                    const input = document.querySelector(
+                                        `input[name="q${questionNumber}"][value="${value}"]`
+                                    );
+                                    
+                                    if (input) {
+                                        input.checked = true;
+                                    }
+                                });
+                            }
+                        });
+
+                        // تحديث التقدم
+                        updateProgress();
+                        
+                        showNotification('تم تحميل إجاباتك السابقة', 'success');
+                    }
+                }
+            } catch (error) {
+                console.error('❌ خطأ في تحميل البيانات:', error);
+            }
+        }
         
     </script>
 </body>
