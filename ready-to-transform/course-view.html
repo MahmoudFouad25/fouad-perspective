@@ -6076,21 +6076,236 @@ function displayPillarExercise(contentData) {
                 </div>
             ` : ''}
             
-            <!-- محتوى مؤقت - هنملاه بعدين -->
+            <!-- Questions Section -->
+<div id="questionsContainer">
+    ${contentData.exerciseData?.questions ? 
+        contentData.exerciseData.questions.map((question, index) => `
             <div style="
                 background: rgba(255, 255, 255, 0.05);
-                padding: 3rem;
+                padding: 2rem;
                 border-radius: 12px;
-                text-align: center;
-                color: rgba(255, 255, 255, 0.6);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                margin-bottom: 2rem;
             ">
-                <i class="fas fa-tools" style="font-size: 3rem; margin-bottom: 1rem;"></i>
-                <p>محتوى التمرين سيظهر هنا</p>
+                <h4 style="
+                    color: var(--primary-blue-light);
+                    margin-bottom: 1.5rem;
+                    font-size: 1.2rem;
+                ">${question.title}</h4>
+                
+                <p style="
+                    color: rgba(255, 255, 255, 0.8);
+                    margin-bottom: 1rem;
+                    line-height: 1.8;
+                ">${question.text}</p>
+                
+                ${question.type === 'textarea' ? `
+                    <textarea 
+                        id="question_${index}"
+                        rows="5"
+                        placeholder="${question.placeholder || 'اكتب إجابتك هنا...'}"
+                        style="
+                            width: 100%;
+                            padding: 1rem;
+                            background: rgba(0, 0, 0, 0.3);
+                            border: 2px solid rgba(255, 255, 255, 0.1);
+                            border-radius: 8px;
+                            color: white;
+                            font-size: 1rem;
+                            font-family: inherit;
+                            resize: vertical;
+                        "
+                    ></textarea>
+                ` : ''}
+                
+                ${question.type === 'checkbox' ? `
+                    <div style="display: flex; flex-direction: column; gap: 1rem;">
+                        ${question.options.map((option, optIndex) => `
+                            <label style="
+                                display: flex;
+                                align-items: center;
+                                gap: 0.75rem;
+                                cursor: pointer;
+                                color: rgba(255, 255, 255, 0.9);
+                            ">
+                                <input 
+                                    type="checkbox" 
+                                    id="question_${index}_${optIndex}"
+                                    value="${option}"
+                                    style="width: 18px; height: 18px; cursor: pointer;"
+                                >
+                                <span>${option}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                
+                ${question.type === 'slider' ? `
+                    <div>
+                        <input 
+                            type="range" 
+                            id="question_${index}"
+                            min="${question.min || 1}"
+                            max="${question.max || 10}"
+                            value="${question.default || 5}"
+                            style="
+                                width: 100%;
+                                margin: 1rem 0;
+                            "
+                            oninput="document.getElementById('slider_value_${index}').textContent = this.value"
+                        >
+                        <div style="
+                            text-align: center;
+                            color: var(--primary-blue);
+                            font-size: 1.5rem;
+                            font-weight: bold;
+                        ">
+                            <span id="slider_value_${index}">${question.default || 5}</span>
+                        </div>
+                    </div>
+                ` : ''}
             </div>
+        `).join('')
+    : '<p style="color: rgba(255, 255, 255, 0.6);">لا توجد أسئلة محددة</p>'}
+</div>
+
+<!-- Save Button -->
+<div style="text-align: center; margin-top: 3rem;">
+    <button 
+        onclick="savePillarExercise('${contentData.id || ''}')"
+        style="
+            background: linear-gradient(135deg, #3b82f6, #10b981);
+            color: white;
+            border: none;
+            padding: 1rem 3rem;
+            border-radius: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+            transition: all 0.3s ease;
+        "
+        onmouseover="this.style.transform='scale(1.05)'"
+        onmouseout="this.style.transform='scale(1)'"
+    >
+        <i class="fas fa-save"></i>
+        احفظ التمرين
+        <span style="
+            display: inline-block;
+            margin-right: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            font-size: 0.9rem;
+        ">
+            +${contentData.exerciseData?.totalPoints || 0} نقطة
+        </span>
+    </button>
+</div>
         </div>
     `;
     
     container.innerHTML = html;
+}
+
+
+// Save Pillar Exercise
+async function savePillarExercise(contentId) {
+    try {
+        // 1. جلب بيانات المحتوى
+        const contentDoc = await db.collection('courseContentLibrary')
+            .doc(contentId)
+            .get();
+        
+        if (!contentDoc.exists) {
+            alert('خطأ: المحتوى غير موجود');
+            return;
+        }
+        
+        const contentData = contentDoc.data();
+        const questions = contentData.exerciseData?.questions || [];
+        
+        // 2. جمع الإجابات
+        const answers = {};
+        questions.forEach((question, index) => {
+            if (question.type === 'textarea' || question.type === 'slider') {
+                const element = document.getElementById(`question_${index}`);
+                answers[`question_${index}`] = element ? element.value : '';
+            } else if (question.type === 'checkbox') {
+                const checked = [];
+                question.options.forEach((option, optIndex) => {
+                    const checkbox = document.getElementById(`question_${index}_${optIndex}`);
+                    if (checkbox && checkbox.checked) {
+                        checked.push(option);
+                    }
+                });
+                answers[`question_${index}`] = checked;
+            }
+        });
+        
+        // 3. التحقق من الإجابات
+        const hasAnswers = Object.values(answers).some(answer => {
+            if (Array.isArray(answer)) return answer.length > 0;
+            return answer && answer.trim() !== '';
+        });
+        
+        if (!hasAnswers) {
+            alert('من فضلك أجب على سؤال واحد على الأقل');
+            return;
+        }
+        
+        // 4. الحصول على معلومات المستخدم
+        const userId = localStorage.getItem('userId') || auth.currentUser?.uid;
+        if (!userId) {
+            alert('خطأ: لم يتم العثور على معلومات المستخدم');
+            return;
+        }
+        
+        // 5. حفظ الإجابات
+        const progressRef = db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId);
+        
+        await progressRef.set({
+            [`exercises.${contentId}`]: {
+                answers: answers,
+                completedAt: new Date().toISOString(),
+                contentName: contentData.name
+            }
+        }, { merge: true });
+        
+        // 6. إضافة النقاط (لو موجودة)
+        if (contentData.exerciseData?.pillars) {
+            const pillars = contentData.exerciseData.pillars;
+            
+            for (const pillarKey in pillars) {
+                const points = pillars[pillarKey];
+                if (points > 0) {
+                    await addPointsToPillar(pillarKey, points, {
+                        type: 'pillar_exercise',
+                        exerciseId: contentId,
+                        exerciseName: contentData.name
+                    });
+                }
+            }
+        }
+        
+        // 7. تحديث الواجهة
+        await loadProgress();
+        await loadPillarsPoints();
+        
+        // 8. رسالة نجاح
+        const totalPoints = contentData.exerciseData?.totalPoints || 0;
+        alert(`🎉 رائع! تم حفظ التمرين بنجاح\n\nحصلت على ${totalPoints} نقطة!`);
+        
+        // 9. وضع علامة إكمال الدرس
+        await markLessonComplete(currentLessonIndex);
+        
+    } catch (error) {
+        console.error('خطأ في حفظ التمرين:', error);
+        alert('حدث خطأ في حفظ التمرين. حاول مرة أخرى.');
+    }
 }
 
        
