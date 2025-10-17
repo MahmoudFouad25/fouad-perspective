@@ -6604,14 +6604,74 @@ async function savePillarExercise(contentId) {
     }
 }
 
-       // إكمال تمرين الركائز
+      // ============================================
+// 1️⃣ دالة جمع الإجابات من التمرين
+// ============================================
+function getExerciseAnswers() {
+    const answers = [];
+    const questions = document.querySelectorAll('#questionsContainer > div');
+    
+    questions.forEach((questionDiv, index) => {
+        const questionId = `question_${index}`;
+        
+        // Check textarea
+        const textarea = document.getElementById(questionId);
+        if (textarea && textarea.tagName === 'TEXTAREA') {
+            answers.push({
+                questionIndex: index,
+                type: 'textarea',
+                answer: textarea.value.trim()
+            });
+            return;
+        }
+        
+        // Check slider
+        const slider = document.getElementById(questionId);
+        if (slider && slider.type === 'range') {
+            answers.push({
+                questionIndex: index,
+                type: 'slider',
+                answer: parseInt(slider.value)
+            });
+            return;
+        }
+        
+        // Check checkboxes
+        const checkboxes = questionDiv.querySelectorAll('input[type="checkbox"]:checked');
+        if (checkboxes.length > 0) {
+            answers.push({
+                questionIndex: index,
+                type: 'checkbox',
+                answer: Array.from(checkboxes).map(cb => cb.value)
+            });
+            return;
+        }
+        
+        // If no answer found, add empty
+        answers.push({
+            questionIndex: index,
+            type: 'unknown',
+            answer: null
+        });
+    });
+    
+    return answers;
+}
+
+// ============================================
+// 2️⃣ دالة إكمال التمرين وإضافة النقاط
+// ============================================
 async function completePillarExercise(exerciseId, answers) {
     try {
+        // عرض Loading
         showLoading('جاري حفظ إجاباتك...');
         
-        // 1. جلب بيانات التمرين
+        const userId = currentUser.uid;
+        
+        // 1. جلب بيانات التمرين من Firebase
         const exerciseDoc = await db.collection('courseContentLibrary')
-            .doc(exerciseId).get();
+            .doc(exerciseId)
+            .get();
         
         if (!exerciseDoc.exists) {
             throw new Error('التمرين غير موجود');
@@ -6620,8 +6680,7 @@ async function completePillarExercise(exerciseId, answers) {
         const exerciseData = exerciseDoc.data();
         const pillars = exerciseData.exerciseData?.pillars || {};
         
-        // 2. حفظ الإجابات
-        const userId = currentUser.uid;
+        // 2. حفظ الإجابات في awakening_progress
         await db.collection('users')
             .doc(userId)
             .collection('awakening_progress')
@@ -6635,37 +6694,57 @@ async function completePillarExercise(exerciseId, answers) {
                 }
             }, { merge: true });
         
+        console.log('✅ تم حفظ الإجابات');
+        
         // 3. إضافة النقاط لكل ركيزة
         for (const [pillarKey, points] of Object.entries(pillars)) {
-            await addPointsToPillar(pillarKey, points, {
-                type: 'pillar_exercise',
-                exerciseId: exerciseId,
-                exerciseName: exerciseData.name
-            });
+            if (points > 0) {
+                await addPointsToPillar(pillarKey, points, {
+                    type: 'pillar_exercise',
+                    exerciseId: exerciseId,
+                    exerciseName: exerciseData.name
+                });
+                console.log(`✅ تمت إضافة ${points} نقطة إلى ${pillarKey}`);
+            }
         }
         
         // 4. تحديث progress الدرس
         await markLessonComplete();
         
+        // إخفاء Loading
         hideLoading();
-        showNotification(`🎉 رائع! حصلت على ${exerciseData.exerciseData.totalPoints} نقطة!`, 'success');
         
-        // 5. إظهار ملخص النقاط
+        // 5. إظهار رسالة النجاح
+        const totalPoints = exerciseData.exerciseData?.totalPoints || 
+                           Object.values(pillars).reduce((sum, p) => sum + p, 0);
+        
+        showNotification(`🎉 رائع! حصلت على ${totalPoints} نقطة!`, 'success');
+        
+        // 6. إظهار ملخص النقاط
         showPointsSummary(pillars);
         
+        // 7. تعطيل الزرار
+        const completeBtn = event.target;
+        completeBtn.disabled = true;
+        completeBtn.style.opacity = '0.6';
+        completeBtn.style.cursor = 'not-allowed';
+        completeBtn.innerHTML = '<i class="fas fa-check"></i> تم الإكمال ✓';
+        
     } catch (error) {
-        console.error('خطأ في إكمال التمرين:', error);
+        console.error('❌ خطأ في إكمال التمرين:', error);
         hideLoading();
-        showNotification('حدث خطأ في حفظ التمرين', 'error');
+        showNotification('حدث خطأ في حفظ التمرين: ' + error.message, 'error');
     }
 }
 
-// دالة addPointsToPillar - نسخة من صفحة صحوة الحائر
+// ============================================
+// 3️⃣ دالة addPointsToPillar (من صفحة صحوة الحائر)
+// ============================================
 async function addPointsToPillar(pillarKey, points, details) {
     try {
         const userId = currentUser.uid;
         
-        // Add to pillar progress
+        // 🔵 المكان الأول: pillarProgress
         const pillarRef = db.collection('users')
             .doc(userId)
             .collection('pillarProgress')
@@ -6681,6 +6760,7 @@ async function addPointsToPillar(pillarKey, points, details) {
         
         const newPillarPoints = currentPillarPoints + points;
         
+        // حفظ النقاط الجديدة
         await pillarRef.set({
             [`${pillarKey}.totalPoints`]: newPillarPoints,
             [`${pillarKey}.lastEntry`]: {
@@ -6693,14 +6773,13 @@ async function addPointsToPillar(pillarKey, points, details) {
         
         console.log(`✅ ${pillarKey}: ${currentPillarPoints} → ${newPillarPoints}`);
         
-        // Add to journey points
+        // 🟢 المكان الثاني: journeyPoints
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
         
         let currentJourneyPoints = 0;
         if (userDoc.exists) {
-            const userData = userDoc.data();
-            currentJourneyPoints = userData.journeyPoints?.total || 0;
+            currentJourneyPoints = userDoc.data().journeyPoints?.total || 0;
         }
         
         const newJourneyPoints = currentJourneyPoints + points;
@@ -6715,11 +6794,14 @@ async function addPointsToPillar(pillarKey, points, details) {
         console.log(`✅ Journey: ${currentJourneyPoints} → ${newJourneyPoints}`);
         
     } catch (error) {
-        console.error('خطأ في إضافة النقاط:', error);
+        console.error('❌ خطأ في إضافة النقاط:', error);
+        throw error;
     }
 }
 
-// إظهار ملخص النقاط بعد الإكمال
+// ============================================
+// 4️⃣ دالة عرض ملخص النقاط
+// ============================================
 function showPointsSummary(pillars) {
     const pillarNames = {
         courage: { name: 'الجرأة', icon: '🔥', color: '#ef4444' },
@@ -6755,25 +6837,30 @@ function showPointsSummary(pillars) {
     for (const [pillarKey, points] of Object.entries(pillars)) {
         if (points > 0) {
             const pillar = pillarNames[pillarKey];
-            summaryHtml += `
-                <div style="
-                    background: rgba(0, 0, 0, 0.3);
-                    padding: 1.5rem;
-                    border-radius: 12px;
-                    border: 2px solid ${pillar.color}40;
-                    text-align: center;
-                ">
-                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">
-                        ${pillar.icon}
+            if (pillar) {
+                summaryHtml += `
+                    <div style="
+                        background: rgba(0, 0, 0, 0.3);
+                        padding: 1.5rem;
+                        border-radius: 12px;
+                        border: 2px solid ${pillar.color}40;
+                        text-align: center;
+                        transition: all 0.3s;
+                    "
+                    onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 8px 20px ${pillar.color}40';"
+                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+                        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">
+                            ${pillar.icon}
+                        </div>
+                        <div style="color: ${pillar.color}; font-weight: 600; margin-bottom: 0.5rem; font-size: 1.1rem;">
+                            ${pillar.name}
+                        </div>
+                        <div style="color: white; font-size: 2rem; font-weight: 700;">
+                            +${points}
+                        </div>
                     </div>
-                    <div style="color: ${pillar.color}; font-weight: 600; margin-bottom: 0.5rem;">
-                        ${pillar.name}
-                    </div>
-                    <div style="color: white; font-size: 2rem; font-weight: 700;">
-                        +${points}
-                    </div>
-                </div>
-            `;
+                `;
+            }
         }
     }
     
@@ -6782,10 +6869,14 @@ function showPointsSummary(pillars) {
         </div>
     `;
     
-    // عرض الملخص في مكان مناسب
+    // إضافة الملخص للصفحة
     const container = document.querySelector('.pillar-exercise-container');
     if (container) {
         container.insertAdjacentHTML('beforeend', summaryHtml);
+        // Scroll إلى الملخص
+        setTimeout(() => {
+            container.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
     }
 }
        
