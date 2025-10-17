@@ -6192,6 +6192,300 @@ function removeGenericQuestion(questionId) {
 }
         
 
+// ========================================
+// 💾 حفظ التمرين من الـ Builder
+// ========================================
+async function saveExerciseFromBuilder(event) {
+    event.preventDefault();
+    
+    try {
+        showLoading('جاري حفظ التمرين...');
+        
+        // ✅ 1. جمع البيانات الأساسية
+        const exerciseName = document.getElementById('exerciseName')?.value.trim();
+        const exerciseDescription = document.getElementById('exerciseDescription')?.value.trim();
+        const exerciseDuration = parseInt(document.getElementById('exerciseDuration')?.value) || 30;
+        const exerciseTotalPoints = parseInt(document.getElementById('exerciseTotalPoints')?.value) || 0;
+        const exerciseIntro = document.getElementById('exerciseIntro')?.value.trim() || '';
+        const exerciseWarning = document.getElementById('exerciseWarning')?.value.trim() || '';
+        
+        // التحقق
+        if (!exerciseName || !exerciseDescription) {
+            hideLoading();
+            showNotification('يجب ملء الاسم والوصف', 'error');
+            return;
+        }
+        
+        if (!currentExercisePattern) {
+            hideLoading();
+            showNotification('خطأ: لم يتم تحديد نمط التمرين', 'error');
+            return;
+        }
+        
+        // ✅ 2. جمع نقاط الأركان
+        const pillars = {};
+        const courage = parseInt(document.getElementById('pillarCourage')?.value) || 0;
+        const mirror = parseInt(document.getElementById('pillarMirror')?.value) || 0;
+        const action = parseInt(document.getElementById('pillarAction')?.value) || 0;
+        const witness = parseInt(document.getElementById('pillarWitness')?.value) || 0;
+        
+        if (courage > 0) pillars.courage = courage;
+        if (mirror > 0) pillars.mirror = mirror;
+        if (action > 0) pillars.action = action;
+        if (witness > 0) pillars.witness = witness;
+        
+        // ✅ 3. جمع المحتوى الخاص بالنمط
+        let patternContent = {};
+        
+        switch(currentExercisePattern.id) {
+            case 'guided-exploration':
+                patternContent = collectGuidedExplorationData();
+                break;
+            
+            case 'daily-tracking':
+                patternContent = collectDailyTrackingData();
+                break;
+            
+            default:
+                patternContent = collectGenericQuestionsData();
+                break;
+        }
+        
+        // التحقق من وجود محتوى
+        if (!patternContent.questions || patternContent.questions.length === 0) {
+            hideLoading();
+            showNotification('يجب إضافة أسئلة أو محتوى للتمرين', 'warning');
+            return;
+        }
+        
+        // ✅ 4. تجهيز البيانات النهائية
+        const exerciseId = 'exercise_' + Date.now();
+        
+        const exerciseData = {
+            name: exerciseName,
+            type: "pillar-exercise",
+            patternType: currentExercisePattern.id,
+            patternName: currentExercisePattern.name,
+            patternIcon: currentExercisePattern.icon,
+            description: exerciseDescription,
+            exerciseData: {
+                introText: exerciseIntro,
+                warningText: exerciseWarning,
+                totalPoints: exerciseTotalPoints,
+                pillars: pillars,
+                ...patternContent
+            }
+        };
+        
+        console.log('📦 بيانات التمرين الكاملة:', exerciseData);
+        
+        // ✅ 5. حفظ في Firebase
+        await db.collection('courseContentLibrary').doc(exerciseId).set(exerciseData);
+        
+        console.log('✅ تم الحفظ في المكتبة بنجاح');
+        
+        // ✅ 6. إضافة للدورة
+        const module = courseData.modules.find(m => m.id === selectedModuleId);
+        if (module) {
+            const lessonId = 'lesson_' + Date.now();
+            const newLesson = {
+                id: lessonId,
+                title: exerciseName,
+                libraryContentId: exerciseId,
+                libraryContentType: "pillar-exercise",
+                duration: exerciseDuration,
+                points: exerciseTotalPoints,
+                isFreePreview: false
+            };
+            
+            if (!module.lessons) {
+                module.lessons = [];
+            }
+            module.lessons.push(newLesson);
+            
+            console.log('✅ تم إضافة الدرس للوحدة');
+            
+            // إعادة رسم
+            renderModules();
+            
+            // فتح الوحدة
+            if (!module.isExpanded) {
+                module.isExpanded = true;
+                renderModules();
+            }
+            
+            // حفظ الدورة
+            if (courseData.id && typeof saveCourse === 'function') {
+                await saveCourse();
+            } else if (typeof autoSave === 'function') {
+                await autoSave();
+            }
+        }
+        
+        hideLoading();
+        
+        // ✅ 7. إغلاق وإظهار نجاح
+        closeExerciseModal();
+        
+        showNotification(`✅ تم إضافة التمرين "${exerciseName}" بنجاح!`, 'success');
+        
+    } catch (error) {
+        console.error('❌ خطأ في حفظ التمرين:', error);
+        console.error('Stack:', error.stack);
+        hideLoading();
+        showNotification('حدث خطأ: ' + error.message, 'error');
+    }
+}
+
+
+        // ========================================
+// 📊 جمع بيانات: الاستكشاف الموجّه
+// ========================================
+function collectGuidedExplorationData() {
+    const sections = [];
+    const sectionDivs = document.querySelectorAll('[id^="section_"]');
+    
+    sectionDivs.forEach((div, index) => {
+        const titleEl = div.querySelector('.section-title');
+        const questionsEl = div.querySelector('.section-questions');
+        const answerTypeEl = div.querySelector('.section-answer-type');
+        
+        if (!titleEl || !questionsEl) return;
+        
+        const title = titleEl.value.trim();
+        const questionsText = questionsEl.value.trim();
+        const answerType = answerTypeEl?.value || 'textarea';
+        
+        if (!title || !questionsText) return;
+        
+        // تقسيم الأسئلة
+        const questionsList = questionsText.split('\n').filter(q => q.trim() !== '');
+        
+        // تحويل لصيغة الأسئلة المطلوبة
+        const questions = questionsList.map((questionText, qIndex) => {
+            const question = {
+                title: `${title} - سؤال ${qIndex + 1}`,
+                text: questionText,
+                type: answerType
+            };
+            
+            // إضافة خصائص حسب النوع
+            if (answerType === 'textarea') {
+                question.placeholder = 'اكتب إجابتك هنا...';
+            } else if (answerType === 'slider') {
+                question.min = 1;
+                question.max = 10;
+                question.default = 5;
+            } else if (answerType === 'checkbox') {
+                question.options = ['نعم، ينطبق علي', 'أحياناً', 'لا ينطبق'];
+            }
+            
+            return question;
+        });
+        
+        sections.push({
+            sectionTitle: title,
+            answerType: answerType,
+            questions: questions
+        });
+    });
+    
+    // تحويل الأقسام لقائمة أسئلة موحدة
+    const allQuestions = [];
+    sections.forEach(section => {
+        // إضافة عنوان القسم كـ header
+        allQuestions.push({
+            title: section.sectionTitle,
+            text: '',
+            type: 'section-header',
+            isHeader: true
+        });
+        
+        // إضافة الأسئلة
+        allQuestions.push(...section.questions);
+    });
+    
+    return {
+        questions: allQuestions,
+        sections: sections
+    };
+}
+
+// ========================================
+// 📅 جمع بيانات: التتبع اليومي
+// ========================================
+function collectDailyTrackingData() {
+    const daysEl = document.getElementById('trackingDays');
+    const questionEl = document.getElementById('dailyQuestion');
+    
+    const days = parseInt(daysEl?.value) || 3;
+    const dailyQuestion = questionEl?.value.trim() || '';
+    
+    // إنشاء أسئلة لكل يوم
+    const questions = [];
+    for (let i = 1; i <= days; i++) {
+        questions.push({
+            title: `اليوم ${i}`,
+            text: dailyQuestion || `سجل ملاحظاتك لليوم ${i}`,
+            type: 'textarea',
+            placeholder: 'اكتب ملاحظاتك هنا...',
+            dayNumber: i
+        });
+    }
+    
+    return {
+        trackingType: 'daily',
+        trackingDays: days,
+        dailyQuestion: dailyQuestion,
+        questions: questions
+    };
+}
+
+// ========================================
+// 📝 جمع بيانات: الأسئلة العامة
+// ========================================
+function collectGenericQuestionsData() {
+    const questions = [];
+    const questionDivs = document.querySelectorAll('[id^="generic_question_"]');
+    
+    questionDivs.forEach((div, index) => {
+        const titleEl = div.querySelector('.generic-question-title');
+        const textEl = div.querySelector('.generic-question-text');
+        const typeEl = div.querySelector('.generic-question-type');
+        
+        if (!titleEl || !textEl) return;
+        
+        const title = titleEl.value.trim();
+        const text = textEl.value.trim();
+        const type = typeEl?.value || 'textarea';
+        
+        if (!title || !text) return;
+        
+        const question = {
+            title: title,
+            text: text,
+            type: type
+        };
+        
+        // إضافة خصائص حسب النوع
+        if (type === 'textarea') {
+            question.placeholder = 'اكتب إجابتك هنا...';
+        } else if (type === 'slider') {
+            question.min = 1;
+            question.max = 10;
+            question.default = 5;
+        } else if (type === 'checkbox') {
+            question.options = ['الخيار الأول', 'الخيار الثاني', 'الخيار الثالث'];
+        }
+        
+        questions.push(question);
+    });
+    
+    return {
+        questions: questions
+    };
+}
+        
 // إغلاق النافذة
 function closeExerciseModal() {
     document.getElementById('exerciseModal').style.display = 'none';
