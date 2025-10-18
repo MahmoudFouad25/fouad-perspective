@@ -4762,6 +4762,30 @@ async function loadLessonPoints() {
                         const points = contentData.pointsSystem.totalPossible || 0;
                         lessonPoints[contentId] = points;
                         courseTotalPoints += points;
+                        // 🆕 حساب نقاط التمارين (pillar-exercise)
+} else if (contentData.type === 'pillar-exercise' && contentData.exerciseData?.pillars) {
+    const pillars = contentData.exerciseData.pillars;
+    let exerciseTotalPoints = 0;
+    
+    // جمع نقاط كل الركائز
+    for (const pillarKey in pillars) {
+        exerciseTotalPoints += pillars[pillarKey] || 0;
+    }
+    
+    courseContentDetails[contentId] = {
+        name: contentData.name,
+        type: contentData.type,
+        exercisePoints: exerciseTotalPoints,
+        pillars: pillars,
+        linkedBadges: contentData.linkedBadges || [],
+        duration: contentData.duration || 0
+    };
+    
+    lessonPoints[contentId] = exerciseTotalPoints;
+    courseTotalPoints += exerciseTotalPoints;
+    
+    console.log(`🏋️ تمرين: ${contentData.name} = ${exerciseTotalPoints} نقطة`, pillars);
+}
                         
                         console.log(`💰 ${contentData.name}:`, {
                             '🌅 صحوة الحائر': contentData.pointsSystem.achievement || 0,
@@ -4864,9 +4888,21 @@ function calculateModulesPoints() {
         );
         
         moduleLessons.forEach(lesson => {
-            if (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
-                const lessonPoints = courseContentDetails[lesson.libraryContentId].pointsSystem.totalPossible || 0;
-                modulePoints.total += lessonPoints;
+    if (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
+        const content = courseContentDetails[lesson.libraryContentId];
+        let lessonPoints = 0;
+        
+        // 🔵 حساب النقاط حسب نوع المحتوى
+        if (content.pointsSystem) {
+            // محتوى عادي (فيديو، نص، إلخ)
+            lessonPoints = content.pointsSystem.totalPossible || 0;
+        } else if (content.exercisePoints) {
+            // تمرين ركائز
+            lessonPoints = content.exercisePoints;
+        }
+        
+        modulePoints.total += lessonPoints;
+        
                 // 🆕 إضافة نقاط التمارين
 const contentType = courseContentDetails[lesson.libraryContentId].type;
 if (contentType === 'pillar-exercise') {
@@ -4994,18 +5030,68 @@ function calculateEarnedDetailedPoints() {
     userProgress.completedLessons?.forEach(lessonIndex => {
         const lesson = allLessons[lessonIndex];
         if (lesson?.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
-            const contentPoints = courseContentDetails[lesson.libraryContentId].pointsSystem;
+            const content = courseContentDetails[lesson.libraryContentId];
             
-            detailedPointsSystem.achievement += contentPoints.achievement || 0;
-            detailedPointsSystem.bonus += contentPoints.bonus || 0;
-            detailedPointsSystem.participation += contentPoints.participationValue || contentPoints.participation || 0;
-            detailedPointsSystem.speed += contentPoints.speedValue || contentPoints.speed || 0;
-            detailedPointsSystem.multiplier += contentPoints.multiplierValue || contentPoints.multiplier || 0;  // ← المحطة الخامسة
-            detailedPointsSystem.totalEarned += contentPoints.totalPossible || 0;
+            // 🔵 حساب النقاط المكتسبة حسب النوع
+            if (content.pointsSystem) {
+                // محتوى عادي (فيديو، نص، إلخ)
+                const contentPoints = content.pointsSystem;
+                
+                detailedPointsSystem.achievement += contentPoints.achievement || 0;
+                detailedPointsSystem.bonus += contentPoints.bonus || 0;
+                detailedPointsSystem.participation += contentPoints.participationValue || contentPoints.participation || 0;
+                detailedPointsSystem.speed += contentPoints.speedValue || contentPoints.speed || 0;
+                detailedPointsSystem.multiplier += contentPoints.multiplierValue || contentPoints.multiplier || 0;  // ← المحطة الخامسة
+                detailedPointsSystem.totalEarned += contentPoints.totalPossible || 0;
+                
+            } else if (content.exercisePoints) {
+                // تمرين ركائز - نضيف نقاطه للمجموع فقط
+                detailedPointsSystem.totalEarned += content.exercisePoints;
+            }
         }
     });
     
     return detailedPointsSystem;
+}
+
+       // ============================================
+// حساب نقاط التمارين المكتسبة
+// ============================================
+async function calculateCompletedExercisesPoints() {
+    try {
+        const userId = localStorage.getItem('userId');
+        if (!userId || !currentCourseId) return 0;
+        
+        const progressDoc = await db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId)
+            .get();
+        
+        if (!progressDoc.exists) return 0;
+        
+        const data = progressDoc.data();
+        let totalExercisePoints = 0;
+        
+        // جمع نقاط كل التمارين المكتملة
+        for (const key in data) {
+            if (key.startsWith('exercises.')) {
+                const exerciseData = data[key];
+                if (exerciseData.completed && exerciseData.pointsEarned) {
+                    for (const pillarKey in exerciseData.pointsEarned) {
+                        totalExercisePoints += exerciseData.pointsEarned[pillarKey] || 0;
+                    }
+                }
+            }
+        }
+        
+        console.log('🏋️ مجموع نقاط التمارين المكتسبة:', totalExercisePoints);
+        return totalExercisePoints;
+        
+    } catch (error) {
+        console.error('خطأ في حساب نقاط التمارين:', error);
+        return 0;
+    }
 }
        
 
@@ -9706,8 +9792,11 @@ async function renderPointsDashboard() {
 
     // حساب المجموع الكلي للنقاط
     const totalAdditionalPoints = await calculateAdditionalPointsTotal();
-    const grandTotal = detailedPointsSystem.totalEarned + totalAdditionalPoints;
+    const grandTotal = detailedPointsSystem.totalEarned + totalAdditionalPoints + completedExercisesPoints;
 
+    // 🆕 حساب نقاط التمارين المكتسبة
+const completedExercisesPoints = await calculateCompletedExercisesPoints();
+       
     // حساب الشريط المتقدم
     const progressBarHTML = await renderAdvancedProgressBar();
     
