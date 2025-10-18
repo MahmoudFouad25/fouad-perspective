@@ -7378,50 +7378,66 @@ async function checkExerciseCompletion(exerciseId) {
     }
 }
 // ============================================
-// دالة تحديث الإجابات (بدون نقاط إضافية) - النسخة النهائية
+// دالة تحديث الإجابات - الحل الصحيح النهائي
 // ============================================
 async function updatePillarExercise(exerciseId, answers, event) {
     try {
         showLoading('جاري تحديث إجاباتك...');
 
         const userId = localStorage.getItem('userId');
-        if (!userId) {
+        if (!userId || !currentCourseId) {
             hideLoading();
-            showNotification('❌ يجب تسجيل الدخول أولاً', 'error');
-            return;
-        }
-
-        if (!currentCourseId) {
-            hideLoading();
-            showNotification('❌ معرف الدورة غير موجود', 'error');
+            showNotification('❌ خطأ في البيانات', 'error');
             return;
         }
 
         console.log('🔄 تحديث إجابات التمرين:', exerciseId);
         console.log('✍️ الإجابات الجديدة:', answers);
 
-        // 🔥 استخدام نفس طريقة completePillarExercise
+        // 1️⃣ جلب البيانات القديمة أولاً
+        const progressDoc = await db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId)
+            .get();
+
+        if (!progressDoc.exists) {
+            throw new Error('بيانات التقدم غير موجودة');
+        }
+
+        const data = progressDoc.data();
+        const exerciseKey = `exercises.${exerciseId}`;
+        const oldExerciseData = data[exerciseKey];
+
+        if (!oldExerciseData) {
+            throw new Error('بيانات التمرين غير موجودة');
+        }
+
+        // 2️⃣ حفظ البيانات القديمة مع الإجابات الجديدة
         await db.collection('users')
             .doc(userId)
             .collection('awakening_progress')
             .doc(currentCourseId)
             .set({
-                [`exercises.${exerciseId}.answers`]: answers,
-                [`exercises.${exerciseId}.lastUpdated`]: firebase.firestore.FieldValue.serverTimestamp()
+                [exerciseKey]: {
+                    completed: oldExerciseData.completed,
+                    completedAt: oldExerciseData.completedAt,
+                    pointsEarned: oldExerciseData.pointsEarned,
+                    answers: answers, // الإجابات الجديدة
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                }
             }, { merge: true });
 
-        console.log('✅ تم تحديث الإجابات بنجاح في Firebase');
+        console.log('✅ تم تحديث الإجابات في Firebase بنجاح');
 
         hideLoading();
-        showNotification('✅ تم تحديث إجاباتك بنجاح!', 'success');
+        showNotification('✅ تم حفظ التعديلات!', 'success');
 
-        // تحديث الزر
         if (event?.target) {
             const btn = event.target;
-            const originalHTML = btn.innerHTML;
             btn.disabled = true;
             btn.style.opacity = '0.6';
-            btn.innerHTML = '<i class="fas fa-check"></i> تم التحديث ✓';
+            btn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ ✓';
 
             setTimeout(() => {
                 btn.disabled = false;
@@ -7431,9 +7447,9 @@ async function updatePillarExercise(exerciseId, answers, event) {
         }
 
     } catch (error) {
-        console.error('❌ خطأ في تحديث التمرين:', error);
+        console.error('❌ خطأ:', error);
         hideLoading();
-        showNotification('حدث خطأ: ' + error.message, 'error');
+        showNotification('فشل الحفظ: ' + error.message, 'error');
     }
 }
 
