@@ -7752,61 +7752,61 @@ function hideLoading() {
 }
        
 // ============================================
-// دالة إكمال التمرين (مع حماية كاملة)
+// دالة إكمال التمرين (مع حماية كاملة من التكرار)
 // ============================================
+let isExerciseSubmitting = false; // Flag لمنع التكرار
+
 async function completePillarExercise(exerciseId, answers, event) {
-   // 🛡️ منع التكرار
-    if (event?.target?.disabled) {
-        console.log('⚠️ الزر معطل بالفعل - منع التكرار');
+    // 🛡️ حماية من التنفيذ المتعدد
+    if (isExerciseSubmitting) {
+        console.log('⚠️ التمرين قيد الحفظ بالفعل - منع التكرار');
         return;
     }
-    if (event?.target) {
-        event.target.disabled = true;
-    }
+    
+    isExerciseSubmitting = true;
     
     try {
         showLoading('جاري حفظ إجاباتك...');
         
-        // ✅ 1. التحقق من تسجيل الدخول
         const userId = localStorage.getItem('userId');
-
-if (!userId) {
-    hideLoading();
-    showNotification('❌ يجب تسجيل الدخول أولاً', 'error');
-    setTimeout(() => {
-        window.location.href = 'login.html';
-    }, 2000);
-    return;
-}
+        if (!userId) {
+            hideLoading();
+            showNotification('❌ يجب تسجيل الدخول أولاً', 'error');
+            isExerciseSubmitting = false;
+            return;
+        }
         
-        // ✅ 2. التحقق من courseId
         if (!currentCourseId) {
             hideLoading();
             showNotification('❌ معرف الدورة غير موجود', 'error');
+            isExerciseSubmitting = false;
             return;
         }
         
         console.log('📝 User ID:', userId);
         console.log('📚 Course ID:', currentCourseId);
-        // ✅ التحقق من عدم التكرار
-const progressDoc = await db.collection('users')
-    .doc(userId)
-    .collection('awakening_progress')
-    .doc(currentCourseId)
-    .get();
+        
+        // ✅ التحقق من عدم الإكمال المسبق
+        const progressDoc = await db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId)
+            .get();
 
-if (progressDoc.exists) {
-    const data = progressDoc.data();
-    if (data.exercises?.[exerciseId]?.completed) {
-        hideLoading();
-        showNotification('⚠️ لقد أكملت هذا التمرين مسبقاً!', 'warning');
-        return;
-    }
-}
+        if (progressDoc.exists) {
+            const data = progressDoc.data();
+            if (data.exercises?.[exerciseId]?.completed) {
+                hideLoading();
+                showNotification('⚠️ لقد أكملت هذا التمرين مسبقاً!', 'warning');
+                isExerciseSubmitting = false;
+                return;
+            }
+        }
+        
         console.log('🎯 Exercise ID:', exerciseId);
         console.log('✍️ Answers:', answers);
         
-        // ✅ 3. جلب بيانات التمرين
+        // جلب بيانات التمرين
         const exerciseDoc = await db.collection('courseContentLibrary')
             .doc(exerciseId)
             .get();
@@ -7821,7 +7821,7 @@ if (progressDoc.exists) {
         console.log('📦 Exercise Data:', exerciseData);
         console.log('🏛️ Pillars:', pillars);
         
-        // ✅ 4. حفظ الإجابات
+        // حفظ الإجابات مع علامة الإكمال
         await db.collection('users')
             .doc(userId)
             .collection('awakening_progress')
@@ -7837,7 +7837,7 @@ if (progressDoc.exists) {
         
         console.log('✅ تم حفظ الإجابات بنجاح');
         
-        // ✅ 5. إضافة النقاط لكل ركيزة
+        // إضافة النقاط لكل ركيزة
         let totalPointsAdded = 0;
         for (const [pillarKey, points] of Object.entries(pillars)) {
             if (points > 0) {
@@ -7852,39 +7852,27 @@ if (progressDoc.exists) {
         }
         
         console.log(`🎉 إجمالي النقاط المضافة: ${totalPointsAdded}`);
-        // إعادة تحميل نقاط الأركان
-const couragePoints = await getCouragePillarPoints();
-const mirrorPoints = await getMirrorPillarPoints();
-const actionPoints = await getActionPillarPoints();
-const witnessPoints = await getWitnessPillarPoints();
-        // 🆕 تحديث لوحة النقاط الكاملة
-await renderPointsDashboard();
-
-console.log('🔄 تحديث عرض النقاط:', {
-    courage: couragePoints,
-    mirror: mirrorPoints,
-    action: actionPoints,
-    witness: witnessPoints
-});
-
-// تحديث العرض في الصفحة
-updatePillarPointsDisplay(couragePoints, mirrorPoints, actionPoints, witnessPoints);
         
-        // ✅ 6. تحديث progress الدرس
+        // تحديث العرض
+        await renderPointsDashboard();
+        const couragePoints = await getCouragePillarPoints();
+        const mirrorPoints = await getMirrorPillarPoints();
+        const actionPoints = await getActionPillarPoints();
+        const witnessPoints = await getWitnessPillarPoints();
+        updatePillarPointsDisplay(couragePoints, mirrorPoints, actionPoints, witnessPoints);
+        
+        // تحديث progress الدرس
         if (typeof markLessonComplete === 'function') {
             await markLessonComplete();
-            console.log('✅ تم تحديث الدرس كمكتمل');
         }
         
         hideLoading();
         
-        // ✅ 7. عرض النجاح
         const totalPoints = exerciseData.exerciseData?.totalPoints || totalPointsAdded;
-        
         showNotification(`🎉 رائع! حصلت على ${totalPoints} نقطة!`, 'success');
         showPointsSummary(pillars);
         
-        // ✅ 8. تعطيل الزرار
+        // تعطيل الزرار
         const completeBtn = event?.target || document.querySelector('button[onclick*="completePillarExercise"]');
         if (completeBtn) {
             completeBtn.disabled = true;
@@ -7895,20 +7883,10 @@ updatePillarPointsDisplay(couragePoints, mirrorPoints, actionPoints, witnessPoin
         
     } catch (error) {
         console.error('❌ خطأ في إكمال التمرين:', error);
-        console.error('Stack:', error.stack);
         hideLoading();
-        
-        let errorMessage = 'حدث خطأ في حفظ التمرين';
-        
-        if (error.message.includes('permission-denied')) {
-            errorMessage = 'ليس لديك صلاحية للوصول';
-        } else if (error.message.includes('not-found')) {
-            errorMessage = 'التمرين غير موجود';
-        } else {
-            errorMessage += ': ' + error.message;
-        }
-        
-        showNotification(errorMessage, 'error');
+        showNotification('حدث خطأ في حفظ التمرين: ' + error.message, 'error');
+    } finally {
+        isExerciseSubmitting = false;
     }
 }
 
