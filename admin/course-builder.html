@@ -4184,7 +4184,7 @@ let courseData = {
        let currentStep = 1;
         let autoSaveTimeout = null;
         let isLoading = false;
-
+let editingLessonId = null;
         // ========================================
         // 🆕 متغيرات نظام التمارين والتسويق
         // ========================================
@@ -6586,48 +6586,33 @@ async function saveExerciseFromBuilder(event) {
         console.log('🔍 selectedModuleId:', selectedModuleId);
 console.log('🔍 courseData.modules:', courseData.modules);
         
-       // 7. إضافة للدورة
-if (!SAVED_MODULE_ID) {
-    console.error('❌ selectedModuleId غير موجود');
-    console.log('🔍 محاولة الحصول على الوحدة الأولى...');
-    
-    // محاولة استخدام أول وحدة متاحة
-    if (courseData.modules && courseData.modules.length > 0) {
-        selectedModuleId = courseData.modules[0].id;
-        console.log('✅ تم اختيار الوحدة:', selectedModuleId);
-    } else {
-        hideLoading();
-        showNotification('❌ خطأ: لا توجد وحدات في الدورة', 'error');
-        return;
-    }
-}
-        
-        const module = courseData.modules.find(m => m.id === SAVED_MODULE_ID);
-        if (module) {
-            const lessonId = 'lesson_' + Date.now();
-            const newLesson = {
-                id: lessonId,
-                title: exerciseName,
-                libraryContentId: exerciseId,
-                libraryContentType: "pillar-exercise",
-                duration: exerciseDuration,
-                points: exerciseTotalPoints,
-                isFreePreview: false
-            };
+      // 7. إضافة أو تحديث في الدورة
+        if (isEditMode && editingLessonId) {
+            // وضع التعديل
+            console.log('🔄 تحديث تمرين موجود');
+            console.log('   - Exercise ID:', exerciseId);
+            console.log('   - Lesson ID:', editingLessonId);
             
-            if (!module.lessons) {
-                module.lessons = [];
+            let lessonUpdated = false;
+            
+            courseData.modules.forEach(module => {
+                module.lessons?.forEach(lesson => {
+                    if (lesson.id === editingLessonId) {
+                        lesson.title = exerciseName;
+                        lesson.duration = exerciseDuration;
+                        lesson.points = exerciseTotalPoints;
+                        lesson.libraryContentId = exerciseId;
+                        lessonUpdated = true;
+                        console.log('✅ تم تحديث الدرس في الوحدة:', module.id);
+                    }
+                });
+            });
+            
+            if (!lessonUpdated) {
+                console.warn('⚠️ لم يتم العثور على الدرس للتحديث');
             }
-            module.lessons.push(newLesson);
-            
-            console.log('✅ تم إضافة الدرس للوحدة');
             
             renderModules();
-            
-            if (!module.isExpanded) {
-                module.isExpanded = true;
-                renderModules();
-            }
             
             if (courseData.id && typeof saveCourse === 'function') {
                 await saveCourse();
@@ -6636,26 +6621,65 @@ if (!SAVED_MODULE_ID) {
                 await autoSave();
                 console.log('✅ تم الحفظ التلقائي');
             }
+            
+        } else {
+            // وضع الإضافة الجديدة
+            console.log('➕ إضافة تمرين جديد');
+            console.log('   - Module ID:', SAVED_MODULE_ID);
+            
+            if (!SAVED_MODULE_ID) {
+                hideLoading();
+                showNotification('❌ خطأ: لم يتم تحديد الوحدة', 'error');
+                console.error('❌ SAVED_MODULE_ID غير موجود');
+                return;
+            }
+            
+            const module = courseData.modules.find(m => m.id === SAVED_MODULE_ID);
+            if (module) {
+                const lessonId = 'lesson_' + Date.now();
+                const newLesson = {
+                    id: lessonId,
+                    title: exerciseName,
+                    libraryContentId: exerciseId,
+                    libraryContentType: "pillar-exercise",
+                    duration: exerciseDuration,
+                    points: exerciseTotalPoints,
+                    isFreePreview: false
+                };
+                
+                if (!module.lessons) {
+                    module.lessons = [];
+                }
+                module.lessons.push(newLesson);
+                
+                console.log('✅ تم إضافة الدرس للوحدة');
+                
+                renderModules();
+                
+                if (!module.isExpanded) {
+                    module.isExpanded = true;
+                    renderModules();
+                }
+                
+                if (courseData.id && typeof saveCourse === 'function') {
+                    await saveCourse();
+                    console.log('✅ تم حفظ الدورة');
+                } else if (typeof autoSave === 'function') {
+                    await autoSave();
+                    console.log('✅ تم الحفظ التلقائي');
+                }
+            } else {
+                console.error('❌ لم يتم العثور على الوحدة:', SAVED_MODULE_ID);
+            }
         }
         
         hideLoading();
-        // إعادة تعيين بعد النجاح فقط
-// في وضع التعديل، نحتفظ بالوحدة الأصلية
-if (selectedModuleId) {
-    console.log('📍 التعديل في نفس الوحدة:', selectedModuleId);
-} else {
-    // لو مش موجود، نجيب الوحدة اللي فيها الدرس
-    const module = courseData.modules.find(m => 
-        m.lessons?.some(l => l.id === lessonId)
-    );
-    if (module) {
-        selectedModuleId = module.id;
-        console.log('📍 تم تحديد الوحدة:', selectedModuleId);
-    }
-}
-closeExerciseModal();
+        closeExerciseModal();
         
-        showNotification(`✅ تم إضافة التمرين "${exerciseName}" بنجاح!`, 'success');
+        showNotification(
+            isEditMode ? `✅ تم تحديث التمرين "${exerciseName}" بنجاح!` : `✅ تم إضافة التمرين "${exerciseName}" بنجاح!`,
+            'success'
+        );
         console.log('🎉 العملية تمت بنجاح!');
         
     } catch (error) {
@@ -6665,7 +6689,6 @@ closeExerciseModal();
         showNotification('حدث خطأ: ' + error.message, 'error');
     }
 }
-
         function validateExerciseData(data) {
     const errors = [];
     
@@ -8725,7 +8748,17 @@ async function editExercise(lessonId, libraryContentId) {
         // تفعيل وضع التعديل
         isEditMode = true;
         editingExerciseId = libraryContentId;
-        selectedModuleId = null; // لأننا في وضع تعديل
+        // في وضع التعديل، نحتاج نحتفظ بـ lessonId و moduleId
+editingLessonId = lessonId;
+
+// البحث عن الوحدة اللي فيها الدرس
+const module = courseData.modules.find(m => 
+    m.lessons?.some(l => l.id === lessonId)
+);
+if (module) {
+    selectedModuleId = module.id;
+    console.log('📍 الوحدة:', selectedModuleId, 'الدرس:', lessonId);
+}
         
         // تحديد النمط
         const patternId = exerciseData.patternType || 'guided-exploration';
@@ -8999,6 +9032,7 @@ function collectGenericQuestionsData() {
 // ❌ إغلاق نافذة التمارين
 // ========================================
 function closeExerciseModal() {
+    editingLessonId = null;
     console.log('❌ إغلاق نافذة التمارين');
     
     const modal = document.getElementById('exerciseModal');
