@@ -4540,6 +4540,7 @@ let lastActivityDate = null;
 let courseBadges = [];
 let potentialBadges = [];
 let moduleCompletionBadges = {};
+       let completedExercisesSet = new Set(); // 🆕 للتمارين المكتملة
          // Get Course ID from URL
     function getCourseIdFromURL() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -4696,6 +4697,32 @@ userProgress = userData.progress?.[courseId] || {
 
 console.log('✅ تقدم المستخدم:', userProgress);
 console.log('✅ completedLessons:', userProgress.completedLessons);
+            // 🆕 تحميل التمارين المكتملة من awakening_progress
+try {
+    const awakeningDoc = await db.collection('users')
+        .doc(userId)
+        .collection('awakening_progress')
+        .doc(courseId)
+        .get();
+    
+    if (awakeningDoc.exists) {
+        const awakeningData = awakeningDoc.data();
+        completedExercisesSet = new Set();
+        
+        // جمع كل التمارين المكتملة
+        for (const key in awakeningData) {
+            if (key.startsWith('exercises.') && awakeningData[key].completed) {
+                const exerciseId = key.replace('exercises.', '');
+                completedExercisesSet.add(exerciseId);
+            }
+        }
+        
+        console.log('🏋️ التمارين المكتملة:', Array.from(completedExercisesSet));
+    }
+} catch (error) {
+    console.error('خطأ في تحميل التمارين المكتملة:', error);
+}
+            
             // استخراج نقاط المستخدم وشاراته من البيانات الصحيحة
 userJourneyPoints = userData.journeyPoints?.balance || 0;
 userWalletPoints = userData.walletPoints?.balance || 0;
@@ -6109,8 +6136,15 @@ function renderModuleLessons(lessons) {
     const isFlexibleMode = courseData?.courseStructure === 'flexible';
    
     return lessons.map((lesson) => {
-        const index = lesson.globalIndex;
-        const isCompleted = completedLessons.includes(index);
+       const index = lesson.globalIndex;
+
+// 🆕 فحص الإكمال: للدروس من completedLessons، للتمارين من completedExercisesSet
+let isCompleted = completedLessons.includes(index);
+
+// إذا كان تمرين، فحص من Set التمارين المكتملة
+if (!isCompleted && (lesson.libraryContentType === 'pillar-exercise' || lesson.type === 'exercise')) {
+    isCompleted = completedExercisesSet.has(lesson.libraryContentId);
+}
         
         // ✨ إذا كان الوضع المرن، جميع الدروس متاحة
         // إذا كان الوضع الخطي، فقط الدرس التالي متاح
@@ -8155,6 +8189,10 @@ await db.collection('users')
 console.log(`✅ تم حفظ completedLessons في users/${userId}`);
         
         console.log(`✅ تم حفظ التمرين ${lessonIndex} في Firebase`);
+        // 🆕 إضافة للـ Set
+completedExercisesSet.add(exerciseId);
+console.log('🏋️ تم تحديث completedExercisesSet');
+        
     }
 }
         
