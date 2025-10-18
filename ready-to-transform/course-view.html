@@ -5949,20 +5949,27 @@ function renderModuleLessons(lessons) {
             itemClass += ' available';
         }
 
-        let buttonText, buttonClass, buttonIcon;
-        if (isCompleted) {
-            buttonText = 'مكتمل';
-            buttonClass = 'lesson-btn btn-completed';
-            buttonIcon = 'fa-check';
-        } else if (isLocked) {
-            buttonText = 'مقفل';
-            buttonClass = 'lesson-btn btn-lock';
-            buttonIcon = 'fa-lock';
-        } else {
-            buttonText = 'بدء الدرس';
-            buttonClass = 'lesson-btn btn-play';
-            buttonIcon = 'fa-play';
-        }
+       let buttonText, buttonClass, buttonIcon;
+if (isCompleted) {
+    buttonText = 'مكتمل';
+    buttonClass = 'lesson-btn btn-completed';
+    buttonIcon = 'fa-check';
+} else if (isLocked) {
+    buttonText = 'مقفل';
+    buttonClass = 'lesson-btn btn-lock';
+    buttonIcon = 'fa-lock';
+} else {
+    // 🆕 تحديد النص حسب نوع المحتوى
+    if (lesson.libraryContentType === 'pillar-exercise' || lesson.type === 'exercise') {
+        buttonText = 'بدء التمرين';
+        buttonIcon = 'fa-dumbbell';
+    } else {
+        buttonText = 'بدء الدرس';
+        buttonIcon = 'fa-play';
+    }
+    buttonClass = 'lesson-btn btn-play';
+}
+
 
         return `
             <div class="${itemClass}" onclick="${!isLocked ? `startLesson(${index})` : ''}">
@@ -6213,25 +6220,24 @@ document.addEventListener('DOMContentLoaded', function() {
     hideAllContent();
     showContentLoading();
     
-    // 🆕 التحقق: هل هذا أول درس في وحدة لها طقس؟
-    const isFirstLessonInModule = checkIfFirstLessonInModule(lesson);
-    const moduleHasRitual = checkIfModuleHasRitual(lesson.moduleIndex);
-    
     // حفظ معلومات الوحدة عالمياً
     window.currentModuleIndex = lesson.moduleIndex;
     window.currentModuleId = courseData.modules[lesson.moduleIndex]?.id;
     
-    if (isFirstLessonInModule && moduleHasRitual) {
+    // 🆕 التحقق الجديد: هل الوحدة لها طقس ولم يكتمل بعد؟
+    const moduleHasRitual = checkIfModuleHasRitual(lesson.moduleIndex);
+    
+    if (moduleHasRitual) {
         // التحقق: هل المستخدم أكمل الطقس من قبل؟
         const ritualCompleted = await checkModuleRitualCompleted(lesson.moduleIndex);
         
         if (!ritualCompleted) {
-            // عرض الطقس
+            // عرض الطقس (بغض النظر عن رقم الدرس)
             hideContentLoading();
             await displayModuleRitual(lesson);
             document.getElementById('lessonModal').classList.add('active');
             document.body.style.overflow = 'hidden';
-            return; // توقف هنا - الطقس سيعرض المحتوى بعد الإكمال
+            return; // توقف هنا
         }
     }
     
@@ -6265,18 +6271,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // 🕊️ دوال التحقق من طقس الوحدة
 // ═══════════════════════════════════════════════════════════
 
-// التحقق: هل هذا أول درس في الوحدة؟
-function checkIfFirstLessonInModule(lesson) {
-    const moduleLessons = allLessons.filter(l => l.moduleIndex === lesson.moduleIndex);
-    if (moduleLessons.length === 0) return false;
-    
-    // الدرس الأول هو اللي له أقل globalIndex في الوحدة
-    const firstLesson = moduleLessons.reduce((min, l) => 
-        l.globalIndex < min.globalIndex ? l : min
-    );
-    
-    return lesson.globalIndex === firstLesson.globalIndex;
-}
+
 
 // التحقق: هل الوحدة لها طقس مفعّل؟
 function checkIfModuleHasRitual(moduleIndex) {
@@ -6316,6 +6311,7 @@ async function checkModuleRitualCompleted(moduleIndex) {
 
        // عرض طقس الوحدة
 // عرض طقس الوحدة
+// عرض طقس الوحدة
 async function displayModuleRitual(lesson) {
     const ritualContainer = document.getElementById('preVideoRitual');
     
@@ -6328,8 +6324,14 @@ async function displayModuleRitual(lesson) {
     const module = courseData.modules[lesson.moduleIndex];
     const ritual = module.ritualSettings;
     
-    // إخفاء كل المحتويات
+    // 🆕 إخفاء كل شيء تماماً أولاً
     hideAllContent();
+    
+    // 🆕 إخفاء أزرار التنقل
+    const actionsContainer = document.getElementById('lessonActionsContainer');
+    if (actionsContainer) {
+        actionsContainer.style.display = 'none';
+    }
     
     // تعبئة بيانات الطقس
     const titleElement = document.getElementById('ritualContentTitle');
@@ -6362,7 +6364,7 @@ async function displayModuleRitual(lesson) {
         question2Placeholder.placeholder = ritual.placeholder2 || 'تخيل نفسك بعد شهر...';
     }
     
-    // 🆕 حساب معلومات الوحدة
+    // حساب معلومات الوحدة
     const moduleLessons = allLessons.filter(l => l.moduleIndex === lesson.moduleIndex);
     const totalDuration = moduleLessons.reduce((sum, l) => sum + (parseInt(l.duration) || 0), 0);
     const totalLessons = moduleLessons.length;
@@ -6379,18 +6381,23 @@ async function displayModuleRitual(lesson) {
         infoBadges[1].innerHTML = `<i class="fas fa-book"></i><span>${totalLessons} ${totalLessons === 1 ? 'درس' : 'دروس'}</span>`;
     }
     
-    // 🆕 إخفاء أزرار التنقل
-    const actionsContainer = document.getElementById('lessonActionsContainer');
-    if (actionsContainer) {
-        actionsContainer.style.display = 'none';
+    // حساب عدد التمارين
+    const exercisesCount = moduleLessons.filter(l => 
+        l.libraryContentType === 'pillar-exercise' || 
+        l.type === 'exercise'
+    ).length;
+    
+    if (infoBadges.length >= 3 && exercisesCount > 0) {
+        infoBadges[2].innerHTML = `<i class="fas fa-dumbbell"></i><span>${exercisesCount} ${exercisesCount === 1 ? 'تمرين' : 'تمارين'}</span>`;
     }
     
-    // إظهار الطقس
+    // 🆕 إظهار الطقس فقط (كل شيء آخر مخفي)
     ritualContainer.style.display = 'block';
 }
 
 
        // دالة بدء رحلة الفيديو
+// دالة بدء رحلة الفيديو
 // دالة بدء رحلة الفيديو
 async function startVideoJourney() {
     try {
@@ -6437,8 +6444,11 @@ async function startVideoJourney() {
         
         hideLoading();
         
-        // إخفاء طقس البداية
-        document.getElementById('preVideoRitual').style.display = 'none';
+        // 🆕 إخفاء الطقس تماماً
+        const ritualContainer = document.getElementById('preVideoRitual');
+        if (ritualContainer) {
+            ritualContainer.style.display = 'none';
+        }
         
         // مسح الحقول
         document.getElementById('intentionText').value = '';
@@ -6449,6 +6459,9 @@ async function startVideoJourney() {
         if (actionsContainer) {
             actionsContainer.style.display = 'flex';
         }
+        
+        // 🆕 إخفاء كل المحتوى قبل عرض الجديد
+        hideAllContent();
         
         // عرض المحتوى
         const lesson = allLessons[currentLessonIndex];
@@ -6838,6 +6851,12 @@ container.style.marginBottom = '0';
     } else {
         showContentError('رابط الفيديو غير متوفر');
     }
+         // 🆕 التأكد من إظهار زر "إكمال الدرس" للفيديوهات
+const completeLessonBtn = document.getElementById('completeLessonBtn');
+if (completeLessonBtn) {
+    completeLessonBtn.style.display = 'block';
+}
+
 }
 
        // Display Library Quiz
@@ -7076,6 +7095,14 @@ function displayPillarExercise(contentData, libraryContentId) {
     `;
     
     container.innerHTML = html;
+
+       // 🆕 إخفاء زر "إكمال الدرس" لأن التمرين له زر خاص
+const completeLessonBtn = document.getElementById('completeLessonBtn');
+if (completeLessonBtn) {
+    completeLessonBtn.style.display = 'none';
+}
+
+       
 }
 
 // ========================================
@@ -8071,11 +8098,25 @@ completeBtn.style.borderColor = '#10b981';
        }
 
        // Close Lesson Player
-       function closeLessonPlayer() {
-           document.getElementById('lessonModal').classList.remove('active');
-           document.body.style.overflow = 'auto';
-           currentLessonIndex = null;
-       }
+       // Close Lesson Player
+function closeLessonPlayer() {
+    // 🆕 إخفاء الطقس إذا كان ظاهراً
+    const ritualContainer = document.getElementById('preVideoRitual');
+    if (ritualContainer) {
+        ritualContainer.style.display = 'none';
+    }
+    
+    // 🆕 مسح الحقول
+    const intentionText = document.getElementById('intentionText');
+    const hopeText = document.getElementById('hopeText');
+    if (intentionText) intentionText.value = '';
+    if (hopeText) hopeText.value = '';
+    
+    // إخفاء المودال
+    document.getElementById('lessonModal').classList.remove('active');
+    document.body.style.overflow = 'auto';
+    currentLessonIndex = null;
+}
 
  // Mark Lesson as Completed
 async function markLessonCompleted(lessonIndex) {
