@@ -6346,7 +6346,8 @@ function addHelpButton(patternId) {
     document.body.insertAdjacentHTML('beforeend', helpButton);
 }
 
-        // ========================================
+ 
+// ========================================
 // 🛡️ معالجة الأخطاء الشاملة
 // ========================================
 
@@ -6363,23 +6364,21 @@ function checkFirebaseConnection() {
 function validateExerciseData(data) {
     const errors = [];
     
-    // التحقق من الاسم
     if (!data.name || data.name.length < 3) {
         errors.push('اسم التمرين يجب أن يكون 3 أحرف على الأقل');
     }
     
-    // التحقق من الوصف
     if (!data.description || data.description.length < 10) {
         errors.push('الوصف يجب أن يكون 10 أحرف على الأقل');
     }
     
-    // التحقق من الأسئلة
-    if (!data.exerciseData.questions || data.exerciseData.questions.length === 0) {
+    // التحقق من الأسئلة (مع حماية من undefined)
+    if (!data.exerciseData?.questions || data.exerciseData.questions.length === 0) {
         errors.push('يجب إضافة سؤال واحد على الأقل');
     }
     
     // التحقق من النقاط
-    const totalPillarPoints = Object.values(data.exerciseData.pillars || {}).reduce((a, b) => a + b, 0);
+    const totalPillarPoints = Object.values(data.exerciseData?.pillars || {}).reduce((a, b) => a + b, 0);
     if (totalPillarPoints === 0) {
         errors.push('يجب تحديد نقاط لركيزة واحدة على الأقل');
     }
@@ -6422,20 +6421,163 @@ function showValidationErrors(errors) {
         </div>
     `;
     
-    // إضافة في أعلى النموذج
-    const form = document.getElementById('exerciseBuilderMainForm');
+    const form = document.getElementById('exerciseBuilderMainForm') || document.getElementById('exerciseModal');
     if (form) {
-        // إزالة أي رسالة خطأ قديمة
         const oldError = form.querySelector('[style*="239, 68, 68"]')?.parentElement;
         if (oldError) oldError.remove();
         
         form.insertAdjacentHTML('afterbegin', errorHTML);
-        
-        // Scroll إلى الأعلى
         form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
+// ========================================
+// 💾 حفظ التمرين
+// ========================================
+async function saveExerciseFromBuilder(event) {
+    event.preventDefault();
+    
+    try {
+        if (!checkFirebaseConnection()) return;
+        
+        showLoading('جاري حفظ التمرين...');
+        
+        // 1. جمع البيانات الأساسية
+        const exerciseName = document.getElementById('exerciseName')?.value.trim();
+        const exerciseDescription = document.getElementById('exerciseDescription')?.value.trim();
+        const exerciseDuration = parseInt(document.getElementById('exerciseDuration')?.value) || 30;
+        const exerciseTotalPoints = parseInt(document.getElementById('exerciseTotalPoints')?.value) || 0;
+        const exerciseIntro = document.getElementById('exerciseIntro')?.value.trim() || '';
+        const exerciseWarning = document.getElementById('exerciseWarning')?.value.trim() || '';
+        
+        // 2. جمع نقاط الأركان
+        const pillars = {};
+        const courage = parseInt(document.getElementById('pillarCourage')?.value) || 0;
+        const mirror = parseInt(document.getElementById('pillarMirror')?.value) || 0;
+        const action = parseInt(document.getElementById('pillarAction')?.value) || 0;
+        const witness = parseInt(document.getElementById('pillarWitness')?.value) || 0;
+        
+        if (courage > 0) pillars.courage = courage;
+        if (mirror > 0) pillars.mirror = mirror;
+        if (action > 0) pillars.action = action;
+        if (witness > 0) pillars.witness = witness;
+        
+        // 3. جمع الأسئلة
+        const questions = [];
+        const questionDivs = document.querySelectorAll('[id^="question_"]');
+        
+        questionDivs.forEach(div => {
+            const titleEl = div.querySelector('.question-title');
+            const textEl = div.querySelector('.question-text');
+            const typeEl = div.querySelector('.question-type');
+            
+            if (!titleEl || !textEl || !typeEl) return;
+            
+            const title = titleEl.value.trim();
+            const text = textEl.value.trim();
+            const type = typeEl.value;
+            
+            if (!title || !text) return;
+            
+            const question = { title, text, type };
+            
+            if (type === 'textarea') {
+                const placeholderEl = div.querySelector('.question-placeholder-text');
+                question.placeholder = placeholderEl ? placeholderEl.value.trim() : '';
+            } else if (type === 'slider') {
+                const minEl = div.querySelector('.slider-min');
+                const maxEl = div.querySelector('.slider-max');
+                const defaultEl = div.querySelector('.slider-default');
+                
+                question.min = minEl ? (parseInt(minEl.value) || 1) : 1;
+                question.max = maxEl ? (parseInt(maxEl.value) || 10) : 10;
+                question.default = defaultEl ? (parseInt(defaultEl.value) || 5) : 5;
+            } else if (type === 'checkbox') {
+                const optionsEl = div.querySelector('.checkbox-options');
+                if (optionsEl) {
+                    const optionsText = optionsEl.value;
+                    question.options = optionsText.split('\n').filter(opt => opt.trim() !== '');
+                }
+            }
+            
+            questions.push(question);
+        });
+        
+        // 4. تجهيز البيانات النهائية
+        const exerciseId = 'exercise_' + Date.now();
+        
+        const exerciseData = {
+            name: exerciseName,
+            type: "pillar-exercise",
+            description: exerciseDescription,
+            exerciseData: {
+                introText: exerciseIntro,
+                warningText: exerciseWarning,
+                totalPoints: exerciseTotalPoints,
+                pillars: pillars,
+                questions: questions
+            }
+        };
+        
+        // 5. التحقق من صحة البيانات
+        const validation = validateExerciseData(exerciseData);
+        if (!validation.isValid) {
+            hideLoading();
+            showValidationErrors(validation.errors);
+            return;
+        }
+        
+        console.log('📦 بيانات التمرين:', exerciseData);
+        
+        // 6. حفظ في Firebase
+        await db.collection('courseContentLibrary').doc(exerciseId).set(exerciseData);
+        
+        console.log('✅ تم الحفظ في المكتبة');
+        
+        // 7. إضافة للدورة
+        const module = courseData.modules.find(m => m.id === selectedModuleId);
+        if (module) {
+            const lessonId = 'lesson_' + Date.now();
+            const newLesson = {
+                id: lessonId,
+                title: exerciseName,
+                libraryContentId: exerciseId,
+                libraryContentType: "pillar-exercise",
+                duration: exerciseDuration,
+                points: exerciseTotalPoints,
+                isFreePreview: false
+            };
+            
+            if (!module.lessons) {
+                module.lessons = [];
+            }
+            module.lessons.push(newLesson);
+            
+            renderModules();
+            
+            if (!module.isExpanded) {
+                module.isExpanded = true;
+                renderModules();
+            }
+            
+            if (courseData.id && typeof saveCourse === 'function') {
+                await saveCourse();
+            } else if (typeof autoSave === 'function') {
+                await autoSave();
+            }
+        }
+        
+        hideLoading();
+        closeExerciseModal();
+        
+        showNotification(`✅ تم إضافة التمرين "${exerciseName}" بنجاح!`, 'success');
+        
+    } catch (error) {
+        console.error('❌ خطأ في الحفظ:', error);
+        hideLoading();
+        showNotification('حدث خطأ: ' + error.message, 'error');
+    }
+}
 
        
         // ========================================
@@ -6461,6 +6603,7 @@ function previewExercise() {
             default:
                 patternContent = collectGenericQuestionsData();
                 break;
+                
         }
         
         const questions = patternContent.questions || [];
@@ -8434,241 +8577,7 @@ function removeGenericQuestion(questionId) {
 }
         
 
-// ========================================
-// 💾 حفظ التمرين من الـ Builder
-// ========================================
-// ========================================
-// 🛡️ معالجة الأخطاء الشاملة
-// ========================================
 
-// التحقق من اتصال Firebase
-function checkFirebaseConnection() {
-    if (typeof db === 'undefined') {
-        showNotification('خطأ: لم يتم الاتصال بقاعدة البيانات', 'error');
-        return false;
-    }
-    return true;
-}
-
-// التحقق من صحة البيانات قبل الحفظ
-function validateExerciseData(data) {
-    const errors = [];
-    
-    // التحقق من الاسم
-    if (!data.name || data.name.length < 3) {
-        errors.push('اسم التمرين يجب أن يكون 3 أحرف على الأقل');
-    }
-    
-    // التحقق من الوصف
-    if (!data.description || data.description.length < 10) {
-        errors.push('الوصف يجب أن يكون 10 أحرف على الأقل');
-    }
-    
-    // التحقق من الأسئلة
-    if (!data.exerciseData.questions || data.exerciseData.questions.length === 0) {
-        errors.push('يجب إضافة سؤال واحد على الأقل');
-    }
-    
-    // التحقق من النقاط
-    const totalPillarPoints = Object.values(data.exerciseData.pillars || {}).reduce((a, b) => a + b, 0);
-    if (totalPillarPoints === 0) {
-        errors.push('يجب تحديد نقاط لركيزة واحدة على الأقل');
-    }
-    
-    return {
-        isValid: errors.length === 0,
-        errors: errors
-    };
-}
-
-// عرض أخطاء التحقق
-function showValidationErrors(errors) {
-    const errorHTML = `
-        <div style="
-            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1));
-            padding: 1.5rem;
-            border-radius: 12px;
-            border: 2px solid rgba(239, 68, 68, 0.4);
-            margin-bottom: 2rem;
-        ">
-            <h4 style="
-                color: #ef4444;
-                margin: 0 0 1rem 0;
-                display: flex;
-                align-items: center;
-                gap: 0.5rem;
-            ">
-                <i class="fas fa-exclamation-triangle"></i>
-                يرجى تصحيح الأخطاء التالية:
-            </h4>
-            <ul style="
-                margin: 0;
-                padding: 0 0 0 1.5rem;
-                color: rgba(255, 255, 255, 0.9);
-            ">
-                ${errors.map(error => `
-                    <li style="margin-bottom: 0.5rem;">${error}</li>
-                `).join('')}
-            </ul>
-        </div>
-    `;
-    
-    // إضافة في أعلى النموذج
-    const form = document.getElementById('exerciseBuilderMainForm');
-    if (form) {
-        // إزالة أي رسالة خطأ قديمة
-        const oldError = form.querySelector('[style*="239, 68, 68"]')?.parentElement;
-        if (oldError) oldError.remove();
-        
-        form.insertAdjacentHTML('afterbegin', errorHTML);
-        
-        // Scroll إلى الأعلى
-        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-
-// الآن عدّل دالة الحفظ لتستخدم التحقق:
-// ابحث عن saveExerciseFromBuilder واستبدل السطور من البداية حتى "تجهيز البيانات النهائية" بهذا:
-
-async function saveExerciseFromBuilder(event) {
-    event.preventDefault();
-    
-    try {
-        // ✅ 0. التحقق من الاتصال
-        if (!checkFirebaseConnection()) return;
-        
-        showLoading('جاري حفظ التمرين...');
-        
-        // ✅ 1. جمع البيانات الأساسية
-        const exerciseName = document.getElementById('exerciseName')?.value.trim();
-        const exerciseDescription = document.getElementById('exerciseDescription')?.value.trim();
-        const exerciseDuration = parseInt(document.getElementById('exerciseDuration')?.value) || 30;
-        const exerciseTotalPoints = parseInt(document.getElementById('exerciseTotalPoints')?.value) || 0;
-        const exerciseIntro = document.getElementById('exerciseIntro')?.value.trim() || '';
-        const exerciseWarning = document.getElementById('exerciseWarning')?.value.trim() || '';
-        
-        if (!currentExercisePattern) {
-            hideLoading();
-            showNotification('خطأ: لم يتم تحديد نمط التمرين', 'error');
-            return;
-        }
-        
-        // ✅ 2. جمع نقاط الأركان
-        const pillars = {};
-        const courage = parseInt(document.getElementById('pillarCourage')?.value) || 0;
-        const mirror = parseInt(document.getElementById('pillarMirror')?.value) || 0;
-        const action = parseInt(document.getElementById('pillarAction')?.value) || 0;
-        const witness = parseInt(document.getElementById('pillarWitness')?.value) || 0;
-        
-        if (courage > 0) pillars.courage = courage;
-        if (mirror > 0) pillars.mirror = mirror;
-        if (action > 0) pillars.action = action;
-        if (witness > 0) pillars.witness = witness;
-        
-        // ✅ 3. جمع المحتوى الخاص بالنمط
-        let patternContent = {};
-        
-        switch(currentExercisePattern.id) {
-            case 'guided-exploration':
-                patternContent = collectGuidedExplorationData();
-                break;
-            
-            case 'daily-tracking':
-                patternContent = collectDailyTrackingData();
-                break;
-            
-            default:
-                patternContent = collectGenericQuestionsData();
-                break;
-        }
-        
-        // ✅ 4. تجهيز البيانات النهائية
-        const exerciseId = 'exercise_' + Date.now();
-        
-        const exerciseData = {
-            name: exerciseName,
-            type: "pillar-exercise",
-            patternType: currentExercisePattern.id,
-            patternName: currentExercisePattern.name,
-            patternIcon: currentExercisePattern.icon,
-            description: exerciseDescription,
-            exerciseData: {
-                introText: exerciseIntro,
-                warningText: exerciseWarning,
-                totalPoints: exerciseTotalPoints,
-                pillars: pillars,
-                ...patternContent
-            }
-        };
-        
-        // ✅ 4.5 التحقق من صحة البيانات
-        const validation = validateExerciseData(exerciseData);
-        if (!validation.isValid) {
-            hideLoading();
-            showValidationErrors(validation.errors);
-            return;
-        }
-        
-        console.log('📦 بيانات التمرين الكاملة:', exerciseData);
-        
-        
-        // ✅ 5. حفظ في Firebase
-        await db.collection('courseContentLibrary').doc(exerciseId).set(exerciseData);
-        
-        console.log('✅ تم الحفظ في المكتبة بنجاح');
-        
-        // ✅ 6. إضافة للدورة
-        const module = courseData.modules.find(m => m.id === selectedModuleId);
-        if (module) {
-            const lessonId = 'lesson_' + Date.now();
-            const newLesson = {
-                id: lessonId,
-                title: exerciseName,
-                libraryContentId: exerciseId,
-                libraryContentType: "pillar-exercise",
-                duration: exerciseDuration,
-                points: exerciseTotalPoints,
-                isFreePreview: false
-            };
-            
-            if (!module.lessons) {
-                module.lessons = [];
-            }
-            module.lessons.push(newLesson);
-            
-            console.log('✅ تم إضافة الدرس للوحدة');
-            
-            // إعادة رسم
-            renderModules();
-            
-            // فتح الوحدة
-            if (!module.isExpanded) {
-                module.isExpanded = true;
-                renderModules();
-            }
-            
-            // حفظ الدورة
-            if (courseData.id && typeof saveCourse === 'function') {
-                await saveCourse();
-            } else if (typeof autoSave === 'function') {
-                await autoSave();
-            }
-        }
-        
-        hideLoading();
-        
-        // ✅ 7. إغلاق وإظهار نجاح
-        closeExerciseModal();
-        
-        showNotification(`✅ تم إضافة التمرين "${exerciseName}" بنجاح!`, 'success');
-        
-    } catch (error) {
-        console.error('❌ خطأ في حفظ التمرين:', error);
-        console.error('Stack:', error.stack);
-        hideLoading();
-        showNotification('حدث خطأ: ' + error.message, 'error');
-    }
-}
 
 
 // ========================================
@@ -8816,84 +8725,6 @@ function fillGenericQuestionsData(exerciseData) {
     });
 }
 
-// تعديل دالة الحفظ لدعم التحديث
-// ابحث عن saveExerciseFromBuilder وأضف في البداية:
-
-async function saveExerciseFromBuilder(event) {
-    event.preventDefault();
-    
-    try {
-        if (!checkFirebaseConnection()) return;
-        
-        showLoading(isEditMode ? 'جاري حفظ التعديلات...' : 'جاري حفظ التمرين...');
-        
-        // ... نفس الكود السابق حتى تجهيز البيانات النهائية
-        
-        // ✅ استخدام ID موجود إذا كان تعديل
-        const exerciseId = isEditMode ? editingExerciseId : ('exercise_' + Date.now());
-        
-        const exerciseData = {
-            // ... البيانات كما هي
-        };
-        
-        // التحقق من الصحة
-        const validation = validateExerciseData(exerciseData);
-        if (!validation.isValid) {
-            hideLoading();
-            showValidationErrors(validation.errors);
-            return;
-        }
-        
-        // ✅ 5. حفظ/تحديث في Firebase
-        await db.collection('courseContentLibrary').doc(exerciseId).set(exerciseData);
-        
-        console.log(isEditMode ? '✅ تم تحديث التمرين' : '✅ تم حفظ التمرين');
-        
-        // ✅ 6. إذا كان تعديل، تحديث الدورة
-        if (isEditMode) {
-            // تحديث عنوان الدرس في الدورة
-            courseData.modules.forEach(module => {
-                module.lessons?.forEach(lesson => {
-                    if (lesson.libraryContentId === exerciseId) {
-                        lesson.title = exerciseName;
-                        lesson.duration = exerciseDuration;
-                        lesson.points = exerciseTotalPoints;
-                    }
-                });
-            });
-            
-            renderModules();
-            
-            if (typeof saveCourse === 'function') {
-                await saveCourse();
-            } else if (typeof autoSave === 'function') {
-                await autoSave();
-            }
-        } else {
-            // إضافة جديد (الكود القديم)
-            const module = courseData.modules.find(m => m.id === selectedModuleId);
-            // ... بقية الكود
-        }
-        
-        hideLoading();
-        closeExerciseModal();
-        
-        showNotification(
-            isEditMode ? `✅ تم تحديث التمرين "${exerciseName}" بنجاح!` : `✅ تم إضافة التمرين "${exerciseName}" بنجاح!`,
-            'success'
-        );
-        
-        // إعادة تعيين وضع التعديل
-        isEditMode = false;
-        editingExerciseId = null;
-        
-    } catch (error) {
-        console.error('❌ خطأ في الحفظ:', error);
-        hideLoading();
-        showNotification('حدث خطأ: ' + error.message, 'error');
-    }
-}
-        
 
     
         // ========================================
