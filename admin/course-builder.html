@@ -6435,20 +6435,37 @@ function showValidationErrors(errors) {
 // 💾 حفظ التمرين
 // ========================================
 async function saveExerciseFromBuilder(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
+    
+    console.log('💾 بداية عملية الحفظ...');
     
     try {
-        if (!checkFirebaseConnection()) return;
+        if (!checkFirebaseConnection()) {
+            console.error('❌ Firebase غير متصل');
+            return;
+        }
         
         showLoading('جاري حفظ التمرين...');
         
         // 1. جمع البيانات الأساسية
-        const exerciseName = document.getElementById('exerciseName')?.value.trim();
-        const exerciseDescription = document.getElementById('exerciseDescription')?.value.trim();
+        const exerciseNameEl = document.getElementById('exerciseName');
+        const exerciseDescriptionEl = document.getElementById('exerciseDescription');
+        
+        if (!exerciseNameEl || !exerciseDescriptionEl) {
+            hideLoading();
+            showNotification('❌ خطأ: بعض الحقول غير موجودة', 'error');
+            console.error('❌ الحقول الأساسية غير موجودة');
+            return;
+        }
+        
+        const exerciseName = exerciseNameEl.value.trim();
+        const exerciseDescription = exerciseDescriptionEl.value.trim();
         const exerciseDuration = parseInt(document.getElementById('exerciseDuration')?.value) || 30;
         const exerciseTotalPoints = parseInt(document.getElementById('exerciseTotalPoints')?.value) || 0;
         const exerciseIntro = document.getElementById('exerciseIntro')?.value.trim() || '';
         const exerciseWarning = document.getElementById('exerciseWarning')?.value.trim() || '';
+        
+        console.log('📝 البيانات الأساسية:', { exerciseName, exerciseDescription });
         
         // 2. جمع نقاط الأركان
         const pillars = {};
@@ -6462,22 +6479,32 @@ async function saveExerciseFromBuilder(event) {
         if (action > 0) pillars.action = action;
         if (witness > 0) pillars.witness = witness;
         
+        console.log('🏆 النقاط:', pillars);
+        
         // 3. جمع الأسئلة
         const questions = [];
         const questionDivs = document.querySelectorAll('[id^="question_"]');
         
-        questionDivs.forEach(div => {
+        console.log('❓ عدد الأسئلة:', questionDivs.length);
+        
+        questionDivs.forEach((div, idx) => {
             const titleEl = div.querySelector('.question-title');
             const textEl = div.querySelector('.question-text');
             const typeEl = div.querySelector('.question-type');
             
-            if (!titleEl || !textEl || !typeEl) return;
+            if (!titleEl || !textEl || !typeEl) {
+                console.warn(`⚠️ السؤال ${idx + 1} ناقص بعض الحقول`);
+                return;
+            }
             
             const title = titleEl.value.trim();
             const text = textEl.value.trim();
             const type = typeEl.value;
             
-            if (!title || !text) return;
+            if (!title || !text) {
+                console.warn(`⚠️ السؤال ${idx + 1} فاضي`);
+                return;
+            }
             
             const question = { title, text, type };
             
@@ -6503,6 +6530,8 @@ async function saveExerciseFromBuilder(event) {
             questions.push(question);
         });
         
+        console.log('✅ تم جمع الأسئلة:', questions.length);
+        
         // 4. تجهيز البيانات النهائية
         const exerciseId = 'exercise_' + Date.now();
         
@@ -6524,17 +6553,25 @@ async function saveExerciseFromBuilder(event) {
         if (!validation.isValid) {
             hideLoading();
             showValidationErrors(validation.errors);
+            console.error('❌ أخطاء في البيانات:', validation.errors);
             return;
         }
         
-        console.log('📦 بيانات التمرين:', exerciseData);
+        console.log('📦 البيانات النهائية:', exerciseData);
         
         // 6. حفظ في Firebase
+        console.log('💾 جاري الحفظ في Firebase...');
         await db.collection('courseContentLibrary').doc(exerciseId).set(exerciseData);
-        
         console.log('✅ تم الحفظ في المكتبة');
         
         // 7. إضافة للدورة
+        if (!selectedModuleId) {
+            hideLoading();
+            showNotification('❌ خطأ: لم يتم تحديد الوحدة', 'error');
+            console.error('❌ selectedModuleId غير موجود');
+            return;
+        }
+        
         const module = courseData.modules.find(m => m.id === selectedModuleId);
         if (module) {
             const lessonId = 'lesson_' + Date.now();
@@ -6553,6 +6590,8 @@ async function saveExerciseFromBuilder(event) {
             }
             module.lessons.push(newLesson);
             
+            console.log('✅ تم إضافة الدرس للوحدة');
+            
             renderModules();
             
             if (!module.isExpanded) {
@@ -6562,8 +6601,10 @@ async function saveExerciseFromBuilder(event) {
             
             if (courseData.id && typeof saveCourse === 'function') {
                 await saveCourse();
+                console.log('✅ تم حفظ الدورة');
             } else if (typeof autoSave === 'function') {
                 await autoSave();
+                console.log('✅ تم الحفظ التلقائي');
             }
         }
         
@@ -6571,14 +6612,15 @@ async function saveExerciseFromBuilder(event) {
         closeExerciseModal();
         
         showNotification(`✅ تم إضافة التمرين "${exerciseName}" بنجاح!`, 'success');
+        console.log('🎉 العملية تمت بنجاح!');
         
     } catch (error) {
         console.error('❌ خطأ في الحفظ:', error);
+        console.error('Stack:', error.stack);
         hideLoading();
         showNotification('حدث خطأ: ' + error.message, 'error');
     }
 }
-
        
         // ========================================
 // 👁️ معاينة التمرين قبل الحفظ
