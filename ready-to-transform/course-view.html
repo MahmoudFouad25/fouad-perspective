@@ -6129,10 +6129,16 @@ function renderModuleLessons(lessons) {
         }
 
         let buttonText, buttonClass, buttonIcon;
-        if (isCompleted) {
-            buttonText = 'مكتمل';
-            buttonClass = 'lesson-btn btn-completed';
-            buttonIcon = 'fa-check';
+if (isCompleted) {
+    // 🆕 تمييز الدروس عن التمارين
+    if (lesson.libraryContentType === 'pillar-exercise' || lesson.type === 'exercise') {
+        buttonText = 'تمرين مكتمل';
+        buttonIcon = 'fa-check-circle';
+    } else {
+        buttonText = 'درس مكتمل';
+        buttonIcon = 'fa-check';
+    }
+    buttonClass = 'lesson-btn btn-completed';
         } else if (isLocked) {
             buttonText = 'مقفل';
             buttonClass = 'lesson-btn btn-lock';
@@ -7678,6 +7684,28 @@ async function updatePillarExercise(exerciseId, answers, event) {
         const verifyData = verifyDoc.data()[exerciseKey];
         console.log('✔️ تحقق من البيانات المحفوظة:', verifyData.answers);
 
+// 🆕 إضافة التمرين للدروس المكتملة
+const lesson = allLessons.find(l => l.libraryContentId === exerciseId);
+if (lesson && !userProgress.completedLessons.includes(lesson.globalIndex)) {
+    userProgress.completedLessons.push(lesson.globalIndex);
+    
+    // حفظ في Firebase
+    await db.collection('users')
+        .doc(userId)
+        .collection('progress')
+        .doc(currentCourseId)
+        .update({
+            completedLessons: userProgress.completedLessons,
+            lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    
+    console.log(`✅ تم إضافة التمرين ${lesson.globalIndex} للمكتملة`);
+    
+    // تحديث الواجهة
+    displayUserProgress();
+    displayModulesAndLessons();
+}
+       
         hideLoading();
         showNotification('✅ تم حفظ التعديلات!', 'success');
 
@@ -10219,7 +10247,7 @@ async function renderPointsDashboard() {
                 <i class="fas fa-trophy"></i> الإنجازات القادمة
             </h4>
             
-            ${renderUpcomingAchievements()}
+            ${await renderUpcomingAchievements()}
         </div>
     `;
 }
@@ -10823,69 +10851,88 @@ async function renderAdvancedProgressBar() {
 }
        // عرض الإنجازات القادمة
 // عرض الإنجازات القادمة - محسوبة بدقة
-function renderUpcomingAchievements() {
+async function renderUpcomingAchievements() {
     const completedCount = userProgress.completedLessons?.length || 0;
     const totalLessonsCount = allLessons.length;
+
+    // 🆕 حساب التمارين
+    const exercisesData = await getCompletedExercisesCount();
+    const totalContent = totalLessonsCount; // عدد كل المحتوى (دروس + تمارين)
+    const completedContent = completedCount; // عدد المكتمل (دروس + تمارين)
     const currentPoints = userJourneyPoints;
     
     let achievements = [];
     
     // المستوى 1: الخطوة التالية المباشرة
-if (completedCount < totalLessonsCount) {
-    const nextLessonIndex = completedCount;
-    const nextLesson = allLessons[nextLessonIndex];
-    
-    if (nextLesson) {
-        let nextPoints = 0;
-        let badges = [];
+    if (completedContent < totalContent) {
+        // إيجاد أول محتوى غير مكتمل (درس أو تمرين)
+        let nextLesson = null;
+        let nextLessonIndex = -1;
         
-        if (nextLesson.libraryContentId) {
-            // النقاط
-            if (lessonPoints[nextLesson.libraryContentId]) {
-                nextPoints = lessonPoints[nextLesson.libraryContentId];
-            }
-            
-            // الشارات المرتبطة
-            if (courseContentDetails[nextLesson.libraryContentId]?.linkedBadges) {
-                const linkedBadgeIds = courseContentDetails[nextLesson.libraryContentId].linkedBadges;
-                linkedBadgeIds.forEach(badgeId => {
-                    const badge = potentialBadges.find(b => b.id === badgeId);
-                    if (badge && !userBadges.some(ub => ub.id === badge.id)) {
-                        badges.push(badge);
-                    }
-                });
+        for (let i = 0; i < allLessons.length; i++) {
+            if (!userProgress.completedLessons.includes(i)) {
+                nextLesson = allLessons[i];
+                nextLessonIndex = i;
+                break;
             }
         }
         
-        // حساب التقدم في الوحدة
-        const moduleProgress = allLessons.filter(l => 
-            l.moduleIndex === nextLesson.moduleIndex && 
-            userProgress.completedLessons?.includes(l.globalIndex)
-        ).length;
-        const moduleTotalLessons = allLessons.filter(l => 
-            l.moduleIndex === nextLesson.moduleIndex
-        ).length;
-        
-        achievements.push({
-            level: 1,
-            type: 'next_lesson',
-            icon: '🎯',
-            title: 'خطوتك التالية',
-            subtitle: nextLesson.title || `الدرس ${nextLessonIndex + 1}`,
-            benefits: `
-                <div style="margin-top: 10px; font-size: 0.9rem; color: rgba(255, 255, 255, 0.7);">
-                    <div>• ${nextPoints} نقطة جديدة</div>
-                    ${badges.length > 0 ? `<div>• ${badges.length} شارة محتملة</div>` : ''}
-                    <div>• تقدم ${Math.round(((moduleProgress + 1) / moduleTotalLessons) * 100)}% في الوحدة</div>
-                </div>
-            `,
-            action: `onclick="window.startLesson(${nextLessonIndex})" style="cursor: pointer;"`,
-            actionButton: true,
-            buttonText: 'ابدأ الآن',
-            color: '#22c55e'
-        });
+        if (nextLesson) {
+            // 🆕 تحديد نوع المحتوى
+            const isExercise = nextLesson.libraryContentType === 'pillar-exercise' || nextLesson.type === 'exercise';
+            const contentIcon = isExercise ? '🏋️' : '🎯';
+            const contentType = isExercise ? 'تمرين' : 'درس';
+            
+            let nextPoints = 0;
+            let badges = [];
+            
+            if (nextLesson.libraryContentId) {
+                // النقاط
+                if (lessonPoints[nextLesson.libraryContentId]) {
+                    nextPoints = lessonPoints[nextLesson.libraryContentId];
+                }
+                
+                // الشارات المرتبطة
+                if (courseContentDetails[nextLesson.libraryContentId]?.linkedBadges) {
+                    const linkedBadgeIds = courseContentDetails[nextLesson.libraryContentId].linkedBadges;
+                    linkedBadgeIds.forEach(badgeId => {
+                        const badge = potentialBadges.find(b => b.id === badgeId);
+                        if (badge && !userBadges.some(ub => ub.id === badge.id)) {
+                            badges.push(badge);
+                        }
+                    });
+                }
+            }
+            
+            // حساب التقدم في الوحدة
+            const moduleProgress = allLessons.filter(l => 
+                l.moduleIndex === nextLesson.moduleIndex && 
+                userProgress.completedLessons?.includes(l.globalIndex)
+            ).length;
+            const moduleTotalLessons = allLessons.filter(l => 
+                l.moduleIndex === nextLesson.moduleIndex
+            ).length;
+            
+            achievements.push({
+                level: 1,
+                type: 'next_lesson',
+                icon: contentIcon,
+                title: `${contentType}ك التالي`,
+                subtitle: nextLesson.title || `الدرس ${nextLessonIndex + 1}`,
+                benefits: `
+                    <div style="margin-top: 10px; font-size: 0.9rem; color: rgba(255, 255, 255, 0.7);">
+                        <div>• ${nextPoints} نقطة جديدة</div>
+                        ${badges.length > 0 ? `<div>• ${badges.length} شارة محتملة</div>` : ''}
+                        <div>• تقدم ${Math.round(((moduleProgress + 1) / moduleTotalLessons) * 100)}% في الوحدة</div>
+                    </div>
+                `,
+                action: `onclick="window.startLesson(${nextLessonIndex})" style="cursor: pointer;"`,
+                actionButton: true,
+                buttonText: 'ابدأ الآن',
+                color: '#22c55e'
+            });
+        }
     }
-}
     
     // المستوى 2: قريب جداً (شارة أو إكمال وحدة)
     // أ- شارة قريبة
@@ -10956,7 +11003,7 @@ if (completedCount < totalLessonsCount) {
     }
     
     // المستوى 3: الإنجاز الكبير
-    const overallProgress = (completedCount / totalLessonsCount) * 100;
+    const overallProgress = (completedContent / totalContent) * 100;
     let majorMilestone = null;
     
     if (overallProgress < 25) {
@@ -11088,7 +11135,6 @@ box-shadow: 0 4px 12px ${
         </div>
     `;
 }
-       
 // عرض شريط نوع النقاط
 function renderPointsTypeBar(label, current, max, color) {
     const percentage = max > 0 ? (current / max * 100) : 0;
