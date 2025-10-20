@@ -6879,7 +6879,11 @@ function displayLibraryVideo(contentData) {
     container.style.display = 'block';
     
     // حفظ البيانات الحالية
-    currentContentData = contentData;
+    // حفظ البيانات مع التأكد من وجود ID
+currentContentData = {
+    ...contentData,
+    id: contentData.id || (currentLesson?.contentId) || 'unknown'
+};
     
     if (contentData.videoData && contentData.videoData.url) {
         let enhancedVideoHtml = '';
@@ -7381,53 +7385,130 @@ function openReflectionModal(momentIndex) {
 }
 
 // دالة حفظ التأمل
+// دالة حفظ لحظة التأمل
 async function saveReflectionMoment(momentIndex, answer, points) {
     try {
         const userId = localStorage.getItem('userId');
-        if (!userId) throw new Error('غير مسجل');
+        const moment = currentReflectionMoments[momentIndex];
         
-        Swal.fire({ title: 'جاري الحفظ...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        if (!userId) throw new Error('المستخدم غير مسجل دخول');
         
-        await db.collection('users').doc(userId).collection('reflectionMoments').add({
+        // الحصول على ID صحيح
+        const lessonContentId = currentLesson?.contentId || currentContentData?.id;
+        
+        if (!lessonContentId || lessonContentId === 'unknown') {
+            throw new Error('لا يمكن تحديد ID المحتوى');
+        }
+        
+        Swal.fire({
+            title: 'جاري الحفظ...',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
+        
+        // بيانات التأمل
+        const reflectionData = {
             momentIndex: momentIndex,
+            momentTitle: moment.title,
+            momentTime: moment.time,
+            question: moment.question,
             answer: answer,
             points: points,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-            contentId: currentContentData?.id || 'unknown'
-        });
+            contentId: lessonContentId,
+            contentTitle: currentContentData?.name || 'Unknown',
+            lessonId: currentLessonIndex || 0
+        };
         
+        // حفظ في Firebase
+        await db.collection('users')
+            .doc(userId)
+            .collection('reflectionMoments')
+            .add(reflectionData);
+        
+        // إضافة النقاط
         await addPointsToPillar('mirror', points, {
             type: 'reflection_moment',
-            momentIndex: momentIndex
+            momentIndex: momentIndex,
+            title: moment.title,
+            contentId: lessonContentId
         });
         
+        // تحديث الحالة
         completedReflectionMoments.add(momentIndex);
-        document.getElementById('reflectionMomentsContainer').innerHTML = generateReflectionMomentsHTML(currentReflectionMoments);
         
-        Swal.fire({ icon: 'success', title: '🎉 تم!', html: `<p>+${points} نقطة</p>`, timer: 2000, showConfirmButton: false });
+        // تحديث العرض
+        const container = document.getElementById('reflectionMomentsContainer');
+        if (container) {
+            container.innerHTML = generateReflectionMomentsHTML(currentReflectionMoments);
+        }
+        
+        Swal.fire({
+            icon: 'success',
+            title: '🎉 رائع!',
+            html: `<p>تم حفظ تأملك بنجاح</p><p style="color: #fbbf24; font-weight: bold;">+${points} نقطة ✨</p>`,
+            timer: 2000,
+            showConfirmButton: false
+        });
         
     } catch (error) {
-        Swal.fire({ icon: 'error', title: 'خطأ', text: error.message });
+        console.error('❌ خطأ في حفظ التأمل:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: error.message,
+            confirmButtonColor: '#dc2626'
+        });
     }
 }
 
 // تحميل اللحظات المكتملة
+// تحميل اللحظات المكتملة
 async function loadCompletedReflectionMoments() {
     try {
         const userId = localStorage.getItem('userId');
-        if (!userId || !currentContentData) return;
+        if (!userId || !currentContentData) {
+            console.log('⚠️ لا يوجد userId أو contentData');
+            return;
+        }
         
-        const snapshot = await db.collection('users').doc(userId).collection('reflectionMoments')
-            .where('contentId', '==', currentContentData.id).get();
+        // استخدام ID الدرس الحالي
+        const lessonContentId = currentLesson?.contentId || currentContentData.id;
+        
+        if (!lessonContentId || lessonContentId === 'unknown') {
+            console.warn('⚠️ contentId غير متوفر');
+            return;
+        }
+        
+        console.log('🔍 جاري تحميل لحظات التأمل المكتملة لـ:', lessonContentId);
+        
+        const snapshot = await db.collection('users')
+            .doc(userId)
+            .collection('reflectionMoments')
+            .where('contentId', '==', lessonContentId)
+            .get();
         
         completedReflectionMoments.clear();
-        snapshot.forEach(doc => completedReflectionMoments.add(doc.data().momentIndex));
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            completedReflectionMoments.add(data.momentIndex);
+            console.log('✅ لحظة مكتملة:', data.momentIndex, data.momentTitle);
+        });
+        
+        console.log('📊 إجمالي اللحظات المكتملة:', completedReflectionMoments.size);
+        
+        // تحديث العرض
+        if (completedReflectionMoments.size > 0) {
+            const container = document.getElementById('reflectionMomentsContainer');
+            if (container && currentReflectionMoments.length > 0) {
+                container.innerHTML = generateReflectionMomentsHTML(currentReflectionMoments);
+            }
+        }
         
     } catch (error) {
-        console.error('خطأ في تحميل اللحظات:', error);
+        console.error('❌ خطأ في تحميل اللحظات:', error);
     }
 }
-
        // ============================================
 // التأمل الفوري بعد المشاهدة
 // ============================================
@@ -7572,47 +7653,57 @@ function openImmediateReflection() {
 }
 
 // دالة التحقق من إكمال التأمل الفوري
+// دالة التحقق من إكمال التأمل الفوري
 async function checkImmediateReflectionCompleted() {
     try {
         const userId = localStorage.getItem('userId');
         if (!userId || !currentContentData) return false;
         
+        const lessonContentId = currentLesson?.contentId || currentContentData.id;
+        
+        if (!lessonContentId || lessonContentId === 'unknown') return false;
+        
         const snapshot = await db.collection('users')
             .doc(userId)
             .collection('immediateReflections')
-            .where('contentId', '==', currentContentData.id)
+            .where('contentId', '==', lessonContentId)
             .limit(1)
             .get();
         
         return !snapshot.empty;
         
     } catch (error) {
-        console.error('خطأ في التحقق من التأمل الفوري:', error);
+        console.error('❌ خطأ في التحقق:', error);
         return false;
     }
 }
 
+// دالة حفظ التأمل الفوري
 // دالة حفظ التأمل الفوري
 async function saveImmediateReflection(reflectionData) {
     try {
         const userId = localStorage.getItem('userId');
         if (!userId) throw new Error('المستخدم غير مسجل دخول');
         
-        // عرض loader
+        // الحصول على ID صحيح
+        const lessonContentId = currentLesson?.contentId || currentContentData?.id;
+        
+        if (!lessonContentId || lessonContentId === 'unknown') {
+            throw new Error('لا يمكن تحديد ID المحتوى');
+        }
+        
         Swal.fire({
             title: 'جاري الحفظ...',
             allowOutsideClick: false,
-            didOpen: () => {
-                Swal.showLoading();
-            }
+            didOpen: () => Swal.showLoading()
         });
         
-        // حفظ التأمل في Firebase
+        // بيانات التأمل الفوري
         const immediateReflectionData = {
             ...reflectionData,
             points: 20,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-            contentId: currentContentData?.id || 'unknown',
+            contentId: lessonContentId,
             contentTitle: currentContentData?.name || 'Unknown',
             lessonId: currentLessonIndex || 0
         };
@@ -7625,54 +7716,35 @@ async function saveImmediateReflection(reflectionData) {
         // إضافة 20 نقطة
         await addPointsToPillar('mirror', 20, {
             type: 'immediate_reflection',
-            contentId: currentContentData?.id,
+            contentId: lessonContentId,
             contentTitle: currentContentData?.name
         });
         
-        // إخفاء قسم التأمل الفوري
+        // إخفاء القسم
         const section = document.getElementById('immediateReflectionSection');
-        if (section) {
-            section.style.display = 'none';
-        }
+        if (section) section.style.display = 'none';
         
-        // رسالة نجاح مع تأثير احتفالي
         Swal.fire({
             icon: 'success',
             title: '🎉 ممتاز!',
             html: `
                 <div style="text-align: center;">
-                    <p style="font-size: 1.2rem; margin-bottom: 15px;">تم حفظ تأملك بنجاح</p>
-                    <div style="
-                        background: linear-gradient(135deg, #fbbf24, #f59e0b);
-                        padding: 20px;
-                        border-radius: 15px;
-                        display: inline-block;
-                        box-shadow: 0 4px 20px rgba(251, 191, 36, 0.4);
-                    ">
-                        <p style="
-                            color: #1e293b;
-                            font-weight: bold;
-                            font-size: 2rem;
-                            margin: 0;
-                        ">+20 نقطة ✨</p>
+                    <p style="font-size: 1.2rem;">تم حفظ تأملك بنجاح</p>
+                    <div style="background: linear-gradient(135deg, #fbbf24, #f59e0b); padding: 20px; border-radius: 15px; display: inline-block;">
+                        <p style="color: #1e293b; font-weight: bold; font-size: 2rem; margin: 0;">+20 نقطة ✨</p>
                     </div>
-                    <p style="margin-top: 15px; color: #fbbf24;">
-                        استمر في رحلتك المميزة! 🚀
-                    </p>
                 </div>
             `,
             confirmButtonText: 'رائع!',
             confirmButtonColor: '#fbbf24'
         });
         
-        console.log('✅ تم حفظ التأمل الفوري بنجاح');
-        
     } catch (error) {
         console.error('❌ خطأ في حفظ التأمل الفوري:', error);
         Swal.fire({
             icon: 'error',
             title: 'خطأ',
-            text: 'حدث خطأ أثناء الحفظ: ' + error.message,
+            text: error.message,
             confirmButtonColor: '#dc2626'
         });
     }
