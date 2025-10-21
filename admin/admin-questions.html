@@ -10,6 +10,10 @@
     
     <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <!-- Quill Rich Text Editor -->
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -751,7 +755,14 @@
                             </div>
                         ` : `
                             <div class="answer-form">
-                                <textarea id="answer-${q.id}" placeholder="اكتب إجابتك هنا..."></textarea>
+                                <div id="editor-${q.id}" style="
+                                    background: white;
+                                    color: #1e293b;
+                                    min-height: 150px;
+                                    border-radius: 10px;
+                                    margin-bottom: 15px;
+                                "></div>
+                                <input type="hidden" id="answer-${q.id}">
                                 
                                 <div class="points-section">
                                     <label>💎 منح نقاط للطالب (اختياري)</label>
@@ -784,14 +795,57 @@
             });
             
             container.innerHTML = html;
+            
+            // تفعيل Rich Text Editors
+            filteredQuestions.forEach(q => {
+                if (!q.isAnswered) {
+                    const editorContainer = document.getElementById(`editor-${q.id}`);
+                    if (editorContainer) {
+                        const quill = new Quill(`#editor-${q.id}`, {
+                            theme: 'snow',
+                            placeholder: 'اكتب إجابتك هنا...\n\nيمكنك استخدام التنسيق: غامق، مائل، قوائم، روابط، وغيرها',
+                            modules: {
+                                toolbar: [
+                                    ['bold', 'italic', 'underline', 'strike'],
+                                    ['blockquote', 'code-block'],
+                                    [{ 'header': 1 }, { 'header': 2 }],
+                                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                                    [{ 'color': [] }, { 'background': [] }],
+                                    ['link'],
+                                    ['clean']
+                                ]
+                            }
+                        });
+                        
+                        // حفظ المحتوى في hidden input
+                        quill.on('text-change', function() {
+                            document.getElementById(`answer-${q.id}`).value = quill.root.innerHTML;
+                        });
+                        
+                        // حفظ reference للـ editor
+                        window[`quillEditor_${q.id}`] = quill;
+                    }
+                }
+            });
         }
         
         // Submit Answer
         // Submit Answer (نسخة محسّنة)
         async function submitAnswer(questionId) {
             try {
-                const answerTextarea = document.getElementById(`answer-${questionId}`);
-                const answer = answerTextarea.value.trim();
+                const answerInput = document.getElementById(`answer-${questionId}`);
+                const quillEditor = window[`quillEditor_${questionId}`];
+                
+                let answer = '';
+                if (quillEditor) {
+                    answer = quillEditor.root.innerHTML.trim();
+                    // إزالة الـ HTML الفارغ
+                    if (answer === '<p><br></p>' || answer === '<p></p>') {
+                        answer = '';
+                    }
+                } else {
+                    answer = answerInput.value.trim();
+                }
                 const pillarType = document.getElementById(`pillar-${questionId}`).value;
                 const pointsAwarded = parseInt(document.getElementById(`points-${questionId}`).value) || 0;
                 
@@ -956,10 +1010,40 @@
         // التحديث التلقائي والإشعارات
         // ============================================
         
-        // تحديث تلقائي كل 30 ثانية
-        setInterval(() => {
-            loadAllQuestions();
-        }, 30000);
+        // تحديث تلقائي ذكي
+        let isTypingAnswer = false;
+        let autoRefreshInterval;
+        
+        function startAutoRefresh() {
+            autoRefreshInterval = setInterval(() => {
+                // التحقق من عدم وجود كتابة حالياً
+                if (!isTypingAnswer) {
+                    loadAllQuestions();
+                } else {
+                    console.log('⏸️ تم تأجيل التحديث - جاري الكتابة');
+                }
+            }, 30000);
+        }
+        
+        startAutoRefresh();
+        
+        // مراقبة الكتابة في Quill editors
+        document.addEventListener('focusin', function(e) {
+            if (e.target.closest('.ql-editor')) {
+                isTypingAnswer = true;
+                console.log('✍️ بدء الكتابة - إيقاف التحديث التلقائي');
+            }
+        });
+        
+        document.addEventListener('focusout', function(e) {
+            if (e.target.closest('.ql-editor')) {
+                // انتظر 5 ثواني بعد التوقف عن الكتابة
+                setTimeout(() => {
+                    isTypingAnswer = false;
+                    console.log('✅ انتهاء الكتابة - استئناف التحديث التلقائي');
+                }, 5000);
+            }
+        });
         
         // إضافة صوت إشعار (اختياري)
         function playNotificationSound() {
