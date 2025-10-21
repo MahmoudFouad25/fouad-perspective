@@ -8215,15 +8215,21 @@ async function saveImmediateReflection(reflectionData, immediateReflection, tota
 }
 
 
-    // دالة فتح نافذة الأسئلة
+    // ============================================
+// نظام التساؤلات حول الدرس
+// ============================================
+
+// دالة فتح نافذة الأسئلة
 function openQuestionsModal() {
     document.getElementById('questionsModal').style.display = 'block';
+    document.body.style.overflow = 'hidden'; // منع السكرول في الخلفية
     loadQuestions(); // تحميل الأسئلة
 }
 
 // دالة إغلاق نافذة الأسئلة
 function closeQuestionsModal() {
     document.getElementById('questionsModal').style.display = 'none';
+    document.body.style.overflow = 'auto'; // السماح بالسكرول مرة أخرى
 }
 
 // ربط الزر بدالة الفتح
@@ -8234,42 +8240,411 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// دالة تحميل الأسئلة (مؤقتة)
-function loadQuestions() {
-    const container = document.getElementById('questionsList');
-    container.innerHTML = `
-        <div style="
-            text-align: center;
-            padding: 40px;
-            color: #94a3b8;
-        ">
-            <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px; opacity: 0.5;"></i>
-            <p style="margin: 0; font-size: 1.1rem;">لا توجد أسئلة حتى الآن</p>
-        </div>
-    `;
+// إغلاق عند الضغط على الخلفية
+document.addEventListener('click', function(e) {
+    const modal = document.getElementById('questionsModal');
+    if (e.target === modal) {
+        closeQuestionsModal();
+    }
+});
+
+// ============================================
+// دالة إرسال السؤال إلى Firebase
+// ============================================
+async function submitQuestion() {
+    try {
+        // الحصول على البيانات
+        const questionText = document.getElementById('newQuestionText').value.trim();
+        const sharingType = document.querySelector('input[name="sharingType"]:checked').value;
+        
+        // التحقق من صحة البيانات
+        if (!questionText) {
+            Swal.fire({
+                icon: 'warning',
+                title: '⚠️ تنبيه',
+                text: 'من فضلك اكتب سؤالك أولاً',
+                confirmButtonColor: '#8b5cf6'
+            });
+            return;
+        }
+        
+        if (questionText.length < 10) {
+            Swal.fire({
+                icon: 'warning',
+                title: '⚠️ تنبيه',
+                text: 'السؤال قصير جداً (على الأقل 10 أحرف)',
+                confirmButtonColor: '#8b5cf6'
+            });
+            return;
+        }
+        
+        // الحصول على بيانات المستخدم
+        const userId = localStorage.getItem('userId');
+        const userName = localStorage.getItem('userName');
+        const userEmail = localStorage.getItem('userEmail');
+        
+        if (!userId) {
+            Swal.fire({
+                icon: 'error',
+                title: '❌ خطأ',
+                text: 'يجب تسجيل الدخول أولاً',
+                confirmButtonColor: '#dc2626'
+            });
+            return;
+        }
+        
+        // عرض رسالة التحميل
+        Swal.fire({
+            title: 'جاري الإرسال...',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
+        
+        // إعداد بيانات السؤال
+        const questionData = {
+            // بيانات المستخدم
+            userId: userId,
+            userName: userName || 'مستخدم',
+            userEmail: userEmail || '',
+            
+            // بيانات الدورة والدرس
+            courseId: courseId || 'unknown',
+            courseName: courseData?.name || courseData?.title || 'دورة غير معروفة',
+            lessonId: currentLesson?.id || currentLessonIndex || 0,
+            lessonTitle: currentLesson?.name || currentLesson?.title || 'درس غير معروف',
+            contentId: currentContentData?.id || currentLesson?.contentId || 'unknown',
+            contentTitle: currentContentData?.name || currentContentData?.title || 'محتوى غير معروف',
+            
+            // السؤال والإعدادات
+            question: questionText,
+            sharingType: sharingType,
+            
+            // حالة الإجابة
+            answer: null,
+            isAnswered: false,
+            
+            // النقاط
+            pointsAwarded: 0,
+            pillarType: null,
+            
+            // التواريخ
+            questionDate: firebase.firestore.FieldValue.serverTimestamp(),
+            answerDate: null,
+            
+            // معرف الأدمن (سيتم ملؤه عند الإجابة)
+            adminId: null
+        };
+        
+        // حفظ السؤال في Firebase
+        await db.collection('questions').add(questionData);
+        
+        // مسح النموذج
+        document.getElementById('newQuestionText').value = '';
+        document.querySelector('input[name="sharingType"][value="private"]').checked = true;
+        
+        // عرض رسالة النجاح
+        Swal.fire({
+            icon: 'success',
+            title: '✅ تم الإرسال!',
+            html: `
+                <p style="font-size: 1.1rem; margin-bottom: 15px;">تم إرسال سؤالك بنجاح</p>
+                <p style="color: #94a3b8; font-size: 0.95rem;">سيتم الرد عليه في أقرب وقت</p>
+            `,
+            confirmButtonColor: '#8b5cf6',
+            timer: 3000
+        });
+        
+        // تحديث قائمة الأسئلة
+        loadQuestions();
+        
+    } catch (error) {
+        console.error('❌ خطأ في إرسال السؤال:', error);
+        Swal.fire({
+            icon: 'error',
+            title: '❌ خطأ',
+            text: 'حدث خطأ أثناء إرسال السؤال. حاول مرة أخرى.',
+            confirmButtonColor: '#dc2626'
+        });
+    }
 }
 
-// دالة إرسال السؤال (مؤقتة)
-function submitQuestion() {
-    const questionText = document.getElementById('newQuestionText').value.trim();
-    
-    if (!questionText) {
-        alert('⚠️ من فضلك اكتب سؤالك أولاً');
-        return;
+// ============================================
+// دالة تحميل وعرض الأسئلة
+// ============================================
+async function loadQuestions() {
+    try {
+        const container = document.getElementById('questionsList');
+        
+        // عرض رسالة التحميل
+        container.innerHTML = `
+            <div style="
+                text-align: center;
+                padding: 40px;
+                color: #94a3b8;
+            ">
+                <i class="fas fa-spinner fa-spin" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                <p style="margin: 0; font-size: 1.1rem;">جاري تحميل الأسئلة...</p>
+            </div>
+        `;
+        
+        const userId = localStorage.getItem('userId');
+        if (!userId) {
+            container.innerHTML = `
+                <div style="
+                    text-align: center;
+                    padding: 40px;
+                    color: #ef4444;
+                ">
+                    <i class="fas fa-exclamation-circle" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                    <p style="margin: 0; font-size: 1.1rem;">يجب تسجيل الدخول لرؤية الأسئلة</p>
+                </div>
+            `;
+            return;
+        }
+        
+        const contentId = currentContentData?.id || currentLesson?.contentId || 'unknown';
+        
+        // جلب الأسئلة من Firebase
+        // 1. أسئلة المستخدم الحالي
+        const myQuestionsSnapshot = await db.collection('questions')
+            .where('userId', '==', userId)
+            .where('contentId', '==', contentId)
+            .orderBy('questionDate', 'desc')
+            .get();
+        
+        // 2. الأسئلة المشتركة من الآخرين
+        const sharedQuestionsSnapshot = await db.collection('questions')
+            .where('contentId', '==', contentId)
+            .where('sharingType', 'in', ['shared_with_name', 'shared_anonymous'])
+            .where('isAnswered', '==', true) // فقط الأسئلة التي تم الرد عليها
+            .orderBy('questionDate', 'desc')
+            .get();
+        
+        // دمج الأسئلة
+        const allQuestions = [];
+        
+        // إضافة أسئلة المستخدم
+        myQuestionsSnapshot.forEach(doc => {
+            allQuestions.push({
+                id: doc.id,
+                ...doc.data(),
+                isMine: true
+            });
+        });
+        
+        // إضافة الأسئلة المشتركة (بدون تكرار)
+        sharedQuestionsSnapshot.forEach(doc => {
+            const data = doc.data();
+            // تجاهل الأسئلة التي أضفناها بالفعل
+            if (data.userId !== userId) {
+                allQuestions.push({
+                    id: doc.id,
+                    ...data,
+                    isMine: false
+                });
+            }
+        });
+        
+        // ترتيب حسب التاريخ
+        allQuestions.sort((a, b) => {
+            const dateA = a.questionDate?.toDate() || new Date(0);
+            const dateB = b.questionDate?.toDate() || new Date(0);
+            return dateB - dateA;
+        });
+        
+        // عرض الأسئلة
+        if (allQuestions.length === 0) {
+            container.innerHTML = `
+                <div style="
+                    text-align: center;
+                    padding: 40px;
+                    color: #94a3b8;
+                ">
+                    <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 15px; opacity: 0.5;"></i>
+                    <p style="margin: 0; font-size: 1.1rem;">لا توجد أسئلة حتى الآن</p>
+                    <p style="margin: 10px 0 0 0; font-size: 0.95rem; opacity: 0.7;">كن أول من يطرح سؤالاً!</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // بناء HTML للأسئلة
+        let questionsHtml = '';
+        
+        allQuestions.forEach(q => {
+            const questionDate = q.questionDate?.toDate();
+            const answerDate = q.answerDate?.toDate();
+            const formattedDate = questionDate ? questionDate.toLocaleDateString('ar-EG', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }) : 'تاريخ غير معروف';
+            
+            // تحديد اسم السائل
+            let displayName = '';
+            if (q.isMine) {
+                displayName = 'أنت';
+            } else if (q.sharingType === 'shared_with_name') {
+                displayName = q.userName || 'مستخدم';
+            } else {
+                displayName = 'مستخدم مجهول';
+            }
+            
+            // تحديد نوع السؤال
+            let privacyBadge = '';
+            if (q.isMine) {
+                if (q.sharingType === 'private') {
+                    privacyBadge = '<span style="background: #ef4444; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;">🔐 خاص</span>';
+                } else if (q.sharingType === 'shared_with_name') {
+                    privacyBadge = '<span style="background: #10b981; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;">👤 مشترك مع الاسم</span>';
+                } else {
+                    privacyBadge = '<span style="background: #6366f1; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;">👥 مشترك</span>';
+                }
+            }
+            
+            questionsHtml += `
+                <div style="
+                    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(99, 102, 241, 0.05));
+                    padding: 20px;
+                    border-radius: 12px;
+                    border: 2px solid rgba(139, 92, 246, 0.3);
+                ">
+                    <!-- Header -->
+                    <div style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: flex-start;
+                        margin-bottom: 15px;
+                        flex-wrap: wrap;
+                        gap: 10px;
+                    ">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div style="
+                                width: 40px;
+                                height: 40px;
+                                background: linear-gradient(135deg, #8b5cf6, #6366f1);
+                                border-radius: 50%;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                font-size: 1.2rem;
+                            ">${q.isMine ? '👤' : '👥'}</div>
+                            <div>
+                                <p style="
+                                    color: #c4b5fd;
+                                    font-weight: bold;
+                                    margin: 0;
+                                    font-size: 1rem;
+                                ">${displayName}</p>
+                                <p style="
+                                    color: #94a3b8;
+                                    font-size: 0.85rem;
+                                    margin: 2px 0 0 0;
+                                ">${formattedDate}</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            ${privacyBadge}
+                            ${q.isAnswered ? 
+                                '<span style="background: #10b981; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;">✅ تم الرد</span>' : 
+                                '<span style="background: #f59e0b; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;">⏳ في الانتظار</span>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- السؤال -->
+                    <div style="
+                        background: rgba(255, 255, 255, 0.05);
+                        padding: 15px;
+                        border-radius: 10px;
+                        margin-bottom: ${q.isAnswered ? '15px' : '0'};
+                    ">
+                        <p style="
+                            color: #e9d5ff;
+                            margin: 0;
+                            line-height: 1.6;
+                            font-size: 1.05rem;
+                        ">${q.question}</p>
+                    </div>
+                    
+                    ${q.isAnswered && q.answer ? `
+                        <!-- الإجابة -->
+                        <div style="
+                            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+                            padding: 15px;
+                            border-radius: 10px;
+                            border-right: 4px solid #10b981;
+                        ">
+                            <div style="
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                margin-bottom: 10px;
+                            ">
+                                <i class="fas fa-reply" style="color: #10b981;"></i>
+                                <span style="
+                                    color: #10b981;
+                                    font-weight: bold;
+                                    font-size: 0.95rem;
+                                ">إجابة المدرب:</span>
+                            </div>
+                            <p style="
+                                color: #d1fae5;
+                                margin: 0;
+                                line-height: 1.6;
+                                font-size: 1.05rem;
+                            ">${q.answer}</p>
+                            ${q.pointsAwarded > 0 ? `
+                                <div style="
+                                    margin-top: 12px;
+                                    padding: 10px;
+                                    background: rgba(251, 191, 36, 0.2);
+                                    border-radius: 8px;
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 8px;
+                                ">
+                                    <span style="font-size: 1.2rem;">🎉</span>
+                                    <span style="color: #fbbf24; font-weight: bold;">
+                                        حصلت على ${q.pointsAwarded} نقطة ${q.pillarType ? getPillarEmoji(q.pillarType) : ''}!
+                                    </span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        });
+        
+        container.innerHTML = questionsHtml;
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحميل الأسئلة:', error);
+        document.getElementById('questionsList').innerHTML = `
+            <div style="
+                text-align: center;
+                padding: 40px;
+                color: #ef4444;
+            ">
+                <i class="fas fa-exclamation-triangle" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                <p style="margin: 0; font-size: 1.1rem;">حدث خطأ في تحميل الأسئلة</p>
+                <p style="margin: 10px 0 0 0; font-size: 0.9rem; opacity: 0.8;">حاول تحديث الصفحة</p>
+            </div>
+        `;
     }
-    
-    if (questionText.length < 10) {
-        alert('⚠️ السؤال قصير جداً (على الأقل 10 أحرف)');
-        return;
-    }
-    
-    // الحصول على نوع المشاركة المختار
-    const sharingType = document.querySelector('input[name="sharingType"]:checked').value;
-    
-    alert('✅ جاري إرسال السؤال...\nسيتم تفعيل الإرسال في الخطوة القادمة!');
-    
-    console.log('السؤال:', questionText);
-    console.log('نوع المشاركة:', sharingType);
+}
+
+// دالة مساعدة للحصول على emoji الركيزة
+function getPillarEmoji(pillarType) {
+    const emojis = {
+        'courage': '🔥',
+        'mirror': '🪞',
+        'action': '👣',
+        'witness': '👁️'
+    };
+    return emojis[pillarType] || '⭐';
 }
 
        
