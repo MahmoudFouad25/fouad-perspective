@@ -8648,61 +8648,101 @@ function getPillarName(pillarType) {
 }
 
 
-       // ============================================
-// نظام الإشعارات - فحص الأسئلة المُجاب عليها
+     // ============================================
+// نظام الإشعارات - Real-time (الجديد)
 // ============================================
 
-// فحص الإشعارات عند تحميل الصفحة
+let unsubscribeQuestions = null;
+
+// بدء مراقبة الأسئلة
+function startQuestionsListener() {
+    const userId = localStorage.getItem('userId');
+    if (!userId) return;
+    
+    const contentId = currentContentData?.id 
+        || currentLesson?.libraryContentId 
+        || currentLesson?.contentId 
+        || currentLesson?.id;
+    
+    if (!contentId || contentId === 'unknown') return;
+    
+    console.log('👂 بدء مراقبة الأسئلة لـ:', contentId);
+    
+    // إيقاف المراقبة القديمة
+    if (unsubscribeQuestions) {
+        unsubscribeQuestions();
+    }
+    
+    // مراقبة الأسئلة في الوقت الفعلي
+    unsubscribeQuestions = db.collection('questions')
+        .where('userId', '==', userId)
+        .where('contentId', '==', contentId)
+        .onSnapshot(snapshot => {
+            let newAnswersCount = 0;
+            const lastChecked = localStorage.getItem(`lastChecked_${contentId}`) || new Date(0).toISOString();
+            
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                if (data.isAnswered && data.answerDate) {
+                    const answerDate = data.answerDate.toDate?.() || new Date(data.answerDate);
+                    if (answerDate.toISOString() > lastChecked) {
+                        newAnswersCount++;
+                    }
+                }
+            });
+            
+            // تحديث Badge
+            const badge = document.getElementById('questionsBadge');
+            if (badge) {
+                if (newAnswersCount > 0) {
+                    badge.textContent = newAnswersCount;
+                    badge.style.display = 'flex';
+                    console.log('🔔 إشعارات جديدة:', newAnswersCount);
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+            
+            // تحديث قائمة الأسئلة إذا كانت مفتوحة
+            const modal = document.getElementById('questionsModal');
+            if (modal && modal.style.display !== 'none') {
+                loadQuestions();
+            }
+        }, error => {
+            console.error('❌ خطأ في مراقبة الأسئلة:', error);
+        });
+}
+
+// بدء المراقبة عند تحميل الدرس
 document.addEventListener('DOMContentLoaded', function() {
-    checkNewAnswers();
-    // فحص كل 30 ثانية
-    setInterval(checkNewAnswers, 30000);
+    // انتظر تحميل بيانات الدرس
+    setTimeout(() => {
+        startQuestionsListener();
+    }, 2000);
 });
 
-// دالة فحص الإجابات الجديدة
-async function checkNewAnswers() {
-    try {
-        const userId = localStorage.getItem('userId');
-        if (!userId) return;
+// تحديث تاريخ آخر فحص عند فتح الأسئلة
+const originalOpenQuestionsModalFunc = window.openQuestionsModal;
+if (originalOpenQuestionsModalFunc) {
+    window.openQuestionsModal = function() {
+        originalOpenQuestionsModalFunc.apply(this, arguments);
         
-        const contentId = currentContentData?.id || currentLesson?.contentId || 'unknown';
+        // تحديث آخر فحص
+        const contentId = currentContentData?.id 
+            || currentLesson?.libraryContentId 
+            || currentLesson?.contentId 
+            || currentLesson?.id;
         
-        // جلب آخر تاريخ فحص
-        const lastChecked = localStorage.getItem(`lastChecked_${contentId}`) || new Date(0).toISOString();
-        
-        // البحث عن أسئلة تم الرد عليها بعد آخر فحص
-        const snapshot = await db.collection('questions')
-            .where('userId', '==', userId)
-            .where('contentId', '==', contentId)
-            .where('isAnswered', '==', true)
-            .get();
-        
-        let newAnswersCount = 0;
-        
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const answerDate = data.answerDate?.toDate();
-            
-            // التحقق من أن الإجابة جديدة
-            if (answerDate && answerDate.toISOString() > lastChecked) {
-                newAnswersCount++;
-            }
-        });
-        
-        // تحديث Badge
-        const badge = document.getElementById('questionsBadge');
-        if (badge) {
-            if (newAnswersCount > 0) {
-                badge.textContent = newAnswersCount;
-                badge.style.display = 'flex';
-            } else {
-                badge.style.display = 'none';
-            }
+        if (contentId && contentId !== 'unknown') {
+            localStorage.setItem(`lastChecked_${contentId}`, new Date().toISOString());
         }
         
-    } catch (error) {
-        console.error('خطأ في فحص الإشعارات:', error);
-    }
+        // إخفاء Badge
+        const badge = document.getElementById('questionsBadge');
+        if (badge) {
+            badge.style.display = 'none';
+        }
+    };
 }
 
        
