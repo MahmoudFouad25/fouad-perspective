@@ -7266,7 +7266,7 @@ currentContentData = {
                     </button>
                     
                     <p style="
-                        color: #92400e;
+                        color: #fde68a;
                         font-size: 0.9rem;
                         margin: 15px 0 0 0;
                         opacity: 0.8;
@@ -7347,14 +7347,55 @@ function generateReflectionMomentsHTML(moments) {
 }
 
 // دالة فتح نافذة التأمل
-function openReflectionModal(momentIndex) {
+async function openReflectionModal(momentIndex) {
     const moment = currentReflectionMoments[momentIndex];
     if (!moment) return;
+    
+    // التحقق من وجود إجابة سابقة
+    let previousAnswer = '';
+    let isCompleted = completedReflectionMoments.has(momentIndex);
+    
+    if (isCompleted) {
+        try {
+            const userId = localStorage.getItem('userId');
+            const lessonContentId = currentLesson?.contentId || currentContentData?.id;
+            
+            if (userId && lessonContentId) {
+                const snapshot = await db.collection('users')
+                    .doc(userId)
+                    .collection('reflectionMoments')
+                    .where('contentId', '==', lessonContentId)
+                    .where('momentIndex', '==', momentIndex)
+                    .limit(1)
+                    .get();
+                
+                if (!snapshot.empty) {
+                    previousAnswer = snapshot.docs[0].data().answer || '';
+                }
+            }
+        } catch (error) {
+            console.error('خطأ في تحميل الإجابة:', error);
+        }
+    }
+    
+    const pillarsPoints = moment.pillarsPoints || { courage: 0, mirror: moment.points || 5, action: 0, witness: 0 };
+    const totalPoints = moment.points || (pillarsPoints.courage + pillarsPoints.mirror + pillarsPoints.action + pillarsPoints.witness);
     
     Swal.fire({
         title: `⏸️ ${moment.title}`,
         html: `
             <div style="text-align: right; padding: 20px;">
+                ${isCompleted ? `
+                    <div style="background: rgba(16, 185, 129, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 2px solid #10b981;">
+                        <p style="color: #10b981; font-weight: bold; margin: 0;">
+                            ✅ لقد أكملت هذا التأمل من قبل
+                        </p>
+                        <p style="color: #6ee7b7; font-size: 0.9rem; margin: 5px 0 0 0;">
+                            يمكنك مراجعة إجابتك أو تعديلها (بدون نقاط إضافية)
+                        </p>
+                    </div>
+                ` : ''}
+                
                 <p style="color: #c084fc; font-size: 1.1rem; margin-bottom: 20px;">${moment.question}</p>
                 <textarea id="reflectionAnswer" placeholder="اكتب تأملك..." style="
                     width: 100%;
@@ -7365,13 +7406,20 @@ function openReflectionModal(momentIndex) {
                     background: rgba(255, 255, 255, 0.05);
                     color: white;
                     font-size: 1rem;
-                "></textarea>
-                <p style="color: #fbbf24; margin-top: 15px;">💰 ${moment.points} نقطة</p>
+                ">${previousAnswer}</textarea>
+                
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 15px;">
+                    ${pillarsPoints.courage > 0 ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">🔥 ${pillarsPoints.courage}</span>` : ''}
+                    ${pillarsPoints.mirror > 0 ? `<span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">🪞 ${pillarsPoints.mirror}</span>` : ''}
+                    ${pillarsPoints.action > 0 ? `<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">👣 ${pillarsPoints.action}</span>` : ''}
+                    ${pillarsPoints.witness > 0 ? `<span style="background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">👁️ ${pillarsPoints.witness}</span>` : ''}
+                </div>
+                <p style="color: #fbbf24; margin-top: 10px; font-size: 1.1rem;">💰 الإجمالي: ${totalPoints} نقطة${isCompleted ? ' (مكتسبة بالفعل)' : ''}</p>
             </div>
         `,
         width: '600px',
         showCancelButton: true,
-        confirmButtonText: '💾 حفظ',
+        confirmButtonText: isCompleted ? '📝 حفظ التعديل' : '💾 حفظ',
         cancelButtonText: '❌ إلغاء',
         confirmButtonColor: '#a855f7',
         preConfirm: () => {
@@ -7380,25 +7428,24 @@ function openReflectionModal(momentIndex) {
                 Swal.showValidationMessage('من فضلك اكتب تأملك (10 أحرف على الأقل)');
                 return false;
             }
-            return answer;
+            return { answer, isUpdate: isCompleted };
         }
     }).then(async (result) => {
         if (result.isConfirmed) {
-            await saveReflectionMoment(momentIndex, result.value, moment.points);
+            await saveReflectionMoment(momentIndex, result.value.answer, totalPoints, result.value.isUpdate, pillarsPoints);
         }
     });
 }
 
 // دالة حفظ التأمل
 // دالة حفظ لحظة التأمل
-async function saveReflectionMoment(momentIndex, answer, points) {
+async function saveReflectionMoment(momentIndex, answer, totalPoints, isUpdate, pillarsPoints) {
     try {
         const userId = localStorage.getItem('userId');
         const moment = currentReflectionMoments[momentIndex];
         
         if (!userId) throw new Error('المستخدم غير مسجل دخول');
         
-        // الحصول على ID صحيح
         const lessonContentId = currentLesson?.contentId || currentContentData?.id;
         
         if (!lessonContentId || lessonContentId === 'unknown') {
@@ -7411,65 +7458,77 @@ async function saveReflectionMoment(momentIndex, answer, points) {
             didOpen: () => Swal.showLoading()
         });
         
-        // بيانات التأمل
+        // حذف الإجابة القديمة لو موجودة
+        if (isUpdate) {
+            const oldSnapshot = await db.collection('users')
+                .doc(userId)
+                .collection('reflectionMoments')
+                .where('contentId', '==', lessonContentId)
+                .where('momentIndex', '==', momentIndex)
+                .get();
+            
+            const deletePromises = oldSnapshot.docs.map(doc => doc.ref.delete());
+            await Promise.all(deletePromises);
+        }
+        
+        // حفظ الإجابة الجديدة
         const reflectionData = {
             momentIndex: momentIndex,
             momentTitle: moment.title,
             momentTime: moment.time,
             question: moment.question,
             answer: answer,
-            points: points,
+            points: totalPoints,
+            pillarsPoints: pillarsPoints,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             contentId: lessonContentId,
             contentTitle: currentContentData?.name || 'Unknown',
             lessonId: currentLessonIndex || 0
         };
         
-        // حفظ في Firebase
         await db.collection('users')
             .doc(userId)
             .collection('reflectionMoments')
             .add(reflectionData);
         
-       // إضافة النقاط لكل الركائز
-const pillarsPoints = moment.pillarsPoints || { courage: 0, mirror: points, action: 0, witness: 0 };
-
-// إضافة النقاط لكل ركيزة
-if (pillarsPoints.courage > 0) {
-    await addPointsToPillar('courage', pillarsPoints.courage, {
-        type: 'reflection_moment',
-        momentIndex: momentIndex,
-        title: moment.title,
-        contentId: lessonContentId
-    });
-}
-
-if (pillarsPoints.mirror > 0) {
-    await addPointsToPillar('mirror', pillarsPoints.mirror, {
-        type: 'reflection_moment',
-        momentIndex: momentIndex,
-        title: moment.title,
-        contentId: lessonContentId
-    });
-}
-
-if (pillarsPoints.action > 0) {
-    await addPointsToPillar('action', pillarsPoints.action, {
-        type: 'reflection_moment',
-        momentIndex: momentIndex,
-        title: moment.title,
-        contentId: lessonContentId
-    });
-}
-
-if (pillarsPoints.witness > 0) {
-    await addPointsToPillar('witness', pillarsPoints.witness, {
-        type: 'reflection_moment',
-        momentIndex: momentIndex,
-        title: moment.title,
-        contentId: lessonContentId
-    });
-}
+        // إضافة النقاط فقط لو مش تحديث
+        if (!isUpdate) {
+            if (pillarsPoints.courage > 0) {
+                await addPointsToPillar('courage', pillarsPoints.courage, {
+                    type: 'reflection_moment',
+                    momentIndex: momentIndex,
+                    title: moment.title,
+                    contentId: lessonContentId
+                });
+            }
+            
+            if (pillarsPoints.mirror > 0) {
+                await addPointsToPillar('mirror', pillarsPoints.mirror, {
+                    type: 'reflection_moment',
+                    momentIndex: momentIndex,
+                    title: moment.title,
+                    contentId: lessonContentId
+                });
+            }
+            
+            if (pillarsPoints.action > 0) {
+                await addPointsToPillar('action', pillarsPoints.action, {
+                    type: 'reflection_moment',
+                    momentIndex: momentIndex,
+                    title: moment.title,
+                    contentId: lessonContentId
+                });
+            }
+            
+            if (pillarsPoints.witness > 0) {
+                await addPointsToPillar('witness', pillarsPoints.witness, {
+                    type: 'reflection_moment',
+                    momentIndex: momentIndex,
+                    title: moment.title,
+                    contentId: lessonContentId
+                });
+            }
+        }
         
         // تحديث الحالة
         completedReflectionMoments.add(momentIndex);
@@ -7482,19 +7541,21 @@ if (pillarsPoints.witness > 0) {
         
         Swal.fire({
             icon: 'success',
-            title: '🎉 رائع!',
-            html: `
-    <p>تم حفظ تأملك بنجاح</p>
-    <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 15px;">
-        ${pillarsPoints.courage > 0 ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">🔥 +${pillarsPoints.courage}</span>` : ''}
-        ${pillarsPoints.mirror > 0 ? `<span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">🪞 +${pillarsPoints.mirror}</span>` : ''}
-        ${pillarsPoints.action > 0 ? `<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">👣 +${pillarsPoints.action}</span>` : ''}
-        ${pillarsPoints.witness > 0 ? `<span style="background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">👁️ +${pillarsPoints.witness}</span>` : ''}
-    </div>
-    <p style="color: #fbbf24; font-weight: bold; font-size: 1.3rem; margin-top: 15px;">📊 الإجمالي: +${points} ✨</p>
-`,
-            timer: 2000,
-            showConfirmButton: false
+            title: isUpdate ? '✏️ تم التحديث!' : '🎉 رائع!',
+            html: isUpdate ? `
+                <p>تم تحديث إجابتك بنجاح</p>
+            ` : `
+                <p>تم حفظ تأملك بنجاح</p>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 15px;">
+                    ${pillarsPoints.courage > 0 ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">🔥 +${pillarsPoints.courage}</span>` : ''}
+                    ${pillarsPoints.mirror > 0 ? `<span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">🪞 +${pillarsPoints.mirror}</span>` : ''}
+                    ${pillarsPoints.action > 0 ? `<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">👣 +${pillarsPoints.action}</span>` : ''}
+                    ${pillarsPoints.witness > 0 ? `<span style="background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 8px 15px; border-radius: 8px; font-weight: bold;">👁️ +${pillarsPoints.witness}</span>` : ''}
+                </div>
+                <p style="color: #fbbf24; font-weight: bold; font-size: 1.3rem; margin-top: 15px;">📊 الإجمالي: +${totalPoints} ✨</p>
+            `,
+            timer: isUpdate ? 2000 : 3000,
+            showConfirmButton: !isUpdate
         });
         
     } catch (error) {
@@ -7560,141 +7621,159 @@ async function loadCompletedReflectionMoments() {
 // ============================================
 
 // دالة فتح نافذة التأمل الفوري
-function openImmediateReflection() {
+async function openImmediateReflection() {
+    // جلب توزيع النقاط من البيانات
+    const immediateReflection = currentContentData?.videoData?.immediateReflection || {
+        courage: 0,
+        mirror: 20,
+        action: 0,
+        witness: 0
+    };
+    
+    const totalPoints = immediateReflection.courage + immediateReflection.mirror + immediateReflection.action + immediateReflection.witness;
+    
     // التحقق من إكمال التأمل قبل كده
-    checkImmediateReflectionCompleted().then(isCompleted => {
+    let isCompleted = false;
+    let previousData = { touchedMost: '', actionPoint: '', takeawayPhrase: '' };
+    
+    try {
+        const userId = localStorage.getItem('userId');
+        const lessonContentId = currentLesson?.contentId || currentContentData?.id;
         
-        Swal.fire({
-            title: '✨ التأمل الفوري',
-            html: `
-                <div style="text-align: right; padding: 20px;">
-                    ${isCompleted ? `
-                        <div style="
-                            background: rgba(16, 185, 129, 0.2);
-                            padding: 15px;
-                            border-radius: 10px;
-                            margin-bottom: 20px;
-                            border: 2px solid #10b981;
-                        ">
-                            <p style="color: #10b981; font-weight: bold; margin: 0;">
-                                ✅ لقد أكملت هذا التأمل من قبل
-                            </p>
-                        </div>
-                    ` : ''}
-                    
-                    <div style="margin-bottom: 20px;">
-                        <label style="
-                            display: block;
-                            color: #fbbf24;
-                            font-weight: bold;
-                            margin-bottom: 10px;
-                            font-size: 1.05rem;
-                        ">1. ما أكثر شيء لمسك في هذا الدرس؟</label>
-                        <textarea id="touchedMost" placeholder="اكتب ما لمسك..." style="
-                            width: 100%;
-                            min-height: 80px;
-                            padding: 12px;
-                            border: 2px solid rgba(251, 191, 36, 0.4);
-                            border-radius: 8px;
-                            background: rgba(255, 255, 255, 0.05);
-                            color: white;
-                            font-size: 1rem;
-                            resize: vertical;
-                        "></textarea>
-                    </div>
-                    
-                    <div style="margin-bottom: 20px;">
-                        <label style="
-                            display: block;
-                            color: #fbbf24;
-                            font-weight: bold;
-                            margin-bottom: 10px;
-                            font-size: 1.05rem;
-                        ">2. نقطة واحدة ستطبقها اليوم:</label>
-                        <textarea id="actionPoint" placeholder="مثال: سأمارس التأمل لمدة 5 دقائق..." style="
-                            width: 100%;
-                            min-height: 80px;
-                            padding: 12px;
-                            border: 2px solid rgba(251, 191, 36, 0.4);
-                            border-radius: 8px;
-                            background: rgba(255, 255, 255, 0.05);
-                            color: white;
-                            font-size: 1rem;
-                            resize: vertical;
-                        "></textarea>
-                    </div>
-                    
-                    <div style="margin-bottom: 20px;">
-                        <label style="
-                            display: block;
-                            color: #fbbf24;
-                            font-weight: bold;
-                            margin-bottom: 10px;
-                            font-size: 1.05rem;
-                        ">3. جملة واحدة ستأخذها معك:</label>
-                        <input type="text" id="takeawayPhrase" placeholder="الجملة التي أثرت فيك..." style="
-                            width: 100%;
-                            padding: 12px;
-                            border: 2px solid rgba(251, 191, 36, 0.4);
-                            border-radius: 8px;
-                            background: rgba(255, 255, 255, 0.05);
-                            color: white;
-                            font-size: 1rem;
-                        ">
-                    </div>
-                    
-                    <div style="
-                        background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1));
-                        padding: 20px;
-                        border-radius: 10px;
-                        text-align: center;
-                        margin-top: 20px;
-                        border: 2px solid rgba(251, 191, 36, 0.3);
-                    ">
-                        <p style="
-                            color: #fbbf24;
-                            font-weight: bold;
-                            font-size: 1.3rem;
-                            margin: 0;
-                        ">💰 ستحصل على 20 نقطة</p>
-                    </div>
-                </div>
-            `,
-            width: '650px',
-            showCancelButton: true,
-            confirmButtonText: '💾 حفظ التأمل',
-            cancelButtonText: '❌ إلغاء',
-            confirmButtonColor: '#fbbf24',
-            cancelButtonColor: '#6b7280',
-            customClass: {
-                popup: 'immediate-reflection-popup'
-            },
-            preConfirm: () => {
-                const touchedMost = document.getElementById('touchedMost').value.trim();
-                const actionPoint = document.getElementById('actionPoint').value.trim();
-                const takeawayPhrase = document.getElementById('takeawayPhrase').value.trim();
-                
-                if (!touchedMost || !actionPoint || !takeawayPhrase) {
-                    Swal.showValidationMessage('من فضلك أكمل جميع الحقول');
-                    return false;
-                }
-                
-                if (touchedMost.length < 10) {
-                    Swal.showValidationMessage('الإجابة الأولى قصيرة جداً (على الأقل 10 أحرف)');
-                    return false;
-                }
-                
-                return {
-                    touchedMost: touchedMost,
-                    actionPoint: actionPoint,
-                    takeawayPhrase: takeawayPhrase
+        if (userId && lessonContentId) {
+            const snapshot = await db.collection('users')
+                .doc(userId)
+                .collection('immediateReflections')
+                .where('contentId', '==', lessonContentId)
+                .limit(1)
+                .get();
+            
+            if (!snapshot.empty) {
+                isCompleted = true;
+                const data = snapshot.docs[0].data();
+                previousData = {
+                    touchedMost: data.touchedMost || '',
+                    actionPoint: data.actionPoint || '',
+                    takeawayPhrase: data.takeawayPhrase || ''
                 };
             }
-        }).then(async (result) => {
-            if (result.isConfirmed) {
-                await saveImmediateReflection(result.value);
+        }
+    } catch (error) {
+        console.error('خطأ في التحقق:', error);
+    }
+    
+    Swal.fire({
+        title: '✨ التأمل الفوري',
+        html: `
+            <div style="text-align: right; padding: 20px;">
+                ${isCompleted ? `
+                    <div style="background: rgba(16, 185, 129, 0.2); padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #10b981;">
+                        <p style="color: #10b981; font-weight: bold; margin: 0;">
+                            ✅ لقد أكملت هذا التأمل من قبل
+                        </p>
+                        <p style="color: #6ee7b7; font-size: 0.9rem; margin: 5px 0 0 0;">
+                            يمكنك مراجعة إجاباتك أو تعديلها (بدون نقاط إضافية)
+                        </p>
+                    </div>
+                ` : ''}
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; color: #fbbf24; font-weight: bold; margin-bottom: 10px; font-size: 1.05rem;">
+                        1. ما أكثر شيء لمسك في هذا الدرس؟
+                    </label>
+                    <textarea id="touchedMost" placeholder="اكتب ما لمسك..." style="
+                        width: 100%;
+                        min-height: 80px;
+                        padding: 12px;
+                        border: 2px solid rgba(251, 191, 36, 0.4);
+                        border-radius: 8px;
+                        background: rgba(255, 255, 255, 0.05);
+                        color: white;
+                        font-size: 1rem;
+                        resize: vertical;
+                    ">${previousData.touchedMost}</textarea>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; color: #fbbf24; font-weight: bold; margin-bottom: 10px; font-size: 1.05rem;">
+                        2. نقطة واحدة ستطبقها اليوم:
+                    </label>
+                    <textarea id="actionPoint" placeholder="مثال: سأمارس التأمل لمدة 5 دقائق..." style="
+                        width: 100%;
+                        min-height: 80px;
+                        padding: 12px;
+                        border: 2px solid rgba(251, 191, 36, 0.4);
+                        border-radius: 8px;
+                        background: rgba(255, 255, 255, 0.05);
+                        color: white;
+                        font-size: 1rem;
+                        resize: vertical;
+                    ">${previousData.actionPoint}</textarea>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; color: #fbbf24; font-weight: bold; margin-bottom: 10px; font-size: 1.05rem;">
+                        3. جملة واحدة ستأخذها معك:
+                    </label>
+                    <input type="text" id="takeawayPhrase" placeholder="الجملة التي أثرت فيك..." value="${previousData.takeawayPhrase}" style="
+                        width: 100%;
+                        padding: 12px;
+                        border: 2px solid rgba(251, 191, 36, 0.4);
+                        border-radius: 8px;
+                        background: rgba(255, 255, 255, 0.05);
+                        color: white;
+                        font-size: 1rem;
+                    ">
+                </div>
+                
+                <div style="background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1)); padding: 20px; border-radius: 10px; text-align: center; margin-top: 20px; border: 2px solid rgba(251, 191, 36, 0.3);">
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px;">
+                        ${immediateReflection.courage > 0 ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">🔥 ${immediateReflection.courage}</span>` : ''}
+                        ${immediateReflection.mirror > 0 ? `<span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">🪞 ${immediateReflection.mirror}</span>` : ''}
+                        ${immediateReflection.action > 0 ? `<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">👣 ${immediateReflection.action}</span>` : ''}
+                        ${immediateReflection.witness > 0 ? `<span style="background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;">👁️ ${immediateReflection.witness}</span>` : ''}
+                    </div>
+                    <p style="color: #fbbf24; font-weight: bold; font-size: 1.3rem; margin: 0;">
+                        💰 الإجمالي: ${totalPoints} نقطة${isCompleted ? ' (مكتسبة بالفعل)' : ''}
+                    </p>
+                </div>
+            </div>
+        `,
+        width: '650px',
+        showCancelButton: true,
+        confirmButtonText: isCompleted ? '📝 حفظ التعديل' : '💾 حفظ التأمل',
+        cancelButtonText: '❌ إلغاء',
+        confirmButtonColor: '#fbbf24',
+        cancelButtonColor: '#6b7280',
+        customClass: {
+            popup: 'immediate-reflection-popup'
+        },
+        preConfirm: () => {
+            const touchedMost = document.getElementById('touchedMost').value.trim();
+            const actionPoint = document.getElementById('actionPoint').value.trim();
+            const takeawayPhrase = document.getElementById('takeawayPhrase').value.trim();
+            
+            if (!touchedMost || !actionPoint || !takeawayPhrase) {
+                Swal.showValidationMessage('من فضلك أكمل جميع الحقول');
+                return false;
             }
-        });
+            
+            if (touchedMost.length < 10) {
+                Swal.showValidationMessage('الإجابة الأولى قصيرة جداً (على الأقل 10 أحرف)');
+                return false;
+            }
+            
+            return {
+                touchedMost: touchedMost,
+                actionPoint: actionPoint,
+                takeawayPhrase: takeawayPhrase,
+                isUpdate: isCompleted
+            };
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            await saveImmediateReflection(result.value, immediateReflection, totalPoints);
+        }
     });
 }
 
@@ -7725,13 +7804,11 @@ async function checkImmediateReflectionCompleted() {
 }
 
 // دالة حفظ التأمل الفوري
-// دالة حفظ التأمل الفوري
-async function saveImmediateReflection(reflectionData) {
+async function saveImmediateReflection(reflectionData, immediateReflection, totalPoints) {
     try {
         const userId = localStorage.getItem('userId');
         if (!userId) throw new Error('المستخدم غير مسجل دخول');
         
-        // الحصول على ID صحيح
         const lessonContentId = currentLesson?.contentId || currentContentData?.id;
         
         if (!lessonContentId || lessonContentId === 'unknown') {
@@ -7744,10 +7821,27 @@ async function saveImmediateReflection(reflectionData) {
             didOpen: () => Swal.showLoading()
         });
         
+        const isUpdate = reflectionData.isUpdate;
+        
+        // حذف الإجابة القديمة لو موجودة
+        if (isUpdate) {
+            const oldSnapshot = await db.collection('users')
+                .doc(userId)
+                .collection('immediateReflections')
+                .where('contentId', '==', lessonContentId)
+                .get();
+            
+            const deletePromises = oldSnapshot.docs.map(doc => doc.ref.delete());
+            await Promise.all(deletePromises);
+        }
+        
         // بيانات التأمل الفوري
         const immediateReflectionData = {
-            ...reflectionData,
-            points: 20,
+            touchedMost: reflectionData.touchedMost,
+            actionPoint: reflectionData.actionPoint,
+            takeawayPhrase: reflectionData.takeawayPhrase,
+            points: totalPoints,
+            pillarsPoints: immediateReflection,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             contentId: lessonContentId,
             contentTitle: currentContentData?.name || 'Unknown',
@@ -7759,70 +7853,107 @@ async function saveImmediateReflection(reflectionData) {
             .collection('immediateReflections')
             .add(immediateReflectionData);
         
-       // جمع توزيع النقاط من البيانات
-const immediateReflection = currentContentData?.videoData?.immediateReflection || {
-    courage: 0,
-    mirror: 20,
-    action: 0,
-    witness: 0
-};
-
-const totalPoints = immediateReflection.courage + immediateReflection.mirror + immediateReflection.action + immediateReflection.witness;
-
-// إضافة النقاط لكل ركيزة
-if (immediateReflection.courage > 0) {
-    await addPointsToPillar('courage', immediateReflection.courage, {
-        type: 'immediate_reflection',
-        contentId: lessonContentId,
-        contentTitle: currentContentData?.name
-    });
-}
-
-if (immediateReflection.mirror > 0) {
-    await addPointsToPillar('mirror', immediateReflection.mirror, {
-        type: 'immediate_reflection',
-        contentId: lessonContentId,
-        contentTitle: currentContentData?.name
-    });
-}
-
-if (immediateReflection.action > 0) {
-    await addPointsToPillar('action', immediateReflection.action, {
-        type: 'immediate_reflection',
-        contentId: lessonContentId,
-        contentTitle: currentContentData?.name
-    });
-}
-
-if (immediateReflection.witness > 0) {
-    await addPointsToPillar('witness', immediateReflection.witness, {
-        type: 'immediate_reflection',
-        contentId: lessonContentId,
-        contentTitle: currentContentData?.name
-    });
-}
+        // إضافة النقاط فقط لو مش تحديث
+        if (!isUpdate) {
+            if (immediateReflection.courage > 0) {
+                await addPointsToPillar('courage', immediateReflection.courage, {
+                    type: 'immediate_reflection',
+                    contentId: lessonContentId,
+                    contentTitle: currentContentData?.name
+                });
+            }
+            
+            if (immediateReflection.mirror > 0) {
+                await addPointsToPillar('mirror', immediateReflection.mirror, {
+                    type: 'immediate_reflection',
+                    contentId: lessonContentId,
+                    contentTitle: currentContentData?.name
+                });
+            }
+            
+            if (immediateReflection.action > 0) {
+                await addPointsToPillar('action', immediateReflection.action, {
+                    type: 'immediate_reflection',
+                    contentId: lessonContentId,
+                    contentTitle: currentContentData?.name
+                });
+            }
+            
+            if (immediateReflection.witness > 0) {
+                await addPointsToPillar('witness', immediateReflection.witness, {
+                    type: 'immediate_reflection',
+                    contentId: lessonContentId,
+                    contentTitle: currentContentData?.name
+                });
+            }
+        }
         
-        // إخفاء القسم
+        // ⚠️ عدم إخفاء القسم - بس نحدث الرسالة
         const section = document.getElementById('immediateReflectionSection');
-        if (section) section.style.display = 'none';
+        if (section) {
+            section.innerHTML = `
+                <div style="
+                    width: 60px;
+                    height: 60px;
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 2rem;
+                    margin: 0 auto 20px;
+                    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.5);
+                ">✅</div>
+                
+                <h3 style="color: #10b981; font-size: 1.5rem; font-weight: 700; margin: 0 0 15px 0;">
+                    تم إكمال التأمل الفوري
+                </h3>
+                
+                <p style="color: #6ee7b7; font-size: 1.1rem; line-height: 1.8; margin: 0 0 25px 0;">
+                    يمكنك مراجعة إجاباتك أو تعديلها في أي وقت
+                </p>
+                
+                <button onclick="openImmediateReflection()" style="
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    color: white;
+                    border: none;
+                    padding: 15px 40px;
+                    border-radius: 12px;
+                    cursor: pointer;
+                    font-weight: bold;
+                    font-size: 1.1rem;
+                    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+                    transition: all 0.3s ease;
+                "
+                onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 6px 20px rgba(16, 185, 129, 0.6)';"
+                onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 15px rgba(16, 185, 129, 0.4)';"
+                >
+                    👁️ مراجعة التأمل
+                </button>
+            `;
+        }
         
         Swal.fire({
             icon: 'success',
-            title: '🎉 ممتاز!',
-            html: `
-    <div style="text-align: center;">
-        <p style="font-size: 1.2rem;">تم حفظ تأملك بنجاح</p>
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 15px;">
-            ${immediateReflection.courage > 0 ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">🔥 +${immediateReflection.courage}</span>` : ''}
-            ${immediateReflection.mirror > 0 ? `<span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">🪞 +${immediateReflection.mirror}</span>` : ''}
-            ${immediateReflection.action > 0 ? `<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">👣 +${immediateReflection.action}</span>` : ''}
-            ${immediateReflection.witness > 0 ? `<span style="background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">👁️ +${immediateReflection.witness}</span>` : ''}
-        </div>
-        <div style="background: linear-gradient(135deg, #fbbf24, #f59e0b); padding: 20px; border-radius: 15px; display: inline-block; margin-top: 20px;">
-            <p style="color: #1e293b; font-weight: bold; font-size: 2rem; margin: 0;">📊 الإجمالي: +${totalPoints} نقطة ✨</p>
-        </div>
-    </div>
-`,
+            title: isUpdate ? '✏️ تم التحديث!' : '🎉 ممتاز!',
+            html: isUpdate ? `
+                <div style="text-align: center;">
+                    <p style="font-size: 1.2rem;">تم تحديث تأملك بنجاح</p>
+                </div>
+            ` : `
+                <div style="text-align: center;">
+                    <p style="font-size: 1.2rem;">تم حفظ تأملك بنجاح</p>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 15px;">
+                        ${immediateReflection.courage > 0 ? `<span style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">🔥 +${immediateReflection.courage}</span>` : ''}
+                        ${immediateReflection.mirror > 0 ? `<span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">🪞 +${immediateReflection.mirror}</span>` : ''}
+                        ${immediateReflection.action > 0 ? `<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">👣 +${immediateReflection.action}</span>` : ''}
+                        ${immediateReflection.witness > 0 ? `<span style="background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 1.1rem;">👁️ +${immediateReflection.witness}</span>` : ''}
+                    </div>
+                    <div style="background: linear-gradient(135deg, #fbbf24, #f59e0b); padding: 20px; border-radius: 15px; display: inline-block; margin-top: 20px;">
+                        <p style="color: #1e293b; font-weight: bold; font-size: 2rem; margin: 0;">📊 الإجمالي: +${totalPoints} نقطة ✨</p>
+                    </div>
+                </div>
+            `,
             confirmButtonText: 'رائع!',
             confirmButtonColor: '#fbbf24'
         });
@@ -7837,7 +7968,6 @@ if (immediateReflection.witness > 0) {
         });
     }
 }
-
        // Display Library Quiz
        function displayLibraryQuiz(contentData) {
            const container = document.getElementById('quizContent');
