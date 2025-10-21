@@ -2497,6 +2497,56 @@
 
     <!-- Header -->
     <header class="header">
+        <!-- أيقونة الإشعارات -->
+<div id="notificationsWidget" style="position: fixed; top: 20px; left: 20px; z-index: 99999;">
+    <button id="notificationsBtn" style="position: relative; width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #6366f1); border: none; color: white; font-size: 1.3rem; cursor: pointer; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4); transition: all 0.3s;">
+        <i class="fas fa-bell"></i>
+        <span id="notificationsBadge" style="position: absolute; top: -5px; right: -5px; background: #ef4444; color: white; border-radius: 50%; min-width: 20px; height: 20px; display: none; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: bold; padding: 0 4px; border: 2px solid white;">0</span>
+    </button>
+    
+    <!-- قائمة الإشعارات -->
+    <div id="notificationsList" style="display: none; position: absolute; top: 60px; left: 0; width: 350px; max-height: 400px; overflow-y: auto; background: #1e293b; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); border: 2px solid rgba(139, 92, 246, 0.3);">
+        <div style="padding: 15px; border-bottom: 1px solid rgba(139, 92, 246, 0.3); background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border-radius: 10px 10px 0 0;">
+            <h3 style="margin: 0; font-size: 1.1rem;">🔔 الإشعارات</h3>
+        </div>
+        <div id="notificationsContent" style="padding: 10px;">
+            <p style="text-align: center; color: #94a3b8; padding: 20px;">لا توجد إشعارات</p>
+        </div>
+    </div>
+</div>
+
+<style>
+#notificationsBtn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.6);
+}
+
+#notificationsList::-webkit-scrollbar {
+    width: 6px;
+}
+
+#notificationsList::-webkit-scrollbar-thumb {
+    background: #8b5cf6;
+    border-radius: 3px;
+}
+
+.notification-item {
+    padding: 12px;
+    border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.notification-item:hover {
+    background: rgba(139, 92, 246, 0.1);
+}
+
+.notification-item.unread {
+    background: rgba(139, 92, 246, 0.05);
+    border-left: 3px solid #8b5cf6;
+}
+</style>
+        
         <div class="header-content">
             <a href="./my-courses.html" class="logo">
                 <div class="logo-icon">
@@ -8766,7 +8816,132 @@ if (originalOpenQuestionsModalFunc) {
     };
 }
 
-       
+
+// ============================================
+// نظام الإشعارات العام
+// ============================================
+
+let unsubscribeNotifications = null;
+
+// فتح/إغلاق قائمة الإشعارات
+document.addEventListener('click', function(e) {
+    const btn = document.getElementById('notificationsBtn');
+    const list = document.getElementById('notificationsList');
+    
+    if (btn && btn.contains(e.target)) {
+        list.style.display = list.style.display === 'none' ? 'block' : 'none';
+    } else if (list && !list.contains(e.target)) {
+        list.style.display = 'none';
+    }
+});
+
+// مراقبة الإشعارات
+function startNotificationsListener() {
+    const userId = localStorage.getItem('userId');
+    if (!userId) return;
+    
+    console.log('🔔 بدء مراقبة الإشعارات');
+    
+    if (unsubscribeNotifications) {
+        unsubscribeNotifications();
+    }
+    
+    // مراقبة جميع الأسئلة المُجاب عليها للمستخدم
+    unsubscribeNotifications = db.collection('questions')
+        .where('userId', '==', userId)
+        .where('isAnswered', '==', true)
+        .orderBy('answerDate', 'desc')
+        .limit(20)
+        .onSnapshot(snapshot => {
+            const lastChecked = localStorage.getItem('notificationsLastChecked') || new Date(0).toISOString();
+            let unreadCount = 0;
+            let notificationsHtml = '';
+            
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const answerDate = data.answerDate?.toDate() || new Date(data.answerDate);
+                const isUnread = answerDate.toISOString() > lastChecked;
+                
+                if (isUnread) unreadCount++;
+                
+                const formattedDate = answerDate.toLocaleDateString('ar-EG', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                
+                notificationsHtml += `
+                    <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="goToLesson('${data.courseId}', '${data.contentId}')">
+                        <div style="display: flex; align-items: start; gap: 10px;">
+                            <div style="font-size: 1.5rem;">${isUnread ? '🔵' : '✅'}</div>
+                            <div style="flex: 1;">
+                                <p style="color: white; font-weight: bold; margin: 0 0 5px 0; font-size: 0.95rem;">تم الرد على سؤالك</p>
+                                <p style="color: #94a3b8; font-size: 0.85rem; margin: 0 0 5px 0;">في: ${data.lessonTitle || data.contentTitle}</p>
+                                ${data.pointsAwarded > 0 ? `<p style="color: #fbbf24; font-size: 0.85rem; margin: 0;">🎉 حصلت على ${data.pointsAwarded} نقطة!</p>` : ''}
+                                <p style="color: #64748b; font-size: 0.75rem; margin: 5px 0 0 0;">${formattedDate}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            // تحديث Badge
+            const badge = document.getElementById('notificationsBadge');
+            if (badge) {
+                if (unreadCount > 0) {
+                    badge.textContent = unreadCount;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+            
+            // تحديث القائمة
+            const content = document.getElementById('notificationsContent');
+            if (content) {
+                if (notificationsHtml) {
+                    content.innerHTML = notificationsHtml;
+                } else {
+                    content.innerHTML = '<p style="text-align: center; color: #94a3b8; padding: 20px;">لا توجد إشعارات</p>';
+                }
+            }
+            
+            console.log('📊 إشعارات غير مقروءة:', unreadCount);
+        });
+}
+
+// الانتقال للدرس
+function goToLesson(courseId, contentId) {
+    // تحديث آخر فحص
+    localStorage.setItem('notificationsLastChecked', new Date().toISOString());
+    
+    // إخفاء القائمة
+    document.getElementById('notificationsList').style.display = 'none';
+    
+    // فتح الدرس (إذا كنت في نفس الصفحة)
+    if (typeof startLesson === 'function') {
+        const lessonIndex = allLessons?.findIndex(l => l.id === contentId || l.contentId === contentId);
+        if (lessonIndex >= 0) {
+            startLesson(lessonIndex);
+        }
+    }
+}
+
+// تحديث آخر فحص عند فتح القائمة
+document.getElementById('notificationsBtn')?.addEventListener('click', function() {
+    setTimeout(() => {
+        localStorage.setItem('notificationsLastChecked', new Date().toISOString());
+    }, 2000);
+});
+
+// بدء المراقبة
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        startNotificationsListener();
+    }, 2000);
+});
+
        // Display Library Quiz
        function displayLibraryQuiz(contentData) {
            const container = document.getElementById('quizContent');
