@@ -8724,61 +8724,68 @@ function getPillarName(pillarType) {
 }
 
 
-    // ============================================
-// نظام الإشعارات العام
+   // ============================================
+// نظام الإشعارات - المنطق الصحيح
 // ============================================
 
 let unsubscribeNotifications = null;
 
-// فتح/إغلاق قائمة الإشعارات
-document.addEventListener('click', function(e) {
-    const btn = document.getElementById('notificationsBtn');
-    const list = document.getElementById('notificationsList');
+// الحصول على قائمة الإشعارات المقروءة
+function getReadQuestions() {
+    const stored = localStorage.getItem('readQuestions');
+    if (!stored) return [];
     
-    if (btn && btn.contains(e.target)) {
-        list.style.display = list.style.display === 'none' ? 'block' : 'none';
-    } else if (list && !list.contains(e.target)) {
-        list.style.display = 'none';
+    try {
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        console.error('خطأ في قراءة الإشعارات المقروءة:', e);
+        return [];
     }
-});
+}
+
+// إضافة سؤال للقائمة المقروءة
+function markQuestionAsRead(questionId) {
+    const readQuestions = getReadQuestions();
+    if (!readQuestions.includes(questionId)) {
+        readQuestions.push(questionId);
+        localStorage.setItem('readQuestions', JSON.stringify(readQuestions));
+        console.log('✅ تم تعليم السؤال كمقروء:', questionId);
+    }
+}
 
 // مراقبة الإشعارات
 function startNotificationsListener() {
     const userId = localStorage.getItem('userId');
     if (!userId) return;
     
-    console.log('🔔 بدء مراقبة الإشعارات (مع Index - أسرع!)');
+    console.log('🔔 بدء مراقبة الإشعارات');
     
     if (unsubscribeNotifications) {
         unsubscribeNotifications();
     }
     
-    // الحصول على الإشعارات المقروءة
-    const getReadNotifications = () => {
-        const stored = localStorage.getItem('readNotifications');
-        return stored ? JSON.parse(stored) : [];
-    };
-    
     unsubscribeNotifications = db.collection('questions')
         .where('userId', '==', userId)
         .where('isAnswered', '==', true)
         .orderBy('answerDate', 'desc')
-        .limit(20)
+        .limit(50)
         .onSnapshot(snapshot => {
-            const readNotifications = getReadNotifications();
+            const readQuestions = getReadQuestions();
             let unreadCount = 0;
             let notificationsHtml = '';
             
             snapshot.forEach(doc => {
                 const data = doc.data();
                 const questionId = doc.id;
-                const answerDate = data.answerDate?.toDate() || new Date(data.answerDate);
                 
-                // ✅ الإشعار غير مقروء إذا لم يكن في القائمة
-                const isUnread = !readNotifications.includes(questionId);
+                // ✅ المنطق الصحيح: الإشعار مقروء = موجود في القائمة
+                const isRead = readQuestions.includes(questionId);
+                const isUnread = !isRead;
                 
                 if (isUnread) unreadCount++;
                 
+                const answerDate = data.answerDate?.toDate() || new Date(data.answerDate);
                 const formattedDate = answerDate.toLocaleDateString('ar-EG', {
                     month: 'short',
                     day: 'numeric',
@@ -8787,7 +8794,7 @@ function startNotificationsListener() {
                 });
                 
                 notificationsHtml += `
-                    <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="markAsReadAndGo('${questionId}', '${data.courseId}', '${data.contentId}')">
+                    <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="handleNotificationClick('${questionId}', '${data.courseId}', '${data.contentId}')">
                         <div style="display: flex; align-items: start; gap: 10px;">
                             <div style="font-size: 1.5rem;">${isUnread ? '🔵' : '✅'}</div>
                             <div style="flex: 1;">
@@ -8822,29 +8829,19 @@ function startNotificationsListener() {
                 }
             }
             
-            console.log('📊 إشعارات غير مقروءة:', unreadCount);
-        }, error => {
-            console.error('❌ خطأ في الإشعارات:', error);
+            console.log('📊 إشعارات غير مقروءة:', unreadCount, '/ إجمالي:', snapshot.size);
         });
 }
 
-// الانتقال للدرس
-// تعليم الإشعار كمقروء والانتقال للدرس
-function markAsReadAndGo(questionId, courseId, contentId) {
-    // إضافة إلى القائمة المقروءة
-    const stored = localStorage.getItem('readNotifications');
-    const readNotifications = stored ? JSON.parse(stored) : [];
+// معالجة الضغط على الإشعار
+function handleNotificationClick(questionId, courseId, contentId) {
+    // 1. تعليم السؤال كمقروء
+    markQuestionAsRead(questionId);
     
-    if (!readNotifications.includes(questionId)) {
-        readNotifications.push(questionId);
-        localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
-        console.log('✅ تم تعليم الإشعار كمقروء');
-    }
-    
-    // إخفاء القائمة
+    // 2. إخفاء القائمة
     document.getElementById('notificationsList').style.display = 'none';
     
-    // فتح الدرس
+    // 3. فتح الدرس
     if (typeof startLesson === 'function') {
         const lessonIndex = allLessons?.findIndex(l => 
             l.id === contentId || 
@@ -8853,40 +8850,27 @@ function markAsReadAndGo(questionId, courseId, contentId) {
         );
         if (lessonIndex >= 0) {
             startLesson(lessonIndex);
+            
+            // 4. فتح صندوق الأسئلة بعد ثانية
+            setTimeout(() => {
+                if (typeof openQuestionsModal === 'function') {
+                    openQuestionsModal();
+                }
+            }, 1000);
         }
     }
 }
 
-     // تعليم جميع الإشعارات كمقروءة
-function markAllAsRead() {
-    const userId = localStorage.getItem('userId');
-    if (!userId) return;
+// فتح/إغلاق قائمة الإشعارات (بدون تعليم كمقروء)
+document.addEventListener('click', function(e) {
+    const btn = document.getElementById('notificationsBtn');
+    const list = document.getElementById('notificationsList');
     
-    db.collection('questions')
-        .where('userId', '==', userId)
-        .where('isAnswered', '==', true)
-        .get()
-        .then(snapshot => {
-            const allQuestionIds = [];
-            snapshot.forEach(doc => {
-                allQuestionIds.push(doc.id);
-            });
-            
-            localStorage.setItem('readNotifications', JSON.stringify(allQuestionIds));
-            console.log('✅ تم تعليم جميع الإشعارات كمقروءة');
-            
-            // تحديث العرض
-            if (typeof startNotificationsListener === 'function') {
-                startNotificationsListener();
-            }
-        });
-}  
-
-// تحديث آخر فحص عند فتح القائمة
-document.getElementById('notificationsBtn')?.addEventListener('click', function() {
-    setTimeout(() => {
-        localStorage.setItem('notificationsLastChecked', new Date().toISOString());
-    }, 2000);
+    if (btn && btn.contains(e.target)) {
+        list.style.display = list.style.display === 'none' ? 'block' : 'none';
+    } else if (list && !list.contains(e.target)) {
+        list.style.display = 'none';
+    }
 });
 
 // بدء المراقبة
@@ -8895,6 +8879,7 @@ document.addEventListener('DOMContentLoaded', function() {
         startNotificationsListener();
     }, 2000);
 });
+
 
        // Display Library Quiz
        function displayLibraryQuiz(contentData) {
