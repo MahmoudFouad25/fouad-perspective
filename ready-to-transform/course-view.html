@@ -2507,7 +2507,12 @@
     <!-- قائمة الإشعارات -->
     <div id="notificationsList" style="display: none; position: absolute; top: 60px; left: 0; width: 350px; max-height: 400px; overflow-y: auto; background: #1e293b; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); border: 2px solid rgba(139, 92, 246, 0.3);">
         <div style="padding: 15px; border-bottom: 1px solid rgba(139, 92, 246, 0.3); background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border-radius: 10px 10px 0 0;">
-            <h3 style="margin: 0; font-size: 1.1rem;">🔔 الإشعارات</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h3 style="margin: 0; font-size: 1.1rem;">🔔 الإشعارات</h3>
+    <button onclick="markAllAsRead()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 5px 10px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;" onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+        ✓ تعليم الكل كمقروء
+    </button>
+</div>
         </div>
         <div id="notificationsContent" style="padding: 10px;">
             <p style="text-align: center; color: #94a3b8; padding: 20px;">لا توجد إشعارات</p>
@@ -8846,21 +8851,29 @@ function startNotificationsListener() {
         unsubscribeNotifications();
     }
     
-    // ✅ استعلام محسّن مع Index
+    // الحصول على الإشعارات المقروءة
+    const getReadNotifications = () => {
+        const stored = localStorage.getItem('readNotifications');
+        return stored ? JSON.parse(stored) : [];
+    };
+    
     unsubscribeNotifications = db.collection('questions')
         .where('userId', '==', userId)
         .where('isAnswered', '==', true)
         .orderBy('answerDate', 'desc')
         .limit(20)
         .onSnapshot(snapshot => {
-            const lastChecked = localStorage.getItem('notificationsLastChecked') || new Date(0).toISOString();
+            const readNotifications = getReadNotifications();
             let unreadCount = 0;
             let notificationsHtml = '';
             
             snapshot.forEach(doc => {
                 const data = doc.data();
+                const questionId = doc.id;
                 const answerDate = data.answerDate?.toDate() || new Date(data.answerDate);
-                const isUnread = answerDate.toISOString() > lastChecked;
+                
+                // ✅ الإشعار غير مقروء إذا لم يكن في القائمة
+                const isUnread = !readNotifications.includes(questionId);
                 
                 if (isUnread) unreadCount++;
                 
@@ -8872,7 +8885,7 @@ function startNotificationsListener() {
                 });
                 
                 notificationsHtml += `
-                    <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="goToLesson('${data.courseId}', '${data.contentId}')">
+                    <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="markAsReadAndGo('${questionId}', '${data.courseId}', '${data.contentId}')">
                         <div style="display: flex; align-items: start; gap: 10px;">
                             <div style="font-size: 1.5rem;">${isUnread ? '🔵' : '✅'}</div>
                             <div style="flex: 1;">
@@ -8914,16 +8927,28 @@ function startNotificationsListener() {
 }
 
 // الانتقال للدرس
-function goToLesson(courseId, contentId) {
-    // تحديث آخر فحص
-    localStorage.setItem('notificationsLastChecked', new Date().toISOString());
+// تعليم الإشعار كمقروء والانتقال للدرس
+function markAsReadAndGo(questionId, courseId, contentId) {
+    // إضافة إلى القائمة المقروءة
+    const stored = localStorage.getItem('readNotifications');
+    const readNotifications = stored ? JSON.parse(stored) : [];
+    
+    if (!readNotifications.includes(questionId)) {
+        readNotifications.push(questionId);
+        localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+        console.log('✅ تم تعليم الإشعار كمقروء');
+    }
     
     // إخفاء القائمة
     document.getElementById('notificationsList').style.display = 'none';
     
-    // فتح الدرس (إذا كنت في نفس الصفحة)
+    // فتح الدرس
     if (typeof startLesson === 'function') {
-        const lessonIndex = allLessons?.findIndex(l => l.id === contentId || l.contentId === contentId);
+        const lessonIndex = allLessons?.findIndex(l => 
+            l.id === contentId || 
+            l.contentId === contentId || 
+            l.libraryContentId === contentId
+        );
         if (lessonIndex >= 0) {
             startLesson(lessonIndex);
         }
