@@ -2710,10 +2710,15 @@ ${hasAccount && student.userId ? `
     ` : `
         <!-- أزرار الطالب مع حساب -->
         <button class="btn btn-success" onclick="assignCourseToStudent('${studentId}')">
-            <i class="fas fa-graduation-cap"></i> تخصيص دورة
-        </button>    
+            <i class="fas fa-graduation-cap"></i> تخصيص دورة جديدة
+        </button>
+        
+        <!-- زرار إعادة التخصيص -->
+        <button class="btn btn-warning" onclick="reopenCourseAssignment('${studentId}')" 
+                style="background: linear-gradient(135deg, #F59E0B, #D97706);">
+            <i class="fas fa-sync-alt"></i> إدارة التخصيصات
+        </button>
     `}
-    
 </div>
         </div>
     `;
@@ -6639,6 +6644,436 @@ async function filterByLabel(label) {
 }
 
 // ==================== نهاية نظام التمييزات ====================
+        // ==================== 🔧 نظام إعادة التخصيص الصحيح ====================
+
+// دالة عرض معلومات التخصيص الحالي وإعادة التخصيص
+async function reopenCourseAssignment(studentId) {
+    try {
+        const student = allStudents.find(s => s.id === studentId);
+        if (!student) {
+            throw new Error('لم يتم العثور على الطالب');
+        }
+
+        if (!student.userId) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'تنبيه',
+                text: 'هذا الطالب ليس له حساب بعد',
+                confirmButtonColor: '#F59E0B'
+            });
+            return;
+        }
+
+        // جلب بيانات المستخدم
+        const userDoc = await db.collection('users').doc(student.userId).get();
+        if (!userDoc.exists) {
+            throw new Error('الحساب غير موجود');
+        }
+
+        const userData = userDoc.data();
+        const enrollments = userData.enrollments || [];
+
+        // عرض التخصيصات الحالية
+        let enrollmentsHtml = '';
+        if (enrollments.length === 0) {
+            enrollmentsHtml = '<p style="color: #6B7280;">لا توجد دورات مخصصة</p>';
+        } else {
+            enrollmentsHtml = `
+                <div style="max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
+                    ${enrollments.map((enr, index) => `
+                        <div style="background: #F9FAFB; padding: 12px; border-radius: 8px; 
+                                    margin-bottom: 8px; border-right: 3px solid ${enr.status?.current === 'active' ? '#10B981' : '#6B7280'};">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong style="color: #1F2937;">${enr.title || 'دورة غير محددة'}</strong>
+                                    <div style="color: #6B7280; font-size: 0.85rem; margin-top: 3px;">
+                                        <i class="fas fa-calendar"></i> 
+                                        ${enr.dates?.startDate ? new Date(enr.dates.startDate).toLocaleDateString('ar-EG') : 'غير محدد'}
+                                        ${enr.dates?.endDate ? ' → ' + new Date(enr.dates.endDate).toLocaleDateString('ar-EG') : ''}
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <span style="background: ${enr.status?.current === 'active' ? '#DCFCE7' : '#F3F4F6'}; 
+                                                 color: ${enr.status?.current === 'active' ? '#166534' : '#6B7280'}; 
+                                                 padding: 4px 10px; border-radius: 12px; font-size: 0.8rem;">
+                                        ${enr.status?.current === 'active' ? 'نشط' : 'منتهي'}
+                                    </span>
+                                    <button onclick="deleteEnrollment('${student.userId}', ${index})" 
+                                            style="background: #EF4444; color: white; border: none; 
+                                                   padding: 4px 10px; border-radius: 6px; cursor: pointer;
+                                                   font-size: 0.8rem;"
+                                            title="حذف">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // عرض نافذة إعادة التخصيص
+        const { value: action } = await Swal.fire({
+            title: '🔧 إدارة تخصيص الدورات',
+            html: `
+                <div style="text-align: right; direction: rtl;">
+                    <!-- معلومات الطالب -->
+                    <div style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); 
+                                padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <div style="font-weight: bold; color: #0369A1; margin-bottom: 5px;">
+                            <i class="fas fa-user"></i> ${student.customer?.name || 'غير محدد'}
+                        </div>
+                        <div style="color: #6B7280; font-size: 0.9rem;">
+                            User ID: <code>${student.userId}</code>
+                        </div>
+                    </div>
+
+                    <!-- الدورة المطلوبة حسب الحجز -->
+                    <div style="background: linear-gradient(135deg, #FEF3C7, #FED7AA); 
+                                padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <div style="color: #92400E; font-weight: bold; margin-bottom: 5px;">
+                            📚 الدورة المطلوبة (حسب الحجز):
+                        </div>
+                        <div style="color: #1F2937; font-size: 1.1rem; font-weight: bold;">
+                            ${student.courseName || 'غير محددة'}
+                        </div>
+                    </div>
+
+                    <!-- التخصيصات الحالية -->
+                    <div style="background: white; border: 2px solid #E5E7EB; 
+                                padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <div style="color: #374151; font-weight: bold; margin-bottom: 10px;">
+                            📋 التخصيصات الحالية:
+                        </div>
+                        ${enrollmentsHtml}
+                    </div>
+
+                    <!-- تحذير إذا كانت الدورة مختلفة -->
+                    ${enrollments.length > 0 && !enrollments.find(e => e.title === student.courseName) ? `
+                        <div style="background: #FEF2F2; border: 2px solid #FCA5A5; 
+                                    padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                            <div style="color: #991B1B; font-weight: bold;">
+                                <i class="fas fa-exclamation-triangle"></i> تنبيه مهم!
+                            </div>
+                            <div style="color: #7F1D1D; margin-top: 5px; font-size: 0.9rem;">
+                                الدورة المخصصة حالياً لا تطابق الدورة المطلوبة في الحجز!
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- الخيارات -->
+                    <div style="background: #F9FAFB; padding: 15px; border-radius: 10px;">
+                        <label style="display: block; margin-bottom: 10px; color: #374151; font-weight: bold;">
+                            اختر الإجراء:
+                        </label>
+                        <select id="reassignAction" class="swal2-select" style="width: 100%;">
+                            <option value="">-- اختر --</option>
+                            <option value="reassign-correct">✅ إعادة تخصيص الدورة الصحيحة</option>
+                            <option value="add-new">➕ إضافة دورة جديدة (بدون حذف القديمة)</option>
+                            <option value="delete-all">🗑️ حذف كل التخصيصات</option>
+                            <option value="manual-select">🎯 اختيار دورة يدوياً</option>
+                        </select>
+                    </div>
+                </div>
+            `,
+            width: '700px',
+            showCancelButton: true,
+            confirmButtonText: 'تنفيذ',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#10B981',
+            preConfirm: () => {
+                const action = document.getElementById('reassignAction').value;
+                if (!action) {
+                    Swal.showValidationMessage('يرجى اختيار إجراء');
+                    return false;
+                }
+                return action;
+            }
+        });
+
+        if (!action) return;
+
+        // تنفيذ الإجراء المختار
+        await executeReassignAction(studentId, action);
+
+    } catch (error) {
+        console.error('خطأ في إعادة التخصيص:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: error.message,
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+// تنفيذ الإجراء المختار
+async function executeReassignAction(studentId, action) {
+    const student = allStudents.find(s => s.id === studentId);
+    
+    switch(action) {
+        case 'reassign-correct':
+            await reassignCorrectCourse(student);
+            break;
+        case 'add-new':
+            await assignCourseToStudent(studentId);
+            break;
+        case 'delete-all':
+            await deleteAllEnrollments(student.userId);
+            break;
+        case 'manual-select':
+            await manualCourseSelection(student);
+            break;
+    }
+}
+
+// إعادة تخصيص الدورة الصحيحة
+async function reassignCorrectCourse(student) {
+    if (!student.courseName) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'تنبيه',
+            text: 'لا توجد دورة محددة في بيانات الحجز',
+            confirmButtonColor: '#F59E0B'
+        });
+        return;
+    }
+
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'تأكيد إعادة التخصيص',
+        html: `
+            <div style="text-align: right;">
+                <p>سيتم:</p>
+                <ul style="text-align: right; padding-right: 30px;">
+                    <li>حذف كل التخصيصات الحالية</li>
+                    <li>تخصيص الدورة الصحيحة: <strong>${student.courseName}</strong></li>
+                </ul>
+                <p style="color: #EF4444; margin-top: 15px;">هل أنت متأكد؟</p>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '✅ نعم، أعد التخصيص',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#10B981'
+    });
+
+    if (!result.isConfirmed) return;
+
+    Swal.fire({
+        title: 'جاري إعادة التخصيص...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    try {
+        // حذف كل التخصيصات
+        await db.collection('users').doc(student.userId).update({
+            enrollments: [],
+            'financial.totalPaid': 0,
+            'financial.totalDue': 0,
+            'financial.totalSavings': 0
+        });
+
+        // تخصيص الدورة الصحيحة
+        await assignCourseToStudent(student.id);
+
+        Swal.fire({
+            icon: 'success',
+            title: 'تم بنجاح',
+            text: 'تم إعادة تخصيص الدورة الصحيحة',
+            confirmButtonColor: '#10B981'
+        });
+
+        // تحديث العرض
+        await loadStudents();
+
+    } catch (error) {
+        console.error('خطأ:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: error.message,
+            confirmButtonColor: '#EF4444'
+        });
+    }
+}
+
+// حذف تخصيص معين
+async function deleteEnrollment(userId, enrollmentIndex) {
+    const result = await Swal.fire({
+        icon: 'warning',
+        title: 'تأكيد الحذف',
+        text: 'هل أنت متأكد من حذف هذا التخصيص؟',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#EF4444'
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        const enrollments = userData.enrollments || [];
+
+        // حذف التخصيص المحدد
+        enrollments.splice(enrollmentIndex, 1);
+
+        // إعادة حساب الإجماليات
+        const financialTotals = EnrollmentManager.calculateFinancialTotals(enrollments);
+
+        await db.collection('users').doc(userId).update({
+            enrollments: enrollments,
+            'financial.totalPaid': financialTotals.totalPaid,
+            'financial.totalDue': financialTotals.totalDue,
+            'financial.totalSavings': financialTotals.totalSavings
+        });
+
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الحذف',
+            timer: 1500,
+            showConfirmButton: false
+        });
+
+        // إعادة فتح نافذة الإدارة
+        const student = allStudents.find(s => s.userId === userId);
+        if (student) {
+            await reopenCourseAssignment(student.id);
+        }
+
+    } catch (error) {
+        console.error('خطأ:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: error.message
+        });
+    }
+}
+
+// حذف كل التخصيصات
+async function deleteAllEnrollments(userId) {
+    const result = await Swal.fire({
+        icon: 'warning',
+        title: 'تأكيد حذف الكل',
+        html: '<p style="color: #EF4444;">سيتم حذف جميع التخصيصات!<br>هل أنت متأكد؟</p>',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف الكل',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#EF4444'
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+        await db.collection('users').doc(userId).update({
+            enrollments: [],
+            'financial.totalPaid': 0,
+            'financial.totalDue': 0,
+            'financial.totalSavings': 0,
+            'financial.totalOriginalPrice': 0
+        });
+
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الحذف',
+            text: 'تم حذف جميع التخصيصات',
+            confirmButtonColor: '#10B981'
+        });
+
+        await loadStudents();
+
+    } catch (error) {
+        console.error('خطأ:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: error.message
+        });
+    }
+}
+
+// اختيار دورة يدوياً
+async function manualCourseSelection(student) {
+    // جلب كل الدورات المتاحة
+    const coursesSnapshot = await db.collection('courses').get();
+    const courses = [];
+    
+    coursesSnapshot.forEach(doc => {
+        courses.push({
+            id: doc.id,
+            ...doc.data()
+        });
+    });
+
+    if (courses.length === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'تنبيه',
+            text: 'لا توجد دورات متاحة',
+            confirmButtonColor: '#F59E0B'
+        });
+        return;
+    }
+
+    const { value: selectedCourseId } = await Swal.fire({
+        title: 'اختر دورة يدوياً',
+        html: `
+            <div style="text-align: right;">
+                <label style="display: block; margin-bottom: 10px; color: #374151; font-weight: bold;">
+                    اختر الدورة:
+                </label>
+                <select id="manual-course" class="swal2-select" style="width: 100%;">
+                    <option value="">-- اختر دورة --</option>
+                    ${courses.map(course => `
+                        <option value="${course.id}">${course.title}</option>
+                    `).join('')}
+                </select>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تخصيص',
+        cancelButtonText: 'إلغاء',
+        preConfirm: () => {
+            const courseId = document.getElementById('manual-course').value;
+            if (!courseId) {
+                Swal.showValidationMessage('يرجى اختيار دورة');
+                return false;
+            }
+            return courseId;
+        }
+    });
+
+    if (!selectedCourseId) return;
+
+    const selectedCourse = courses.find(c => c.id === selectedCourseId);
+    
+    // تحديث بيانات الطالب مؤقتاً للتخصيص
+    const tempStudent = {
+        ...student,
+        courseName: selectedCourse.title,
+        actualCourseId: selectedCourseId
+    };
+
+    // إعادة حفظ في allStudents
+    const studentIndex = allStudents.findIndex(s => s.id === student.id);
+    if (studentIndex !== -1) {
+        allStudents[studentIndex] = tempStudent;
+    }
+
+    // تخصيص الدورة
+    await assignCourseToStudent(student.id);
+}
+
+// إضافة الزر لكل بطاقة طالب
+window.reopenCourseAssignment = reopenCourseAssignment;
+window.deleteEnrollment = deleteEnrollment;
+
+console.log('✅ نظام إعادة التخصيص جاهز');
     </script>
 </body>
 </html>
