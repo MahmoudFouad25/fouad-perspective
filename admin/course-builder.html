@@ -6362,7 +6362,109 @@ function checkFirebaseConnection() {
 
 // التحقق من صحة البيانات قبل الحفظ
 
-
+// ========================================
+// 📦 جمع بيانات التمرين من نظام الأجزاء الجديد
+// ========================================
+function collectExerciseStructure() {
+    const partsContainer = document.getElementById('exercisePartsContainer');
+    
+    if (!partsContainer) {
+        console.log('ℹ️ نظام الأجزاء غير مفعّل (النمط القديم)');
+        return null;
+    }
+    
+    const parts = [];
+    const partElements = partsContainer.querySelectorAll('.exercise-part');
+    
+    if (partElements.length === 0) {
+        console.log('ℹ️ لا توجد أجزاء (النمط القديم)');
+        return null;
+    }
+    
+    console.log('🔍 جمع بيانات الأجزاء:', partElements.length);
+    
+    partElements.forEach((partElement, partIndex) => {
+        const partTitle = partElement.querySelector('.part-title')?.value?.trim();
+        const partDescription = partElement.querySelector('.part-description')?.value?.trim();
+        
+        if (!partTitle) {
+            console.warn(`⚠️ الجزء ${partIndex + 1} بدون عنوان - تم تخطيه`);
+            return;
+        }
+        
+        const part = {
+            title: partTitle,
+            description: partDescription || '',
+            sections: []
+        };
+        
+        const sectionElements = partElement.querySelectorAll('.part-section');
+        
+        sectionElements.forEach((sectionElement, sectionIndex) => {
+            const sectionTitle = sectionElement.querySelector('.section-title')?.value?.trim();
+            const sectionDescription = sectionElement.querySelector('.section-description')?.value?.trim();
+            
+            if (!sectionTitle) {
+                console.warn(`⚠️ القسم ${sectionIndex + 1} بدون عنوان - تم تخطيه`);
+                return;
+            }
+            
+            const section = {
+                title: sectionTitle,
+                description: sectionDescription || '',
+                questions: []
+            };
+            
+            const questionElements = sectionElement.querySelectorAll('.question-item');
+            
+            questionElements.forEach((questionElement) => {
+                const questionText = questionElement.querySelector('.question-text')?.value?.trim();
+                const questionType = questionElement.getAttribute('data-type');
+                
+                if (!questionText) return;
+                
+                const question = {
+                    text: questionText,
+                    type: questionType
+                };
+                
+                switch(questionType) {
+                    case 'textarea':
+                        question.rows = parseInt(questionElement.querySelector('.question-rows')?.value) || 4;
+                        break;
+                        
+                    case 'checkbox':
+                        const optionsText = questionElement.querySelector('.question-options')?.value?.trim();
+                        question.options = optionsText ? optionsText.split('\n').filter(opt => opt.trim()) : [];
+                        break;
+                        
+                    case 'slider':
+                        question.min = parseInt(questionElement.querySelector('.question-min')?.value) || 1;
+                        question.max = parseInt(questionElement.querySelector('.question-max')?.value) || 10;
+                        break;
+                        
+                    case 'text':
+                        question.placeholder = questionElement.querySelector('.question-placeholder')?.value?.trim() || '';
+                        break;
+                }
+                
+                section.questions.push(question);
+            });
+            
+            if (section.questions.length > 0) {
+                part.sections.push(section);
+            }
+        });
+        
+        if (part.sections.length > 0) {
+            parts.push(part);
+        }
+    });
+    
+    console.log('✅ تم جمع الأجزاء:', parts.length);
+    
+    return parts.length > 0 ? { parts } : null;
+}
 
 // ========================================
 // 💾 حفظ التمرين
@@ -6482,6 +6584,40 @@ async function saveExerciseFromBuilder(event) {
         });
         
         console.log('✅ تم جمع الأسئلة:', questions.length);
+
+        // 🆕 3.1 محاولة جمع البيانات من نظام الأجزاء الجديد
+        const structuredData = collectExerciseStructure();
+        
+        if (structuredData) {
+            console.log('✅ تم استخدام نظام الأجزاء المتقدم');
+            
+            // تحويل الأجزاء والأقسام إلى questions مسطّحة (للتوافق مع النظام القديم)
+            const flatQuestions = [];
+            let questionCounter = 1;
+            
+            structuredData.parts.forEach(part => {
+                part.sections.forEach(section => {
+                    section.questions.forEach(q => {
+                        flatQuestions.push({
+                            title: `${part.title} - ${section.title}`,
+                            text: q.text,
+                            type: q.type,
+                            ...q
+                        });
+                    });
+                });
+            });
+            
+            // استبدال questions بالنسخة المسطّحة
+            questions.push(...flatQuestions);
+            
+            // إضافة البيانات الهيكلية للـ patternContent
+            patternContent.structuredExercise = structuredData;
+            
+            console.log('📊 تم تحويل', flatQuestions.length, 'سؤال من النظام الجديد');
+        } else {
+            console.log('ℹ️ استخدام النظام القديم (الأسئلة المباشرة)');
+        }
         
         // 3.5. جمع محتوى خاص بالنمط
         let patternContent = {};
@@ -6540,7 +6676,11 @@ async function saveExerciseFromBuilder(event) {
                 totalPoints: exerciseTotalPoints,
                 pillars: pillars,
                 questions: questions,
-                ...patternContent
+                ...patternContent,
+                // 🆕 معلومات النمط
+                patternType: currentExercisePattern?.id || 'generic',
+                patternName: currentExercisePattern?.name || 'تمرين عملي',
+                patternIcon: currentExercisePattern?.icon || '💪'
             }
         };
         
@@ -9008,6 +9148,60 @@ function showExercisePreview() {
     `;
     
     document.body.insertAdjacentHTML('beforeend', previewHtml);
+}
+
+  
+// دالة الحفظ في Firebase
+async function saveToFirebase(exerciseData) {
+    try {
+        // عرض رسالة تحميل
+        Swal.fire({
+            title: 'جاري الحفظ...',
+            text: 'يتم حفظ التمرين في قاعدة البيانات',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        // الحفظ في مكتبة المحتوى
+        const docRef = await db.collection('courseContentLibrary').add(exerciseData);
+        
+        console.log('✅ تم الحفظ بنجاح، ID:', docRef.id);
+        
+        // رسالة نجاح
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الحفظ بنجاح! 🎉',
+            html: `
+                <div style="text-align: right;">
+                    <p><strong>اسم التمرين:</strong> ${exerciseData.name}</p>
+                    <p><strong>عدد الأجزاء:</strong> ${exerciseData.exerciseData.statistics.totalParts}</p>
+                    <p><strong>عدد الأقسام:</strong> ${exerciseData.exerciseData.statistics.totalSections}</p>
+                    <p><strong>عدد الأسئلة:</strong> ${exerciseData.exerciseData.statistics.totalQuestions}</p>
+                    <p><strong>إجمالي النقاط:</strong> ${exerciseData.exerciseData.totalPoints}</p>
+                </div>
+            `,
+            confirmButtonText: 'رائع!',
+            confirmButtonColor: '#10b981'
+        }).then(() => {
+            // إغلاق النافذة
+            closeExerciseModal();
+            // إعادة تحميل المكتبة
+            loadContentLibrary();
+        });
+        
+    } catch (error) {
+        console.error('❌ خطأ في الحفظ:', error);
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'فشل الحفظ',
+            text: 'حدث خطأ أثناء حفظ التمرين: ' + error.message,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#ef4444'
+        });
+    }
 }
 
 // بناء حقل السؤال في المعاينة
