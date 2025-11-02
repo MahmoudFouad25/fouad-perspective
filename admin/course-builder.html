@@ -5768,11 +5768,33 @@ function displayExercisesList(exercises) {
                             </div>
                             
                            <!-- الأزرار -->
-<div style="
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1fr;
+<div style="  
+    display: grid;  
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
     gap: 0.5rem;
 ">
+
+        <!-- 🆕 زر النسخ -->
+<button   
+    onclick="copyExercise('${ex.id}', '${ex.name.replace(/'/g, "\\'")}'); event.stopPropagation();"
+    style="  
+        background: rgba(139, 92, 246, 0.2);
+        border: 2px solid rgba(139, 92, 246, 0.5);
+        color: #8b5cf6;
+        padding: 0.75rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.85rem;
+        transition: all 0.3s;
+    "
+    onmouseover="this.style.background='rgba(139, 92, 246, 0.3)';"
+    onmouseout="this.style.background='rgba(139, 92, 246, 0.2)';"
+    title="نسخ التمرين"
+>
+    <i class="fas fa-copy"></i>
+    نسخ
+</button>
     <!-- زر الإضافة -->
     <button 
         onclick="addExistingExerciseToModule('${ex.id}', '${ex.name.replace(/'/g, "\\'")}'); event.stopPropagation();"
@@ -6378,9 +6400,97 @@ async function addExistingExerciseToModule(exerciseId, exerciseName) {
     }
 }
 
-        // ========================================
-// 🎯 متغير لحفظ النمط المختار
-// ========================================
+        // 📋 نسخ تمرين من المكتبة
+async function copyExercise(exerciseId, exerciseName) {
+    try {
+        showLoading('جاري نسخ التمرين...');
+        
+        // جلب التمرين الأصلي
+        const originalDoc = await db.collection('courseContentLibrary')
+            .doc(exerciseId)
+            .get();
+        
+        if (!originalDoc.exists) {
+            hideLoading();
+            showNotification('التمرين غير موجود', 'error');
+            return;
+        }
+        
+        const originalData = originalDoc.data();
+        
+        // طلب اسم جديد للنسخة
+        const result = await Swal.fire({
+            title: 'نسخ التمرين',
+            html: `
+                <p style="margin-bottom: 1rem;">سيتم إنشاء نسخة من:</p>
+                <p style="font-weight: bold; color: #3b82f6; margin-bottom: 1.5rem;">"${exerciseName}"</p>
+                <input id="newExerciseName" class="swal2-input" placeholder="اسم النسخة الجديدة" value="${exerciseName} (نسخة)">
+            `,
+            showCancelButton: true,
+            confirmButtonText: 'نسخ',
+            cancelButtonText: 'إلغاء',
+            confirmButtonColor: '#8b5cf6',
+            preConfirm: () => {
+                const name = document.getElementById('newExerciseName').value;
+                if (!name || name.trim() === '') {
+                    Swal.showValidationMessage('يرجى إدخال اسم للنسخة');
+                    return false;
+                }
+                return name.trim();
+            }
+        });
+        
+        if (!result.isConfirmed) {
+            hideLoading();
+            return;
+        }
+        
+        const newName = result.value;
+        
+        // إنشاء نسخة مع IDs جديدة للأسئلة
+        const copiedData = JSON.parse(JSON.stringify(originalData));
+        copiedData.name = newName;
+        
+        // توليد IDs جديدة للأسئلة
+        if (copiedData.exerciseData?.structuredExercise?.parts) {
+            copiedData.exerciseData.structuredExercise.parts.forEach(part => {
+                part.sections.forEach(section => {
+                    section.questions.forEach(question => {
+                        // توليد ID جديد
+                        question.id = 'q_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    });
+                });
+            });
+        }
+        
+        // حفظ النسخة الجديدة
+        const newExerciseId = 'exercise_' + Date.now();
+        await db.collection('courseContentLibrary')
+            .doc(newExerciseId)
+            .set(copiedData);
+        
+        hideLoading();
+        
+        await Swal.fire({
+            icon: 'success',
+            title: 'تم النسخ بنجاح! 🎉',
+            html: `
+                <p>تم إنشاء نسخة جديدة:</p>
+                <p style="font-weight: bold; color: #8b5cf6;">"${newName}"</p>
+            `,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#8b5cf6'
+        });
+        
+        // إعادة تحميل القائمة
+        showExistingExercises();
+        
+    } catch (error) {
+        console.error('❌ خطأ في النسخ:', error);
+        hideLoading();
+        showNotification('حدث خطأ أثناء النسخ', 'error');
+    }
+}
 
 
 // ========================================
@@ -6551,10 +6661,10 @@ function collectExerciseStructure() {
                 if (!questionText) return;
                   
                 const question = {
-                    id: questionId, // 🆕
-                    text: questionText,
-                    type: questionType
-                };
+    id: questionId || ('q_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)), // 🔒 استخدام ID موجود أو توليد جديد
+    text: questionText,
+    type: questionType
+};
                   
                 switch(questionType) {
                     case 'textarea':
