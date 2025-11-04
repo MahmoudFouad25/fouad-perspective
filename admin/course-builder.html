@@ -11692,20 +11692,74 @@ function renderAnalysisStepContent(step) {
  */
 function renderStepQuestions(step) {
     return step.questions.map((q, qIndex) => `
-        <div class="question-item mb-3 p-3" style="background: #f9fafb; border-radius: 6px; border-left: 4px solid #667eea;">
+        <div class="question-item mb-3 p-3" style="
+            background: ${q.isConditional ? '#fef3c7' : '#f9fafb'}; 
+            border-radius: 6px; 
+            border-left: 4px solid ${q.isConditional ? '#f59e0b' : '#667eea'};
+        ">
             
             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
                 <div style="flex: 1;">
-                    <strong style="color: #667eea;">سؤال ${qIndex + 1}</strong>
+                    <strong style="color: ${q.isConditional ? '#f59e0b' : '#667eea'};">
+                        ${q.isConditional ? '🔗' : '📝'} سؤال ${qIndex + 1}
+                        ${q.isConditional ? ' (مشروط)' : ''}
+                    </strong>
                 </div>
-                <button 
-    type="button"
-    class="btn btn-sm btn-outline-danger" 
-    onclick="deleteStepQuestion('${step.id}', ${qIndex})"
->
-                    <i class="fas fa-trash"></i>
-                </button>
+                <div style="display: flex; gap: 5px;">
+                    <!-- زر تفعيل/إلغاء الشرط -->
+                    <button 
+                        type="button"
+                        class="btn btn-sm ${q.isConditional ? 'btn-warning' : 'btn-outline-secondary'}" 
+                        onclick="toggleQuestionConditional('${step.id}', ${qIndex})"
+                        title="${q.isConditional ? 'إلغاء الشرط' : 'جعل السؤال مشروطاً'}"
+                        style="font-size: 0.75rem;"
+                    >
+                        <i class="fas ${q.isConditional ? 'fa-unlink' : 'fa-link'}"></i>
+                    </button>
+                    <!-- زر حذف -->
+                    <button 
+                        type="button"
+                        class="btn btn-sm btn-outline-danger" 
+                        onclick="deleteStepQuestion('${step.id}', ${qIndex})"
+                    >
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
+
+            <!-- إعدادات الشرط (تظهر فقط إذا كان مشروطاً) -->
+            ${q.isConditional ? `
+                <div class="alert alert-warning p-2 mb-2" style="font-size: 0.85rem;">
+                    <strong><i class="fas fa-info-circle"></i> شرط الظهور:</strong>
+                    <div class="row g-2 mt-1">
+                        <div class="col-md-6">
+                            <label class="small">يظهر فقط إذا السؤال:</label>
+                            <select 
+                                class="form-select form-select-sm"
+                                onchange="updateQuestionConditional('${step.id}', ${qIndex}, 'conditionalOn', this.value)"
+                            >
+                                <option value="">-- اختر السؤال --</option>
+                                ${step.questions.slice(0, qIndex).map((prevQ, prevIdx) => `
+                                    <option value="${prevQ.id}" ${q.conditionalOn === prevQ.id ? 'selected' : ''}>
+                                        سؤال ${prevIdx + 1}: ${prevQ.text.substring(0, 30)}...
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="small">كانت الإجابة:</label>
+                            <input 
+                                type="text" 
+                                class="form-control form-control-sm"
+                                value="${q.conditionalValue || ''}"
+                                onchange="updateQuestionConditional('${step.id}', ${qIndex}, 'conditionalValue', this.value)"
+                                placeholder="مثال: نعم، أو رقم الخيار"
+                            >
+                            <small class="text-muted">اكتب نص الخيار أو رقمه (1، 2، إلخ)</small>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
 
             <!-- نص السؤال -->
             <div class="mb-2">
@@ -11723,7 +11777,7 @@ function renderStepQuestions(step) {
                 <label class="small text-muted">نوع الإجابة:</label>
                 <select 
                     class="form-select form-select-sm" 
-                    onchange="updateStepQuestion('${step.id}', ${qIndex}, 'type', this.value)"
+                    onchange="updateStepQuestion('${step.id}', ${qIndex}, 'type', this.value); renderAssessmentSteps();"
                 >
                     <option value="radio" ${q.type === 'radio' ? 'selected' : ''}>اختيار من متعدد (Radio)</option>
                     <option value="checkbox" ${q.type === 'checkbox' ? 'selected' : ''}>اختيارات متعددة (Checkbox)</option>
@@ -11788,9 +11842,89 @@ function renderStepQuestions(step) {
                 </div>
             ` : ''}
 
+            <!-- إعدادات إضافية متقدمة (قابلة للطي) -->
+            <div class="mt-2">
+                <button 
+                    type="button"
+                    class="btn btn-sm btn-link p-0 text-decoration-none" 
+                    onclick="toggleElement('advanced_${step.id}_${qIndex}')"
+                    style="font-size: 0.8rem;"
+                >
+                    <i class="fas fa-cog"></i> إعدادات متقدمة
+                </button>
+                <div id="advanced_${step.id}_${qIndex}" style="display: none;" class="mt-2 p-2" style="background: #f3f4f6; border-radius: 4px;">
+                    <!-- التصنيف -->
+                    <div class="mb-2">
+                        <label class="small text-muted">التصنيف (Category):</label>
+                        <input 
+                            type="text" 
+                            class="form-control form-control-sm"
+                            value="${q.category || ''}"
+                            onchange="updateStepQuestion('${step.id}', ${qIndex}, 'category', this.value)"
+                            placeholder="مثال: dimension-1 (لتجميع الأسئلة)"
+                        >
+                        <small class="text-muted">استخدم نفس التصنيف للأسئلة المترابطة (مثل: بُعد معين)</small>
+                    </div>
+                    <!-- الوزن -->
+                    <div class="mb-2">
+                        <label class="small text-muted">الوزن في الحساب:</label>
+                        <input 
+                            type="number" 
+                            class="form-control form-control-sm"
+                            value="${q.weight || 1}"
+                            step="0.1"
+                            min="0"
+                            onchange="updateStepQuestion('${step.id}', ${qIndex}, 'weight', parseFloat(this.value))"
+                        >
+                        <small class="text-muted">الوزن الافتراضي = 1. استخدم أرقام أعلى للأسئلة الأهم</small>
+                    </div>
+                </div>
+            </div>
+
         </div>
     `).join('');
 }
+
+        /**
+ * تفعيل/إلغاء الشرط للسؤال
+ */
+function toggleQuestionConditional(stepId, questionIndex) {
+    const step = assessmentSteps.find(s => s.id === stepId);
+    if (!step || !step.questions[questionIndex]) return;
+    
+    const question = step.questions[questionIndex];
+    question.isConditional = !question.isConditional;
+    
+    // إذا تم إلغاء الشرط، امسح البيانات
+    if (!question.isConditional) {
+        question.conditionalOn = null;
+        question.conditionalValue = null;
+    }
+    
+    renderAssessmentSteps();
+}
+
+/**
+ * تحديث شرط السؤال
+ */
+function updateQuestionConditional(stepId, questionIndex, property, value) {
+    const step = assessmentSteps.find(s => s.id === stepId);
+    if (!step || !step.questions[questionIndex]) return;
+    
+    step.questions[questionIndex][property] = value;
+    console.log(`✏️ تحديث ${property} للسؤال ${questionIndex}:`, value);
+}
+
+/**
+ * إظهار/إخفاء عنصر
+ */
+function toggleElement(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.style.display = element.style.display === 'none' ? 'block' : 'none';
+    }
+}
+    
 
         /**
  * تحديث خاصية في الخطوة
@@ -11817,7 +11951,14 @@ function addQuestionToStep(stepId) {
         text: '',
         type: 'radio',
         options: ['○ الخيار الأول', '○ الخيار الثاني'],
-        scores: [0, 1]
+        scores: [0, 1],
+        // 🆕 إضافة دعم الشروط
+        isConditional: false,
+        conditionalOn: null, // ID السؤال المعتمد عليه
+        conditionalValue: null, // القيمة المطلوبة لإظهار هذا السؤال
+        // 🆕 إضافة دعم العلامات
+        category: '', // مثل: 'dimension-1' لتصنيف الأسئلة
+        weight: 1 // وزن السؤال في الحساب
     });
     
     renderAssessmentSteps();
@@ -13401,16 +13542,22 @@ function collectInteractiveAssessmentData() {
             title: step.title,
             description: step.description,
             questions: step.questions.map(q => ({
-                id: q.id,
-                text: q.text,
-                type: q.type,
-                options: q.options || [],
-                scores: q.scores || [],
-                min: q.min,
-                max: q.max,
-                placeholder: q.placeholder,
-                conditional: q.conditional || null
-            })),
+    id: q.id,
+    text: q.text,
+    type: q.type,
+    options: q.options || [],
+    scores: q.scores || [],
+    min: q.min,
+    max: q.max,
+    placeholder: q.placeholder,
+    // 🆕 إضافة بيانات الشروط
+    isConditional: q.isConditional || false,
+    conditionalOn: q.conditionalOn || null,
+    conditionalValue: q.conditionalValue || null,
+    // 🆕 إضافة البيانات المتقدمة
+    category: q.category || '',
+    weight: q.weight || 1
+})),
             analysisRules: step.analysisRules || []
         })),
         points: points,
