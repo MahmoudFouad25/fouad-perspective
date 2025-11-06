@@ -11699,17 +11699,376 @@ function renderQuestionsStepContent(step) {
  */
 function renderAnalysisStepContent(step) {
     return `
-        <div class="alert alert-info" style="background: #dbeafe; border: none; color: #1e40af;">
-            <i class="fas fa-info-circle"></i>
-            <strong>خطوة التحليل:</strong>
-            <p class="mb-0 mt-2 small">
-                هذه الخطوة ستعرض تحليل ديناميكي للطالب بناءً على إجاباته في الخطوات السابقة.
-                <br>
-                (سنضيف إعدادات التحليل في المرحلة الثالثة)
-            </p>
+        <div>
+            <!-- شرح خطوة التحليل -->
+            <div class="alert alert-info mb-3" style="background: #dbeafe; border: none; color: #1e40af;">
+                <h6 class="mb-2">
+                    <i class="fas fa-chart-line"></i>
+                    خطوة التحليل الديناميكي
+                </h6>
+                <p class="mb-0 small">
+                    هذه الخطوة ستعرض للطالب تحليلاً ديناميكياً بناءً على إجاباته في الخطوات السابقة.
+                    يمكنك تحديد نصوص مختلفة تظهر حسب النتيجة.
+                </p>
+            </div>
+
+            <!-- نوع التحليل -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">
+                    <i class="fas fa-cog"></i>
+                    نوع التحليل
+                </label>
+                <select 
+                    class="form-select"
+                    onchange="updateStepProperty('${step.id}', 'analysisType', this.value); renderAssessmentSteps();"
+                >
+                    <option value="score-based" ${step.analysisType === 'score-based' ? 'selected' : ''}>
+                        حسب مجموع النقاط
+                    </option>
+                    <option value="category-based" ${step.analysisType === 'category-based' ? 'selected' : ''}>
+                        حسب التصنيفات (Categories)
+                    </option>
+                    <option value="percentage-based" ${step.analysisType === 'percentage-based' ? 'selected' : ''}>
+                        حسب النسبة المئوية
+                    </option>
+                    <option value="pattern-based" ${step.analysisType === 'pattern-based' ? 'selected' : ''}>
+                        حسب أنماط الإجابات
+                    </option>
+                </select>
+                <small class="text-muted d-block mt-1">
+                    ${step.analysisType === 'score-based' ? 'سيتم حساب مجموع النقاط من الأسئلة السابقة' :
+                      step.analysisType === 'category-based' ? 'سيتم حساب النقاط لكل تصنيف (Category) على حدة' :
+                      step.analysisType === 'percentage-based' ? 'سيتم حساب نسبة النقاط من الإجمالي' :
+                      'سيتم تحليل أنماط الإجابات (مثل: كم مرة اختار "أ" vs "ب")'}
+                </small>
+            </div>
+
+            <!-- المصدر (من أي خطوات يتم الحساب) -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">
+                    <i class="fas fa-database"></i>
+                    حساب النتائج من:
+                </label>
+                <select 
+                    class="form-select"
+                    onchange="updateStepProperty('${step.id}', 'analysisSource', this.value)"
+                >
+                    <option value="all-previous" ${step.analysisSource === 'all-previous' ? 'selected' : ''}>
+                        جميع الخطوات السابقة
+                    </option>
+                    <option value="specific-steps" ${step.analysisSource === 'specific-steps' ? 'selected' : ''}>
+                        خطوات محددة فقط
+                    </option>
+                    <option value="specific-categories" ${step.analysisSource === 'specific-categories' ? 'selected' : ''}>
+                        تصنيفات محددة فقط
+                    </option>
+                </select>
+            </div>
+
+            ${step.analysisSource === 'specific-steps' ? `
+                <!-- اختيار الخطوات المحددة -->
+                <div class="mb-3">
+                    <label class="small text-muted">حدد الخطوات:</label>
+                    ${renderPreviousStepsCheckboxes(step)}
+                </div>
+            ` : ''}
+
+            ${step.analysisSource === 'specific-categories' ? `
+                <!-- إدخال التصنيفات -->
+                <div class="mb-3">
+                    <label class="small text-muted">التصنيفات (افصل بفواصل):</label>
+                    <input 
+                        type="text" 
+                        class="form-control"
+                        value="${(step.analysisCategories || []).join(', ')}"
+                        onchange="updateStepProperty('${step.id}', 'analysisCategories', this.value.split(',').map(c => c.trim()).filter(c => c))"
+                        placeholder="dimension-1, dimension-2, dimension-3"
+                    >
+                </div>
+            ` : ''}
+
+            <hr>
+
+            <!-- قواعد التحليل -->
+            <div class="mb-3">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h6 class="mb-0">
+                        <i class="fas fa-rules"></i>
+                        قواعد التحليل
+                    </h6>
+                    <button 
+                        type="button"
+                        class="btn btn-sm btn-outline-primary" 
+                        onclick="addAnalysisRule('${step.id}')"
+                    >
+                        <i class="fas fa-plus"></i>
+                        إضافة قاعدة
+                    </button>
+                </div>
+
+                <div class="alert alert-warning p-2 mb-2" style="background: #fef3c7; border: none; color: #92400e; font-size: 0.85rem;">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>كيف تعمل القواعد؟</strong><br>
+                    كل قاعدة تحدد: "إذا كانت النتيجة من X إلى Y، اعرض النص Z"
+                </div>
+
+                <!-- حاوية القواعد -->
+                <div id="analysisRules_${step.id}">
+                    ${(step.analysisRules && step.analysisRules.length > 0) ? 
+                        renderAnalysisRules(step) : 
+                        `<div class="text-center text-muted py-3" style="background: #f9fafb; border-radius: 6px;">
+                            <i class="fas fa-ruler fa-2x mb-2" style="opacity: 0.3;"></i>
+                            <p class="mb-0">لم يتم إضافة قواعد بعد</p>
+                        </div>`
+                    }
+                </div>
+            </div>
+
+            <!-- النص الافتراضي (إذا لم تطابق أي قاعدة) -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">
+                    <i class="fas fa-text"></i>
+                    النص الافتراضي (إذا لم تطابق أي قاعدة)
+                </label>
+                <textarea 
+                    class="form-control"
+                    rows="3"
+                    onchange="updateStepProperty('${step.id}', 'analysisDefaultText', this.value)"
+                    placeholder="هذا النص سيظهر إذا لم تطابق النتيجة أي قاعدة..."
+                >${step.analysisDefaultText || ''}</textarea>
+            </div>
+
         </div>
     `;
 }
+
+        /**
+ * عرض checkboxes للخطوات السابقة
+ */
+function renderPreviousStepsCheckboxes(currentStep) {
+    const currentIndex = assessmentSteps.findIndex(s => s.id === currentStep.id);
+    if (currentIndex <= 0) {
+        return `<p class="text-muted small">لا توجد خطوات سابقة</p>`;
+    }
+    
+    const previousSteps = assessmentSteps.slice(0, currentIndex);
+    const selectedSteps = currentStep.analysisSteps || [];
+    
+    return `
+        <div style="max-height: 200px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px;">
+            ${previousSteps.map(step => `
+                <div class="form-check mb-2">
+                    <input 
+                        class="form-check-input" 
+                        type="checkbox" 
+                        value="${step.id}"
+                        id="check_${step.id}"
+                        ${selectedSteps.includes(step.id) ? 'checked' : ''}
+                        onchange="toggleAnalysisStep('${currentStep.id}', '${step.id}', this.checked)"
+                    >
+                    <label class="form-check-label small" for="check_${step.id}">
+                        الخطوة ${step.number}: ${step.title || 'بدون عنوان'}
+                    </label>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+/**
+ * إضافة/إزالة خطوة من قائمة الخطوات المحسوبة
+ */
+function toggleAnalysisStep(currentStepId, stepId, isChecked) {
+    const step = assessmentSteps.find(s => s.id === currentStepId);
+    if (!step) return;
+    
+    if (!step.analysisSteps) {
+        step.analysisSteps = [];
+    }
+    
+    if (isChecked) {
+        if (!step.analysisSteps.includes(stepId)) {
+            step.analysisSteps.push(stepId);
+        }
+    } else {
+        step.analysisSteps = step.analysisSteps.filter(id => id !== stepId);
+    }
+    
+    console.log('📊 تحديث الخطوات المحسوبة:', step.analysisSteps);
+}
+
+        /**
+ * إضافة قاعدة تحليل جديدة
+ */
+function addAnalysisRule(stepId) {
+    const step = assessmentSteps.find(s => s.id === stepId);
+    if (!step) return;
+    
+    if (!step.analysisRules) {
+        step.analysisRules = [];
+    }
+    
+    const ruleId = `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    step.analysisRules.push({
+        id: ruleId,
+        minScore: 0,
+        maxScore: 100,
+        condition: 'range', // range, equals, greater, less
+        text: '',
+        title: '',
+        color: '#3b82f6'
+    });
+    
+    renderAssessmentSteps();
+}
+
+/**
+ * عرض قواعد التحليل
+ */
+function renderAnalysisRules(step) {
+    return step.analysisRules.map((rule, ruleIndex) => `
+        <div class="card mb-2" style="border-left: 4px solid ${rule.color};">
+            <div class="card-body p-3">
+                
+                <!-- Header -->
+                <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 10px;">
+                    <strong style="color: ${rule.color}; flex: 1;">
+                        قاعدة ${ruleIndex + 1}
+                    </strong>
+                    <button 
+                        type="button"
+                        class="btn btn-sm btn-outline-danger" 
+                        onclick="deleteAnalysisRule('${step.id}', ${ruleIndex})"
+                    >
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+
+                <!-- الشرط -->
+                <div class="row g-2 mb-2">
+                    <div class="col-md-3">
+                        <label class="small text-muted">نوع الشرط:</label>
+                        <select 
+                            class="form-select form-select-sm"
+                            onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'condition', this.value); renderAssessmentSteps();"
+                        >
+                            <option value="range" ${rule.condition === 'range' ? 'selected' : ''}>في نطاق (من-إلى)</option>
+                            <option value="equals" ${rule.condition === 'equals' ? 'selected' : ''}>يساوي بالضبط</option>
+                            <option value="greater" ${rule.condition === 'greater' ? 'selected' : ''}>أكبر من</option>
+                            <option value="less" ${rule.condition === 'less' ? 'selected' : ''}>أقل من</option>
+                        </select>
+                    </div>
+                    
+                    ${rule.condition === 'range' ? `
+                        <div class="col-md-4">
+                            <label class="small text-muted">النتيجة من:</label>
+                            <input 
+                                type="number" 
+                                class="form-control form-control-sm"
+                                value="${rule.minScore || 0}"
+                                onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'minScore', parseFloat(this.value))"
+                            >
+                        </div>
+                        <div class="col-md-4">
+                            <label class="small text-muted">إلى:</label>
+                            <input 
+                                type="number" 
+                                class="form-control form-control-sm"
+                                value="${rule.maxScore || 100}"
+                                onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'maxScore', parseFloat(this.value))"
+                            >
+                        </div>
+                    ` : `
+                        <div class="col-md-8">
+                            <label class="small text-muted">القيمة:</label>
+                            <input 
+                                type="number" 
+                                class="form-control form-control-sm"
+                                value="${rule.minScore || 0}"
+                                onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'minScore', parseFloat(this.value))"
+                            >
+                        </div>
+                    `}
+                </div>
+
+                <!-- العنوان -->
+                <div class="mb-2">
+                    <label class="small text-muted">عنوان التحليل (اختياري):</label>
+                    <input 
+                        type="text" 
+                        class="form-control form-control-sm"
+                        value="${rule.title || ''}"
+                        onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'title', this.value)"
+                        placeholder="مثال: عقلية ثابتة قوية"
+                    >
+                </div>
+
+                <!-- النص -->
+                <div class="mb-2">
+                    <label class="small text-muted">نص التحليل:</label>
+                    <textarea 
+                        class="form-control form-control-sm"
+                        rows="3"
+                        onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'text', this.value)"
+                        placeholder="اكتب التحليل الذي سيظهر للطالب إذا تحقق هذا الشرط..."
+                    >${rule.text || ''}</textarea>
+                </div>
+
+                <!-- اللون -->
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="small text-muted">لون العرض:</label>
+                        <input 
+                            type="color" 
+                            class="form-control form-control-sm form-control-color"
+                            value="${rule.color || '#3b82f6'}"
+                            onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'color', this.value); renderAssessmentSteps();"
+                        >
+                    </div>
+                    <div class="col-md-6">
+                        <label class="small text-muted">الأولوية:</label>
+                        <input 
+                            type="number" 
+                            class="form-control form-control-sm"
+                            value="${rule.priority || ruleIndex}"
+                            min="0"
+                            onchange="updateAnalysisRule('${step.id}', ${ruleIndex}, 'priority', parseInt(this.value))"
+                            title="إذا تطابقت عدة قواعد، ستظهر الأعلى أولوية"
+                        >
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * تحديث قاعدة تحليل
+ */
+function updateAnalysisRule(stepId, ruleIndex, property, value) {
+    const step = assessmentSteps.find(s => s.id === stepId);
+    if (!step || !step.analysisRules || !step.analysisRules[ruleIndex]) return;
+    
+    step.analysisRules[ruleIndex][property] = value;
+    console.log(`✏️ تحديث ${property} للقاعدة ${ruleIndex}:`, value);
+}
+
+/**
+ * حذف قاعدة تحليل
+ */
+function deleteAnalysisRule(stepId, ruleIndex) {
+    const step = assessmentSteps.find(s => s.id === stepId);
+    if (!step || !step.analysisRules) return;
+    
+    if (confirm('هل أنت متأكد من حذف هذه القاعدة؟')) {
+        step.analysisRules.splice(ruleIndex, 1);
+        renderAssessmentSteps();
+    }
+}
+
+        
 
         /**
  * عرض محتوى خطوة المجموعة المتكررة
@@ -13708,8 +14067,17 @@ function collectInteractiveAssessmentData() {
         stepData.repeatLabels = step.repeatLabels || [];
         stepData.repeatItemName = step.repeatItemName || 'العنصر';
     }
+
+            // 🆕 إضافة بيانات التحليل
+    if (step.type === 'analysis') {
+        stepData.analysisType = step.analysisType || 'score-based';
+        stepData.analysisSource = step.analysisSource || 'all-previous';
+        stepData.analysisSteps = step.analysisSteps || [];
+        stepData.analysisCategories = step.analysisCategories || [];
+        stepData.analysisDefaultText = step.analysisDefaultText || '';
+    }
     
-    return stepData;
+              return stepData;
 }),
         points: points,
         duration: duration
@@ -13772,6 +14140,15 @@ function fillInteractiveAssessmentData(assessmentData) {
             step.repeatCount = stepData.repeatCount || 3;
             step.repeatLabels = stepData.repeatLabels || [];
             step.repeatItemName = stepData.repeatItemName || 'العنصر';
+        }
+
+        // 🆕 استعادة بيانات التحليل
+        if (stepData.type === 'analysis') {
+            step.analysisType = stepData.analysisType || 'score-based';
+            step.analysisSource = stepData.analysisSource || 'all-previous';
+            step.analysisSteps = stepData.analysisSteps || [];
+            step.analysisCategories = stepData.analysisCategories || [];
+            step.analysisDefaultText = stepData.analysisDefaultText || '';
         }
         
         assessmentSteps.push(step);
