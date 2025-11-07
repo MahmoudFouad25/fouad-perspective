@@ -15934,13 +15934,17 @@ function updateStepQuestion(stepId, questionIndex, field, value) {
         console.log('🔗 تهيئة Dynamic Dropdown للسؤال');
     }
     
-    // عند تغيير النوع لـ checkbox، نهيئ checkboxLimit
+    // 🆕 عند تغيير النوع لـ checkbox، نهيئ checkboxLimit بالبنية الجديدة
     if (field === 'type' && value === 'checkbox') {
         question.checkboxLimit = {
             enabled: false,
-            min: null,
-            max: null,
-            exact: null
+            limitType: 'max',
+            maxSelections: 3,
+            exactSelections: 3,
+            minSelections: 2,
+            customErrorMessage: '',
+            showCounter: true,
+            disableAfterLimit: true
         };
         console.log('✅ تهيئة Checkbox Limit للسؤال');
     }
@@ -17953,10 +17957,26 @@ if (timerValidation.hasWarnings) {
         return null;
     }
     
-    if (dateTimeValidation.hasWarnings) {
-        console.warn('⚠️ تحذيرات في Date/Time:');
-        dateTimeValidation.warnings.forEach(w => console.warn(`  - ${w}`));
-    }
+    // تحذيرات - نعرضها في console فقط
+if (dateTimeValidation.hasWarnings) {
+    console.warn('⚠️ تحذيرات في Date/Time:');
+    dateTimeValidation.warnings.forEach(w => console.warn(`  - ${w}`));
+    
+    // 🆕 Toast خفيف
+    const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true
+    });
+    
+    Toast.fire({
+        icon: 'warning',
+        title: `${dateTimeValidation.warnings.length} تحذير في Date/Time`,
+        text: 'تحقق من Console للتفاصيل'
+    });
+}
     
     // 12. Validation للـ Daily Tracking
     const dailyTrackingValidation = validateDailyTracking();
@@ -18109,23 +18129,25 @@ if (q.timer && q.timer.enabled) {
 }
 
                 
-                // إضافة بيانات Date/Time
-                if ((q.type === 'date' || q.type === 'time' || q.type === 'datetime') && q.dateTimeSettings) {
-                    questionData.dateTimeSettings = {
-                        dateDefault: q.dateTimeSettings.dateDefault || 'none',
-                        timeDefault: q.dateTimeSettings.timeDefault || 'none',
-                        timeFormat: q.dateTimeSettings.timeFormat || '24h',
-                        minDate: q.dateTimeSettings.minDate || '',
-                        maxDate: q.dateTimeSettings.maxDate || '',
-                        minTime: q.dateTimeSettings.minTime || '',
-                        maxTime: q.dateTimeSettings.maxTime || '',
-                        customDate: q.dateTimeSettings.customDate || '',
-                        customTime: q.dateTimeSettings.customTime || '',
-                        showIcon: q.dateTimeSettings.showIcon !== false,
-                        required: q.dateTimeSettings.required || false,
-                        disableWeekends: q.dateTimeSettings.disableWeekends || false
-                    };
-                }
+               // 🆕 إضافة بيانات Date/Time
+if ((q.type === 'date' || q.type === 'time' || q.type === 'datetime') && q.dateTimeSettings) {
+    questionData.dateTimeSettings = {
+        dateDefault: q.dateTimeSettings.dateDefault || 'none',
+        timeDefault: q.dateTimeSettings.timeDefault || 'none',
+        timeFormat: q.dateTimeSettings.timeFormat || '24h',
+        minDate: q.dateTimeSettings.minDate || '',
+        maxDate: q.dateTimeSettings.maxDate || '',
+        minTime: q.dateTimeSettings.minTime || '',
+        maxTime: q.dateTimeSettings.maxTime || '',
+        customDate: q.dateTimeSettings.customDate || '',
+        customTime: q.dateTimeSettings.customTime || '',
+        showIcon: q.dateTimeSettings.showIcon !== false,
+        required: q.dateTimeSettings.required || false,
+        disableWeekends: q.dateTimeSettings.disableWeekends || false
+    };
+    
+    console.log(`📅 حفظ Date/Time Settings للسؤال ${q.id}:`, questionData.dateTimeSettings);
+}
                 
                 return questionData;
             });
@@ -18614,6 +18636,103 @@ function validateTimers() {
         hasWarnings: warnings.length > 0,
         message: errors.length > 0 ? 'أخطاء في إعدادات Timer:' : '',
         warningMessage: warnings.length > 0 ? 'تحذيرات في إعدادات Timer:' : '',
+        details: errors,
+        warnings: warnings
+    };
+}
+
+        /**
+ * التحقق من صحة إعدادات Date/Time
+ */
+function validateDateTimePickers() {
+    const errors = [];
+    const warnings = [];
+    
+    assessmentSteps.forEach((step, stepIndex) => {
+        if (step.type === 'questions' || step.type === 'repeating-group') {
+            step.questions.forEach((q, qIndex) => {
+                if (q.type === 'date' || q.type === 'time' || q.type === 'datetime') {
+                    const dt = q.dateTimeSettings;
+                    const questionRef = `الخطوة ${step.number} - السؤال ${qIndex + 1}`;
+                    
+                    if (!dt) {
+                        warnings.push(`⚠️ ${questionRef}: لا توجد إعدادات Date/Time - سيتم استخدام الإعدادات الافتراضية`);
+                        return;
+                    }
+                    
+                    // 1. التحقق من التواريخ
+                    if (q.type === 'date' || q.type === 'datetime') {
+                        
+                        // minDate يجب أن يكون قبل maxDate
+                        if (dt.minDate && dt.maxDate && dt.minDate > dt.maxDate) {
+                            errors.push(`❌ ${questionRef}: الحد الأدنى للتاريخ (${dt.minDate}) بعد الحد الأقصى (${dt.maxDate})`);
+                        }
+                        
+                        // customDate يجب أن يكون ضمن النطاق
+                        if (dt.dateDefault === 'custom' && dt.customDate) {
+                            if (dt.minDate && dt.customDate < dt.minDate) {
+                                errors.push(`❌ ${questionRef}: التاريخ المخصص (${dt.customDate}) قبل الحد الأدنى (${dt.minDate})`);
+                            }
+                            if (dt.maxDate && dt.customDate > dt.maxDate) {
+                                errors.push(`❌ ${questionRef}: التاريخ المخصص (${dt.customDate}) بعد الحد الأقصى (${dt.maxDate})`);
+                            }
+                        }
+                        
+                        // تحذير: النطاق ضيق جداً
+                        if (dt.minDate && dt.maxDate) {
+                            const minDateObj = new Date(dt.minDate);
+                            const maxDateObj = new Date(dt.maxDate);
+                            const daysDiff = (maxDateObj - minDateObj) / (1000 * 60 * 60 * 24);
+                            
+                            if (daysDiff < 7) {
+                                warnings.push(`⚠️ ${questionRef}: النطاق الزمني ضيق جداً (${Math.floor(daysDiff)} يوم فقط)`);
+                            }
+                        }
+                        
+                        // تحذير: customDate بدون قيمة
+                        if (dt.dateDefault === 'custom' && !dt.customDate) {
+                            warnings.push(`⚠️ ${questionRef}: اخترت "تاريخ محدد" لكن لم تحدد التاريخ`);
+                        }
+                    }
+                    
+                    // 2. التحقق من الأوقات
+                    if (q.type === 'time' || q.type === 'datetime') {
+                        
+                        // minTime يجب أن يكون قبل maxTime
+                        if (dt.minTime && dt.maxTime && dt.minTime > dt.maxTime) {
+                            errors.push(`❌ ${questionRef}: الحد الأدنى للوقت (${dt.minTime}) بعد الحد الأقصى (${dt.maxTime})`);
+                        }
+                        
+                        // customTime يجب أن يكون ضمن النطاق
+                        if (dt.timeDefault === 'custom' && dt.customTime) {
+                            if (dt.minTime && dt.customTime < dt.minTime) {
+                                errors.push(`❌ ${questionRef}: الوقت المخصص (${dt.customTime}) قبل الحد الأدنى (${dt.minTime})`);
+                            }
+                            if (dt.maxTime && dt.customTime > dt.maxTime) {
+                                errors.push(`❌ ${questionRef}: الوقت المخصص (${dt.customTime}) بعد الحد الأقصى (${dt.maxTime})`);
+                            }
+                        }
+                        
+                        // تحذير: customTime بدون قيمة
+                        if (dt.timeDefault === 'custom' && !dt.customTime) {
+                            warnings.push(`⚠️ ${questionRef}: اخترت "وقت محدد" لكن لم تحدد الوقت`);
+                        }
+                    }
+                    
+                    // 3. تحذير: حقل غير إجباري بدون قيمة افتراضية
+                    if (!dt.required && dt.dateDefault === 'none' && dt.timeDefault === 'none') {
+                        warnings.push(`⚠️ ${questionRef}: الحقل ليس إجبارياً ولا يوجد قيمة افتراضية - قد يتركه الطالب فارغاً`);
+                    }
+                }
+            });
+        }
+    });
+    
+    return {
+        isValid: errors.length === 0,
+        hasWarnings: warnings.length > 0,
+        message: errors.length > 0 ? 'أخطاء في إعدادات Date/Time:' : '',
+        warningMessage: warnings.length > 0 ? 'تحذيرات في إعدادات Date/Time:' : '',
         details: errors,
         warnings: warnings
     };
