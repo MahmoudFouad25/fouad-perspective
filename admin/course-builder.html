@@ -15501,6 +15501,667 @@ function renderDateTimePreview(question) {
     `;
 }
 
+
+    /**
+ * حفظ التقييم التفاعلي الحالي كقالب
+ */
+async function saveAsTemplate() {
+    console.log('💾 حفظ كقالب...');
+    
+    // 1. التحقق من وجود محتوى
+    if (assessmentSteps.length === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'لا يوجد محتوى',
+            text: 'يجب إضافة خطوة واحدة على الأقل قبل الحفظ كقالب',
+            confirmButtonText: 'حسناً'
+        });
+        return;
+    }
+    
+    // 2. جمع بيانات التمرين الحالي
+    const exerciseData = collectInteractiveAssessmentData();
+    if (!exerciseData) {
+        // التحقق فشل - تم عرض رسالة الخطأ من collectInteractiveAssessmentData
+        return;
+    }
+    
+    // 3. طلب معلومات القالب من الأدمن
+    const { value: templateInfo } = await Swal.fire({
+        title: '💾 حفظ كقالب',
+        html: `
+            <div style="text-align: right;">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-tag"></i>
+                        اسم القالب: <span style="color: #dc2626;">*</span>
+                    </label>
+                    <input 
+                        id="templateName" 
+                        class="form-control swal2-input"
+                        placeholder="مثال: تقييم ذاتي شامل"
+                        style="margin: 0; width: 100%;"
+                    >
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-align-right"></i>
+                        الوصف:
+                    </label>
+                    <textarea 
+                        id="templateDescription" 
+                        class="form-control swal2-textarea"
+                        rows="3"
+                        placeholder="وصف مختصر للقالب وكيفية استخدامه..."
+                        style="margin: 0; width: 100%;"
+                    ></textarea>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-folder"></i>
+                        التصنيف:
+                    </label>
+                    <select 
+                        id="templateCategory" 
+                        class="form-control swal2-select"
+                        style="margin: 0; width: 100%;"
+                    >
+                        <option value="assessment">📊 تقييم (Assessment)</option>
+                        <option value="reflection">🤔 تأمل (Reflection)</option>
+                        <option value="planning">📋 تخطيط (Planning)</option>
+                        <option value="tracking">📈 تتبع (Tracking)</option>
+                        <option value="exploration">🔍 استكشاف (Exploration)</option>
+                        <option value="other">📁 أخرى (Other)</option>
+                    </select>
+                </div>
+                
+                <div class="alert alert-info p-2" style="background: #dbeafe; border: none; color: #1e40af; font-size: 0.85rem;">
+                    <i class="fas fa-info-circle"></i>
+                    سيتم حفظ القالب محلياً على جهازك
+                </div>
+            </div>
+        `,
+        width: '600px',
+        showCancelButton: true,
+        confirmButtonText: 'حفظ القالب',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#ec4899',
+        preConfirm: () => {
+            const name = document.getElementById('templateName').value.trim();
+            const description = document.getElementById('templateDescription').value.trim();
+            const category = document.getElementById('templateCategory').value;
+            
+            if (!name) {
+                Swal.showValidationMessage('يجب إدخال اسم للقالب');
+                return false;
+            }
+            
+            return {
+                name: name,
+                description: description,
+                category: category
+            };
+        }
+    });
+    
+    if (!templateInfo) return;
+    
+    // 4. بناء بيانات القالب
+    const template = {
+        id: `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: templateInfo.name,
+        description: templateInfo.description,
+        category: templateInfo.category,
+        createdAt: new Date().toISOString(),
+        stepsCount: assessmentSteps.length,
+        questionsCount: assessmentSteps.reduce((total, step) => {
+            return total + (step.questions?.length || 0);
+        }, 0),
+        data: exerciseData.interactiveAssessment
+    };
+    
+    // 5. حفظ في localStorage
+    try {
+        // جلب القوالب الموجودة
+        let templates = JSON.parse(localStorage.getItem('assessmentTemplates') || '[]');
+        
+        // إضافة القالب الجديد
+        templates.push(template);
+        
+        // حفظ
+        localStorage.setItem('assessmentTemplates', JSON.stringify(templates));
+        
+        console.log('✅ تم حفظ القالب:', template);
+        
+        // 6. رسالة نجاح
+        Swal.fire({
+            icon: 'success',
+            title: '✅ تم الحفظ بنجاح',
+            html: `
+                <div style="text-align: right;">
+                    <p>تم حفظ القالب "<strong>${template.name}</strong>" بنجاح!</p>
+                    <div class="alert alert-info p-2 mt-3" style="background: #dbeafe; border: none; color: #1e40af; font-size: 0.9rem;">
+                        <i class="fas fa-lightbulb"></i>
+                        يمكنك الآن استخدام هذا القالب لإنشاء تمارين جديدة
+                    </div>
+                </div>
+            `,
+            confirmButtonText: 'رائع',
+            confirmButtonColor: '#10b981'
+        });
+        
+    } catch (error) {
+        console.error('❌ خطأ في حفظ القالب:', error);
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'فشل الحفظ',
+            text: 'حدث خطأ أثناء حفظ القالب. تحقق من console للتفاصيل.',
+            confirmButtonText: 'حسناً'
+        });
+    }
+}
+
+        /**
+ * تحميل تمرين من قالب محفوظ
+ */
+async function loadFromTemplate() {
+    console.log('📂 تحميل من قالب...');
+    
+    // 1. جلب القوالب المحفوظة
+    let templates = [];
+    try {
+        templates = JSON.parse(localStorage.getItem('assessmentTemplates') || '[]');
+    } catch (error) {
+        console.error('❌ خطأ في قراءة القوالب:', error);
+    }
+    
+    if (templates.length === 0) {
+        Swal.fire({
+            icon: 'info',
+            title: 'لا توجد قوالب',
+            html: `
+                <div style="text-align: right;">
+                    <p>لم تقم بحفظ أي قوالب بعد.</p>
+                    <p class="mt-2">
+                        <i class="fas fa-lightbulb"></i>
+                        قم بإنشاء تمرين ثم احفظه كقالب لاستخدامه لاحقاً.
+                    </p>
+                </div>
+            `,
+            confirmButtonText: 'حسناً'
+        });
+        return;
+    }
+    
+    // 2. ترتيب القوالب (الأحدث أولاً)
+    templates.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    // 3. بناء HTML القوالب
+    const templatesHTML = templates.map((template, index) => {
+        const categoryIcons = {
+            'assessment': '📊',
+            'reflection': '🤔',
+            'planning': '📋',
+            'tracking': '📈',
+            'exploration': '🔍',
+            'other': '📁'
+        };
+        
+        const categoryArabic = {
+            'assessment': 'تقييم',
+            'reflection': 'تأمل',
+            'planning': 'تخطيط',
+            'tracking': 'تتبع',
+            'exploration': 'استكشاف',
+            'other': 'أخرى'
+        };
+        
+        const icon = categoryIcons[template.category] || '📁';
+        const categoryName = categoryArabic[template.category] || 'أخرى';
+        
+        const createdDate = new Date(template.createdAt).toLocaleDateString('ar-EG', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        
+        return `
+            <div 
+                class="template-card" 
+                style="
+                    border: 2px solid #e5e7eb;
+                    border-radius: 12px;
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    background: white;
+                "
+                onmouseover="this.style.borderColor='#ec4899'; this.style.background='#fdf2f8';"
+                onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';"
+                onclick="selectTemplate(${index})"
+            >
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+                    <div style="flex: 1;">
+                        <h6 style="margin: 0; color: #1e293b; font-weight: bold;">
+                            ${template.name}
+                        </h6>
+                        <small style="color: #64748b;">
+                            ${icon} ${categoryName}
+                        </small>
+                    </div>
+                    <div style="text-align: left;">
+                        <button 
+                            type="button"
+                            class="btn btn-sm btn-outline-danger"
+                            onclick="event.stopPropagation(); deleteTemplate(${index})"
+                            title="حذف القالب"
+                        >
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                ${template.description ? `
+                    <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.75rem;">
+                        ${template.description}
+                    </p>
+                ` : ''}
+                
+                <div style="display: flex; gap: 1rem; font-size: 0.75rem; color: #94a3b8;">
+                    <span>
+                        <i class="fas fa-layer-group"></i>
+                        ${template.stepsCount} ${template.stepsCount === 1 ? 'خطوة' : 'خطوات'}
+                    </span>
+                    <span>
+                        <i class="fas fa-question-circle"></i>
+                        ${template.questionsCount} ${template.questionsCount === 1 ? 'سؤال' : 'أسئلة'}
+                    </span>
+                    <span style="margin-right: auto;">
+                        <i class="fas fa-calendar"></i>
+                        ${createdDate}
+                    </span>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // 4. عرض modal القوالب
+    const { value: selectedIndex } = await Swal.fire({
+        title: '📚 القوالب المحفوظة',
+        html: `
+            <div style="text-align: right;">
+                <div style="max-height: 500px; overflow-y: auto; padding: 0.5rem;">
+                    ${templatesHTML}
+                </div>
+                
+                <div class="alert alert-warning p-2 mt-3" style="background: #fef3c7; border: none; color: #92400e; font-size: 0.85rem;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>تنبيه:</strong>
+                    تحميل قالب سيستبدل المحتوى الحالي. تأكد من حفظ عملك أولاً!
+                </div>
+            </div>
+        `,
+        width: '700px',
+        showCancelButton: true,
+        showConfirmButton: false,
+        cancelButtonText: 'إلغاء',
+        didOpen: () => {
+            // إخفاء زر التأكيد - سنستخدم النقر على البطاقة
+            window.selectTemplate = (index) => {
+                Swal.clickConfirm();
+                Swal.close();
+                
+                // تحميل القالب
+                loadTemplateData(templates[index]);
+            };
+            
+            window.deleteTemplate = async (index) => {
+                const result = await Swal.fire({
+                    title: 'حذف القالب؟',
+                    text: `هل أنت متأكد من حذف "${templates[index].name}"؟`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'نعم، احذف',
+                    cancelButtonText: 'إلغاء',
+                    confirmButtonColor: '#dc2626'
+                });
+                
+                if (result.isConfirmed) {
+                    templates.splice(index, 1);
+                    localStorage.setItem('assessmentTemplates', JSON.stringify(templates));
+                    
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'تم الحذف',
+                        text: 'تم حذف القالب بنجاح',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // إعادة فتح القوالب
+                    setTimeout(() => loadFromTemplate(), 2100);
+                }
+            };
+        }
+    });
+}
+
+/**
+ * تحميل بيانات القالب للواجهة
+ */
+function loadTemplateData(template) {
+    console.log('📥 تحميل بيانات القالب:', template.name);
+    
+    try {
+        // 1. تنظيف البيانات الحالية
+        assessmentSteps = [];
+        
+        // 2. ملء البيانات من القالب
+        fillInteractiveAssessmentData(template.data);
+        
+        // 3. رسالة نجاح
+        Swal.fire({
+            icon: 'success',
+            title: '✅ تم التحميل بنجاح',
+            html: `
+                <div style="text-align: right;">
+                    <p>تم تحميل القالب "<strong>${template.name}</strong>" بنجاح!</p>
+                    <div class="alert alert-info p-2 mt-3" style="background: #dbeafe; border: none; color: #1e40af; font-size: 0.9rem;">
+                        <i class="fas fa-edit"></i>
+                        يمكنك الآن تعديل المحتوى حسب احتياجك
+                    </div>
+                </div>
+            `,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#10b981'
+        });
+        
+        console.log('✅ تم تحميل القالب بنجاح');
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحميل القالب:', error);
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'فشل التحميل',
+            text: 'حدث خطأ أثناء تحميل القالب. تحقق من console للتفاصيل.',
+            confirmButtonText: 'حسناً'
+        });
+    }
+}
+
+        /**
+ * عرض شرح تفصيلي لنظام القوالب
+ */
+function showTemplatesHelp() {
+    Swal.fire({
+        title: '📚 دليل نظام القوالب',
+        html: `
+            <div style="text-align: right; max-height: 500px; overflow-y: auto;">
+                
+                <!-- ما هي القوالب؟ -->
+                <div style="background: #fce7f3; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #ec4899;">
+                    <h6 style="color: #831843; margin-bottom: 0.5rem;">
+                        <i class="fas fa-layer-group"></i>
+                        ما هي القوالب؟
+                    </h6>
+                    <p style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0;">
+                        القوالب هي <strong>تمارين جاهزة</strong> يمكنك حفظها وإعادة استخدامها.
+                        بدلاً من إنشاء نفس التمرين من الصفر في كل مرة، احفظه كقالب واستخدمه متى شئت!
+                    </p>
+                </div>
+
+                <!-- كيف تعمل؟ -->
+                <div style="background: #faf5ff; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #a855f7;">
+                    <h6 style="color: #6b21a8; margin-bottom: 0.75rem;">
+                        <i class="fas fa-cogs"></i>
+                        كيف تعمل؟
+                    </h6>
+                    
+                    <div style="margin-bottom: 0.75rem;">
+                        <strong style="color: #1e293b; font-size: 0.9rem;">1. حفظ كقالب</strong>
+                        <ul style="font-size: 0.85rem; color: #475569; margin-top: 0.25rem; padding-right: 1.25rem;">
+                            <li>أنشئ تمريناً كاملاً (خطوات + أسئلة + إعدادات)</li>
+                            <li>اضغط "حفظ كقالب"</li>
+                            <li>أدخل اسماً ووصفاً وتصنيفاً</li>
+                            <li>يُحفظ القالب محلياً على جهازك</li>
+                        </ul>
+                    </div>
+                    
+                    <div>
+                        <strong style="color: #1e293b; font-size: 0.9rem;">2. تحميل من قالب</strong>
+                        <ul style="font-size: 0.85rem; color: #475569; margin-top: 0.25rem; padding-right: 1.25rem;">
+                            <li>اضغط "تصفح القوالب"</li>
+                            <li>اختر القالب الذي تريده</li>
+                            <li>يُحمّل كل شيء: الخطوات، الأسئلة، الإعدادات</li>
+                            <li>عدّل ما تريد واحفظ كتمرين جديد</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- التصنيفات -->
+                <div style="background: #dbeafe; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #3b82f6;">
+                    <h6 style="color: #1e40af; margin-bottom: 0.75rem;">
+                        <i class="fas fa-folder"></i>
+                        التصنيفات المتاحة
+                    </h6>
+                    <ul style="font-size: 0.85rem; color: #1e293b; margin-bottom: 0; padding-right: 1.25rem;">
+                        <li><strong>📊 تقييم:</strong> تمارين تقييم ذاتي أو تقييم مهارات</li>
+                        <li><strong>🤔 تأمل:</strong> تمارين تأملية أو استبطان داخلي</li>
+                        <li><strong>📋 تخطيط:</strong> تمارين تخطيط وتحديد أهداف</li>
+                        <li><strong>📈 تتبع:</strong> تمارين متابعة وتتبع يومي</li>
+                        <li><strong>🔍 استكشاف:</strong> تمارين استكشاف وتعرّف</li>
+                        <li><strong>📁 أخرى:</strong> أي نوع آخر</li>
+                    </ul>
+                </div>
+
+                <!-- أمثلة عملية -->
+                <div style="background: #d1fae5; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #10b981;">
+                    <h6 style="color: #065f46; margin-bottom: 0.75rem;">
+                        <i class="fas fa-lightbulb"></i>
+                        أمثلة عملية
+                    </h6>
+                    <div style="font-size: 0.85rem; color: #1e293b;">
+                        <strong>قالب "تقييم أسبوعي":</strong>
+                        <p style="margin: 0.25rem 0 0 1rem;">
+                            5 أسئلة عن الأسبوع + تحليل النتائج + معاينة نهائية
+                        </p>
+                        
+                        <strong style="display: block; margin-top: 0.75rem;">قالب "تأمل يومي":</strong>
+                        <p style="margin: 0.25rem 0 0 1rem;">
+                            3 أسئلة تأملية + عداد وقت 5 دقائق + حفظ تلقائي
+                        </p>
+                    </div>
+                </div>
+
+                <!-- ملاحظات مهمة -->
+                <div style="background: #fef3c7; padding: 1rem; border-radius: 8px;">
+                    <h6 style="color: #92400e; margin-bottom: 0.75rem;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        ملاحظات مهمة
+                    </h6>
+                    <ul style="font-size: 0.85rem; color: #92400e; margin-bottom: 0; padding-right: 1.25rem;">
+                        <li>القوالب تُحفظ محلياً على جهازك (localStorage)</li>
+                        <li>إذا مسحت بيانات المتصفح، ستُحذف القوالب</li>
+                        <li>تحميل قالب يستبدل المحتوى الحالي - احفظ عملك أولاً!</li>
+                        <li>يمكنك تصدير القوالب ومشاركتها (قريباً)</li>
+                    </ul>
+                </div>
+
+            </div>
+        `,
+        width: '700px',
+        confirmButtonText: 'فهمت',
+        confirmButtonColor: '#ec4899'
+    });
+}
+
+        /**
+ * تصدير جميع القوالب لملف JSON
+ */
+function exportTemplates() {
+    try {
+        const templates = JSON.parse(localStorage.getItem('assessmentTemplates') || '[]');
+        
+        if (templates.length === 0) {
+            Swal.fire({
+                icon: 'info',
+                title: 'لا توجد قوالب',
+                text: 'لا توجد قوالب لتصديرها',
+                confirmButtonText: 'حسناً'
+            });
+            return;
+        }
+        
+        // تحويل لـ JSON
+        const dataStr = JSON.stringify(templates, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        // إنشاء رابط التحميل
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `assessment-templates_${new Date().toISOString().split('T')[0]}.json`;
+        
+        // تحميل الملف
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        Swal.fire({
+            icon: 'success',
+            title: '✅ تم التصدير',
+            text: `تم تصدير ${templates.length} ${templates.length === 1 ? 'قالب' : 'قوالب'} بنجاح`,
+            confirmButtonText: 'رائع'
+        });
+        
+    } catch (error) {
+        console.error('❌ خطأ في التصدير:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'فشل التصدير',
+            text: 'حدث خطأ أثناء تصدير القوالب',
+            confirmButtonText: 'حسناً'
+        });
+    }
+}
+
+/**
+ * استيراد قوالب من ملف JSON
+ */
+function importTemplates() {
+    // إنشاء input file مخفي
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        try {
+            const text = await file.text();
+            const importedTemplates = JSON.parse(text);
+            
+            // التحقق من صحة البيانات
+            if (!Array.isArray(importedTemplates)) {
+                throw new Error('تنسيق ملف غير صحيح');
+            }
+            
+            // جلب القوالب الحالية
+            const existingTemplates = JSON.parse(localStorage.getItem('assessmentTemplates') || '[]');
+            
+            // دمج القوالب (مع تجنب التكرار)
+            const existingIds = new Set(existingTemplates.map(t => t.id));
+            const newTemplates = importedTemplates.filter(t => !existingIds.has(t.id));
+            
+            const mergedTemplates = [...existingTemplates, ...newTemplates];
+            
+            // حفظ
+            localStorage.setItem('assessmentTemplates', JSON.stringify(mergedTemplates));
+            
+            Swal.fire({
+                icon: 'success',
+                title: '✅ تم الاستيراد',
+                html: `
+                    <div style="text-align: right;">
+                        <p>تم استيراد <strong>${newTemplates.length}</strong> ${newTemplates.length === 1 ? 'قالب جديد' : 'قوالب جديدة'}</p>
+                        ${existingTemplates.length > 0 ? `
+                            <small style="color: #64748b;">
+                                (تم تخطي ${importedTemplates.length - newTemplates.length} قالب موجود مسبقاً)
+                            </small>
+                        ` : ''}
+                    </div>
+                `,
+                confirmButtonText: 'رائع'
+            });
+            
+        } catch (error) {
+            console.error('❌ خطأ في الاستيراد:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'فشل الاستيراد',
+                text: 'تأكد من أن الملف بتنسيق JSON صحيح',
+                confirmButtonText: 'حسناً'
+            });
+        }
+    };
+    
+    input.click();
+}
+
+/**
+ * حذف جميع القوالب
+ */
+async function clearAllTemplates() {
+    const templates = JSON.parse(localStorage.getItem('assessmentTemplates') || '[]');
+    
+    if (templates.length === 0) {
+        Swal.fire({
+            icon: 'info',
+            title: 'لا توجد قوالب',
+            text: 'لا توجد قوالب لحذفها',
+            confirmButtonText: 'حسناً'
+        });
+        return;
+    }
+    
+    const result = await Swal.fire({
+        title: '⚠️ حذف جميع القوالب؟',
+        html: `
+            <div style="text-align: right;">
+                <p>هل أنت متأكد من حذف <strong>جميع</strong> القوالب (${templates.length} ${templates.length === 1 ? 'قالب' : 'قوالب'})؟</p>
+                <div class="alert alert-danger p-2 mt-2" style="background: #fee2e2; border: none; color: #991b1b; font-size: 0.9rem;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>تحذير:</strong>
+                    هذا الإجراء لا يمكن التراجع عنه!
+                </div>
+            </div>
+        `,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف الكل',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc2626'
+    });
+    
+    if (result.isConfirmed) {
+        localStorage.removeItem('assessmentTemplates');
+        
+        Swal.fire({
+            icon: 'success',
+            title: '✅ تم الحذف',
+            text: 'تم حذف جميع القوالب بنجاح',
+            confirmButtonText: 'حسناً'
+        });
+    }
+}
+
     /**
  * تحديث خاصية في Dynamic Source
  */
