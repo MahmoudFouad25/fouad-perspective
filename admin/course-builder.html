@@ -11325,6 +11325,32 @@ let currentStepIndex = 0;
 let assessmentAnswers = {}; // لحفظ الإجابات
 let assessmentScores = {}; // لحفظ النقاط المحسوبة
 
+        // 🆕 متغير إعدادات Daily Tracking
+let dailyTrackingSettings = {
+    enabled: false,
+    duration: {
+        type: 'days',      // days, weeks, custom
+        value: 7,          // عدد الأيام أو الأسابيع
+        endDate: null      // للنوع custom
+    },
+    trackingItems: [],     // العناصر المراد تتبعها
+    reminders: {
+        enabled: false,
+        time: '20:00',     // وقت التذكير
+        message: ''
+    },
+    visualization: {
+        showCharts: true,
+        chartType: 'line', // line, bar, calendar
+        showStats: true,
+        showStreak: true   // عرض السلسلة (كم يوم متتالي)
+    },
+    goals: {
+        enabled: false,
+        items: []
+    }
+};
+
 /**
  * بناء واجهة التقييم التفاعلي
  */
@@ -16162,6 +16188,893 @@ async function clearAllTemplates() {
     }
 }
 
+/**
+ * عرض إعدادات Daily Tracking
+ */
+function renderDailyTrackingSettings() {
+    const container = document.getElementById('dailyTrackingBody');
+    if (!container) return;
+    
+    const dt = dailyTrackingSettings;
+    
+    if (!dt.enabled) {
+        container.innerHTML = `
+            <div class="text-center p-5" style="color: #94a3b8;">
+                <i class="fas fa-chart-line" style="font-size: 4rem; margin-bottom: 1rem; opacity: 0.3;"></i>
+                <h5 style="color: #64748b;">Daily Tracking معطّل</h5>
+                <p>فعّل الخاصية من الزر أعلاه لإعداد نظام التتبع اليومي</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = `
+        <div>
+            <!-- شرح -->
+            <div class="alert alert-info mb-3" style="background: #fef3c7; border: none; color: #92400e;">
+                <i class="fas fa-lightbulb"></i>
+                <strong>Daily Tracking 2.0</strong> يحوّل التمرين لنظام تتبع يومي متقدم.
+                بدلاً من إجابة الأسئلة مرة واحدة، يجيب الطالب يومياً على مدار فترة محددة.
+            </div>
+            
+            <!-- إعدادات المدة -->
+            <div class="card mb-3" style="border: 2px solid #fbbf24;">
+                <div class="card-header" style="background: #fef3c7;">
+                    <h6 class="mb-0 fw-bold" style="color: #92400e;">
+                        <i class="fas fa-calendar-alt"></i>
+                        مدة التتبع
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-clock"></i>
+                                نوع المدة:
+                            </label>
+                            <select 
+                                class="form-select"
+                                onchange="updateDailyTrackingProperty('duration.type', this.value); renderDailyTrackingSettings();"
+                            >
+                                <option value="days" ${dt.duration.type === 'days' ? 'selected' : ''}>
+                                    📅 أيام (Days)
+                                </option>
+                                <option value="weeks" ${dt.duration.type === 'weeks' ? 'selected' : ''}>
+                                    📆 أسابيع (Weeks)
+                                </option>
+                                <option value="custom" ${dt.duration.type === 'custom' ? 'selected' : ''}>
+                                    📌 تاريخ محدد (Custom)
+                                </option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            ${dt.duration.type === 'custom' ? `
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-calendar-check"></i>
+                                    تاريخ الانتهاء:
+                                </label>
+                                <input 
+                                    type="date"
+                                    class="form-control"
+                                    value="${dt.duration.endDate || ''}"
+                                    min="${new Date().toISOString().split('T')[0]}"
+                                    onchange="updateDailyTrackingProperty('duration.endDate', this.value)"
+                                >
+                            ` : `
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-hashtag"></i>
+                                    عدد ${dt.duration.type === 'days' ? 'الأيام' : 'الأسابيع'}:
+                                </label>
+                                <input 
+                                    type="number"
+                                    class="form-control"
+                                    value="${dt.duration.value || 7}"
+                                    min="1"
+                                    max="${dt.duration.type === 'days' ? '365' : '52'}"
+                                    onchange="updateDailyTrackingProperty('duration.value', parseInt(this.value))"
+                                >
+                            `}
+                        </div>
+                    </div>
+                    
+                    <!-- معاينة المدة -->
+                    <div class="alert alert-success p-2 mt-3 mb-0" style="background: #d1fae5; border: none; color: #065f46;">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>المدة:</strong>
+                        ${getDurationPreviewText(dt.duration)}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- العناصر المتتبعة -->
+            <div class="card mb-3" style="border: 2px solid #3b82f6;">
+                <div class="card-header" style="background: #dbeafe; display: flex; justify-content: space-between; align-items: center;">
+                    <h6 class="mb-0 fw-bold" style="color: #1e40af;">
+                        <i class="fas fa-list-check"></i>
+                        العناصر المتتبعة (Tracking Items)
+                    </h6>
+                    <button 
+                        type="button"
+                        class="btn btn-sm btn-primary"
+                        onclick="addTrackingItem()"
+                    >
+                        <i class="fas fa-plus"></i>
+                        إضافة عنصر
+                    </button>
+                </div>
+                <div class="card-body">
+                    ${dt.trackingItems.length === 0 ? `
+                        <div class="text-center p-4" style="color: #94a3b8;">
+                            <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                            <p>لم تضف أي عناصر للتتبع بعد</p>
+                            <button 
+                                type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="addTrackingItem()"
+                            >
+                                <i class="fas fa-plus"></i>
+                                إضافة أول عنصر
+                            </button>
+                        </div>
+                    ` : `
+                        <div id="trackingItemsList">
+                            ${renderTrackingItemsList()}
+                        </div>
+                    `}
+                </div>
+            </div>
+            
+            <!-- التذكيرات -->
+            <div class="card mb-3" style="border: 2px solid #10b981;">
+                <div class="card-header" style="background: #d1fae5; display: flex; justify-content: space-between; align-items: center;">
+                    <h6 class="mb-0 fw-bold" style="color: #065f46;">
+                        <i class="fas fa-bell"></i>
+                        التذكيرات اليومية
+                    </h6>
+                    <label class="switch" style="margin: 0;">
+                        <input 
+                            type="checkbox" 
+                            ${dt.reminders.enabled ? 'checked' : ''}
+                            onchange="updateDailyTrackingProperty('reminders.enabled', this.checked); renderDailyTrackingSettings();"
+                        >
+                        <span class="slider-round"></span>
+                    </label>
+                </div>
+                <div class="card-body">
+                    ${dt.reminders.enabled ? `
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-clock"></i>
+                                    وقت التذكير:
+                                </label>
+                                <input 
+                                    type="time"
+                                    class="form-control"
+                                    value="${dt.reminders.time || '20:00'}"
+                                    onchange="updateDailyTrackingProperty('reminders.time', this.value)"
+                                >
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-comment-dots"></i>
+                                    رسالة التذكير (اختياري):
+                                </label>
+                                <input 
+                                    type="text"
+                                    class="form-control"
+                                    value="${dt.reminders.message || ''}"
+                                    placeholder="مثال: لا تنسَ تسجيل تتبعك اليومي!"
+                                    onchange="updateDailyTrackingProperty('reminders.message', this.value)"
+                                >
+                            </div>
+                        </div>
+                    ` : `
+                        <p class="text-muted mb-0">
+                            <i class="fas fa-bell-slash"></i>
+                            التذكيرات معطّلة - فعّلها لإرسال تنبيه يومي للطالب
+                        </p>
+                    `}
+                </div>
+            </div>
+            
+            <!-- التصورات والإحصائيات -->
+            <div class="card mb-3" style="border: 2px solid #8b5cf6;">
+                <div class="card-header" style="background: #ede9fe;">
+                    <h6 class="mb-0 fw-bold" style="color: #5b21b6;">
+                        <i class="fas fa-chart-bar"></i>
+                        التصورات البيانية والإحصائيات
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="form-check mb-2">
+                                <input 
+                                    class="form-check-input" 
+                                    type="checkbox" 
+                                    id="showCharts"
+                                    ${dt.visualization.showCharts ? 'checked' : ''}
+                                    onchange="updateDailyTrackingProperty('visualization.showCharts', this.checked); renderDailyTrackingSettings();"
+                                >
+                                <label class="form-check-label fw-bold" for="showCharts">
+                                    📊 عرض الرسوم البيانية
+                                </label>
+                            </div>
+                            
+                            ${dt.visualization.showCharts ? `
+                                <select 
+                                    class="form-select form-select-sm mt-2"
+                                    onchange="updateDailyTrackingProperty('visualization.chartType', this.value)"
+                                >
+                                    <option value="line" ${dt.visualization.chartType === 'line' ? 'selected' : ''}>
+                                        📈 خط (Line Chart)
+                                    </option>
+                                    <option value="bar" ${dt.visualization.chartType === 'bar' ? 'selected' : ''}>
+                                        📊 أعمدة (Bar Chart)
+                                    </option>
+                                    <option value="calendar" ${dt.visualization.chartType === 'calendar' ? 'selected' : ''}>
+                                        📅 تقويم (Calendar Heatmap)
+                                    </option>
+                                </select>
+                            ` : ''}
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="form-check mb-2">
+                                <input 
+                                    class="form-check-input" 
+                                    type="checkbox" 
+                                    id="showStats"
+                                    ${dt.visualization.showStats ? 'checked' : ''}
+                                    onchange="updateDailyTrackingProperty('visualization.showStats', this.checked)"
+                                >
+                                <label class="form-check-label fw-bold" for="showStats">
+                                    📈 عرض الإحصائيات
+                                </label>
+                            </div>
+                            
+                            <div class="form-check mb-2">
+                                <input 
+                                    class="form-check-input" 
+                                    type="checkbox" 
+                                    id="showStreak"
+                                    ${dt.visualization.showStreak ? 'checked' : ''}
+                                    onchange="updateDailyTrackingProperty('visualization.showStreak', this.checked)"
+                                >
+                                <label class="form-check-label fw-bold" for="showStreak">
+                                    🔥 عرض السلسلة (Streak)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- الأهداف -->
+            <div class="card mb-3" style="border: 2px solid #ec4899;">
+                <div class="card-header" style="background: #fce7f3; display: flex; justify-content: space-between; align-items: center;">
+                    <h6 class="mb-0 fw-bold" style="color: #831843;">
+                        <i class="fas fa-bullseye"></i>
+                        الأهداف (Goals)
+                    </h6>
+                    <label class="switch" style="margin: 0;">
+                        <input 
+                            type="checkbox" 
+                            ${dt.goals.enabled ? 'checked' : ''}
+                            onchange="updateDailyTrackingProperty('goals.enabled', this.checked); renderDailyTrackingSettings();"
+                        >
+                        <span class="slider-round"></span>
+                    </label>
+                </div>
+                <div class="card-body">
+                    ${dt.goals.enabled ? `
+                        <p class="small text-muted mb-3">
+                            <i class="fas fa-info-circle"></i>
+                            الأهداف ستُربط تلقائياً بالعناصر المتتبعة (مثال: هدف = "5 أيام في الأسبوع")
+                        </p>
+                        <button 
+                            type="button"
+                            class="btn btn-sm btn-outline-primary"
+                            onclick="configureGoals()"
+                        >
+                            <i class="fas fa-cog"></i>
+                            إعداد الأهداف
+                        </button>
+                    ` : `
+                        <p class="text-muted mb-0">
+                            <i class="fas fa-flag-checkered"></i>
+                            الأهداف معطّلة - فعّلها لتحديد أهداف للطالب
+                        </p>
+                    `}
+                </div>
+            </div>
+            
+        </div>
+    `;
+}
+
+
+        /**
+ * إضافة عنصر جديد للتتبع
+ */
+async function addTrackingItem() {
+    const { value: itemData } = await Swal.fire({
+        title: '➕ إضافة عنصر للتتبع',
+        html: `
+            <div style="text-align: right;">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-tag"></i>
+                        اسم العنصر: <span style="color: #dc2626;">*</span>
+                    </label>
+                    <input 
+                        id="itemName" 
+                        class="form-control"
+                        placeholder="مثال: الصلاة في وقتها"
+                        style="text-align: right;"
+                    >
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-icons"></i>
+                        الأيقونة (emoji):
+                    </label>
+                    <input 
+                        id="itemIcon" 
+                        class="form-control"
+                        placeholder="مثال: 🕌"
+                        maxlength="2"
+                        style="text-align: center; font-size: 2rem;"
+                    >
+                    <small class="text-muted">اختياري - ستظهر بجانب العنصر</small>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-list"></i>
+                        نوع البيانات:
+                    </label>
+                    <select 
+                        id="itemType" 
+                        class="form-select"
+                        onchange="toggleItemTypeOptions(this.value)"
+                    >
+                        <option value="boolean">✓ نعم/لا (Boolean) - هل فعلت؟</option>
+                        <option value="number">🔢 رقم (Number) - كمية أو مدة</option>
+                        <option value="scale">⭐ تقييم (Scale) - من 1 إلى 5</option>
+                        <option value="time">🕐 وقت (Time) - كم ساعة؟</option>
+                        <option value="text">📝 نص قصير (Text)</option>
+                    </select>
+                </div>
+                
+                <div id="itemTypeOptions"></div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-question-circle"></i>
+                        السؤال الذي سيُطرح يومياً:
+                    </label>
+                    <input 
+                        id="itemQuestion" 
+                        class="form-control"
+                        placeholder="سيتم توليده تلقائياً حسب النوع"
+                        style="text-align: right;"
+                    >
+                </div>
+            </div>
+        `,
+        width: '600px',
+        showCancelButton: true,
+        confirmButtonText: 'إضافة',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#3b82f6',
+        didOpen: () => {
+            // دالة مساعدة لعرض خيارات حسب النوع
+            window.toggleItemTypeOptions = (type) => {
+                const container = document.getElementById('itemTypeOptions');
+                
+                if (type === 'number' || type === 'time') {
+                    container.innerHTML = `
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-ruler"></i>
+                                الوحدة:
+                            </label>
+                            <input 
+                                id="itemUnit" 
+                                class="form-control"
+                                placeholder="${type === 'number' ? 'مثال: كوب ماء' : 'مثال: ساعة'}"
+                                style="text-align: right;"
+                            >
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">الحد الأدنى:</label>
+                                <input 
+                                    id="itemMin" 
+                                    type="number"
+                                    class="form-control"
+                                    value="0"
+                                >
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">الحد الأقصى:</label>
+                                <input 
+                                    id="itemMax" 
+                                    type="number"
+                                    class="form-control"
+                                    value="10"
+                                >
+                            </div>
+                        </div>
+                    `;
+                } else if (type === 'scale') {
+                    container.innerHTML = `
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">من:</label>
+                                <input 
+                                    id="itemMin" 
+                                    type="number"
+                                    class="form-control"
+                                    value="1"
+                                    readonly
+                                >
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">إلى:</label>
+                                <select id="itemMax" class="form-select">
+                                    <option value="5" selected>5</option>
+                                    <option value="7">7</option>
+                                    <option value="10">10</option>
+                                </select>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = '';
+                }
+            };
+        },
+        preConfirm: () => {
+            const name = document.getElementById('itemName').value.trim();
+            const icon = document.getElementById('itemIcon').value.trim();
+            const type = document.getElementById('itemType').value;
+            const question = document.getElementById('itemQuestion').value.trim();
+            
+            if (!name) {
+                Swal.showValidationMessage('يجب إدخال اسم للعنصر');
+                return false;
+            }
+            
+            const item = {
+                id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: name,
+                icon: icon,
+                type: type,
+                question: question || generateDefaultQuestion(name, type)
+            };
+            
+            // إضافة خصائص حسب النوع
+            if (type === 'number' || type === 'time') {
+                item.unit = document.getElementById('itemUnit')?.value.trim() || '';
+                item.min = parseInt(document.getElementById('itemMin')?.value || 0);
+                item.max = parseInt(document.getElementById('itemMax')?.value || 10);
+            } else if (type === 'scale') {
+                item.min = 1;
+                item.max = parseInt(document.getElementById('itemMax')?.value || 5);
+            }
+            
+            return item;
+        }
+    });
+    
+    if (itemData) {
+        dailyTrackingSettings.trackingItems.push(itemData);
+        renderDailyTrackingSettings();
+        
+        console.log('✅ تم إضافة عنصر:', itemData);
+    }
+}
+
+/**
+ * توليد سؤال افتراضي حسب النوع
+ */
+function generateDefaultQuestion(itemName, itemType) {
+    const questions = {
+        'boolean': `هل ${itemName}؟`,
+        'number': `كم ${itemName}؟`,
+        'scale': `قيّم ${itemName} من 1 إلى 5`,
+        'time': `كم ساعة ${itemName}؟`,
+        'text': `اكتب عن ${itemName}`
+    };
+    
+    return questions[itemType] || `${itemName}؟`;
+}
+
+    /**
+ * عرض قائمة العناصر المتتبعة
+ */
+function renderTrackingItemsList() {
+    const items = dailyTrackingSettings.trackingItems;
+    
+    if (items.length === 0) return '';
+    
+    return items.map((item, index) => {
+        const typeIcons = {
+            'boolean': '✓',
+            'number': '🔢',
+            'scale': '⭐',
+            'time': '🕐',
+            'text': '📝'
+        };
+        
+        const typeArabic = {
+            'boolean': 'نعم/لا',
+            'number': 'رقم',
+            'scale': 'تقييم',
+            'time': 'وقت',
+            'text': 'نص'
+        };
+        
+        return `
+            <div class="card mb-2" style="border: 2px solid #e5e7eb;">
+                <div class="card-body p-3">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                ${item.icon ? `
+                                    <span style="font-size: 1.5rem;">${item.icon}</span>
+                                ` : ''}
+                                <strong style="color: #1e293b; font-size: 1rem;">
+                                    ${item.name}
+                                </strong>
+                                <span style="
+                                    background: #dbeafe;
+                                    color: #1e40af;
+                                    padding: 0.125rem 0.5rem;
+                                    border-radius: 12px;
+                                    font-size: 0.75rem;
+                                ">
+                                    ${typeIcons[item.type]} ${typeArabic[item.type]}
+                                </span>
+                            </div>
+                            
+                            <div style="font-size: 0.85rem; color: #64748b;">
+                                <i class="fas fa-question-circle"></i>
+                                ${item.question}
+                            </div>
+                            
+                            ${item.unit ? `
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
+                                    <i class="fas fa-ruler"></i>
+                                    الوحدة: ${item.unit} • النطاق: ${item.min}-${item.max}
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div style="display: flex; gap: 0.25rem;">
+                            <button 
+                                type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                onclick="editTrackingItem(${index})"
+                                title="تعديل"
+                            >
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button 
+                                type="button"
+                                class="btn btn-sm btn-outline-danger"
+                                onclick="deleteTrackingItem(${index})"
+                                title="حذف"
+                            >
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+    /**
+ * تحديث خاصية في Daily Tracking
+ */
+function updateDailyTrackingProperty(path, value) {
+    const parts = path.split('.');
+    let obj = dailyTrackingSettings;
+    
+    for (let i = 0; i < parts.length - 1; i++) {
+        obj = obj[parts[i]];
+    }
+    
+    obj[parts[parts.length - 1]] = value;
+    console.log(`📈 تحديث ${path}:`, value);
+}
+
+/**
+ * تفعيل/إلغاء Daily Tracking
+ */
+function toggleDailyTracking(enabled) {
+    dailyTrackingSettings.enabled = enabled;
+    console.log(`📈 Daily Tracking: ${enabled ? 'مفعّل' : 'معطّل'}`);
+}
+
+/**
+ * حذف عنصر متتبع
+ */
+async function deleteTrackingItem(index) {
+    const item = dailyTrackingSettings.trackingItems[index];
+    
+    const result = await Swal.fire({
+        title: 'حذف العنصر؟',
+        text: `هل أنت متأكد من حذف "${item.name}"؟`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#dc2626'
+    });
+    
+    if (result.isConfirmed) {
+        dailyTrackingSettings.trackingItems.splice(index, 1);
+        renderDailyTrackingSettings();
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الحذف',
+            timer: 1500,
+            showConfirmButton: false
+        });
+    }
+}
+
+        /**
+ * تعديل عنصر متتبع
+ */
+async function editTrackingItem(index) {
+    const item = dailyTrackingSettings.trackingItems[index];
+    if (!item) return;
+    
+    // نفس modal الإضافة لكن مع قيم محملة
+    const { value: updatedItem } = await Swal.fire({
+        title: '✏️ تعديل العنصر',
+        html: `
+            <div style="text-align: right;">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-tag"></i>
+                        اسم العنصر: <span style="color: #dc2626;">*</span>
+                    </label>
+                    <input 
+                        id="itemName" 
+                        class="form-control"
+                        value="${item.name}"
+                        style="text-align: right;"
+                    >
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-icons"></i>
+                        الأيقونة (emoji):
+                    </label>
+                    <input 
+                        id="itemIcon" 
+                        class="form-control"
+                        value="${item.icon || ''}"
+                        maxlength="2"
+                        style="text-align: center; font-size: 2rem;"
+                    >
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-list"></i>
+                        نوع البيانات:
+                    </label>
+                    <select 
+                        id="itemType" 
+                        class="form-select"
+                        onchange="toggleItemTypeOptions(this.value)"
+                    >
+                        <option value="boolean" ${item.type === 'boolean' ? 'selected' : ''}>✓ نعم/لا</option>
+                        <option value="number" ${item.type === 'number' ? 'selected' : ''}>🔢 رقم</option>
+                        <option value="scale" ${item.type === 'scale' ? 'selected' : ''}>⭐ تقييم</option>
+                        <option value="time" ${item.type === 'time' ? 'selected' : ''}>🕐 وقت</option>
+                        <option value="text" ${item.type === 'text' ? 'selected' : ''}>📝 نص</option>
+                    </select>
+                </div>
+                
+                <div id="itemTypeOptions"></div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="fas fa-question-circle"></i>
+                        السؤال:
+                    </label>
+                    <input 
+                        id="itemQuestion" 
+                        class="form-control"
+                        value="${item.question}"
+                        style="text-align: right;"
+                    >
+                </div>
+            </div>
+        `,
+        width: '600px',
+        showCancelButton: true,
+        confirmButtonText: 'حفظ التعديلات',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#3b82f6',
+        didOpen: () => {
+            // نفس الدالة المساعدة
+            window.toggleItemTypeOptions = (type) => {
+                const container = document.getElementById('itemTypeOptions');
+                
+                if (type === 'number' || type === 'time') {
+                    container.innerHTML = `
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الوحدة:</label>
+                            <input 
+                                id="itemUnit" 
+                                class="form-control"
+                                value="${item.unit || ''}"
+                                style="text-align: right;"
+                            >
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">الحد الأدنى:</label>
+                                <input 
+                                    id="itemMin" 
+                                    type="number"
+                                    class="form-control"
+                                    value="${item.min || 0}"
+                                >
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">الحد الأقصى:</label>
+                                <input 
+                                    id="itemMax" 
+                                    type="number"
+                                    class="form-control"
+                                    value="${item.max || 10}"
+                                >
+                            </div>
+                        </div>
+                    `;
+                } else if (type === 'scale') {
+                    container.innerHTML = `
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">من:</label>
+                                <input 
+                                    id="itemMin" 
+                                    type="number"
+                                    class="form-control"
+                                    value="1"
+                                    readonly
+                                >
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">إلى:</label>
+                                <select id="itemMax" class="form-select">
+                                    <option value="5" ${item.max === 5 ? 'selected' : ''}>5</option>
+                                    <option value="7" ${item.max === 7 ? 'selected' : ''}>7</option>
+                                    <option value="10" ${item.max === 10 ? 'selected' : ''}>10</option>
+                                </select>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = '';
+                }
+            };
+            
+            // تفعيل الخيارات حسب النوع الحالي
+            toggleItemTypeOptions(item.type);
+        },
+        preConfirm: () => {
+            const name = document.getElementById('itemName').value.trim();
+            
+            if (!name) {
+                Swal.showValidationMessage('يجب إدخال اسم للعنصر');
+                return false;
+            }
+            
+            const updatedItem = {
+                ...item,
+                name: name,
+                icon: document.getElementById('itemIcon').value.trim(),
+                type: document.getElementById('itemType').value,
+                question: document.getElementById('itemQuestion').value.trim()
+            };
+            
+            // تحديث الخصائص حسب النوع
+            const type = updatedItem.type;
+            if (type === 'number' || type === 'time') {
+                updatedItem.unit = document.getElementById('itemUnit')?.value.trim() || '';
+                updatedItem.min = parseInt(document.getElementById('itemMin')?.value || 0);
+                updatedItem.max = parseInt(document.getElementById('itemMax')?.value || 10);
+            } else if (type === 'scale') {
+                updatedItem.min = 1;
+                updatedItem.max = parseInt(document.getElementById('itemMax')?.value || 5);
+            }
+            
+            return updatedItem;
+        }
+    });
+    
+    if (updatedItem) {
+        dailyTrackingSettings.trackingItems[index] = updatedItem;
+        renderDailyTrackingSettings();
+        
+        console.log('✅ تم تعديل العنصر:', updatedItem);
+    }
+}
+
+        /**
+ * إعداد الأهداف (مبسطة)
+ */
+function configureGoals() {
+    Swal.fire({
+        title: '🎯 إعداد الأهداف',
+        html: `
+            <div style="text-align: right;">
+                <p style="color: #64748b; margin-bottom: 1rem;">
+                    سيتم ربط الأهداف تلقائياً بالعناصر المتتبعة.
+                    مثال: "هدف: 5 أيام من أصل 7 للصلاة"
+                </p>
+                
+                <div class="alert alert-info p-2" style="background: #dbeafe; border: none; color: #1e40af;">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>قريباً:</strong> إعدادات أهداف متقدمة
+                </div>
+                
+                <p style="color: #64748b; font-size: 0.9rem; margin-top: 1rem;">
+                    حالياً، الأهداف الافتراضية هي:<br>
+                    • للعناصر boolean: 5 أيام من أصل 7<br>
+                    • للعناصر الأخرى: الوصول للحد الأقصى
+                </p>
+            </div>
+        `,
+        confirmButtonText: 'حسناً',
+        confirmButtonColor: '#ec4899'
+    });
+}
+
+/**
+ * الحصول على نص معاينة المدة
+ */
+function getDurationPreviewText(duration) {
+    if (duration.type === 'custom') {
+        if (duration.endDate) {
+            const endDate = new Date(duration.endDate);
+            const today = new Date();
+            const diffTime = Math.abs(endDate - today);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            return `حتى ${endDate.toLocaleDateString('ar-EG')} (${diffDays} يوم)`;
+        }
+        return 'يرجى تحديد تاريخ الانتهاء';
+    }
+    
+    const value = duration.value || 7;
+    const type = duration.type === 'days' ? 'يوم' : 'أسبوع';
+    const typeArabic = duration.type === 'days' ? 
+        (value === 1 ? 'يوم' : value === 2 ? 'يومان' : value <= 10 ? 'أيام' : 'يوماً') :
+        (value === 1 ? 'أسبوع' : value === 2 ? 'أسبوعان' : value <= 10 ? 'أسابيع' : 'أسبوعاً');
+    
+    return `${value} ${typeArabic}`;
+}
+
+        
+
     /**
  * تحديث خاصية في Dynamic Source
  */
@@ -18918,6 +19831,8 @@ if (step.type === 'preview' && step.preview) {
                 items: dailyTrackingSettings.goals.items || []
             }
         };
+            console.log('📈 تم حفظ بيانات Daily Tracking:', data.dailyTracking);
+
     } else {
         data.dailyTracking = { enabled: false };
     }
@@ -19398,6 +20313,425 @@ function validateDateTimePickers() {
         warnings: warnings
     };
 }
+
+        /**
+ * التحقق من صحة إعدادات Daily Tracking
+ */
+function validateDailyTracking() {
+    const errors = [];
+    const warnings = [];
+    
+    const dt = dailyTrackingSettings;
+    
+    // إذا لم يكن مفعّلاً، لا توجد مشاكل
+    if (!dt.enabled) {
+        return {
+            isValid: true,
+            hasWarnings: false,
+            message: '',
+            warningMessage: '',
+            details: [],
+            warnings: []
+        };
+    }
+    
+    // 1. التحقق من المدة
+    if (dt.duration.type === 'custom') {
+        if (!dt.duration.endDate) {
+            errors.push('❌ Daily Tracking: يجب تحديد تاريخ الانتهاء');
+        } else {
+            const endDate = new Date(dt.duration.endDate);
+            const today = new Date();
+            
+            if (endDate <= today) {
+                errors.push('❌ Daily Tracking: تاريخ الانتهاء يجب أن يكون في المستقبل');
+            }
+        }
+    } else {
+        const value = dt.duration.value || 0;
+        
+        if (value <= 0) {
+            errors.push('❌ Daily Tracking: المدة يجب أن تكون أكبر من صفر');
+        }
+        
+        // تحذير: مدة قصيرة جداً
+        if (value < 3 && dt.duration.type === 'days') {
+            warnings.push('⚠️ Daily Tracking: المدة قصيرة جداً (أقل من 3 أيام) - قد لا تكون مفيدة للتتبع');
+        }
+        
+        // تحذير: مدة طويلة جداً
+        if (value > 90 && dt.duration.type === 'days') {
+            warnings.push(`⚠️ Daily Tracking: المدة طويلة جداً (${value} يوم) - قد يكون من الصعب على الطالب الالتزام`);
+        }
+        
+        if (value > 12 && dt.duration.type === 'weeks') {
+            warnings.push(`⚠️ Daily Tracking: المدة طويلة جداً (${value} أسبوع) - قد يكون من الصعب على الطالب الالتزام`);
+        }
+    }
+    
+    // 2. التحقق من العناصر المتتبعة
+    if (!dt.trackingItems || dt.trackingItems.length === 0) {
+        errors.push('❌ Daily Tracking: يجب إضافة عنصر واحد على الأقل للتتبع');
+    } else {
+        // التحقق من كل عنصر
+        dt.trackingItems.forEach((item, index) => {
+            const itemRef = `العنصر ${index + 1} (${item.name})`;
+            
+            // اسم العنصر
+            if (!item.name || item.name.trim() === '') {
+                errors.push(`❌ ${itemRef}: لا يوجد اسم`);
+            }
+            
+            // السؤال
+            if (!item.question || item.question.trim() === '') {
+                warnings.push(`⚠️ ${itemRef}: لا يوجد سؤال - سيتم توليد سؤال افتراضي`);
+            }
+            
+            // التحقق حسب النوع
+            if (item.type === 'number' || item.type === 'time') {
+                if (item.min !== null && item.max !== null && item.min >= item.max) {
+                    errors.push(`❌ ${itemRef}: الحد الأدنى (${item.min}) يجب أن يكون أصغر من الحد الأقصى (${item.max})`);
+                }
+                
+                if (item.min !== null && item.min < 0) {
+                    warnings.push(`⚠️ ${itemRef}: الحد الأدنى سالب (${item.min})`);
+                }
+            }
+            
+            if (item.type === 'scale') {
+                if (item.max < 3) {
+                    warnings.push(`⚠️ ${itemRef}: نطاق التقييم ضيق جداً (1-${item.max})`);
+                }
+            }
+        });
+        
+        // تحذير: عدد كبير جداً من العناصر
+        if (dt.trackingItems.length > 10) {
+            warnings.push(`⚠️ Daily Tracking: عدد العناصر كبير (${dt.trackingItems.length}) - قد يكون مرهقاً للطالب`);
+        }
+    }
+    
+    // 3. التحقق من التذكيرات
+    if (dt.reminders.enabled) {
+        if (!dt.reminders.time || dt.reminders.time === '') {
+            errors.push('❌ Daily Tracking: يجب تحديد وقت التذكير');
+        }
+    }
+    
+    // 4. التحقق من التصورات البيانية
+    if (dt.visualization.showCharts) {
+        if (!dt.visualization.chartType) {
+            warnings.push('⚠️ Daily Tracking: لم يتم اختيار نوع الرسم البياني - سيتم استخدام Line Chart افتراضياً');
+        }
+    }
+    
+    // 5. التحقق من الأهداف
+    if (dt.goals.enabled) {
+        if (!dt.goals.items || dt.goals.items.length === 0) {
+            warnings.push('⚠️ Daily Tracking: الأهداف مفعّلة لكن لم يتم تحديد أي هدف');
+        }
+    }
+    
+    // 6. تحذير: Daily Tracking بدون خطوات
+    if (assessmentSteps.length === 0) {
+        warnings.push('⚠️ Daily Tracking: لا توجد خطوات في التمرين - Daily Tracking يعمل بشكل أفضل مع خطوات');
+    }
+    
+    // 7. معلومة: Daily Tracking + Time-locked steps
+    const hasTimelockedSteps = assessmentSteps.some(s => s.timelock && s.timelock.enabled);
+    if (hasTimelockedSteps) {
+        warnings.push('💡 Daily Tracking: يوجد خطوات مقفولة زمنياً - تأكد من أن هذا متوافق مع نظام التتبع اليومي');
+    }
+    
+    return {
+        isValid: errors.length === 0,
+        hasWarnings: warnings.length > 0,
+        message: errors.length > 0 ? 'أخطاء في إعدادات Daily Tracking:' : '',
+        warningMessage: warnings.length > 0 ? 'تحذيرات في إعدادات Daily Tracking:' : '',
+        details: errors,
+        warnings: warnings
+    };
+}
+
+        // Validation للـ Date/Time
+const dateTimeValidation = validateDateTimePickers();
+
+// أخطاء فادحة
+if (!dateTimeValidation.isValid) {
+    // ... كود الخطأ ...
+    return null;
+}
+
+// تحذيرات
+if (dateTimeValidation.hasWarnings) {
+    // ... كود التحذيرات ...
+}
+
+// 🆕 Validation للـ Daily Tracking
+const dailyTrackingValidation = validateDailyTracking();
+
+// أخطاء فادحة - توقف الحفظ
+if (!dailyTrackingValidation.isValid) {
+    Swal.fire({
+        icon: 'error',
+        title: 'خطأ في إعدادات Daily Tracking',
+        html: `
+            <div style="text-align: right;">
+                <p>${dailyTrackingValidation.message}</p>
+                ${dailyTrackingValidation.details ? `
+                    <ul style="margin-top: 1rem; padding-right: 1.5rem;">
+                        ${dailyTrackingValidation.details.map(d => `<li>${d}</li>`).join('')}
+                    </ul>
+                ` : ''}
+            </div>
+        `,
+        confirmButtonText: 'حسناً'
+    });
+    return null;
+}
+
+// تحذيرات - نعرضها في console فقط
+if (dailyTrackingValidation.hasWarnings) {
+    console.warn('⚠️ تحذيرات في Daily Tracking:');
+    dailyTrackingValidation.warnings.forEach(w => console.warn(`  - ${w}`));
+    
+    // Toast خفيف
+    const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true
+    });
+    
+    Toast.fire({
+        icon: 'warning',
+        title: `${dailyTrackingValidation.warnings.length} تحذير في Daily Tracking`,
+        text: 'تحقق من Console للتفاصيل'
+    });
+}
+
+
+    /**
+ * عرض معلومات أولية عن Daily Tracking
+ */
+function showDailyTrackingInfo() {
+    Swal.fire({
+        title: '📈 ما هو Daily Tracking 2.0؟',
+        html: `
+            <div style="text-align: right;">
+                
+                <!-- التعريف -->
+                <div style="background: #fef3c7; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #f59e0b;">
+                    <h6 style="color: #92400e; margin-bottom: 0.5rem;">
+                        <i class="fas fa-info-circle"></i>
+                        التعريف
+                    </h6>
+                    <p style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0;">
+                        <strong>Daily Tracking 2.0</strong> هو نظام تتبع يومي متقدم يحوّل التمرين العادي 
+                        إلى <strong>نظام تتبع مستمر</strong> على مدار فترة زمنية محددة (أيام/أسابيع).
+                    </p>
+                </div>
+
+                <!-- الفرق الأساسي -->
+                <div style="background: #dbeafe; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #3b82f6;">
+                    <h6 style="color: #1e40af; margin-bottom: 0.75rem;">
+                        <i class="fas fa-exchange-alt"></i>
+                        الفرق بين التمرين العادي وDaily Tracking
+                    </h6>
+                    
+                    <table style="width: 100%; font-size: 0.85rem; color: #1e293b;">
+                        <tr style="background: #f1f5f9;">
+                            <th style="padding: 0.5rem; border: 1px solid #e2e8f0;">التمرين العادي</th>
+                            <th style="padding: 0.5rem; border: 1px solid #e2e8f0;">Daily Tracking</th>
+                        </tr>
+                        <tr>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ مرة واحدة فقط</td>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ يومياً لفترة محددة</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ لا يوجد تتبع</td>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ رسوم بيانية وإحصائيات</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ لا تذكيرات</td>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ تذكيرات يومية</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ لا أهداف</td>
+                            <td style="padding: 0.5rem; border: 1px solid #e2e8f0;">✓ أهداف وإنجازات</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- أمثلة الاستخدام -->
+                <div style="background: #d1fae5; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #10b981;">
+                    <h6 style="color: #065f46; margin-bottom: 0.75rem;">
+                        <i class="fas fa-lightbulb"></i>
+                        أمثلة الاستخدام
+                    </h6>
+                    <ul style="font-size: 0.85rem; color: #1e293b; margin-bottom: 0; padding-right: 1.25rem;">
+                        <li><strong>تتبع العادات:</strong> صلاة، رياضة، قراءة، نوم</li>
+                        <li><strong>تتبع المشاعر:</strong> الحالة المزاجية، مستوى الطاقة</li>
+                        <li><strong>تتبع المؤشرات:</strong> ساعات النوم، كمية الماء، الوزن</li>
+                        <li><strong>تتبع الإنتاجية:</strong> ساعات العمل، المهام المنجزة</li>
+                    </ul>
+                </div>
+
+                <!-- متى تستخدمه -->
+                <div style="background: #ede9fe; padding: 1rem; border-radius: 8px;">
+                    <h6 style="color: #5b21b6; margin-bottom: 0.75rem;">
+                        <i class="fas fa-check-circle"></i>
+                        متى تستخدم Daily Tracking؟
+                    </h6>
+                    <ul style="font-size: 0.85rem; color: #1e293b; margin-bottom: 0; padding-right: 1.25rem;">
+                        <li>عندما تريد تتبع شيء على مدار فترة زمنية</li>
+                        <li>عندما تريد بناء عادة أو كسر عادة</li>
+                        <li>عندما تريد رؤية التقدم بشكل بصري (رسوم بيانية)</li>
+                        <li>عندما تريد تحفيز الطالب بالأهداف والإنجازات</li>
+                    </ul>
+                </div>
+
+            </div>
+        `,
+        width: '700px',
+        confirmButtonText: 'فهمت',
+        confirmButtonColor: '#f59e0b'
+    });
+}
+
+    /**
+ * عرض دليل شامل لـ Daily Tracking
+ */
+function showDailyTrackingHelp() {
+    Swal.fire({
+        title: '📘 دليل Daily Tracking 2.0',
+        html: `
+            <div style="text-align: right; max-height: 500px; overflow-y: auto;">
+                
+                <!-- المكونات الأساسية -->
+                <div style="background: #fef3c7; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #f59e0b;">
+                    <h6 style="color: #92400e; margin-bottom: 0.75rem;">
+                        <i class="fas fa-puzzle-piece"></i>
+                        المكونات الأساسية
+                    </h6>
+                    
+                    <div style="margin-bottom: 0.75rem;">
+                        <strong style="color: #1e293b; font-size: 0.9rem;">1. المدة (Duration)</strong>
+                        <p style="font-size: 0.85rem; color: #475569; margin: 0.25rem 0 0 1rem;">
+                            حدد كم يوماً/أسبوعاً سيستمر التتبع. مثال: 7 أيام، 4 أسابيع
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 0.75rem;">
+                        <strong style="color: #1e293b; font-size: 0.9rem;">2. العناصر المتتبعة (Tracking Items)</strong>
+                        <p style="font-size: 0.85rem; color: #475569; margin: 0.25rem 0 0 1rem;">
+                            ماذا سيتتبع الطالب؟ كل عنصر له نوع بيانات (نعم/لا، رقم، تقييم، إلخ)
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 0.75rem;">
+                        <strong style="color: #1e293b; font-size: 0.9rem;">3. التذكيرات (Reminders)</strong>
+                        <p style="font-size: 0.85rem; color: #475569; margin: 0.25rem 0 0 1rem;">
+                            تنبيه يومي في وقت محدد لتذكير الطالب بالتسجيل
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 0.75rem;">
+                        <strong style="color: #1e293b; font-size: 0.9rm;">4. التصورات البيانية (Visualization)</strong>
+                        <p style="font-size: 0.85rem; color: #475569; margin: 0.25rem 0 0 1rem;">
+                            رسوم بيانية وإحصائيات لعرض التقدم بشكل بصري
+                        </p>
+                    </div>
+                    
+                    <div>
+                        <strong style="color: #1e293b; font-size: 0.9rem;">5. الأهداف (Goals)</strong>
+                        <p style="font-size: 0.85rem; color: #475569; margin: 0.25rem 0 0 1rem;">
+                            أهداف محددة لتحفيز الطالب (مثال: 5 أيام في الأسبوع)
+                        </p>
+                    </div>
+                </div>
+
+                <!-- أنواع البيانات -->
+                <div style="background: #dbeafe; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #3b82f6;">
+                    <h6 style="color: #1e40af; margin-bottom: 0.75rem;">
+                        <i class="fas fa-database"></i>
+                        أنواع البيانات للعناصر
+                    </h6>
+                    <ul style="font-size: 0.85rem; color: #1e293b; margin-bottom: 0; padding-right: 1.25rem;">
+                        <li><strong>✓ نعم/لا (Boolean):</strong> هل فعلت الشيء أم لا؟ مثال: هل صليت؟</li>
+                        <li><strong>🔢 رقم (Number):</strong> كمية. مثال: كم كوب ماء شربت؟</li>
+                        <li><strong>⭐ تقييم (Scale):</strong> من 1 إلى 5. مثال: قيّم مزاجك</li>
+                        <li><strong>🕐 وقت (Time):</strong> كم ساعة؟ مثال: كم ساعة نمت؟</li>
+                        <li><strong>📝 نص (Text):</strong> ملاحظة قصيرة. مثال: ما أهم شيء اليوم؟</li>
+                    </ul>
+                </div>
+
+                <!-- كيفية الإعداد -->
+                <div style="background: #d1fae5; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #10b981;">
+                    <h6 style="color: #065f46; margin-bottom: 0.75rem;">
+                        <i class="fas fa-list-ol"></i>
+                        كيفية الإعداد (خطوة بخطوة)
+                    </h6>
+                    <ol style="font-size: 0.85rem; color: #1e293b; margin-bottom: 0; padding-right: 1.5rem;">
+                        <li>فعّل Daily Tracking من الزر في الأعلى</li>
+                        <li>حدد المدة (كم يوماً سيستمر التتبع)</li>
+                        <li>أضف العناصر التي تريد تتبعها (صلاة، رياضة، إلخ)</li>
+                        <li>فعّل التذكيرات إذا أردت (اختياري)</li>
+                        <li>اختر نوع الرسم البياني المفضل</li>
+                        <li>فعّل الأهداف إذا أردت (اختياري)</li>
+                        <li>احفظ التمرين</li>
+                    </ol>
+                </div>
+
+                <!-- نصائح مهمة -->
+                <div style="background: #fce7f3; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-right: 4px solid #ec4899;">
+                    <h6 style="color: #831843; margin-bottom: 0.75rem;">
+                        <i class="fas fa-star"></i>
+                        نصائح لأفضل النتائج
+                    </h6>
+                    <ul style="font-size: 0.85rem; color: #831843; margin-bottom: 0; padding-right: 1.25rem;">
+                        <li>ابدأ بمدة قصيرة (7-14 يوم) لأول مرة</li>
+                        <li>لا تضف عناصر كثيرة (3-5 عناصر كافية)</li>
+                        <li>اختر أسماء واضحة وبسيطة للعناصر</li>
+                        <li>استخدم الأيقونات emoji - تجعل التتبع أكثر متعة</li>
+                        <li>فعّل التذكيرات - تزيد الالتزام بنسبة كبيرة</li>
+                        <li>استخدم التصورات البيانية - تحفز الطالب بصرياً</li>
+                    </ul>
+                </div>
+
+                <!-- مثال عملي -->
+                <div style="background: #ede9fe; padding: 1rem; border-radius: 8px;">
+                    <h6 style="color: #5b21b6; margin-bottom: 0.75rem;">
+                        <i class="fas fa-hands-helping"></i>
+                        مثال عملي: تتبع العادات اليومية
+                    </h6>
+                    <div style="font-size: 0.85rem; color: #1e293b;">
+                        <strong>الهدف:</strong> تتبع 4 عادات يومية لمدة أسبوع
+                        
+                        <div style="margin-top: 0.5rem; padding: 0.75rem; background: white; border-radius: 6px;">
+                            <strong>الإعدادات:</strong><br>
+                            • المدة: 7 أيام<br>
+                            • العناصر:<br>
+                            &nbsp;&nbsp;1. 🕌 الصلاة في وقتها (نعم/لا)<br>
+                            &nbsp;&nbsp;2. 📖 القراءة (كم دقيقة؟)<br>
+                            &nbsp;&nbsp;3. 🏃 الرياضة (نعم/لا)<br>
+                            &nbsp;&nbsp;4. 😊 الحالة المزاجية (تقييم 1-5)<br>
+                            • التذكير: 8:00 مساءً<br>
+                            • الرسم البياني: خط (Line Chart)<br>
+                            • الهدف: 5 أيام من أصل 7
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        `,
+        width: '750px',
+        confirmButtonText: 'فهمت',
+        confirmButtonColor: '#f59e0b'
+    });
+}
+        
 
         /**
  * تفعيل/إلغاء عداد الوقت للسؤال
