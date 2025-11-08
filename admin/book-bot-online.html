@@ -8934,10 +8934,14 @@ const paidDate = new Date(result.value.date).toISOString();
 installment.status = actualPaidAmount >= installmentAmount ? 'paid' : 'partial';
 installment.paidAt = paidDate;
 installment.paymentMethod = result.value.method;
-installment.reference = result.value.reference;
-installment.paymentNotes = result.value.notes;
+installment.reference = result.value.reference || 'لا يوجد';
 installment.paidBy = 'admin';
 installment.actualPaidAmount = actualPaidAmount;
+
+// إضافة الملاحظات فقط إذا كانت موجودة
+if (result.value.notes) {
+    installment.paymentNotes = result.value.notes;
+}
 
 // حذف إشعار الإيصال إذا كان موجود (تم التسجيل)
 if (installment.receiptReceived) {
@@ -8951,12 +8955,13 @@ let totalPaidAmount = actualPaidAmount;
 let distributionLog = [];
 
 // تسجيل القسط الحالي
-distributionLog.push({
+const logEntry = {
     installmentNumber: installment.installmentNumber + 1,
     amount: Math.min(actualPaidAmount, installmentAmount),
     status: installment.status,
     isOriginal: true
-});
+};
+distributionLog.push(cleanDataForFirebase(logEntry));
 
 // إذا كان هناك مبلغ زائد، توزيعه على الأقساط القادمة
 if (extraAmount > 0) {
@@ -8995,13 +9000,14 @@ if (extraAmount > 0) {
                     nextInstallment.partialPayments = [];
                 }
                 
-                nextInstallment.partialPayments.push({
-                    amount: remainingExtra,
-                    date: paidDate,
-                    method: result.value.method,
-                    reference: result.value.reference,
-                    linkedToInstallment: installmentIndex
-                });
+                const partialPayment = {
+    amount: remainingExtra,
+    date: paidDate,
+    method: result.value.method,
+    reference: result.value.reference || 'لا يوجد',
+    linkedToInstallment: installmentIndex
+};
+nextInstallment.partialPayments.push(cleanDataForFirebase(partialPayment));
                 
                 distributionLog.push({
                     installmentNumber: nextInstallment.installmentNumber + 1,
@@ -9029,6 +9035,14 @@ if (booking.paymentDetails.remainingAmount <= 0) {
     booking.paymentDetails.fullyPaid = true;
     booking.paymentDetails.fullyPaidAt = new Date().toISOString();
     booking.status = 'active';
+} else {
+    // التأكد من وجود قيم صحيحة
+    if (!booking.paymentDetails.fullyPaid) {
+        booking.paymentDetails.fullyPaid = false;
+    }
+    if (!booking.paymentDetails.fullyPaidAt) {
+        booking.paymentDetails.fullyPaidAt = null;
+    }
 }
 
 // حفظ سجل التوزيع
@@ -9036,16 +9050,17 @@ if (!booking.paymentDetails.paymentHistory) {
     booking.paymentDetails.paymentHistory = [];
 }
 
-booking.paymentDetails.paymentHistory.push({
+const historyEntry = {
     timestamp: new Date().toISOString(),
     actualAmount: actualPaidAmount,
     installmentAmount: installmentAmount,
     extraAmount: extraAmount,
     distribution: distributionLog,
     method: result.value.method,
-    reference: result.value.reference,
+    reference: result.value.reference || 'لا يوجد',
     by: 'admin'
-});
+};
+booking.paymentDetails.paymentHistory.push(cleanDataForFirebase(historyEntry));
         
         // التحقق من اكتمال الدفع
         if (booking.paymentDetails.remainingAmount === 0) {
@@ -9053,11 +9068,14 @@ booking.paymentDetails.paymentHistory.push({
             booking.status = 'paid'; // تحديث حالة الحجز
         }
         
-        // حفظ في Firebase
-        await db.collection('tempBookings').doc(bookingId).update({
-            'paymentDetails': booking.paymentDetails,
-            'status': booking.status
-        });
+       // تنظيف البيانات من undefined قبل الحفظ في Firebase
+const cleanedPaymentDetails = cleanDataForFirebase(booking.paymentDetails);
+
+// حفظ في Firebase
+await db.collection('tempBookings').doc(bookingId).update({
+    'paymentDetails': cleanedPaymentDetails,
+    'status': booking.status
+});
         
         // إرسال رسالة تفصيلية للعميل
 if (booking.telegramChatId) {
@@ -9843,6 +9861,27 @@ function calculateDistribution(extraAmount) {
         }
     };
 }
+
+
+        // دالة تنظيف البيانات من undefined قبل الحفظ في Firebase
+function cleanDataForFirebase(obj) {
+    if (Array.isArray(obj)) {
+        return obj.map(item => cleanDataForFirebase(item));
+    } else if (obj !== null && typeof obj === 'object') {
+        const cleaned = {};
+        for (const key in obj) {
+            if (obj.hasOwnProperty(key)) {
+                const value = obj[key];
+                if (value !== undefined) {
+                    cleaned[key] = cleanDataForFirebase(value);
+                }
+            }
+        }
+        return cleaned;
+    }
+    return obj;
+}
+        
         
        // تحديث تلقائي للوقت
        setInterval(() => {
