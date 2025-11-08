@@ -996,6 +996,63 @@
     border-color: #8B5CF6;
     background: linear-gradient(135deg, #F5F3FF, white);
 }
+
+        /* تأثير النبض للأزرار المهمة */
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+    }
+}
+
+.pulse-animation {
+    animation: pulse 2s infinite;
+}
+
+/* تحسين عرض الجداول في النوافذ */
+.installment-schedule-popup {
+    overflow: visible !important;
+}
+
+.installment-schedule-popup .swal2-html-container {
+    overflow-x: auto !important;
+    max-height: 70vh !important;
+}
+
+/* تحسين عرض بطاقات العملاء في نافذة الأقساط */
+.installments-manager-popup {
+    overflow: visible !important;
+}
+
+.installments-manager-content {
+    overflow-y: auto !important;
+    max-height: 80vh !important;
+    padding: 0 10px;
+}
+
+/* تحسين السكرول في الأجهزة المحمولة */
+@media (max-width: 768px) {
+    .installments-manager-content {
+        max-height: 75vh !important;
+    }
+    
+    .installment-table {
+        font-size: 0.85rem;
+    }
+    
+    .installment-table th,
+    .installment-table td {
+        padding: 8px 4px;
+    }
+    
+    .installments-stats-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
     </style>
 </head>
 <body>
@@ -1561,7 +1618,137 @@ function createBookingCard(booking) {
                 </div>
             </div>
         </div>
+
+        <!-- قسم الأقساط (يظهر فقط للحجوزات بنظام التقسيط) -->
+${booking.paymentDetails?.type === 'installment' ? `
+    <div class="installments-section" style="margin-top: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3 style="margin: 0; color: #1E40AF;">
+                <i class="fas fa-calendar-check"></i> نظام الأقساط الشهرية
+            </h3>
+        </div>
         
+        ${(() => {
+            const schedule = booking.paymentDetails.installmentSchedule || [];
+            const paidCount = schedule.filter(i => i.status === 'paid').length;
+            const totalCount = schedule.length - 1; // استثناء الدفعة الأولى
+            const nextPending = schedule.find(i => i.status === 'pending' && i.installmentNumber > 0);
+            
+            return `
+                <div class="installments-summary">
+                    <div class="installment-stat">
+                        <div class="installment-stat-value">${paidCount}/${totalCount}</div>
+                        <div class="installment-stat-label">الأقساط المدفوعة</div>
+                    </div>
+                    <div class="installment-stat">
+                        <div class="installment-stat-value" style="color: #DC2626;">
+                            ${booking.paymentDetails.remainingAmount?.toLocaleString('ar-EG') || '0'} ج.م
+                        </div>
+                        <div class="installment-stat-label">المتبقي</div>
+                    </div>
+                    ${nextPending ? `
+                        <div class="installment-stat" style="background: linear-gradient(135deg, #FEF3C7, #FDE68A);">
+                            <div class="installment-stat-value" style="color: #D97706;">
+                                ${nextPending.amount.toLocaleString('ar-EG')} ج.م
+                            </div>
+                            <div class="installment-stat-label">
+                                القسط القادم
+                                <br>
+                                <small style="color: #92400E;">
+                                    ${(() => {
+                                        const dueDate = new Date(nextPending.dueDate);
+                                        const now = new Date();
+                                        const daysDiff = Math.floor((dueDate - now) / (1000 * 60 * 60 * 24));
+                                        
+                                        if (daysDiff < 0) {
+                                            return `⚠️ متأخر ${Math.abs(daysDiff)} ${Math.abs(daysDiff) === 1 ? 'يوم' : 'أيام'}`;
+                                        } else if (daysDiff === 0) {
+                                            return '⏰ اليوم';
+                                        } else if (daysDiff <= 7) {
+                                            return `⏰ بعد ${daysDiff} ${daysDiff === 1 ? 'يوم' : 'أيام'}`;
+                                        } else {
+                                            return dueDate.toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' });
+                                        }
+                                    })()}
+                                </small>
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="installment-stat" style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0);">
+                            <div class="installment-stat-value" style="color: #065F46;">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="installment-stat-label" style="color: #065F46;">
+                                مكتمل الدفع
+                            </div>
+                        </div>
+                    `}
+                </div>
+                
+                <div class="installments-actions">
+                    <button onclick="showInstallmentSchedule('${booking.id}')" 
+                            class="btn-installment"
+                            style="background: linear-gradient(135deg, #3B82F6, #2563EB); color: white;">
+                        <i class="fas fa-table"></i> جدول الأقساط الكامل
+                    </button>
+                    
+                    ${nextPending ? `
+                        ${(() => {
+                            const lastReminder = nextPending.reminders?.[nextPending.reminders.length - 1];
+                            const minDays = parseInt(localStorage.getItem('installmentReminderMinDays') || '7');
+                            const now = new Date();
+                            
+                            let canRemind = !lastReminder;
+                            if (lastReminder) {
+                                const daysSince = Math.floor((now - new Date(lastReminder.sentAt)) / (1000 * 60 * 60 * 24));
+                                const dueDate = new Date(nextPending.dueDate);
+                                const daysOverdue = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24));
+                                canRemind = daysSince >= minDays || daysOverdue > 7;
+                            }
+                            
+                            if (canRemind) {
+                                return `
+                                    <button onclick="sendQuickInstallmentReminder('${booking.id}', ${schedule.indexOf(nextPending)})" 
+                                            class="btn-installment"
+                                            style="background: linear-gradient(135deg, #10B981, #059669); color: white;">
+                                        <i class="fas fa-paper-plane"></i> إرسال تذكير سريع
+                                    </button>
+                                `;
+                            } else {
+                                return `
+                                    <button disabled
+                                            class="btn-installment"
+                                            style="background: #E5E7EB; color: #9CA3AF; cursor: not-allowed;">
+                                        <i class="fas fa-pause"></i> تم التذكير حديثاً
+                                    </button>
+                                `;
+                            }
+                        })()}
+                        
+                        ${nextPending.receiptReceived ? `
+                            <button onclick="viewInstallmentReceipt('${booking.id}', ${schedule.indexOf(nextPending)})" 
+                                    class="btn-installment pulse-animation"
+                                    style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); color: white;">
+                                <i class="fas fa-camera"></i> عرض الإيصال المستلم
+                            </button>
+                            <button onclick="markInstallmentAsPaid('${booking.id}', ${schedule.indexOf(nextPending)})" 
+                                    class="btn-installment pulse-animation"
+                                    style="background: linear-gradient(135deg, #F59E0B, #D97706); color: white;">
+                                <i class="fas fa-check-double"></i> تسجيل دفع القسط
+                            </button>
+                        ` : ''}
+                    ` : ''}
+                    
+                    <button onclick="showInstallmentsManager()" 
+                            class="btn-installment"
+                            style="background: linear-gradient(135deg, #8B5CF6, #7C3AED); color: white;">
+                        <i class="fas fa-calendar-alt"></i> إدارة كل الأقساط
+                    </button>
+                </div>
+            `;
+        })()}
+    </div>
+` : ''}
         <!-- التفاصيل الكاملة (مطوية) -->
         <div class="full-details" id="details-${booking.id}" style="display: none; margin-top: 20px;">
             ${getFullDetailsContent(booking)}
@@ -5588,21 +5775,7 @@ function smartRound(num) {
     return Math.ceil(num / 5) * 5;
 }
 
-// دالة استخراج الأرقام من النص العربي
-function extractNumberFromArabicText(text) {
-    if (!text) return 0;
-    
-    const arabicNumbers = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
-    const englishNumbers = ['0','1','2','3','4','5','6','7','8','9'];
-    
-    let result = text.toString();
-    for (let i = 0; i < arabicNumbers.length; i++) {
-        result = result.replace(new RegExp(arabicNumbers[i], 'g'), englishNumbers[i]);
-    }
-    
-    result = result.replace(/[^\d]/g, '');
-    return parseInt(result) || 0;
-}
+
 
 // دالة تحليل الخطة الحالية
 function analyzeCurrentPlan(booking) {
@@ -8521,7 +8694,309 @@ ${isFullyPaid ?
 }
 
 
+// دالة عرض جدول الأقساط لحجز معين
+async function showInstallmentSchedule(bookingId) {
+    try {
+        const booking = allBookings.find(b => b.id === bookingId);
+        if (!booking || !booking.paymentDetails?.installmentSchedule) {
+            Swal.fire('خطأ!', 'لم يتم العثور على بيانات الأقساط', 'error');
+            return;
+        }
+        
+        const schedule = booking.paymentDetails.installmentSchedule;
+        const customerName = booking.customer?.name || 'غير محدد';
+        const courseName = booking.courseName || 'غير محدد';
+        
+        let tableHTML = `
+            <div style="text-align: right;">
+                <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                            padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 10px 0; color: #1E40AF;">
+                        <i class="fas fa-user"></i> ${customerName}
+                    </h3>
+                    <p style="margin: 5px 0;"><strong>📚 الدورة:</strong> ${courseName}</p>
+                    <p style="margin: 5px 0;"><strong>💰 المبلغ الكلي:</strong> ${booking.paymentDetails.totalAmount?.toLocaleString('ar-EG') || '0'} ج.م</p>
+                </div>
+                
+                <div style="overflow-x: auto;">
+                    <table class="installment-table">
+                        <thead>
+                            <tr>
+                                <th style="text-align: center; width: 80px;">القسط</th>
+                                <th style="text-align: center; width: 120px;">المبلغ</th>
+                                <th style="text-align: center; width: 150px;">تاريخ الاستحقاق</th>
+                                <th style="text-align: center; width: 120px;">الحالة</th>
+                                <th style="text-align: center;">تفاصيل إضافية</th>
+                                <th style="text-align: center; width: 150px;">إجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        const now = new Date();
+        
+        schedule.forEach((installment, index) => {
+            const dueDate = new Date(installment.dueDate);
+            const daysDiff = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24));
+            
+            let statusBadge = '';
+            let statusClass = '';
+            let detailsHTML = '';
+            let actionsHTML = '';
+            
+            if (installment.status === 'paid') {
+                statusClass = 'installment-status-paid';
+                statusBadge = `<span class="installment-status-badge ${statusClass}">✅ مدفوع</span>`;
+                detailsHTML = `
+                    <div style="font-size: 0.9rem;">
+                        <div>📅 ${new Date(installment.paidAt).toLocaleDateString('ar-EG')}</div>
+                        ${installment.paymentMethod ? `<div>💳 ${installment.paymentMethod}</div>` : ''}
+                        ${installment.reference && installment.reference !== 'لا يوجد' ? `<div>📝 ${installment.reference}</div>` : ''}
+                    </div>
+                `;
+                actionsHTML = `<span style="color: #10B981; font-weight: bold;">✓ مكتمل</span>`;
+                
+            } else {
+                if (daysDiff > 0) {
+                    statusClass = 'installment-status-overdue';
+                    statusBadge = `<span class="installment-status-badge ${statusClass}">🔴 متأخر ${daysDiff} ${daysDiff === 1 ? 'يوم' : 'أيام'}</span>`;
+                } else if (daysDiff > -7) {
+                    statusClass = 'installment-status-due';
+                    statusBadge = `<span class="installment-status-badge ${statusClass}">⏰ قادم</span>`;
+                } else {
+                    statusClass = 'installment-status-upcoming';
+                    statusBadge = `<span class="installment-status-badge ${statusClass}">📅 مستقبلي</span>`;
+                }
+                
+                // تفاصيل التذكيرات والإيصالات
+                if (installment.reminders && installment.reminders.length > 0) {
+                    const lastReminder = installment.reminders[installment.reminders.length - 1];
+                    detailsHTML += `<div style="font-size: 0.85rem; color: #6B7280;">
+                        💬 آخر تذكير: ${new Date(lastReminder.sentAt).toLocaleDateString('ar-EG')}
+                    </div>`;
+                }
+                
+                if (installment.receiptReceived) {
+                    detailsHTML += `<div style="font-size: 0.85rem; color: #8B5CF6;">
+                        📸 إيصال مستلم: ${new Date(installment.receiptReceivedAt).toLocaleDateString('ar-EG')}
+                    </div>`;
+                }
+                
+                // أزرار الإجراءات
+                actionsHTML = `
+                    <div style="display: flex; gap: 5px; flex-direction: column;">
+                        ${installment.installmentNumber > 0 ? `
+                            <button onclick="sendSingleReminder('${bookingId}', ${index})"
+                                    style="padding: 6px 12px; background: #10B981; color: white; 
+                                           border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">
+                                💬 تذكير
+                            </button>
+                            ${installment.receiptReceived ? `
+                                <button onclick="viewInstallmentReceipt('${bookingId}', ${index})"
+                                        style="padding: 6px 12px; background: #8B5CF6; color: white; 
+                                               border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">
+                                    👁️ الإيصال
+                                </button>
+                            ` : ''}
+                            <button onclick="markInstallmentAsPaid('${bookingId}', ${index})"
+                                    style="padding: 6px 12px; background: #3B82F6; color: white; 
+                                           border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">
+                                ✅ تسجيل
+                            </button>
+                        ` : `
+                            <span style="font-size: 0.85rem; color: #6B7280;">الدفعة الأولى</span>
+                        `}
+                    </div>
+                `;
+            }
+            
+            tableHTML += `
+                <tr>
+                    <td style="text-align: center; font-weight: bold;">
+                        ${installment.installmentNumber === 0 ? 'الأولى' : installment.installmentNumber}
+                    </td>
+                    <td style="text-align: center; font-weight: bold; color: #DC2626;">
+                        ${installment.amount.toLocaleString('ar-EG')} ج.م
+                    </td>
+                    <td style="text-align: center;">
+                        ${dueDate.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    </td>
+                    <td style="text-align: center;">
+                        ${statusBadge}
+                    </td>
+                    <td>
+                        ${detailsHTML || '<span style="color: #9CA3AF;">-</span>'}
+                    </td>
+                    <td style="text-align: center;">
+                        ${actionsHTML}
+                    </td>
+                </tr>
+            `;
+        });
+        
+        tableHTML += `
+                        </tbody>
+                        <tfoot>
+                            <tr style="background: #F3F4F6; font-weight: bold;">
+                                <td colspan="2" style="text-align: right; padding: 15px;">
+                                    <strong>الإجمالي</strong>
+                                </td>
+                                <td colspan="4" style="text-align: right; padding: 15px;">
+                                    <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 10px;">
+                                        <div>
+                                            <span style="color: #6B7280;">المبلغ الكلي:</span>
+                                            <strong style="color: #1F2937;">${booking.paymentDetails.totalAmount?.toLocaleString('ar-EG') || '0'} ج.م</strong>
+                                        </div>
+                                        <div>
+                                            <span style="color: #6B7280;">المدفوع:</span>
+                                            <strong style="color: #10B981;">${booking.paymentDetails.paidAmount?.toLocaleString('ar-EG') || '0'} ج.م</strong>
+                                        </div>
+                                        <div>
+                                            <span style="color: #6B7280;">المتبقي:</span>
+                                            <strong style="color: #DC2626;">${booking.paymentDetails.remainingAmount?.toLocaleString('ar-EG') || '0'} ج.م</strong>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        Swal.fire({
+            title: '📋 جدول الأقساط الكامل',
+            html: tableHTML,
+            width: '95%',
+            showCloseButton: true,
+            showConfirmButton: false,
+            customClass: {
+                popup: 'installment-schedule-popup'
+            }
+        });
+        
+    } catch (error) {
+        console.error('خطأ في عرض جدول الأقساط:', error);
+        Swal.fire('خطأ!', 'حدث خطأ في عرض جدول الأقساط', 'error');
+    }
+}
 
+// دالة إرسال تذكير سريع من بطاقة الحجز
+async function sendQuickInstallmentReminder(bookingId, installmentIndex) {
+    try {
+        // نفس منطق sendSingleReminder لكن بدون نافذة تأكيد
+        const booking = allBookings.find(b => b.id === bookingId);
+        if (!booking) {
+            Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
+            return;
+        }
+        
+        const installment = booking.paymentDetails.installmentSchedule[installmentIndex];
+        const customerName = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+        
+        // إظهار شاشة التحميل
+        Swal.fire({
+            title: 'جاري الإرسال...',
+            html: 'يرجى الانتظار',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        // بناء رسالة التذكير
+        const dueDate = new Date(installment.dueDate);
+        const message = `⏰ تذكير بموعد القسط الشهري
+
+مرحباً ${customerName} 👋
+
+هذا تذكير لطيف بأن القسط الشهري القادم:
+
+━━━━━━━━━━━━━━━━━━
+📚 الدورة: *${booking.courseName}*
+💰 المبلغ المطلوب: *${installment.amount.toLocaleString('ar-EG')} ج.م*
+📅 تاريخ الاستحقاق: ${dueDate.toLocaleDateString('ar-EG')}
+
+📊 حالة الأقساط:
+✅ مدفوع: ${booking.paymentDetails.paidInstallments} من ${booking.paymentDetails.totalInstallments - 1} أقساط
+⏳ المتبقي: ${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م
+
+━━━━━━━━━━━━━━━━━━
+💳 طرق الدفع المتاحة:
+
+📱 فودافون كاش: 01xxxxxxxxx
+💳 انستاباي: اسم الحساب
+🏦 تحويل بنكي: رقم الحساب
+
+━━━━━━━━━━━━━━━━━━
+بعد الدفع، يرجى إرسال صورة الإيصال 📸
+
+شكراً لثقتك في منظور الفؤاد 💚`;
+
+        // إرسال الرسالة
+        const response = await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: booking.telegramChatId,
+                message: message
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('فشل إرسال الرسالة');
+        }
+        
+        // تحديث Firebase
+        const updatedReminders = installment.reminders || [];
+        updatedReminders.push({
+            sentAt: new Date().toISOString(),
+            sentBy: 'admin',
+            type: 'quick'
+        });
+        
+        installment.reminders = updatedReminders;
+        
+        await db.collection('tempBookings').doc(bookingId).update({
+            'paymentDetails.installmentSchedule': booking.paymentDetails.installmentSchedule
+        });
+        
+        Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'success',
+            title: '✅ تم إرسال التذكير بنجاح',
+            showConfirmButton: false,
+            timer: 3000
+        });
+        
+        // إعادة تحميل البيانات
+        loadBookings();
+        
+    } catch (error) {
+        console.error('خطأ في إرسال التذكير:', error);
+        Swal.fire('خطأ!', 'حدث خطأ في إرسال التذكير', 'error');
+    }
+}
+
+// دالة مساعدة لحساب الفرق بالأيام
+function getDaysDifference(date1, date2) {
+    const d1 = new Date(date1);
+    const d2 = new Date(date2);
+    const diffTime = Math.abs(d2 - d1);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+}
+
+// دالة تهيئة مدير الأقساط (تُستدعى عند فتح النافذة)
+function initializeInstallmentsManager() {
+    // تحميل الحد الأدنى المحفوظ
+    const savedMinDays = localStorage.getItem('installmentReminderMinDays') || '7';
+    const select = document.getElementById('reminderMinDays');
+    if (select) {
+        select.value = savedMinDays;
+    }
+}
         
        // تحديث تلقائي للوقت
        setInterval(() => {
