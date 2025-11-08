@@ -8726,13 +8726,27 @@ async function rejectReceipt(bookingId, installmentIndex) {
     }
 }
 
-        // دالة تسجيل دفع قسط
+       // دالة تسجيل دفع قسط
 async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = false) {
     try {
         const booking = allBookings.find(b => b.id === bookingId);
         if (!booking) {
             Swal.fire('خطأ!', 'لم يتم العثور على الحجز', 'error');
             return;
+        }
+        
+        // التحقق من صحة remainingAmount وإعادة حسابه إذا لزم الأمر
+        if (!booking.paymentDetails.remainingAmount || 
+            isNaN(booking.paymentDetails.remainingAmount) ||
+            booking.paymentDetails.remainingAmount < 0) {
+            
+            console.warn('⚠️ إعادة حساب المتبقي...');
+            
+            const totalAmount = booking.paymentDetails.totalAmount || 0;
+            const paidAmount = booking.paymentDetails.paidAmount || 0;
+            booking.paymentDetails.remainingAmount = totalAmount - paidAmount;
+            
+            console.log('✅ المتبقي الجديد:', booking.paymentDetails.remainingAmount);
         }
         
         const installment = booking.paymentDetails.installmentSchedule[installmentIndex];
@@ -8772,7 +8786,7 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
                     </div>
                     <div>
                         <span style="color: #6B7280;">المتبقي الكلي:</span>
-                        <strong style="color: #F59E0B;">${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م</strong>
+                        <strong style="color: #F59E0B;">${(booking.paymentDetails.remainingAmount || 0).toLocaleString('ar-EG')} ج.م</strong>
                     </div>
                 </div>
             </div>
@@ -8804,7 +8818,7 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
                        min="0"
                        step="0.01"
                        data-installment-amount="${installment.amount}"
-                       data-remaining-total="${booking.paymentDetails.remainingAmount}"
+                       data-remaining-total="${booking.paymentDetails.remainingAmount || 0}"
                        oninput="validateAndCalculateExtra()"
                        style="width: 90%; padding: 15px; border: 3px solid #8B5CF6; 
                               border-radius: 10px; margin-bottom: 0; font-size: 1.3rem;
@@ -8815,10 +8829,10 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
                                    border-radius: 6px; cursor: pointer; font-weight: bold; color: #4338CA;">
                         القسط فقط (${installment.amount.toLocaleString('ar-EG')} ج.م)
                     </button>
-                    <button type="button" onclick="setAmount(${booking.paymentDetails.remainingAmount})"
+                    <button type="button" onclick="setAmount(${booking.paymentDetails.remainingAmount || 0})"
                             style="flex: 1; padding: 8px; background: #FEF3C7; border: 2px solid #F59E0B;
                                    border-radius: 6px; cursor: pointer; font-weight: bold; color: #D97706;">
-                        الباقي كله (${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م)
+                        الباقي كله (${(booking.paymentDetails.remainingAmount || 0).toLocaleString('ar-EG')} ج.م)
                     </button>
                 </div>
             </div>
@@ -8889,10 +8903,37 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
             confirmButtonText: '✅ تأكيد الدفع',
             cancelButtonText: 'إلغاء',
             confirmButtonColor: '#10B981',
+            didOpen: () => {
+                // تخزين معلومات الحجز في window للوصول إليها من الدوال المساعدة
+                window.currentBookingId = bookingId;
+                window.currentInstallmentIndex = installmentIndex;
+                
+                // تشغيل التحقق الأولي
+                setTimeout(() => {
+                    validateAndCalculateExtra();
+                }, 100);
+            },
             preConfirm: () => {
                 const method = document.getElementById('installmentPaymentMethod').value;
+                const actualAmount = parseFloat(document.getElementById('actualPaidAmount')?.value);
+                const installmentAmount = parseFloat(document.getElementById('actualPaidAmount')?.getAttribute('data-installment-amount'));
+                const remainingTotal = parseFloat(document.getElementById('actualPaidAmount')?.getAttribute('data-remaining-total'));
+                
+                // التحقق من طريقة الدفع
                 if (!method) {
-                    Swal.showValidationMessage('من فضلك اختر طريقة الدفع');
+                    Swal.showValidationMessage('⚠️ من فضلك اختر طريقة الدفع');
+                    return false;
+                }
+                
+                // التحقق من المبلغ
+                if (!actualAmount || actualAmount <= 0) {
+                    Swal.showValidationMessage('⚠️ من فضلك أدخل المبلغ المدفوع');
+                    return false;
+                }
+                
+                // تحذير إذا كان المبلغ أكبر بكثير من المتبقي
+                if (actualAmount > remainingTotal * 1.5) {
+                    Swal.showValidationMessage(`⚠️ المبلغ كبير جداً! المتبقي الكلي: ${remainingTotal.toLocaleString('ar-EG')} ج.م`);
                     return false;
                 }
                 
@@ -8900,7 +8941,10 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
                     method: method,
                     reference: document.getElementById('installmentPaymentReference').value || 'لا يوجد',
                     date: document.getElementById('installmentPaymentDate').value,
-                    notes: document.getElementById('installmentPaymentNotes').value || null
+                    notes: document.getElementById('installmentPaymentNotes').value || null,
+                    actualAmount: actualAmount,
+                    installmentAmount: installmentAmount,
+                    hasExtra: actualAmount > installmentAmount
                 };
             }
         });
@@ -8913,180 +8957,156 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
             html: 'يرجى الانتظار',
             allowOutsideClick: false,
             didOpen: () => {
-    // تخزين معلومات الحجز في window للوصول إليها من الدوال المساعدة
-    window.currentBookingId = bookingId;
-    window.currentInstallmentIndex = installmentIndex;
-    
-    // تشغيل التحقق الأولي
-    setTimeout(() => {
-        validateAndCalculateExtra();
-    }, 100);
-},
+                Swal.showLoading();
+            }
         });
         
         // بيانات الدفع
-const actualPaidAmount = result.value.actualAmount;
-const installmentAmount = result.value.installmentAmount;
-const extraAmount = actualPaidAmount - installmentAmount;
-const paidDate = new Date(result.value.date).toISOString();
+        const actualPaidAmount = result.value.actualAmount;
+        const installmentAmount = result.value.installmentAmount;
+        const extraAmount = actualPaidAmount - installmentAmount;
+        const paidDate = new Date(result.value.date).toISOString();
 
-// تحديث القسط الحالي
-installment.status = actualPaidAmount >= installmentAmount ? 'paid' : 'partial';
-installment.paidAt = paidDate;
-installment.paymentMethod = result.value.method;
-installment.reference = result.value.reference || 'لا يوجد';
-installment.paidBy = 'admin';
-installment.actualPaidAmount = actualPaidAmount;
+        // تحديث القسط الحالي
+        installment.status = actualPaidAmount >= installmentAmount ? 'paid' : 'partial';
+        installment.paidAt = paidDate;
+        installment.paymentMethod = result.value.method;
+        installment.reference = result.value.reference || 'لا يوجد';
+        installment.paidBy = 'admin';
+        installment.actualPaidAmount = actualPaidAmount;
 
-// إضافة الملاحظات فقط إذا كانت موجودة
-if (result.value.notes) {
-    installment.paymentNotes = result.value.notes;
-}
+        // إضافة الملاحظات فقط إذا كانت موجودة
+        if (result.value.notes) {
+            installment.paymentNotes = result.value.notes;
+        }
 
-// حذف إشعار الإيصال إذا كان موجود (تم التسجيل)
-if (installment.receiptReceived) {
-    installment.receiptProcessed = true;
-    installment.receiptProcessedAt = new Date().toISOString();
-}
+        // حذف إشعار الإيصال إذا كان موجود (تم التسجيل)
+        if (installment.receiptReceived) {
+            installment.receiptProcessed = true;
+            installment.receiptProcessedAt = new Date().toISOString();
+        }
 
-// متغيرات التتبع
-let installmentsPaidCount = actualPaidAmount >= installmentAmount ? 1 : 0;
-let totalPaidAmount = actualPaidAmount;
-let distributionLog = [];
+        // متغيرات التتبع
+        let installmentsPaidCount = actualPaidAmount >= installmentAmount ? 1 : 0;
+        let totalPaidAmount = actualPaidAmount;
+        let distributionLog = [];
 
-// تسجيل القسط الحالي
-const logEntry = {
-    installmentNumber: installment.installmentNumber + 1,
-    amount: Math.min(actualPaidAmount, installmentAmount),
-    status: installment.status,
-    isOriginal: true
-};
-distributionLog.push(cleanDataForFirebase(logEntry));
+        // تسجيل القسط الحالي
+        const logEntry = {
+            installmentNumber: installment.installmentNumber + 1,
+            amount: Math.min(actualPaidAmount, installmentAmount),
+            status: installment.status,
+            isOriginal: true
+        };
+        distributionLog.push(logEntry);
 
-// إذا كان هناك مبلغ زائد، توزيعه على الأقساط القادمة
-if (extraAmount > 0) {
-    let remainingExtra = extraAmount;
-    
-    for (let i = installmentIndex + 1; i < booking.paymentDetails.installmentSchedule.length; i++) {
-        const nextInstallment = booking.paymentDetails.installmentSchedule[i];
-        
-        if (nextInstallment.status === 'pending' && remainingExtra > 0) {
-            if (remainingExtra >= nextInstallment.amount) {
-                // المبلغ الزائد يغطي هذا القسط بالكامل
-                nextInstallment.status = 'paid';
-                nextInstallment.paidAt = paidDate;
-                nextInstallment.paymentMethod = result.value.method + ' (من دفعة سابقة)';
-                nextInstallment.reference = result.value.reference;
-                nextInstallment.paidBy = 'admin';
-                nextInstallment.actualPaidAmount = nextInstallment.amount;
-                nextInstallment.paidFromExtra = true;
-                nextInstallment.linkedToInstallment = installmentIndex;
+        // إذا كان هناك مبلغ زائد، توزيعه على الأقساط القادمة
+        if (extraAmount > 0) {
+            let remainingExtra = extraAmount;
+            
+            for (let i = installmentIndex + 1; i < booking.paymentDetails.installmentSchedule.length; i++) {
+                const nextInstallment = booking.paymentDetails.installmentSchedule[i];
                 
-                distributionLog.push({
-                    installmentNumber: nextInstallment.installmentNumber + 1,
-                    amount: nextInstallment.amount,
-                    status: 'paid',
-                    fromExtra: true
-                });
-                
-                remainingExtra -= nextInstallment.amount;
-                installmentsPaidCount++;
-            } else {
-                // المبلغ الزائد يغطي جزء من هذا القسط
-                const originalAmount = nextInstallment.amount;
-                nextInstallment.amount = originalAmount - remainingExtra;
-                
-                if (!nextInstallment.partialPayments) {
-                    nextInstallment.partialPayments = [];
+                if (nextInstallment.status === 'pending' && remainingExtra > 0) {
+                    if (remainingExtra >= nextInstallment.amount) {
+                        // المبلغ الزائد يغطي هذا القسط بالكامل
+                        nextInstallment.status = 'paid';
+                        nextInstallment.paidAt = paidDate;
+                        nextInstallment.paymentMethod = result.value.method + ' (من دفعة سابقة)';
+                        nextInstallment.reference = result.value.reference || 'لا يوجد';
+                        nextInstallment.paidBy = 'admin';
+                        nextInstallment.actualPaidAmount = nextInstallment.amount;
+                        nextInstallment.paidFromExtra = true;
+                        nextInstallment.linkedToInstallment = installmentIndex;
+                        
+                        distributionLog.push({
+                            installmentNumber: nextInstallment.installmentNumber + 1,
+                            amount: nextInstallment.amount,
+                            status: 'paid',
+                            fromExtra: true
+                        });
+                        
+                        remainingExtra -= nextInstallment.amount;
+                        installmentsPaidCount++;
+                    } else {
+                        // المبلغ الزائد يغطي جزء من هذا القسط
+                        const originalAmount = nextInstallment.amount;
+                        nextInstallment.amount = originalAmount - remainingExtra;
+                        
+                        if (!nextInstallment.partialPayments) {
+                            nextInstallment.partialPayments = [];
+                        }
+                        
+                        nextInstallment.partialPayments.push({
+                            amount: remainingExtra,
+                            date: paidDate,
+                            method: result.value.method,
+                            reference: result.value.reference || 'لا يوجد',
+                            linkedToInstallment: installmentIndex
+                        });
+                        
+                        distributionLog.push({
+                            installmentNumber: nextInstallment.installmentNumber + 1,
+                            amount: remainingExtra,
+                            originalAmount: originalAmount,
+                            newAmount: nextInstallment.amount,
+                            status: 'partial',
+                            fromExtra: true
+                        });
+                        
+                        remainingExtra = 0;
+                        break;
+                    }
                 }
-                
-                const partialPayment = {
-    amount: remainingExtra,
-    date: paidDate,
-    method: result.value.method,
-    reference: result.value.reference || 'لا يوجد',
-    linkedToInstallment: installmentIndex
-};
-nextInstallment.partialPayments.push(cleanDataForFirebase(partialPayment));
-                
-                distributionLog.push({
-                    installmentNumber: nextInstallment.installmentNumber + 1,
-                    amount: remainingExtra,
-                    originalAmount: originalAmount,
-                    newAmount: nextInstallment.amount,
-                    status: 'partial',
-                    fromExtra: true
-                });
-                
-                remainingExtra = 0;
-                break;
             }
         }
-    }
-}
 
-// تحديث الإحصائيات
-booking.paymentDetails.paidInstallments = (booking.paymentDetails.paidInstallments || 0) + installmentsPaidCount;
-booking.paymentDetails.paidAmount = (booking.paymentDetails.paidAmount || 0) + totalPaidAmount;
-booking.paymentDetails.remainingAmount = Math.max(0, booking.paymentDetails.remainingAmount - totalPaidAmount);
+        // تحديث الإحصائيات
+        booking.paymentDetails.paidInstallments = (booking.paymentDetails.paidInstallments || 0) + installmentsPaidCount;
+        booking.paymentDetails.paidAmount = (booking.paymentDetails.paidAmount || 0) + totalPaidAmount;
+        booking.paymentDetails.remainingAmount = Math.max(0, booking.paymentDetails.remainingAmount - totalPaidAmount);
 
-// التحقق من اكتمال الدفع
-if (booking.paymentDetails.remainingAmount <= 0) {
-    booking.paymentDetails.fullyPaid = true;
-    booking.paymentDetails.fullyPaidAt = new Date().toISOString();
-    booking.status = 'active';
-} else {
-    // التأكد من وجود قيم صحيحة
-    if (!booking.paymentDetails.fullyPaid) {
-        booking.paymentDetails.fullyPaid = false;
-    }
-    if (!booking.paymentDetails.fullyPaidAt) {
-        booking.paymentDetails.fullyPaidAt = null;
-    }
-}
-
-// حفظ سجل التوزيع
-if (!booking.paymentDetails.paymentHistory) {
-    booking.paymentDetails.paymentHistory = [];
-}
-
-const historyEntry = {
-    timestamp: new Date().toISOString(),
-    actualAmount: actualPaidAmount,
-    installmentAmount: installmentAmount,
-    extraAmount: extraAmount,
-    distribution: distributionLog,
-    method: result.value.method,
-    reference: result.value.reference || 'لا يوجد',
-    by: 'admin'
-};
-booking.paymentDetails.paymentHistory.push(cleanDataForFirebase(historyEntry));
-        
         // التحقق من اكتمال الدفع
-        if (booking.paymentDetails.remainingAmount === 0) {
+        if (booking.paymentDetails.remainingAmount <= 0) {
             booking.paymentDetails.fullyPaid = true;
-            booking.status = 'paid'; // تحديث حالة الحجز
+            booking.paymentDetails.fullyPaidAt = new Date().toISOString();
+            booking.status = 'active';
         }
-        
-       // تنظيف البيانات من undefined قبل الحفظ في Firebase
-const cleanedPaymentDetails = cleanDataForFirebase(booking.paymentDetails);
 
-// حفظ في Firebase
-await db.collection('tempBookings').doc(bookingId).update({
-    'paymentDetails': cleanedPaymentDetails,
-    'status': booking.status
-});
+        // حفظ سجل التوزيع
+        if (!booking.paymentDetails.paymentHistory) {
+            booking.paymentDetails.paymentHistory = [];
+        }
+
+        booking.paymentDetails.paymentHistory.push({
+            timestamp: new Date().toISOString(),
+            actualAmount: actualPaidAmount,
+            installmentAmount: installmentAmount,
+            extraAmount: extraAmount,
+            distribution: distributionLog,
+            method: result.value.method,
+            reference: result.value.reference || 'لا يوجد',
+            by: 'admin'
+        });
         
-        // إرسال رسالة تفصيلية للعميل
-if (booking.telegramChatId) {
-    const customerName = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
-    const isFullyPaid = booking.paymentDetails.fullyPaid;
-    
-    let message = '';
-    
-    if (isFullyPaid) {
-        // رسالة إكمال الدفع
-        message = `🎊🎉 مبروك ${customerName}! 🎉🎊
+        // تنظيف البيانات من undefined قبل الحفظ في Firebase
+        const cleanedPaymentDetails = cleanDataForFirebase(booking.paymentDetails);
+
+        // حفظ في Firebase
+        await db.collection('tempBookings').doc(bookingId).update({
+            'paymentDetails': cleanedPaymentDetails,
+            'status': booking.status
+        });
+        
+        // إرسال رسالة للعميل
+        if (booking.telegramChatId) {
+            const customerName = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+            const isFullyPaid = booking.paymentDetails.fullyPaid;
+            
+            let message = '';
+            
+            if (isFullyPaid) {
+                message = `🎊🎉 مبروك ${customerName}! 🎉🎊
 
 تم إكمال دفع كامل مبلغ الدورة! ✅
 
@@ -9107,9 +9127,8 @@ if (booking.telegramChatId) {
 ستحصل على شهادة الإتمام عند انتهاء الدورة 🎓
 
 منظور الفؤاد 💚`;
-    } else {
-        // رسالة دفع عادي
-        message = `${distributionLog.length > 1 ? '🎊' : '🎉'} شكراً لك ${customerName}!
+            } else {
+                message = `${distributionLog.length > 1 ? '🎊' : '🎉'} شكراً لك ${customerName}!
 
 تم استلام وتأكيد دفعتك بنجاح ✅
 
@@ -9120,54 +9139,51 @@ if (booking.telegramChatId) {
 
 `;
 
-        // إذا كان هناك توزيع
-        if (distributionLog.length > 1) {
-            message += `✨ *تم توزيع المبلغ تلقائياً:*\n`;
-            distributionLog.forEach(log => {
-                if (log.status === 'paid') {
-                    message += `• القسط ${log.installmentNumber}: ${log.amount.toLocaleString('ar-EG')} ج.م ✅\n`;
-                } else if (log.status === 'partial') {
-                    message += `• القسط ${log.installmentNumber}: ${log.amount.toLocaleString('ar-EG')} ج.م (متبقي ${log.newAmount.toLocaleString('ar-EG')} ج.م)\n`;
+                if (distributionLog.length > 1) {
+                    message += `✨ *تم توزيع المبلغ تلقائياً:*\n`;
+                    distributionLog.forEach(log => {
+                        if (log.status === 'paid') {
+                            message += `• القسط ${log.installmentNumber}: ${log.amount.toLocaleString('ar-EG')} ج.م ✅\n`;
+                        } else if (log.status === 'partial') {
+                            message += `• القسط ${log.installmentNumber}: ${log.amount.toLocaleString('ar-EG')} ج.م (متبقي ${log.newAmount.toLocaleString('ar-EG')} ج.م)\n`;
+                        }
+                    });
+                    message += `\n`;
                 }
-            });
-            message += `\n`;
-        }
 
-        message += `📊 حالة الأقساط:
+                message += `📊 حالة الأقساط:
 ✅ مدفوع: ${booking.paymentDetails.paidInstallments} من ${booking.paymentDetails.totalInstallments} أقساط
 ⏳ المتبقي: ${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م
 
 `;
 
-        // القسط القادم
-        const nextPending = booking.paymentDetails.installmentSchedule.find(i => i.status === 'pending');
-        if (nextPending) {
-            message += `📅 القسط القادم: ${nextPending.amount.toLocaleString('ar-EG')} ج.م في ${new Date(nextPending.dueDate).toLocaleDateString('ar-EG')}\n\n`;
-        }
+                const nextPending = booking.paymentDetails.installmentSchedule.find(i => i.status === 'pending');
+                if (nextPending) {
+                    message += `📅 القسط القادم: ${nextPending.amount.toLocaleString('ar-EG')} ج.م في ${new Date(nextPending.dueDate).toLocaleDateString('ar-EG')}\n\n`;
+                }
 
-        message += `━━━━━━━━━━━━━━━━━━
+                message += `━━━━━━━━━━━━━━━━━━
 ${distributionLog.length > 1 ? 'شكراً لدفعتك السخية! 🌟' : 'شكراً لالتزامك'} 💚
 
 منظور الفؤاد`;
-    }
-    
-    // إرسال الرسالة
-    try {
-        await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chatId: booking.telegramChatId,
-                message: message
-            })
-        });
-    } catch (error) {
-        console.error('خطأ في إرسال رسالة Telegram:', error);
-    }
-}
+            }
+            
+            try {
+                await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chatId: booking.telegramChatId,
+                        message: message
+                    })
+                });
+            } catch (error) {
+                console.error('خطأ في إرسال رسالة Telegram:', error);
+            }
+        }
         
-       // بناء رسالة النجاح المفصلة
-let successHTML = `
+        // بناء رسالة النجاح
+        let successHTML = `
     <div style="text-align: right;">
         <div style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0); 
                     padding: 20px; border-radius: 15px; margin-bottom: 20px;
@@ -9195,9 +9211,8 @@ let successHTML = `
             </div>
 `;
 
-// إذا كان هناك توزيع للمبلغ الزائد
-if (distributionLog.length > 1) {
-    successHTML += `
+        if (distributionLog.length > 1) {
+            successHTML += `
         <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
             <h4 style="color: #065F46; margin: 0 0 12px 0; font-size: 1rem;">
                 📊 تفاصيل التوزيع:
@@ -9224,9 +9239,9 @@ if (distributionLog.length > 1) {
             `).join('')}
         </div>
     `;
-}
+        }
 
-successHTML += `
+        successHTML += `
             <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
                         padding: 15px; border-radius: 10px;">
                 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;">
@@ -9275,23 +9290,21 @@ successHTML += `
     </div>
 `;
 
-Swal.fire({
-    icon: 'success',
-    title: booking.paymentDetails.fullyPaid ? '🎊 مبروك!' : '✅ نجح!',
-    html: successHTML,
-    width: '600px',
-    confirmButtonText: 'تمام',
-    confirmButtonColor: '#10B981'
-});
+        Swal.fire({
+            icon: 'success',
+            title: booking.paymentDetails.fullyPaid ? '🎊 مبروك!' : '✅ نجح!',
+            html: successHTML,
+            width: '600px',
+            confirmButtonText: 'تمام',
+            confirmButtonColor: '#10B981'
+        });
         
-        // إعادة فتح النافذة
-        setTimeout(() => {
-            showInstallmentsManager();
-        }, 2000);
+        // إعادة تحميل البيانات
+        await loadBookings();
         
     } catch (error) {
         console.error('خطأ في تسجيل الدفع:', error);
-        Swal.fire('خطأ!', 'حدث خطأ في تسجيل الدفع', 'error');
+        Swal.fire('خطأ!', 'حدث خطأ في تسجيل الدفع: ' + error.message, 'error');
     }
 }
 
