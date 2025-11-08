@@ -1104,6 +1104,71 @@
     color: #6B7280;
     margin-top: 4px;
 }
+
+        /* تنسيق حقل إدخال المبلغ */
+#actualPaidAmount {
+    transition: all 0.3s ease;
+}
+
+#actualPaidAmount:focus {
+    transform: scale(1.02);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+/* تنسيق أزرار المبالغ السريعة */
+button[onclick^="setAmount"] {
+    transition: all 0.2s ease;
+}
+
+button[onclick^="setAmount"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+button[onclick^="setAmount"]:active {
+    transform: translateY(0);
+}
+
+/* تنسيق صندوق التوزيع */
+#distributionPreview {
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* تنسيق رسائل التحذير */
+#paymentValidationMessage {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* تحسين عرض النوافذ على الموبايل */
+@media (max-width: 768px) {
+    #actualPaidAmount {
+        font-size: 1.5rem !important;
+    }
+    
+    #distributionPreview {
+        padding: 15px !important;
+    }
+    
+    #distributionDetails {
+        font-size: 0.9rem;
+    }
+}
     </style>
 </head>
 <body>
@@ -4132,41 +4197,39 @@ document.getElementById('remainingInstallments').parentElement.appendChild(insta
             }
         },
         preConfirm: () => {
-            const method = document.getElementById('paymentMethodUsed').value;
-            if (!method) {
-                Swal.showValidationMessage('من فضلك اختر طريقة الدفع');
-                return false;
-            }
-            
-            if (isInstallment) {
-                const firstPayment = document.getElementById('firstPaymentAmount')?.value;
-                const numInstallments = document.getElementById('remainingInstallments')?.value;
-                
-                if (!firstPayment || parseFloat(firstPayment) <= 0) {
-                    Swal.showValidationMessage('من فضلك أدخل مبلغ الدفعة الأولى');
-                    return false;
-                }
-                
-                if (!numInstallments) {
-                    Swal.showValidationMessage('من فضلك اختر عدد الأقساط المتبقية');
-                    return false;
-                }
-                
-                return {
-                    method: method,
-                    reference: document.getElementById('paymentReference').value || 'لا يوجد',
-                    isInstallment: true,
-                    firstPaymentAmount: parseFloat(firstPayment),
-                    remainingInstallments: parseInt(numInstallments)
-                };
-            }
-            
-            return {
-                method: method,
-                reference: document.getElementById('paymentReference').value || 'لا يوجد',
-                isInstallment: false
-            };
-        }
+    const method = document.getElementById('installmentPaymentMethod').value;
+    const actualAmount = parseFloat(document.getElementById('actualPaidAmount')?.value);
+    const installmentAmount = parseFloat(document.getElementById('actualPaidAmount')?.getAttribute('data-installment-amount'));
+    const remainingTotal = parseFloat(document.getElementById('actualPaidAmount')?.getAttribute('data-remaining-total'));
+    
+    // التحقق من طريقة الدفع
+    if (!method) {
+        Swal.showValidationMessage('⚠️ من فضلك اختر طريقة الدفع');
+        return false;
+    }
+    
+    // التحقق من المبلغ
+    if (!actualAmount || actualAmount <= 0) {
+        Swal.showValidationMessage('⚠️ من فضلك أدخل المبلغ المدفوع');
+        return false;
+    }
+    
+    // تحذير إذا كان المبلغ أكبر بكثير من المتبقي
+    if (actualAmount > remainingTotal * 1.5) {
+        Swal.showValidationMessage(`⚠️ المبلغ كبير جداً! المتبقي الكلي: ${remainingTotal.toLocaleString('ar-EG')} ج.م`);
+        return false;
+    }
+    
+    return {
+        method: method,
+        reference: document.getElementById('installmentPaymentReference').value || 'لا يوجد',
+        date: document.getElementById('installmentPaymentDate').value,
+        notes: document.getElementById('installmentPaymentNotes').value || null,
+        actualAmount: actualAmount,
+        installmentAmount: installmentAmount,
+        hasExtra: actualAmount > installmentAmount
+    };
+}
     });
     
     if (result.isConfirmed) {
@@ -8678,69 +8741,149 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
         const result = await Swal.fire({
             title: `✅ تسجيل دفع القسط ${installment.installmentNumber + 1}`,
             html: `
-                <div style="text-align: right;">
-                    <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
-                                padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-                        <p><strong>👤 العميل:</strong> ${booking.customer?.name}</p>
-                        <p><strong>📚 الدورة:</strong> ${booking.courseName}</p>
-                        <p><strong>💰 المبلغ:</strong> ${installment.amount.toLocaleString('ar-EG')} ج.م</p>
-                        <p><strong>📅 تاريخ الاستحقاق:</strong> ${new Date(installment.dueDate).toLocaleDateString('ar-EG')}</p>
+        <div style="text-align: right;">
+            <!-- معلومات القسط -->
+            <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                        padding: 15px; border-radius: 10px; margin-bottom: 20px;
+                        border: 2px solid #3B82F6;">
+                <h4 style="color: #1E40AF; margin-bottom: 10px;">
+                    <i class="fas fa-info-circle"></i> تفاصيل القسط
+                </h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <span style="color: #6B7280;">العميل:</span>
+                        <strong style="color: #1F2937;">${booking.customer?.name}</strong>
                     </div>
-                    
-                    ${installment.receiptReceived && installment.receiptImageUrl ? `
-                        <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-                            <p style="color: #065F46; margin-bottom: 10px;">
-                                <i class="fas fa-check-circle"></i> الإيصال المرفق:
-                            </p>
-                            <img src="${installment.receiptImageUrl}" 
-                                 style="max-width: 100%; border-radius: 8px; border: 2px solid #10B981;">
-                            <p style="font-size: 0.85rem; color: #6B7280; margin-top: 5px;">
-                                تاريخ الاستلام: ${new Date(installment.receiptReceivedAt).toLocaleString('ar-EG')}
-                            </p>
-                        </div>
-                    ` : ''}
-                    
-                    <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
-                        💳 طريقة الدفع المستخدمة: <span style="color: red;">*</span>
-                    </label>
-                    <select id="installmentPaymentMethod" class="swal2-input" 
-                            style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
-                                   border-radius: 8px; margin-bottom: 15px;">
-                        <option value="">اختر طريقة الدفع</option>
-                        <option value="vodafone">فودافون كاش</option>
-                        <option value="instapay">انستاباي</option>
-                        <option value="bank">تحويل بنكي</option>
-                        <option value="card">بطاقة بنكية</option>
-                        <option value="cash">كاش (نقدي)</option>
-                        <option value="western_union">ويسترن يونيون</option>
-                        <option value="other">أخرى</option>
-                    </select>
-                    
-                    <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
-                        📝 رقم المرجع/العملية: <span style="color: #6B7280;">(اختياري)</span>
-                    </label>
-                    <input id="installmentPaymentReference" class="swal2-input" 
-                           placeholder="مثال: TRX123456789" 
-                           style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
-                                  border-radius: 8px; direction: ltr; margin-bottom: 15px;">
-                    
-                    <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
-                        📅 تاريخ الدفع الفعلي:
-                    </label>
-                    <input type="date" id="installmentPaymentDate" class="swal2-input"
-                           value="${new Date().toISOString().split('T')[0]}"
-                           style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
-                                  border-radius: 8px; margin-bottom: 15px;">
-                    
-                    <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
-                        📝 ملاحظات: <span style="color: #6B7280;">(اختياري)</span>
-                    </label>
-                    <textarea id="installmentPaymentNotes" class="swal2-textarea"
-                              placeholder="أي ملاحظات إضافية..."
-                              style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
-                                     border-radius: 8px; min-height: 80px;"></textarea>
+                    <div>
+                        <span style="color: #6B7280;">الدورة:</span>
+                        <strong style="color: #1F2937;">${booking.courseName}</strong>
+                    </div>
+                    <div>
+                        <span style="color: #6B7280;">رقم القسط:</span>
+                        <strong style="color: #3B82F6; font-size: 1.2rem;">${installment.installmentNumber + 1} من ${booking.paymentDetails.totalInstallments}</strong>
+                    </div>
+                    <div>
+                        <span style="color: #6B7280;">قيمة القسط المستحق:</span>
+                        <strong style="color: #DC2626; font-size: 1.2rem;">${installment.amount.toLocaleString('ar-EG')} ج.م</strong>
+                    </div>
+                    <div>
+                        <span style="color: #6B7280;">تاريخ الاستحقاق:</span>
+                        <strong>${new Date(installment.dueDate).toLocaleDateString('ar-EG')}</strong>
+                    </div>
+                    <div>
+                        <span style="color: #6B7280;">المتبقي الكلي:</span>
+                        <strong style="color: #F59E0B;">${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م</strong>
+                    </div>
                 </div>
-            `,
+            </div>
+            
+            ${installment.receiptReceived && installment.receiptImageUrl ? `
+                <div style="background: #F0FDF4; padding: 15px; border-radius: 10px; margin-bottom: 20px;
+                            border: 2px solid #10B981;">
+                    <p style="color: #065F46; margin-bottom: 10px; font-weight: bold;">
+                        <i class="fas fa-check-circle"></i> الإيصال المرفق:
+                    </p>
+                    <img src="${installment.receiptImageUrl}" 
+                         style="max-width: 100%; max-height: 300px; border-radius: 8px; 
+                                border: 2px solid #10B981; cursor: pointer;"
+                         onclick="window.open('${installment.receiptImageUrl}', '_blank')">
+                    <p style="font-size: 0.85rem; color: #6B7280; margin-top: 5px;">
+                        📅 تاريخ الاستلام: ${new Date(installment.receiptReceivedAt).toLocaleString('ar-EG')}
+                    </p>
+                </div>
+            ` : ''}
+            
+            <!-- المبلغ المدفوع فعلياً -->
+            <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 20px;
+                        border: 3px solid #8B5CF6;">
+                <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block; font-size: 1.1rem;">
+                    💰 المبلغ المدفوع فعلياً: <span style="color: red;">*</span>
+                </label>
+                <input type="number" id="actualPaidAmount" class="swal2-input"
+                       value="${installment.amount}"
+                       min="0"
+                       step="0.01"
+                       data-installment-amount="${installment.amount}"
+                       data-remaining-total="${booking.paymentDetails.remainingAmount}"
+                       oninput="validateAndCalculateExtra()"
+                       style="width: 90%; padding: 15px; border: 3px solid #8B5CF6; 
+                              border-radius: 10px; margin-bottom: 0; font-size: 1.3rem;
+                              font-weight: bold; color: #7C3AED; text-align: center;">
+                <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+                    <button type="button" onclick="setAmount(${installment.amount})"
+                            style="flex: 1; padding: 8px; background: #E0E7FF; border: 2px solid #6366F1;
+                                   border-radius: 6px; cursor: pointer; font-weight: bold; color: #4338CA;">
+                        القسط فقط (${installment.amount.toLocaleString('ar-EG')} ج.م)
+                    </button>
+                    <button type="button" onclick="setAmount(${booking.paymentDetails.remainingAmount})"
+                            style="flex: 1; padding: 8px; background: #FEF3C7; border: 2px solid #F59E0B;
+                                   border-radius: 6px; cursor: pointer; font-weight: bold; color: #D97706;">
+                        الباقي كله (${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م)
+                    </button>
+                </div>
+            </div>
+            
+            <!-- رسالة التحذير/التوزيع -->
+            <div id="paymentValidationMessage" style="display: none; margin-bottom: 20px;"></div>
+            
+            <!-- تفاصيل التوزيع التلقائي -->
+            <div id="distributionPreview" style="display: none; background: linear-gradient(135deg, #F0FDF4, #D1FAE5);
+                 padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 3px solid #10B981;">
+                <h4 style="color: #065F46; margin: 0 0 15px 0;">
+                    <i class="fas fa-calculator"></i> 📊 التوزيع التلقائي للمبلغ الزائد
+                </h4>
+                <div id="distributionDetails"></div>
+                
+                <div style="background: #DBEAFE; padding: 12px; border-radius: 8px; margin-top: 15px;
+                            border-right: 4px solid #3B82F6;">
+                    <p style="color: #1E40AF; margin: 0; font-weight: bold;">
+                        <i class="fas fa-info-circle"></i> سيتم تطبيق هذا التوزيع تلقائياً عند التأكيد
+                    </p>
+                </div>
+            </div>
+            
+            <!-- طريقة الدفع -->
+            <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
+                💳 طريقة الدفع المستخدمة: <span style="color: red;">*</span>
+            </label>
+            <select id="installmentPaymentMethod" class="swal2-input" 
+                    style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
+                           border-radius: 8px; margin-bottom: 15px;">
+                <option value="">اختر طريقة الدفع</option>
+                <option value="vodafone">فودافون كاش</option>
+                <option value="instapay">انستاباي</option>
+                <option value="bank">تحويل بنكي</option>
+                <option value="card">بطاقة بنكية</option>
+                <option value="cash">كاش (نقدي)</option>
+                <option value="western_union">ويسترن يونيون</option>
+                <option value="other">أخرى</option>
+            </select>
+            
+            <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
+                📝 رقم المرجع/العملية: <span style="color: #6B7280;">(اختياري)</span>
+            </label>
+            <input id="installmentPaymentReference" class="swal2-input" 
+                   placeholder="مثال: TRX123456789" 
+                   style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
+                          border-radius: 8px; direction: ltr; margin-bottom: 15px;">
+            
+            <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
+                📅 تاريخ الدفع الفعلي:
+            </label>
+            <input type="date" id="installmentPaymentDate" class="swal2-input"
+                   value="${new Date().toISOString().split('T')[0]}"
+                   style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
+                          border-radius: 8px; margin-bottom: 15px;">
+            
+            <label style="font-weight: bold; color: #1F2937; margin-bottom: 10px; display: block;">
+                📝 ملاحظات: <span style="color: #6B7280;">(اختياري)</span>
+            </label>
+            <textarea id="installmentPaymentNotes" class="swal2-textarea"
+                      placeholder="أي ملاحظات إضافية..."
+                      style="width: 90%; padding: 12px; border: 2px solid #E5E7EB; 
+                             border-radius: 8px; min-height: 80px;"></textarea>
+        </div>
+    `,
             width: '700px',
             showCancelButton: true,
             confirmButtonText: '✅ تأكيد الدفع',
@@ -8770,22 +8913,139 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
             html: 'يرجى الانتظار',
             allowOutsideClick: false,
             didOpen: () => {
-                Swal.showLoading();
-            }
+    // تخزين معلومات الحجز في window للوصول إليها من الدوال المساعدة
+    window.currentBookingId = bookingId;
+    window.currentInstallmentIndex = installmentIndex;
+    
+    // تشغيل التحقق الأولي
+    setTimeout(() => {
+        validateAndCalculateExtra();
+    }, 100);
+},
         });
         
-        // تحديث بيانات القسط
-        installment.status = 'paid';
-        installment.paidAt = new Date(result.value.date).toISOString();
-        installment.paymentMethod = result.value.method;
-        installment.reference = result.value.reference;
-        installment.paymentNotes = result.value.notes;
-        installment.paidBy = 'admin';
+        // بيانات الدفع
+const actualPaidAmount = result.value.actualAmount;
+const installmentAmount = result.value.installmentAmount;
+const extraAmount = actualPaidAmount - installmentAmount;
+const paidDate = new Date(result.value.date).toISOString();
+
+// تحديث القسط الحالي
+installment.status = actualPaidAmount >= installmentAmount ? 'paid' : 'partial';
+installment.paidAt = paidDate;
+installment.paymentMethod = result.value.method;
+installment.reference = result.value.reference;
+installment.paymentNotes = result.value.notes;
+installment.paidBy = 'admin';
+installment.actualPaidAmount = actualPaidAmount;
+
+// حذف إشعار الإيصال إذا كان موجود (تم التسجيل)
+if (installment.receiptReceived) {
+    installment.receiptProcessed = true;
+    installment.receiptProcessedAt = new Date().toISOString();
+}
+
+// متغيرات التتبع
+let installmentsPaidCount = actualPaidAmount >= installmentAmount ? 1 : 0;
+let totalPaidAmount = actualPaidAmount;
+let distributionLog = [];
+
+// تسجيل القسط الحالي
+distributionLog.push({
+    installmentNumber: installment.installmentNumber + 1,
+    amount: Math.min(actualPaidAmount, installmentAmount),
+    status: installment.status,
+    isOriginal: true
+});
+
+// إذا كان هناك مبلغ زائد، توزيعه على الأقساط القادمة
+if (extraAmount > 0) {
+    let remainingExtra = extraAmount;
+    
+    for (let i = installmentIndex + 1; i < booking.paymentDetails.installmentSchedule.length; i++) {
+        const nextInstallment = booking.paymentDetails.installmentSchedule[i];
         
-        // تحديث الإحصائيات
-        booking.paymentDetails.paidInstallments = (booking.paymentDetails.paidInstallments || 0) + 1;
-        booking.paymentDetails.paidAmount = (booking.paymentDetails.paidAmount || 0) + installment.amount;
-        booking.paymentDetails.remainingAmount = Math.max(0, booking.paymentDetails.remainingAmount - installment.amount);
+        if (nextInstallment.status === 'pending' && remainingExtra > 0) {
+            if (remainingExtra >= nextInstallment.amount) {
+                // المبلغ الزائد يغطي هذا القسط بالكامل
+                nextInstallment.status = 'paid';
+                nextInstallment.paidAt = paidDate;
+                nextInstallment.paymentMethod = result.value.method + ' (من دفعة سابقة)';
+                nextInstallment.reference = result.value.reference;
+                nextInstallment.paidBy = 'admin';
+                nextInstallment.actualPaidAmount = nextInstallment.amount;
+                nextInstallment.paidFromExtra = true;
+                nextInstallment.linkedToInstallment = installmentIndex;
+                
+                distributionLog.push({
+                    installmentNumber: nextInstallment.installmentNumber + 1,
+                    amount: nextInstallment.amount,
+                    status: 'paid',
+                    fromExtra: true
+                });
+                
+                remainingExtra -= nextInstallment.amount;
+                installmentsPaidCount++;
+            } else {
+                // المبلغ الزائد يغطي جزء من هذا القسط
+                const originalAmount = nextInstallment.amount;
+                nextInstallment.amount = originalAmount - remainingExtra;
+                
+                if (!nextInstallment.partialPayments) {
+                    nextInstallment.partialPayments = [];
+                }
+                
+                nextInstallment.partialPayments.push({
+                    amount: remainingExtra,
+                    date: paidDate,
+                    method: result.value.method,
+                    reference: result.value.reference,
+                    linkedToInstallment: installmentIndex
+                });
+                
+                distributionLog.push({
+                    installmentNumber: nextInstallment.installmentNumber + 1,
+                    amount: remainingExtra,
+                    originalAmount: originalAmount,
+                    newAmount: nextInstallment.amount,
+                    status: 'partial',
+                    fromExtra: true
+                });
+                
+                remainingExtra = 0;
+                break;
+            }
+        }
+    }
+}
+
+// تحديث الإحصائيات
+booking.paymentDetails.paidInstallments = (booking.paymentDetails.paidInstallments || 0) + installmentsPaidCount;
+booking.paymentDetails.paidAmount = (booking.paymentDetails.paidAmount || 0) + totalPaidAmount;
+booking.paymentDetails.remainingAmount = Math.max(0, booking.paymentDetails.remainingAmount - totalPaidAmount);
+
+// التحقق من اكتمال الدفع
+if (booking.paymentDetails.remainingAmount <= 0) {
+    booking.paymentDetails.fullyPaid = true;
+    booking.paymentDetails.fullyPaidAt = new Date().toISOString();
+    booking.status = 'active';
+}
+
+// حفظ سجل التوزيع
+if (!booking.paymentDetails.paymentHistory) {
+    booking.paymentDetails.paymentHistory = [];
+}
+
+booking.paymentDetails.paymentHistory.push({
+    timestamp: new Date().toISOString(),
+    actualAmount: actualPaidAmount,
+    installmentAmount: installmentAmount,
+    extraAmount: extraAmount,
+    distribution: distributionLog,
+    method: result.value.method,
+    reference: result.value.reference,
+    by: 'admin'
+});
         
         // التحقق من اكتمال الدفع
         if (booking.paymentDetails.remainingAmount === 0) {
@@ -8799,60 +9059,212 @@ async function markInstallmentAsPaid(bookingId, installmentIndex, fromReceipt = 
             'status': booking.status
         });
         
-        // إرسال رسالة شكر للعميل
+        // إرسال رسالة تفصيلية للعميل
 if (booking.telegramChatId) {
     const customerName = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
     const isFullyPaid = booking.paymentDetails.fullyPaid;
     
-    const message = `🎉 شكراً لك ${customerName}!
+    let message = '';
+    
+    if (isFullyPaid) {
+        // رسالة إكمال الدفع
+        message = `🎊🎉 مبروك ${customerName}! 🎉🎊
 
-تم استلام وتأكيد دفع القسط ${installment.installmentNumber + 1} بنجاح ✅
+تم إكمال دفع كامل مبلغ الدورة! ✅
 
-💰 المبلغ: ${installment.amount.toLocaleString('ar-EG')} ج.م
+━━━━━━━━━━━━━━━━━━
+💰 المبلغ النهائي المدفوع: ${actualPaidAmount.toLocaleString('ar-EG')} ج.م
 📅 التاريخ: ${new Date(result.value.date).toLocaleDateString('ar-EG')}
 
-📊 حالة الأقساط:
-✅ مدفوع: ${booking.paymentDetails.paidInstallments} من ${booking.paymentDetails.totalInstallments} أقساط
-${isFullyPaid ? 
-    '🎊 *تم سداد كامل المبلغ!*' : 
-    `⏳ المتبقي: ${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م
+📊 ملخص الدفع الكامل:
+✅ إجمالي المبلغ: ${booking.paymentDetails.totalAmount.toLocaleString('ar-EG')} ج.م
+✅ عدد الأقساط: ${booking.paymentDetails.totalInstallments}
+✅ تم الدفع: ${booking.paymentDetails.paidAmount.toLocaleString('ar-EG')} ج.م
+✅ المتبقي: 0 ج.م
 
-📅 القسط القادم: ${booking.paymentDetails.installmentSchedule.find(i => i.status === 'pending')?.amount.toLocaleString('ar-EG') || '0'} ج.م في ${new Date(booking.paymentDetails.installmentSchedule.find(i => i.status === 'pending')?.dueDate).toLocaleDateString('ar-EG')}`
-}
+🎊 *تم سداد كامل المبلغ!*
 
-شكراً لالتزامك 💚`;
-            
-            await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chatId: booking.telegramChatId,
-                    message: message
-                })
+━━━━━━━━━━━━━━━━━━
+شكراً لالتزامك والدفع في الوقت المحدد! 💚
+ستحصل على شهادة الإتمام عند انتهاء الدورة 🎓
+
+منظور الفؤاد 💚`;
+    } else {
+        // رسالة دفع عادي
+        message = `${distributionLog.length > 1 ? '🎊' : '🎉'} شكراً لك ${customerName}!
+
+تم استلام وتأكيد دفعتك بنجاح ✅
+
+━━━━━━━━━━━━━━━━━━
+💰 المبلغ المدفوع: *${actualPaidAmount.toLocaleString('ar-EG')} ج.م*
+📅 التاريخ: ${new Date(result.value.date).toLocaleDateString('ar-EG')}
+💳 الطريقة: ${result.value.method}
+
+`;
+
+        // إذا كان هناك توزيع
+        if (distributionLog.length > 1) {
+            message += `✨ *تم توزيع المبلغ تلقائياً:*\n`;
+            distributionLog.forEach(log => {
+                if (log.status === 'paid') {
+                    message += `• القسط ${log.installmentNumber}: ${log.amount.toLocaleString('ar-EG')} ج.م ✅\n`;
+                } else if (log.status === 'partial') {
+                    message += `• القسط ${log.installmentNumber}: ${log.amount.toLocaleString('ar-EG')} ج.م (متبقي ${log.newAmount.toLocaleString('ar-EG')} ج.م)\n`;
+                }
             });
+            message += `\n`;
         }
+
+        message += `📊 حالة الأقساط:
+✅ مدفوع: ${booking.paymentDetails.paidInstallments} من ${booking.paymentDetails.totalInstallments} أقساط
+⏳ المتبقي: ${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م
+
+`;
+
+        // القسط القادم
+        const nextPending = booking.paymentDetails.installmentSchedule.find(i => i.status === 'pending');
+        if (nextPending) {
+            message += `📅 القسط القادم: ${nextPending.amount.toLocaleString('ar-EG')} ج.م في ${new Date(nextPending.dueDate).toLocaleDateString('ar-EG')}\n\n`;
+        }
+
+        message += `━━━━━━━━━━━━━━━━━━
+${distributionLog.length > 1 ? 'شكراً لدفعتك السخية! 🌟' : 'شكراً لالتزامك'} 💚
+
+منظور الفؤاد`;
+    }
+    
+    // إرسال الرسالة
+    try {
+        await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-message-to-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: booking.telegramChatId,
+                message: message
+            })
+        });
+    } catch (error) {
+        console.error('خطأ في إرسال رسالة Telegram:', error);
+    }
+}
         
-        // رسالة النجاح
-        Swal.fire({
-            icon: 'success',
-            title: 'تم تسجيل الدفع!',
-            html: `
-                <div style="text-align: center;">
-                    <p style="font-size: 1.1rem; color: #065F46; margin-bottom: 15px;">
-                        تم تسجيل القسط ${installment.installmentNumber} بنجاح
-                    </p>
-                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px;">
-                        <p><strong>المدفوع:</strong> ${booking.paymentDetails.paidInstallments} من ${booking.paymentDetails.totalInstallments - 1}</p>
-                        <p><strong>المتبقي:</strong> ${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م</p>
-                        ${booking.paymentDetails.fullyPaid ? 
-                            '<p style="color: #10B981; font-weight: bold;">🎊 تم سداد كامل المبلغ!</p>' : 
-                            ''
-                        }
+       // بناء رسالة النجاح المفصلة
+let successHTML = `
+    <div style="text-align: right;">
+        <div style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0); 
+                    padding: 20px; border-radius: 15px; margin-bottom: 20px;
+                    border: 3px solid #10B981;">
+            <h3 style="color: #065F46; margin: 0 0 15px 0;">
+                ${booking.paymentDetails.fullyPaid ? '🎊' : '✅'} 
+                ${booking.paymentDetails.fullyPaid ? 'تم إكمال الدفع بالكامل!' : 'تم تسجيل الدفع بنجاح'}
+            </h3>
+            
+            <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="text-align: center; padding: 12px; background: #EFF6FF; border-radius: 8px;">
+                        <div style="font-size: 0.85rem; color: #6B7280;">المبلغ المدفوع</div>
+                        <div style="font-size: 1.8rem; font-weight: bold; color: #3B82F6;">
+                            ${actualPaidAmount.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                    <div style="text-align: center; padding: 12px; background: #F0FDF4; border-radius: 8px;">
+                        <div style="font-size: 0.85rem; color: #6B7280;">الأقساط المدفوعة</div>
+                        <div style="font-size: 1.8rem; font-weight: bold; color: #10B981;">
+                            ${installmentsPaidCount}
+                        </div>
                     </div>
                 </div>
-            `,
-            confirmButtonColor: '#10B981'
-        });
+            </div>
+`;
+
+// إذا كان هناك توزيع للمبلغ الزائد
+if (distributionLog.length > 1) {
+    successHTML += `
+        <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+            <h4 style="color: #065F46; margin: 0 0 12px 0; font-size: 1rem;">
+                📊 تفاصيل التوزيع:
+            </h4>
+            ${distributionLog.map(log => `
+                <div style="display: flex; justify-content: space-between; align-items: center;
+                            padding: 10px; margin-bottom: 8px; border-radius: 8px;
+                            background: ${log.status === 'paid' ? '#D1FAE5' : '#FEF3C7'};
+                            border-right: 3px solid ${log.status === 'paid' ? '#10B981' : '#F59E0B'};">
+                    <div>
+                        <strong style="color: #1F2937;">
+                            ${log.status === 'paid' ? '✅' : '⚡'} القسط ${log.installmentNumber}
+                        </strong>
+                        ${log.status === 'partial' ? `
+                            <div style="font-size: 0.8rem; color: #6B7280;">
+                                تبقى: ${log.newAmount.toLocaleString('ar-EG')} ج.م
+                            </div>
+                        ` : ''}
+                    </div>
+                    <strong style="color: ${log.status === 'paid' ? '#059669' : '#D97706'}; font-size: 1.1rem;">
+                        ${log.amount.toLocaleString('ar-EG')} ج.م
+                    </strong>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+successHTML += `
+            <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                        padding: 15px; border-radius: 10px;">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;">
+                    <div>
+                        <div style="font-size: 0.8rem; color: #6B7280;">المدفوع</div>
+                        <div style="font-size: 1.2rem; font-weight: bold; color: #10B981;">
+                            ${booking.paymentDetails.paidInstallments}/${booking.paymentDetails.totalInstallments}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: #6B7280;">إجمالي المدفوع</div>
+                        <div style="font-size: 1.2rem; font-weight: bold; color: #3B82F6;">
+                            ${booking.paymentDetails.paidAmount.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: #6B7280;">المتبقي</div>
+                        <div style="font-size: 1.2rem; font-weight: bold; color: ${booking.paymentDetails.fullyPaid ? '#10B981' : '#DC2626'};">
+                            ${booking.paymentDetails.remainingAmount.toLocaleString('ar-EG')} ج.م
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        ${booking.paymentDetails.fullyPaid ? `
+            <div style="background: linear-gradient(135deg, #FEF3C7, #FDE68A); 
+                        padding: 15px; border-radius: 10px; border: 2px solid #F59E0B;
+                        text-align: center;">
+                <div style="font-size: 2rem; margin-bottom: 10px;">🎉🎊🎈</div>
+                <div style="color: #92400E; font-weight: bold; font-size: 1.1rem;">
+                    تم سداد كامل المبلغ!
+                </div>
+                <div style="color: #78350F; font-size: 0.9rem; margin-top: 5px;">
+                    تم إرسال رسالة تهنئة للعميل
+                </div>
+            </div>
+        ` : `
+            <div style="background: #F0FDF4; padding: 12px; border-radius: 10px;
+                        border-right: 3px solid #10B981; text-align: center;">
+                <div style="color: #065F46; font-size: 0.9rem;">
+                    ✅ تم إرسال رسالة تأكيد للعميل
+                </div>
+            </div>
+        `}
+    </div>
+`;
+
+Swal.fire({
+    icon: 'success',
+    title: booking.paymentDetails.fullyPaid ? '🎊 مبروك!' : '✅ نجح!',
+    html: successHTML,
+    width: '600px',
+    confirmButtonText: 'تمام',
+    confirmButtonColor: '#10B981'
+});
         
         // إعادة فتح النافذة
         setTimeout(() => {
@@ -9165,6 +9577,271 @@ function initializeInstallmentsManager() {
     if (select) {
         select.value = savedMinDays;
     }
+}
+
+
+
+        // دالة تعيين المبلغ من الأزرار السريعة
+function setAmount(amount) {
+    const input = document.getElementById('actualPaidAmount');
+    if (input) {
+        input.value = amount;
+        validateAndCalculateExtra();
+    }
+}
+
+// دالة التحقق والحساب
+function validateAndCalculateExtra() {
+    const input = document.getElementById('actualPaidAmount');
+    if (!input) return;
+    
+    const actualAmount = parseFloat(input.value) || 0;
+    const installmentAmount = parseFloat(input.getAttribute('data-installment-amount')) || 0;
+    const remainingTotal = parseFloat(input.getAttribute('data-remaining-total')) || 0;
+    
+    const validationMsg = document.getElementById('paymentValidationMessage');
+    const distributionPreview = document.getElementById('distributionPreview');
+    const distributionDetails = document.getElementById('distributionDetails');
+    
+    // إخفاء كل الرسائل أولاً
+    validationMsg.style.display = 'none';
+    distributionPreview.style.display = 'none';
+    
+    // التحقق من صحة المبلغ
+    if (actualAmount <= 0) {
+        validationMsg.style.display = 'block';
+        validationMsg.style.background = '#FEE2E2';
+        validationMsg.style.border = '2px solid #DC2626';
+        validationMsg.style.borderRadius = '10px';
+        validationMsg.style.padding = '15px';
+        validationMsg.innerHTML = `
+            <div style="color: #991B1B; font-weight: bold;">
+                <i class="fas fa-exclamation-triangle"></i> يجب إدخال مبلغ أكبر من صفر
+            </div>
+        `;
+        input.style.borderColor = '#DC2626';
+        input.style.background = '#FEE2E2';
+        return;
+    }
+    
+    // التحقق: المبلغ أكبر من المتبقي الكلي
+    if (actualAmount > remainingTotal) {
+        validationMsg.style.display = 'block';
+        validationMsg.style.background = '#FEF3C7';
+        validationMsg.style.border = '2px solid #F59E0B';
+        validationMsg.style.borderRadius = '10px';
+        validationMsg.style.padding = '15px';
+        validationMsg.innerHTML = `
+            <div style="color: #92400E; font-weight: bold; margin-bottom: 10px;">
+                <i class="fas fa-exclamation-circle"></i> ⚠️ المبلغ أكبر من المتبقي الكلي
+            </div>
+            <div style="background: white; padding: 12px; border-radius: 8px;">
+                <div>المبلغ المدخل: <strong style="color: #DC2626;">${actualAmount.toLocaleString('ar-EG')} ج.م</strong></div>
+                <div>المتبقي الكلي: <strong style="color: #059669;">${remainingTotal.toLocaleString('ar-EG')} ج.م</strong></div>
+                <div style="margin-top: 8px; padding-top: 8px; border-top: 2px solid #F59E0B;">
+                    الزيادة: <strong style="color: #F59E0B;">${(actualAmount - remainingTotal).toLocaleString('ar-EG')} ج.م</strong>
+                </div>
+            </div>
+            <div style="color: #78350F; margin-top: 10px; font-size: 0.9rem;">
+                💡 يمكنك المتابعة، لكن تأكد من صحة المبلغ
+            </div>
+        `;
+        input.style.borderColor = '#F59E0B';
+        input.style.background = '#FFFBEB';
+    }
+    // المبلغ أكبر من القسط الحالي
+    else if (actualAmount > installmentAmount) {
+        const extraAmount = actualAmount - installmentAmount;
+        
+        // حساب التوزيع
+        const distribution = calculateDistribution(extraAmount);
+        
+        if (distribution) {
+            distributionPreview.style.display = 'block';
+            input.style.borderColor = '#10B981';
+            input.style.background = '#F0FDF4';
+            
+            distributionDetails.innerHTML = `
+                <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div style="text-align: center; padding: 12px; background: #EFF6FF; border-radius: 8px;">
+                            <div style="font-size: 0.85rem; color: #6B7280;">المبلغ المدفوع</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #3B82F6;">
+                                ${actualAmount.toLocaleString('ar-EG')} ج.م
+                            </div>
+                        </div>
+                        <div style="text-align: center; padding: 12px; background: #FEF3C7; border-radius: 8px;">
+                            <div style="font-size: 0.85rem; color: #6B7280;">المبلغ الزائد</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #F59E0B;">
+                                ${extraAmount.toLocaleString('ar-EG')} ج.م
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="background: white; padding: 15px; border-radius: 10px;">
+                    <h5 style="color: #065F46; margin: 0 0 12px 0;">
+                        📋 توزيع المبلغ على الأقساط:
+                    </h5>
+                    ${distribution.items.map((item, index) => `
+                        <div style="display: flex; justify-content: space-between; align-items: center;
+                                    padding: 12px; margin-bottom: 8px; border-radius: 8px;
+                                    background: ${item.fullyPaid ? '#D1FAE5' : '#FEF3C7'};
+                                    border-right: 4px solid ${item.fullyPaid ? '#10B981' : '#F59E0B'};">
+                            <div>
+                                <div style="font-weight: bold; color: #1F2937;">
+                                    ${item.fullyPaid ? '✅' : '⚡'} القسط ${item.installmentNumber}
+                                </div>
+                                <div style="font-size: 0.85rem; color: #6B7280; margin-top: 4px;">
+                                    ${item.fullyPaid ? 
+                                        'سيتم دفعه بالكامل' : 
+                                        `سيتبقى منه: ${item.newAmount.toLocaleString('ar-EG')} ج.م`
+                                    }
+                                </div>
+                            </div>
+                            <div style="text-align: left;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: ${item.fullyPaid ? '#059669' : '#D97706'};">
+                                    ${item.paidAmount.toLocaleString('ar-EG')} ج.م
+                                </div>
+                                ${!item.fullyPaid ? `
+                                    <div style="font-size: 0.75rem; color: #9CA3AF;">
+                                        من ${item.originalAmount.toLocaleString('ar-EG')} ج.م
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                    
+                    <div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); 
+                                padding: 15px; border-radius: 8px; margin-top: 15px;
+                                border: 2px solid #3B82F6;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; text-align: center;">
+                            <div>
+                                <div style="font-size: 0.85rem; color: #6B7280;">الأقساط المدفوعة</div>
+                                <div style="font-size: 1.3rem; font-weight: bold; color: #3B82F6;">
+                                    ${distribution.summary.installmentsPaid}
+                                </div>
+                            </div>
+                            <div>
+                                <div style="font-size: 0.85rem; color: #6B7280;">إجمالي المدفوع</div>
+                                <div style="font-size: 1.3rem; font-weight: bold; color: #10B981;">
+                                    ${actualAmount.toLocaleString('ar-EG')} ج.م
+                                </div>
+                            </div>
+                            <div>
+                                <div style="font-size: 0.85rem; color: #6B7280;">المتبقي الجديد</div>
+                                <div style="font-size: 1.3rem; font-weight: bold; color: #DC2626;">
+                                    ${distribution.summary.newRemaining.toLocaleString('ar-EG')} ج.م
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    // المبلغ مساوي للقسط
+    else if (actualAmount === installmentAmount) {
+        validationMsg.style.display = 'block';
+        validationMsg.style.background = '#F0FDF4';
+        validationMsg.style.border = '2px solid #10B981';
+        validationMsg.style.borderRadius = '10px';
+        validationMsg.style.padding = '15px';
+        validationMsg.innerHTML = `
+            <div style="color: #065F46; font-weight: bold;">
+                <i class="fas fa-check-circle"></i> ✅ المبلغ مطابق للقسط المستحق
+            </div>
+        `;
+        input.style.borderColor = '#10B981';
+        input.style.background = '#F0FDF4';
+    }
+    // المبلغ أقل من القسط
+    else {
+        validationMsg.style.display = 'block';
+        validationMsg.style.background = '#FEF3C7';
+        validationMsg.style.border = '2px solid #F59E0B';
+        validationMsg.style.borderRadius = '10px';
+        validationMsg.style.padding = '15px';
+        validationMsg.innerHTML = `
+            <div style="color: #92400E; font-weight: bold; margin-bottom: 10px;">
+                <i class="fas fa-info-circle"></i> ⚠️ المبلغ أقل من القسط المستحق
+            </div>
+            <div style="background: white; padding: 12px; border-radius: 8px;">
+                <div>المبلغ المدخل: <strong style="color: #DC2626;">${actualAmount.toLocaleString('ar-EG')} ج.م</strong></div>
+                <div>القسط المستحق: <strong style="color: #059669;">${installmentAmount.toLocaleString('ar-EG')} ج.م</strong></div>
+                <div style="margin-top: 8px; padding-top: 8px; border-top: 2px solid #F59E0B;">
+                    الفرق: <strong style="color: #F59E0B;">${(installmentAmount - actualAmount).toLocaleString('ar-EG')} ج.م</strong>
+                </div>
+            </div>
+            <div style="color: #78350F; margin-top: 10px; font-size: 0.9rem;">
+                💡 سيتم تسجيل دفع جزئي - لن يُعتبر القسط مكتمل
+            </div>
+        `;
+        input.style.borderColor = '#F59E0B';
+        input.style.background = '#FFFBEB';
+    }
+}
+
+// دالة حساب التوزيع
+function calculateDistribution(extraAmount) {
+    // الحصول على بيانات الحجز من النافذة
+    const bookingId = window.currentBookingId;
+    const installmentIndex = window.currentInstallmentIndex;
+    
+    if (!bookingId || installmentIndex === undefined) return null;
+    
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return null;
+    
+    const schedule = booking.paymentDetails.installmentSchedule;
+    let remaining = extraAmount;
+    let items = [];
+    let installmentsPaid = 1; // القسط الحالي
+    
+    // البحث عن الأقساط القادمة
+    for (let i = installmentIndex + 1; i < schedule.length; i++) {
+        const inst = schedule[i];
+        
+        if (inst.status !== 'pending') continue;
+        
+        if (remaining >= inst.amount) {
+            // يغطي القسط بالكامل
+            items.push({
+                installmentNumber: inst.installmentNumber + 1,
+                originalAmount: inst.amount,
+                paidAmount: inst.amount,
+                newAmount: 0,
+                fullyPaid: true
+            });
+            remaining -= inst.amount;
+            installmentsPaid++;
+        } else if (remaining > 0) {
+            // يغطي جزء من القسط
+            items.push({
+                installmentNumber: inst.installmentNumber + 1,
+                originalAmount: inst.amount,
+                paidAmount: remaining,
+                newAmount: inst.amount - remaining,
+                fullyPaid: false
+            });
+            remaining = 0;
+            break;
+        } else {
+            break;
+        }
+    }
+    
+    const actualPaidAmount = parseFloat(document.getElementById('actualPaidAmount')?.value) || 0;
+    const newRemaining = booking.paymentDetails.remainingAmount - actualPaidAmount;
+    
+    return {
+        items: items,
+        summary: {
+            installmentsPaid: installmentsPaid,
+            totalPaid: actualPaidAmount,
+            newRemaining: Math.max(0, newRemaining)
+        }
+    };
 }
         
        // تحديث تلقائي للوقت
