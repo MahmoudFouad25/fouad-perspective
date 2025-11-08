@@ -1053,6 +1053,57 @@
         grid-template-columns: repeat(2, 1fr) !important;
     }
 }
+
+        @keyframes slideDown {
+    from {
+        transform: translateX(-50%) translateY(-100px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(-50%) translateY(-100px);
+        opacity: 0;
+    }
+}
+
+.filter-btn {
+    padding: 12px 16px;
+    border: 2px solid #E5E7EB;
+    background: white;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.3s;
+    text-align: center;
+}
+
+.filter-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.filter-btn.active {
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.filter-btn small {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: normal;
+    color: #6B7280;
+    margin-top: 4px;
+}
     </style>
 </head>
 <body>
@@ -7469,6 +7520,7 @@ async function showInstallmentsManager() {
 }
 
 // دالة حساب إحصائيات الأقساط
+// دالة حساب إحصائيات الأقساط - مصلحة
 function calculateInstallmentsStats(bookings) {
     const now = new Date();
     const currentMonth = now.getMonth();
@@ -7486,13 +7538,20 @@ function calculateInstallmentsStats(bookings) {
         readyForReminder: 0,
         recentlyReminded: 0,
         receiptsReceived: 0,
-        monthlyIncome: 0 // الدخل الشهري المتوقع
+        monthlyIncome: 0,
+        dueIn3Days: 0,
+        dueIn7Days: 0
     };
     
     bookings.forEach(booking => {
         const schedule = booking.paymentDetails?.installmentSchedule || [];
         
         schedule.forEach(installment => {
+            // تخطي الدفعة الأولى من الإحصائيات
+            if (installment.installmentNumber === 0) {
+                return;
+            }
+            
             stats.total++;
             stats.totalAmount += installment.amount;
             
@@ -7512,7 +7571,7 @@ function calculateInstallmentsStats(bookings) {
             // الأقساط المستحقة
             if (installment.status === 'pending') {
                 const dueDate = new Date(installment.dueDate);
-                const daysDiff = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24));
+                const daysDiff = Math.floor((dueDate - now) / (1000 * 60 * 60 * 24));
                 
                 // مستحق هذا الشهر
                 if (dueDate.getMonth() === currentMonth && 
@@ -7522,9 +7581,19 @@ function calculateInstallmentsStats(bookings) {
                 }
                 
                 // متأخر
-                if (daysDiff > 0) {
+                if (daysDiff < 0) {
                     stats.overdue++;
                     stats.overdueAmount += installment.amount;
+                }
+                
+                // قادم خلال 3 أيام
+                if (daysDiff >= 0 && daysDiff <= 3) {
+                    stats.dueIn3Days++;
+                }
+                
+                // قادم خلال 7 أيام
+                if (daysDiff >= 0 && daysDiff <= 7) {
+                    stats.dueIn7Days++;
                 }
                 
                 // جاهز للتذكير
@@ -7538,7 +7607,7 @@ function calculateInstallmentsStats(bookings) {
                         (now - new Date(lastReminder.sentAt)) / (1000 * 60 * 60 * 24)
                     );
                     
-                    if (daysSinceReminder >= minDays || daysDiff > 7) {
+                    if (daysSinceReminder >= minDays || daysDiff < -7) {
                         stats.readyForReminder++;
                     } else {
                         stats.recentlyReminded++;
@@ -7555,7 +7624,6 @@ function calculateInstallmentsStats(bookings) {
     
     return stats;
 }
-
 // دالة بناء محتوى النافذة
 function buildInstallmentsManagerContent(bookings, stats) {
     return `
@@ -7700,38 +7768,41 @@ function buildInstallmentsManagerContent(bookings, stats) {
                 </div>
             </div>
             
-            <!-- الفلاتر -->
-            <!-- الفلاتر المبسطة -->
-<div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #E5E7EB;">
-    <h4 style="margin: 0 0 15px 0; color: #1F2937;">
-        🔍 تصفية العرض:
-    </h4>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <!-- الفلاتر المبسطة والواضحة -->
+<div style="background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #3B82F6;">
+    <h3 style="margin: 0 0 15px 0; color: #1E40AF;">
+        🔍 اختر ما تريد عرضه:
+    </h3>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 15px;">
         <button class="filter-btn active" data-filter="all" onclick="filterInstallments('all')">
-            📋 الكل (${stats.total})
+            📋 كل الأقساط<br><small>(${stats.total} قسط)</small>
         </button>
-        <button class="filter-btn" data-filter="needAction" onclick="filterInstallments('needAction')" 
-                style="border-color: #DC2626; color: #DC2626;">
-            🔴 يحتاج إجراء (${stats.overdue + stats.dueThisMonth})
+        <button class="filter-btn" data-filter="overdue" onclick="filterInstallments('overdue')"
+                style="background: linear-gradient(135deg, #FEE2E2, #FECACA);">
+            🔴 متأخر<br><small>(${stats.overdue} قسط)</small>
+        </button>
+        <button class="filter-btn" data-filter="dueIn3Days" onclick="filterInstallments('dueIn3Days')"
+                style="background: linear-gradient(135deg, #FEF3C7, #FDE68A);">
+            ⏰ خلال 3 أيام<br><small>(${stats.dueIn3Days} قسط)</small>
+        </button>
+        <button class="filter-btn" data-filter="dueIn7Days" onclick="filterInstallments('dueIn7Days')"
+                style="background: linear-gradient(135deg, #E0E7FF, #C7D2FE);">
+            📅 خلال 7 أيام<br><small>(${stats.dueIn7Days} قسط)</small>
         </button>
         <button class="filter-btn" data-filter="receipts" onclick="filterInstallments('receipts')"
-                style="border-color: #8B5CF6; color: #8B5CF6;">
-            📸 إيصالات للمراجعة (${stats.receiptsReceived})
+                style="background: linear-gradient(135deg, #F3E8FF, #E9D5FF);">
+            📸 إيصالات<br><small>(${stats.receiptsReceived} قسط)</small>
         </button>
         <button class="filter-btn" data-filter="paid" onclick="filterInstallments('paid')"
-                style="border-color: #10B981; color: #10B981;">
-            ✅ مدفوع (${stats.paid})
+                style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0);">
+            ✅ مدفوع<br><small>(${stats.paid} قسط)</small>
         </button>
     </div>
     
-    <!-- شرح مبسط -->
-    <div style="margin-top: 15px; padding: 12px; background: #F0F9FF; border-radius: 8px; font-size: 0.9rem; color: #1E40AF;">
-        <strong>💡 كيف تستخدم النظام:</strong>
-        <ol style="margin: 10px 0 0 20px; padding: 0;">
-            <li><strong>🔴 يحتاج إجراء:</strong> الأقساط المتأخرة أو المستحقة هذا الشهر - ابدأ من هنا!</li>
-            <li><strong>📸 إيصالات للمراجعة:</strong> العملاء بعتوا إيصالات - راجعها وسجل الدفع</li>
-            <li><strong>✅ مدفوع:</strong> الأقساط المدفوعة - للمراجعة فقط</li>
-        </ol>
+    <div style="background: #EFF6FF; padding: 12px; border-radius: 8px; border-right: 3px solid #3B82F6;">
+        <strong style="color: #1E40AF;">💡 نصيحة:</strong>
+        <span style="color: #1E3A8A;"> ابدأ بـ "متأخر" أو "خلال 3 أيام" للمتابعة السريعة</span>
     </div>
 </div>
             
@@ -7836,13 +7907,14 @@ function buildInstallmentsList(bookings) {
             
             html += `
                 <div class="installment-client-box ${disableCheckbox ? 'disabled' : ''} ${isOverdue ? 'overdue' : ''}" 
-                     data-booking-id="${booking.id}"
-                     data-installment-index="${index}"
-                     data-status="${installment.status}"
-                     data-can-remind="${canRemind}"
-                     data-overdue="${isOverdue}"
-                     data-month="${dueDate.getMonth()}"
-                     data-receipt="${installment.receiptReceived || false}">
+     data-booking-id="${booking.id}"
+     data-installment-index="${index}"
+     data-status="${installment.status}"
+     data-can-remind="${canRemind}"
+     data-overdue="${isOverdue}"
+     data-month="${dueDate.getMonth()}"
+     data-receipt="${installment.receiptReceived || false}"
+     data-due-date="${installment.dueDate}">
                     
                     <div style="display: flex; justify-content: space-between; align-items: start; gap: 15px;">
                         
@@ -7978,9 +8050,8 @@ function updateReminderMinDays() {
 }
 
 // دالة تحديد كل الجاهزين للتذكير
-// دالة تحديد كل الجاهزين للتذكير (حسب الفلتر الحالي)
+// دالة تحديد الجاهزين - بدون إغلاق النافذة
 function selectAllReadyForReminder() {
-    // الحصول على كل الصناديق الظاهرة فقط (بناءً على الفلتر)
     const visibleBoxes = Array.from(document.querySelectorAll('.installment-client-box'))
         .filter(box => box.style.display !== 'none');
     
@@ -7991,7 +8062,6 @@ function selectAllReadyForReminder() {
         const bookingId = box.getAttribute('data-booking-id');
         const installmentIndex = box.getAttribute('data-installment-index');
         
-        // إيجاد الـ checkbox المناسب
         const checkbox = box.querySelector(`.installment-item-checkbox[data-booking-id="${bookingId}"][data-installment-index="${installmentIndex}"]`);
         
         if (checkbox && !checkbox.disabled && canRemind) {
@@ -8002,25 +8072,32 @@ function selectAllReadyForReminder() {
     
     updateSelectedCount();
     
-    if (selectedCount === 0) {
-        Swal.fire({
-            toast: true,
-            position: 'top-end',
-            icon: 'info',
-            title: '⚠️ لا يوجد عملاء جاهزين للتذكير في هذا الفلتر',
-            showConfirmButton: false,
-            timer: 3000
-        });
-    } else {
-        Swal.fire({
-            toast: true,
-            position: 'top-end',
-            icon: 'success',
-            title: `✅ تم تحديد ${selectedCount} عميل من الظاهرين حالياً`,
-            showConfirmButton: false,
-            timer: 3000
-        });
-    }
+    // رسالة بسيطة في أعلى الصفحة بدون إغلاق النافذة
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${selectedCount > 0 ? '#10B981' : '#F59E0B'};
+        color: white;
+        padding: 15px 30px;
+        border-radius: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 99999;
+        font-weight: bold;
+        animation: slideDown 0.3s ease;
+    `;
+    messageDiv.textContent = selectedCount > 0 ? 
+        `✅ تم تحديد ${selectedCount} عميل` : 
+        '⚠️ لا يوجد عملاء جاهزين في هذا الفلتر';
+    
+    document.body.appendChild(messageDiv);
+    
+    setTimeout(() => {
+        messageDiv.style.animation = 'slideUp 0.3s ease';
+        setTimeout(() => messageDiv.remove(), 300);
+    }, 2000);
 }
 
 // دالة تحديث عدد المحددين
@@ -8047,11 +8124,10 @@ function updateSelectedCount() {
 }
 
 // دالة الفلترة
-// دالة الفلترة المبسطة
+// دالة الفلترة الصحيحة
 function filterInstallments(filterType) {
     const allBoxes = document.querySelectorAll('.installment-client-box');
     const now = new Date();
-    const currentMonth = now.getMonth();
     
     // تحديث أزرار الفلاتر
     document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -8067,38 +8143,73 @@ function filterInstallments(filterType) {
     });
     updateSelectedCount();
     
+    let visibleCount = 0;
+    
     allBoxes.forEach(box => {
         let show = false;
         
         const status = box.getAttribute('data-status');
         const isOverdue = box.getAttribute('data-overdue') === 'true';
-        const month = parseInt(box.getAttribute('data-month'));
         const hasReceipt = box.getAttribute('data-receipt') === 'true';
+        const dueDateStr = box.querySelector('[data-due-date]')?.getAttribute('data-due-date');
+        
+        let daysDiff = 0;
+        if (dueDateStr) {
+            const dueDate = new Date(dueDateStr);
+            daysDiff = Math.floor((dueDate - now) / (1000 * 60 * 60 * 24));
+        }
         
         switch(filterType) {
             case 'all':
-                // كل الأقساط
-                show = true;
+                show = status !== 'paid' || status === 'paid'; // كل شيء
                 break;
                 
-            case 'needAction':
-                // المتأخر + المستحق هذا الشهر (غير المدفوع)
-                show = (isOverdue || month === currentMonth) && status !== 'paid';
+            case 'overdue':
+                show = isOverdue && status !== 'paid';
+                break;
+                
+            case 'dueIn3Days':
+                show = daysDiff >= 0 && daysDiff <= 3 && status !== 'paid';
+                break;
+                
+            case 'dueIn7Days':
+                show = daysDiff >= 0 && daysDiff <= 7 && status !== 'paid';
                 break;
                 
             case 'receipts':
-                // الإيصالات المستلمة (غير المدفوعة)
                 show = hasReceipt && status !== 'paid';
                 break;
                 
             case 'paid':
-                // المدفوع فقط
                 show = status === 'paid';
                 break;
         }
         
-        box.style.display = show ? 'block' : 'none';
+        if (show) {
+            box.style.display = 'block';
+            visibleCount++;
+        } else {
+            box.style.display = 'none';
+        }
     });
+    
+    // عرض رسالة إذا لم يكن هناك نتائج
+    const container = document.getElementById('installmentsList');
+    if (container) {
+        const existingMsg = container.querySelector('.no-results-message');
+        if (existingMsg) existingMsg.remove();
+        
+        if (visibleCount === 0) {
+            const noResultsMsg = document.createElement('div');
+            noResultsMsg.className = 'no-results-message';
+            noResultsMsg.style.cssText = 'text-align: center; padding: 40px; color: #6B7280; background: #F9FAFB; border-radius: 10px; margin: 20px 0;';
+            noResultsMsg.innerHTML = `
+                <i class="fas fa-inbox" style="font-size: 3rem; color: #D1D5DB; margin-bottom: 15px;"></i>
+                <p style="font-size: 1.1rem; margin: 0;">لا توجد أقساط في هذا الفلتر</p>
+            `;
+            container.appendChild(noResultsMsg);
+        }
+    }
 }
 
 // دالة إرسال تذكير فردي
