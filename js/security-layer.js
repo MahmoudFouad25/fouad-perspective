@@ -72,6 +72,8 @@
     
     // التعامل عند فتح أدوات المطور (للكمبيوتر فقط)
     const handleDevToolsOpen = () => {
+                return; // معطل مؤقتاً للتطوير
+
         if (!isMobile) {
             document.body.innerHTML = `
                 <div style="
