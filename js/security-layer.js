@@ -165,33 +165,16 @@
     
     // حماية قاعدة البيانات
     const protectDatabase = () => {
-        // إخفاء معلومات Firebase
-        if (window.firebaseConfig) {
-            delete window.firebaseConfig;
-        }
-        
-        // حماية كائنات Firebase
-        if (window.firebase) {
-            Object.defineProperty(window.firebase, 'apiKey', {
-                get: () => undefined,
-                set: () => {},
-                configurable: false
-            });
-        }
-        
         // رسالة تحذيرية في الـ Console (للكمبيوتر فقط)
         if (!isMobile && window.console) {
             const warningStyle = 'color: red; font-size: 30px; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);';
             console.log('%c⛔ توقف! STOP!', warningStyle);
             console.log('%cهذه منطقة محمية - Protected Area', 'color: orange; font-size: 18px;');
             console.log('%cأي محاولة للعبث ستُسجل وقد تعرض حسابك للحظر', 'color: #ff6b6b; font-size: 14px;');
-            
-            // تعطيل بعض وظائف Console
-            const noop = () => {};
-            ['log', 'debug', 'info', 'warn'].forEach(method => {
-                console[method] = noop;
-            });
         }
+        
+        // ملاحظة: تم إزالة تعطيل Firebase للسماح بتسجيل الدخول
+        // الحماية الآن تعتمد على منع DevTools والنسخ فقط
     };
 
 
