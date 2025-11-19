@@ -7232,6 +7232,11 @@ async function startVideoJourney() {
                   case 'pillar-exercise':
     displayPillarExercise(contentData, lesson.libraryContentId);
     break;
+
+                           case 'external-exercise':  // 🆕 أضف السطرين دول
+        displayExternalExercise(contentData, lesson.libraryContentId);
+        break;
+
                    default:
                        displayGenericContent(contentData);
                }
@@ -19963,67 +19968,90 @@ document.head.appendChild(glowStyle);
     });
 }
 
-    // ==========================================
-// 🎯 عرض التمرين الخارجي
+  // ==========================================
+// 🌐 عرض التمرين الخارجي
 // ==========================================
 async function displayExternalExercise(contentData, libraryContentId) {
     console.log('🌐 فتح تمرين خارجي:', contentData.name);
     
-    const externalData = contentData.externalExercise;
+    // جلب البيانات من المكتبة
+    let externalData;
+    
+    if (contentData.externalExercise) {
+        externalData = contentData.externalExercise;
+    } else {
+        // جلب من المكتبة
+        const libraryDoc = await db.collection('courseContentLibrary')
+            .doc(libraryContentId)
+            .get();
+        
+        if (!libraryDoc.exists) {
+            showNotification('❌ التمرين غير موجود', 'error');
+            return;
+        }
+        
+        externalData = libraryDoc.data().externalExercise;
+    }
+    
     const url = externalData.url;
-    const openMode = externalData.openMode;
+    const openMode = externalData.openMode || 'iframe';
     
     // إضافة معلومات للـ URL
     const userId = localStorage.getItem('userId');
     const courseId = currentCourseId;
     
-    const fullUrl = `${url}?exerciseId=${libraryContentId}&userId=${userId}&courseId=${courseId}`;
+    const separator = url.includes('?') ? '&' : '?';
+    const fullUrl = `${url}${separator}exerciseId=${libraryContentId}&userId=${userId}&courseId=${courseId}`;
+    
+    console.log('🔗 URL الكامل:', fullUrl);
     
     // فتح حسب الوضع المحدد
     if (openMode === 'new-tab') {
         // فتح في تبويب جديد
         window.open(fullUrl, '_blank');
-        
-        // عرض رسالة في الصفحة الحالية
         showExternalExerciseMessage(contentData, 'new-tab');
-        
     } else if (openMode === 'modal') {
         // فتح في نافذة منبثقة
         openExternalExerciseModal(contentData, fullUrl);
-        
     } else {
         // فتح في iframe (default)
-        displayExternalExerciseInIframe(contentData, fullUrl);
+        displayExternalExerciseInIframe(contentData, fullUrl, libraryContentId, externalData);
     }
 }
 
 // ==========================================
 // 📺 عرض في iframe
 // ==========================================
-function displayExternalExerciseInIframe(contentData, url) {
+function displayExternalExerciseInIframe(contentData, url, libraryContentId, externalData) {
     const container = document.getElementById('textContent');
+    if (!container) {
+        console.error('❌ Container غير موجود');
+        return;
+    }
+    
     container.style.display = 'block';
     
     const html = `
-        <div style="
-            padding: 1rem;
-            max-width: 100%;
-            margin: 0 auto;
-        ">
+        <div style="padding: 1rem; max-width: 100%; margin: 0 auto;">
             <div style="
                 text-align: center;
-                margin-bottom: 1rem;
-                padding: 1rem;
-                background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1));
+                margin-bottom: 1.5rem;
+                padding: 1.5rem;
+                background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
                 border-radius: 12px;
-                border: 2px solid rgba(59, 130, 246, 0.3);
+                border: 2px solid rgba(245, 158, 11, 0.3);
             ">
-                <h2 style="color: #3b82f6; margin: 0 0 0.5rem 0;">
-                    ${contentData.name}
+                <h2 style="color: #f59e0b; margin: 0 0 0.5rem 0; font-size: 1.8rem;">
+                    🌐 ${contentData.name}
                 </h2>
-                <p style="color: rgba(255, 255, 255, 0.8); margin: 0;">
-                    ${contentData.description || ''}
-                </p>
+                ${contentData.description ? `
+                    <p style="color: rgba(255, 255, 255, 0.8); margin: 0; font-size: 1rem;">
+                        ${contentData.description}
+                    </p>
+                ` : ''}
+                <div style="margin-top: 1rem; color: #fbbf24; font-size: 0.9rem;">
+                    <i class="fas fa-star"></i> ${externalData.totalPoints || 0} نقطة
+                </div>
             </div>
             
             <div style="
@@ -20032,7 +20060,8 @@ function displayExternalExerciseInIframe(contentData, url) {
                 height: 80vh;
                 border-radius: 12px;
                 overflow: hidden;
-                border: 2px solid rgba(255, 255, 255, 0.1);
+                border: 2px solid rgba(245, 158, 11, 0.2);
+                background: rgba(0, 0, 0, 0.2);
             ">
                 <iframe
                     id="external-exercise-iframe"
@@ -20050,6 +20079,8 @@ function displayExternalExerciseInIframe(contentData, url) {
     
     container.innerHTML = html;
     
+    console.log('✅ تم عرض التمرين في iframe');
+    
     // إخفاء زر "إكمال الدرس"
     const completeLessonBtn = document.getElementById('completeLessonBtn');
     if (completeLessonBtn) {
@@ -20064,15 +20095,14 @@ function displayExternalExerciseInIframe(contentData, url) {
 // 💬 معالجة رسائل التمرين الخارجي
 // ==========================================
 function handleExternalExerciseMessage(event) {
-    // التحقق من مصدر الرسالة (أمان)
-    // if (event.origin !== 'https://yoursite.com') return;
+    console.log('📨 رسالة من التمرين:', event.data);
     
     const message = event.data;
     
     if (message.type === 'exercise-completed') {
         handleExternalExerciseCompletion(message.data);
     } else if (message.type === 'exercise-progress') {
-        handleExternalExerciseProgress(message.data);
+        console.log('📊 تقدم:', message.data);
     }
 }
 
@@ -20084,6 +20114,8 @@ async function handleExternalExerciseCompletion(data) {
         showLoading('جاري حفظ التمرين...');
         
         const { exerciseId, userId, answers, customData } = data;
+        
+        console.log('💾 حفظ إكمال التمرين:', exerciseId);
         
         // جلب بيانات التمرين
         const exerciseDoc = await db.collection('courseContentLibrary')
@@ -20154,9 +20186,19 @@ async function handleExternalExerciseCompletion(data) {
         }
         
         hideLoading();
-        
-        showNotification(`🎉 رائع! حصلت على ${totalPoints} نقطة!`, 'success');
-        showPointsSummary(pillars);
+
+// عرض notification
+showNotification(`🎉 رائع! حصلت على ${totalPoints} نقطة!`, 'success');
+
+// عرض ملخص النقاط في SweetAlert (أجمل)
+Swal.fire({
+    icon: 'success',
+    title: '🎉 رائع! أكملت التمرين',
+    html: generatePointsSummaryHTML(pillars, totalPoints),
+    confirmButtonText: 'تمام!',
+    confirmButtonColor: '#10b981',
+    width: '600px'
+});
         
     } catch (error) {
         console.error('❌ خطأ:', error);
@@ -20164,6 +20206,68 @@ async function handleExternalExerciseCompletion(data) {
         showNotification('حدث خطأ: ' + error.message, 'error');
     }
 }
+
+       // ==========================================
+// 🎨 توليد HTML ملخص النقاط
+// ==========================================
+function generatePointsSummaryHTML(pillars, totalPoints) {
+    const pillarNames = {
+        courage: { name: 'الجرأة', icon: '🔥', color: '#ef4444' },
+        mirror: { name: 'المرآة', icon: '🪞', color: '#8b5cf6' },
+        action: { name: 'الخطوة', icon: '👣', color: '#10b981' },
+        witness: { name: 'الشهود', icon: '👁️', color: '#fbbf24' }
+    };
+    
+    let html = `
+        <div style="text-align: center; margin: 1.5rem 0;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">
+                ${totalPoints}
+            </div>
+            <div style="color: #10b981; font-size: 1.2rem; margin-bottom: 2rem;">
+                إجمالي النقاط المكتسبة
+            </div>
+            
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 1rem;
+                margin-top: 1.5rem;
+            ">
+    `;
+    
+    for (const [pillarKey, points] of Object.entries(pillars)) {
+        if (points > 0) {
+            const pillar = pillarNames[pillarKey];
+            if (pillar) {
+                html += `
+                    <div style="
+                        background: ${pillar.color}20;
+                        padding: 1rem;
+                        border-radius: 12px;
+                        border: 2px solid ${pillar.color};
+                    ">
+                        <div style="font-size: 2rem;">${pillar.icon}</div>
+                        <div style="color: ${pillar.color}; font-weight: 600; margin: 0.5rem 0;">
+                            ${pillar.name}
+                        </div>
+                        <div style="color: white; font-size: 1.5rem; font-weight: 700;">
+                            +${points}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+    }
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+
 
        // ============================================
 // 🔧 إصلاح دائم لـ z-index والمسافات
