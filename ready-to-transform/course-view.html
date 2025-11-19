@@ -19963,6 +19963,208 @@ document.head.appendChild(glowStyle);
     });
 }
 
+    // ==========================================
+// 🎯 عرض التمرين الخارجي
+// ==========================================
+async function displayExternalExercise(contentData, libraryContentId) {
+    console.log('🌐 فتح تمرين خارجي:', contentData.name);
+    
+    const externalData = contentData.externalExercise;
+    const url = externalData.url;
+    const openMode = externalData.openMode;
+    
+    // إضافة معلومات للـ URL
+    const userId = localStorage.getItem('userId');
+    const courseId = currentCourseId;
+    
+    const fullUrl = `${url}?exerciseId=${libraryContentId}&userId=${userId}&courseId=${courseId}`;
+    
+    // فتح حسب الوضع المحدد
+    if (openMode === 'new-tab') {
+        // فتح في تبويب جديد
+        window.open(fullUrl, '_blank');
+        
+        // عرض رسالة في الصفحة الحالية
+        showExternalExerciseMessage(contentData, 'new-tab');
+        
+    } else if (openMode === 'modal') {
+        // فتح في نافذة منبثقة
+        openExternalExerciseModal(contentData, fullUrl);
+        
+    } else {
+        // فتح في iframe (default)
+        displayExternalExerciseInIframe(contentData, fullUrl);
+    }
+}
+
+// ==========================================
+// 📺 عرض في iframe
+// ==========================================
+function displayExternalExerciseInIframe(contentData, url) {
+    const container = document.getElementById('textContent');
+    container.style.display = 'block';
+    
+    const html = `
+        <div style="
+            padding: 1rem;
+            max-width: 100%;
+            margin: 0 auto;
+        ">
+            <div style="
+                text-align: center;
+                margin-bottom: 1rem;
+                padding: 1rem;
+                background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1));
+                border-radius: 12px;
+                border: 2px solid rgba(59, 130, 246, 0.3);
+            ">
+                <h2 style="color: #3b82f6; margin: 0 0 0.5rem 0;">
+                    ${contentData.name}
+                </h2>
+                <p style="color: rgba(255, 255, 255, 0.8); margin: 0;">
+                    ${contentData.description || ''}
+                </p>
+            </div>
+            
+            <div style="
+                position: relative;
+                width: 100%;
+                height: 80vh;
+                border-radius: 12px;
+                overflow: hidden;
+                border: 2px solid rgba(255, 255, 255, 0.1);
+            ">
+                <iframe
+                    id="external-exercise-iframe"
+                    src="${url}"
+                    style="
+                        width: 100%;
+                        height: 100%;
+                        border: none;
+                    "
+                    allow="fullscreen"
+                ></iframe>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+    
+    // إخفاء زر "إكمال الدرس"
+    const completeLessonBtn = document.getElementById('completeLessonBtn');
+    if (completeLessonBtn) {
+        completeLessonBtn.style.display = 'none';
+    }
+    
+    // الاستماع لرسائل من الـ iframe
+    window.addEventListener('message', handleExternalExerciseMessage);
+}
+
+// ==========================================
+// 💬 معالجة رسائل التمرين الخارجي
+// ==========================================
+function handleExternalExerciseMessage(event) {
+    // التحقق من مصدر الرسالة (أمان)
+    // if (event.origin !== 'https://yoursite.com') return;
+    
+    const message = event.data;
+    
+    if (message.type === 'exercise-completed') {
+        handleExternalExerciseCompletion(message.data);
+    } else if (message.type === 'exercise-progress') {
+        handleExternalExerciseProgress(message.data);
+    }
+}
+
+// ==========================================
+// ✅ معالجة إكمال التمرين الخارجي
+// ==========================================
+async function handleExternalExerciseCompletion(data) {
+    try {
+        showLoading('جاري حفظ التمرين...');
+        
+        const { exerciseId, userId, answers, customData } = data;
+        
+        // جلب بيانات التمرين
+        const exerciseDoc = await db.collection('courseContentLibrary')
+            .doc(exerciseId)
+            .get();
+        
+        if (!exerciseDoc.exists) {
+            throw new Error('التمرين غير موجود');
+        }
+        
+        const exerciseData = exerciseDoc.data();
+        const pillars = exerciseData.externalExercise.pillars;
+        
+        // حفظ الإجابات
+        await db.collection('users')
+            .doc(userId)
+            .collection('awakening_progress')
+            .doc(currentCourseId)
+            .set({
+                [`exercises.${exerciseId}`]: {
+                    completed: true,
+                    completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    answers: answers,
+                    customData: customData,
+                    pointsEarned: pillars
+                }
+            }, { merge: true });
+        
+        // إضافة النقاط
+        let totalPoints = 0;
+        for (const [pillarKey, points] of Object.entries(pillars)) {
+            if (points > 0) {
+                await addPointsToPillar(pillarKey, points, {
+                    type: 'external_exercise',
+                    exerciseId: exerciseId,
+                    exerciseName: exerciseData.name
+                });
+                totalPoints += points;
+            }
+        }
+        
+        // تحديث الواجهة
+        await renderPointsDashboard();
+        await refreshUserPoints();
+        await displayUserProgress();
+        displayModulesAndLessons();
+        
+        // إضافة للدروس المكتملة
+        const exerciseLesson = allLessons.find(l => l.libraryContentId === exerciseId);
+        if (exerciseLesson) {
+            const lessonIndex = exerciseLesson.globalIndex;
+            
+            if (!userProgress.completedLessons) {
+                userProgress.completedLessons = [];
+            }
+            
+            if (!userProgress.completedLessons.includes(lessonIndex)) {
+                userProgress.completedLessons.push(lessonIndex);
+                
+                await db.collection('users')
+                    .doc(userId)
+                    .update({
+                        [`progress.${currentCourseId}.completedLessons`]: userProgress.completedLessons
+                    });
+                
+                completedExercisesSet.add(exerciseId);
+            }
+        }
+        
+        hideLoading();
+        
+        showNotification(`🎉 رائع! حصلت على ${totalPoints} نقطة!`, 'success');
+        showPointsSummary(pillars);
+        
+    } catch (error) {
+        console.error('❌ خطأ:', error);
+        hideLoading();
+        showNotification('حدث خطأ: ' + error.message, 'error');
+    }
+}
+
        // ============================================
 // 🔧 إصلاح دائم لـ z-index والمسافات
 // ============================================
