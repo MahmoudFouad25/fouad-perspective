@@ -6,9 +6,8 @@
     <title>تمرين مخصص</title>
     
     <!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.x.x/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.x.x/firebase-firestore-compat.js"></script>
     
     <style>
         * {
@@ -94,252 +93,238 @@
             <input type="text" id="answer2" placeholder="إجابتك...">
         </div>
         
-        <button class="submit-btn" onclick="submitExercise()">
-            ✅ إكمال التمرين
-        </button>
+        <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+    <button class="submit-btn" onclick="submitExercise()" style="flex: 1;">
+        ✅ إكمال التمرين
+    </button>
+    <button onclick="saveDraft()" style="
+        flex: 0.5;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+        border: none;
+        padding: 1.25rem 2rem;
+        border-radius: 12px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        cursor: pointer;
+    ">
+        💾 حفظ مسودة
+    </button>
+</div>
     </div>
     
     <script>
-        // ========================================
-// 🔥 إعداد Firebase
-// ========================================
-const firebaseConfig = {
-    apiKey: "AIzaSyD_vKtYDjyiXdY3brkUuz1Pc2F5K1KY4bg",
-    authDomain: "awakingopp.firebaseapp.com",
-    projectId: "awakingopp",
-    storageBucket: "awakingopp.firebasestorage.app",
-    messagingSenderId: "884050120823",
-    appId: "1:884050120823:web:eba2cfea832fc3dda1d72b",
-    measurementId: "G-YG75QF02SG"
-};
+        // استخراج المعلومات من الـ URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const exerciseId = urlParams.get('exerciseId');
+        const userId = urlParams.get('userId');
+        const courseId = urlParams.get('courseId');
 
-// تهيئة Firebase
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-
-const db = firebase.firestore();
-const auth = firebase.auth();
-
-console.log('✅ Firebase initialized');
         
         // ========================================
-// 📦 استخراج المعلومات من الـ URL
-// ========================================
-const urlParams = new URLSearchParams(window.location.search);
-const exerciseId = urlParams.get('exerciseId');
-const userId = urlParams.get('userId');
-const courseId = urlParams.get('courseId');
-
-console.log('📋 معلومات التمرين:');
-console.log('🎯 Exercise ID:', exerciseId);
-console.log('👤 User ID:', userId);
-console.log('📚 Course ID:', courseId);
-
-// التحقق من وجود البيانات
-if (!exerciseId || !userId || !courseId) {
-    console.error('❌ بيانات ناقصة في الرابط');
-    alert('⚠️ خطأ: بيانات التمرين غير مكتملة في الرابط');
-}
-
-        // ========================================
-// 🔍 فحص حالة إكمال التمرين من Firebase
-// ========================================
-async function checkExerciseStatus() {
-    try {
-        console.log('🔍 جاري فحص حالة التمرين...');
-        
-        if (!userId || !courseId || !exerciseId) {
-            console.log('⚠️ لا يمكن الفحص - بيانات ناقصة');
-            return { completed: false, draft: false, answers: {} };
-        }
-
-        const progressDoc = await db.collection('users')
-            .doc(userId)
-            .collection('awakening_progress')
-            .doc(courseId)
-            .get();
-
-        if (!progressDoc.exists) {
-            console.log('📝 لا توجد بيانات سابقة');
-            return { completed: false, draft: false, answers: {} };
-        }
-
-        const data = progressDoc.data();
-        const exerciseKey = `exercises.${exerciseId}`;
-        const exerciseData = data[exerciseKey];
-
-        if (!exerciseData) {
-            console.log('📝 التمرين لم يتم حله من قبل');
-            return { completed: false, draft: false, answers: {} };
-        }
-
-        const isCompleted = exerciseData.completed === true;
-        const isDraft = exerciseData.draft === true && !isCompleted;
-        const savedAnswers = exerciseData.answers || {};
-
-        console.log('📊 حالة التمرين:', {
-            completed: isCompleted,
-            draft: isDraft,
-            answersCount: Object.keys(savedAnswers).length
-        });
-
-        return {
-            completed: isCompleted,
-            draft: isDraft,
-            answers: savedAnswers
-        };
-
-    } catch (error) {
-        console.error('❌ خطأ في فحص الحالة:', error);
-        return { completed: false, draft: false, answers: {} };
-    }
-}
-
-        // ========================================
-// 🛡️ متغير منع التنفيذ المتكرر
+// 🛡️ متغير منع التكرار
 // ========================================
 let isSubmitting = false;
+let exerciseCompleted = false;
+
+// ========================================
+// 📤 دالة إرسال التمرين (محسّنة)
+// ========================================
+function submitExercise() {
+    // 🛡️ منع التنفيذ المتكرر
+    if (isSubmitting) {
+        console.log('⚠️ التمرين قيد الإرسال');
+        return;
+    }
+    
+    if (exerciseCompleted) {
+        console.log('⚠️ التمرين مكتمل بالفعل');
+        alert('✅ لقد أكملت هذا التمرين مسبقاً!');
+        return;
+    }
+    
+    isSubmitting = true;
+    
+    // جمع الإجابات
+    const answers = {
+        answer1: document.getElementById('answer1').value.trim(),
+        answer2: document.getElementById('answer2').value.trim()
+    };
+    
+    // التحقق من الإجابات
+    if (!answers.answer1 && !answers.answer2) {
+        alert('⚠️ من فضلك أجب على سؤال واحد على الأقل');
+        isSubmitting = false;
+        return;
+    }
+    
+    console.log('📤 إرسال البيانات...');
+    
+    // إرسال رسالة للصفحة الأم
+    window.parent.postMessage({
+        type: 'exercise-completed',
+        data: {
+            exerciseId: exerciseId,
+            userId: userId,
+            courseId: courseId,
+            answers: answers,
+            completedAt: new Date().toISOString()
+        }
+    }, '*');
+    
+    // رسالة نجاح
+    alert('✅ تم إرسال إجاباتك بنجاح!');
+    
+    // تحديث الحالة
+    exerciseCompleted = true;
+    
+    // تعطيل الزرار
+    const btn = document.querySelector('.submit-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'not-allowed';
+        btn.style.background = '#6b7280';
+        btn.innerHTML = '✅ تم الإكمال';
+    }
+    
+    isSubmitting = false;
+}
 
         // ========================================
-// 🎨 تحميل البيانات المحفوظة عند فتح الصفحة
+// 💾 دالة حفظ المسودة
 // ========================================
-async function loadSavedData() {
-    try {
-        console.log('🔄 جاري تحميل البيانات المحفوظة...');
-        
-        const status = await checkExerciseStatus();
-        
-        // تحديث واجهة الحالة
-        const header = document.querySelector('.exercise-header');
-        if (!header) return;
-        
-        if (status.completed) {
-            // عرض شارة الإكمال
-            const badge = document.createElement('div');
-            badge.style.cssText = `
-                background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
-                padding: 1rem 1.5rem;
-                border-radius: 12px;
-                border: 2px solid rgba(16, 185, 129, 0.4);
-                margin-top: 1rem;
-                text-align: center;
-            `;
-            badge.innerHTML = `
-                <i class="fas fa-check-circle" style="color: #10b981; font-size: 1.2rem;"></i>
-                <span style="color: #10b981; font-weight: 600; margin-right: 0.5rem;">
-                    ✅ تم إكمال هذا التمرين مسبقاً
-                </span>
-            `;
-            header.appendChild(badge);
-            
-            console.log('✅ تم إكمال التمرين من قبل');
-            
-        } else if (status.draft) {
-            // عرض شارة المسودة
-            const badge = document.createElement('div');
-            badge.style.cssText = `
-                background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
-                padding: 1rem 1.5rem;
-                border-radius: 12px;
-                border: 2px solid rgba(245, 158, 11, 0.4);
-                margin-top: 1rem;
-                text-align: center;
-            `;
-            badge.innerHTML = `
-                <i class="fas fa-clock" style="color: #f59e0b; font-size: 1.2rem;"></i>
-                <span style="color: #f59e0b; font-weight: 600; margin-right: 0.5rem;">
-                    📝 لديك مسودة محفوظة - تم تحميل إجاباتك
-                </span>
-            `;
-            header.appendChild(badge);
-            
-            console.log('📝 يوجد مسودة محفوظة');
+function saveDraft() {
+    if (isSubmitting) {
+        console.log('⚠️ عملية جارية');
+        return;
+    }
+    
+    // جمع الإجابات
+    const answers = {
+        answer1: document.getElementById('answer1').value.trim(),
+        answer2: document.getElementById('answer2').value.trim()
+    };
+    
+    // التحقق من وجود إجابات
+    if (!answers.answer1 && !answers.answer2) {
+        alert('⚠️ لا توجد إجابات للحفظ');
+        return;
+    }
+    
+    console.log('💾 حفظ مسودة...');
+    
+    // إرسال رسالة للصفحة الأم
+    window.parent.postMessage({
+        type: 'exercise-draft-save',
+        data: {
+            exerciseId: exerciseId,
+            userId: userId,
+            courseId: courseId,
+            answers: answers,
+            savedAt: new Date().toISOString()
         }
+    }, '*');
+    
+    alert('💾 تم حفظ المسودة!');
+}
+
+        // ========================================
+// 📥 استقبال البيانات من صفحة العميل
+// ========================================
+window.addEventListener('message', function(event) {
+    // التحقق من نوع الرسالة
+    if (event.data.type === 'load-saved-data') {
+        console.log('📥 استلام بيانات محفوظة:', event.data);
         
-        // تحميل الإجابات المحفوظة
-        if (status.answers && Object.keys(status.answers).length > 0) {
-            console.log('📥 تحميل الإجابات:', status.answers);
+        const savedData = event.data.data;
+        
+        if (savedData && savedData.answers) {
+            // تحميل الإجابات
+            if (savedData.answers.answer1) {
+                document.getElementById('answer1').value = savedData.answers.answer1;
+            }
+            if (savedData.answers.answer2) {
+                document.getElementById('answer2').value = savedData.answers.answer2;
+            }
             
-            // تحميل answer1
-            if (status.answers.answer1) {
-                const answer1 = document.getElementById('answer1');
-                if (answer1) {
-                    answer1.value = status.answers.answer1;
-                    console.log('✅ تم تحميل answer1');
+            // تحديث الحالة
+            if (savedData.completed) {
+                exerciseCompleted = true;
+                
+                // تعطيل الزرار
+                const btn = document.querySelector('.submit-btn');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.6';
+                    btn.style.cursor = 'not-allowed';
+                    btn.style.background = '#6b7280';
+                    btn.innerHTML = '✅ تم الإكمال';
+                }
+                
+                // عرض رسالة
+                const header = document.querySelector('.exercise-header');
+                if (header) {
+                    const badge = document.createElement('div');
+                    badge.style.cssText = `
+                        background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+                        padding: 1rem;
+                        border-radius: 12px;
+                        border: 2px solid rgba(16, 185, 129, 0.4);
+                        margin-top: 1rem;
+                        text-align: center;
+                        color: #10b981;
+                        font-weight: 600;
+                    `;
+                    badge.innerHTML = '✅ تم إكمال هذا التمرين مسبقاً';
+                    header.appendChild(badge);
+                }
+            } else if (savedData.draft) {
+                // عرض رسالة مسودة
+                const header = document.querySelector('.exercise-header');
+                if (header) {
+                    const badge = document.createElement('div');
+                    badge.style.cssText = `
+                        background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
+                        padding: 1rem;
+                        border-radius: 12px;
+                        border: 2px solid rgba(245, 158, 11, 0.4);
+                        margin-top: 1rem;
+                        text-align: center;
+                        color: #f59e0b;
+                        font-weight: 600;
+                    `;
+                    badge.innerHTML = '📝 تم تحميل مسودتك المحفوظة';
+                    header.appendChild(badge);
                 }
             }
             
-            // تحميل answer2
-            if (status.answers.answer2) {
-                const answer2 = document.getElementById('answer2');
-                if (answer2) {
-                    answer2.value = status.answers.answer2;
-                    console.log('✅ تم تحميل answer2');
-                }
-            }
+            console.log('✅ تم تحميل البيانات المحفوظة');
         }
-        
-        // تعديل الزرار بناءً على الحالة
-        updateSubmitButton(status.completed);
-        
-    } catch (error) {
-        console.error('❌ خطأ في تحميل البيانات:', error);
     }
-}
-
-// ========================================
-// 🔄 تعديل شكل زرار الإكمال
-// ========================================
-function updateSubmitButton(isCompleted) {
-    const submitBtn = document.querySelector('.submit-btn');
-    if (!submitBtn) return;
-    
-    if (isCompleted) {
-        submitBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
-        submitBtn.innerHTML = '✏️ تعديل الإجابات';
-        submitBtn.onclick = updateExercise;
-    } else {
-        submitBtn.innerHTML = '✅ إكمال التمرين';
-        submitBtn.onclick = submitExercise;
-    }
-}
-        // دالة إرسال التمرين
-        function submitExercise() {
-            // جمع الإجابات
-            const answers = {
-                answer1: document.getElementById('answer1').value,
-                answer2: document.getElementById('answer2').value
-            };
-            
-            // إرسال رسالة للصفحة الأم
-            window.parent.postMessage({
-                type: 'exercise-completed',
-                data: {
-                    exerciseId: exerciseId,
-                    userId: userId,
-                    answers: answers,
-                    customData: {
-                        completedAt: new Date().toISOString()
-                    }
-                }
-            }, '*');
-            
-            // رسالة نجاح
-            alert('✅ تم إكمال التمرين بنجاح!');
-        }
-
-        // ========================================
-// 🚀 تشغيل عند تحميل الصفحة
-// ========================================
-window.addEventListener('DOMContentLoaded', () => {
-    console.log('🎬 الصفحة جاهزة - بدء التحميل...');
-    
-    // انتظار تهيئة Firebase ثم تحميل البيانات
-    setTimeout(() => {
-        loadSavedData();
-    }, 1000);
 });
+
+// ========================================
+// 🚀 طلب البيانات المحفوظة عند التحميل
+// ========================================
+window.addEventListener('load', function() {
+    console.log('🎬 الصفحة جاهزة');
+    
+    // طلب البيانات من صفحة العميل
+    setTimeout(() => {
+        console.log('📤 طلب البيانات المحفوظة...');
+        window.parent.postMessage({
+            type: 'request-saved-data',
+            data: {
+                exerciseId: exerciseId,
+                userId: userId,
+                courseId: courseId
+            }
+        }, '*');
+    }, 500);
+});
+
+        
     </script>
 </body>
 </html>
