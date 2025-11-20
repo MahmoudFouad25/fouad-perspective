@@ -30618,6 +30618,208 @@ async function saveModuleRitualSettings() {
         alert('❌ حدث خطأ في الحفظ. حاول مرة أخرى.');
     }
 }
+
+         // ========================================
+// 📡 نظام استقبال رسائل التمارين الخارجية
+// ========================================
+window.addEventListener('message', async function(event) {
+    console.log('📨 رسالة واردة:', event.data);
+    
+    try {
+        const messageType = event.data.type;
+        const messageData = event.data.data;
+        
+        // ========================================
+        // ✅ استقبال إكمال التمرين
+        // ========================================
+        if (messageType === 'exercise-completed') {
+            console.log('✅ استلام إكمال التمرين:', messageData);
+            
+            const { exerciseId, userId, courseId, answers, completedAt } = messageData;
+            
+            if (!exerciseId || !userId || !courseId) {
+                console.error('❌ بيانات ناقصة');
+                return;
+            }
+            
+            // جلب بيانات التمرين من المكتبة
+            const exerciseDoc = await db.collection('courseContentLibrary')
+                .doc(exerciseId)
+                .get();
+            
+            if (!exerciseDoc.exists) {
+                console.error('❌ التمرين غير موجود في المكتبة');
+                return;
+            }
+            
+            const exerciseData = exerciseDoc.data();
+            const pillars = exerciseData.externalExercise?.pillars || {};
+            const totalPoints = exerciseData.externalExercise?.totalPoints || 0;
+            
+            console.log('📦 بيانات التمرين:', exerciseData);
+            console.log('🏛️ النقاط:', pillars);
+            
+            // حفظ في Firebase
+            await db.collection('users')
+                .doc(userId)
+                .collection('awakening_progress')
+                .doc(courseId)
+                .set({
+                    [`exercises.${exerciseId}`]: {
+                        completed: true,
+                        completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        answers: answers,
+                        pointsEarned: pillars
+                    }
+                }, { merge: true });
+            
+            console.log('✅ تم حفظ الإجابات في Firebase');
+            
+            // إضافة النقاط للأركان
+            for (const [pillarKey, points] of Object.entries(pillars)) {
+                if (points > 0) {
+                    await addPointsToPillar(pillarKey, points, {
+                        type: 'external-exercise',
+                        exerciseId: exerciseId,
+                        exerciseName: exerciseData.name
+                    });
+                    console.log(`✅ ${pillarKey}: +${points} نقطة`);
+                }
+            }
+            
+            // تحديث الواجهة
+            if (typeof renderPointsDashboard === 'function') {
+                await renderPointsDashboard();
+            }
+            if (typeof refreshUserPoints === 'function') {
+                await refreshUserPoints();
+            }
+            if (typeof displayUserProgress === 'function') {
+                await displayUserProgress();
+            }
+            if (typeof displayModulesAndLessons === 'function') {
+                displayModulesAndLessons();
+            }
+            
+            // إضافة للدروس المكتملة
+            if (typeof allLessons !== 'undefined' && typeof userProgress !== 'undefined') {
+                const exerciseLesson = allLessons.find(l => l.libraryContentId === exerciseId);
+                if (exerciseLesson) {
+                    const lessonIndex = exerciseLesson.globalIndex;
+                    
+                    if (!userProgress.completedLessons) {
+                        userProgress.completedLessons = [];
+                    }
+                    
+                    if (!userProgress.completedLessons.includes(lessonIndex)) {
+                        userProgress.completedLessons.push(lessonIndex);
+                        
+                        await db.collection('users')
+                            .doc(userId)
+                            .update({
+                                [`progress.${courseId}.completedLessons`]: userProgress.completedLessons
+                            });
+                        
+                        console.log(`✅ تم إضافة للدروس المكتملة: ${lessonIndex}`);
+                    }
+                }
+            }
+            
+            // عرض رسالة نجاح
+            if (typeof showNotification === 'function') {
+                showNotification(`🎉 رائع! حصلت على ${totalPoints} نقطة!`, 'success');
+            } else {
+                alert(`🎉 رائع! حصلت على ${totalPoints} نقطة!`);
+            }
+        }
+        
+        // ========================================
+        // 💾 استقبال حفظ المسودة
+        // ========================================
+        else if (messageType === 'exercise-draft-save') {
+            console.log('💾 استلام حفظ مسودة:', messageData);
+            
+            const { exerciseId, userId, courseId, answers, savedAt } = messageData;
+            
+            if (!exerciseId || !userId || !courseId) {
+                console.error('❌ بيانات ناقصة');
+                return;
+            }
+            
+            // حفظ كمسودة
+            await db.collection('users')
+                .doc(userId)
+                .collection('awakening_progress')
+                .doc(courseId)
+                .set({
+                    [`exercises.${exerciseId}`]: {
+                        completed: false,
+                        draft: true,
+                        lastSaved: firebase.firestore.FieldValue.serverTimestamp(),
+                        answers: answers
+                    }
+                }, { merge: true });
+            
+            console.log('✅ تم حفظ المسودة في Firebase');
+            
+            // عرض رسالة
+            if (typeof showNotification === 'function') {
+                showNotification('💾 تم حفظ المسودة!', 'success');
+            }
+        }
+        
+        // ========================================
+        // 📥 طلب البيانات المحفوظة
+        // ========================================
+        else if (messageType === 'request-saved-data') {
+            console.log('📥 طلب البيانات المحفوظة:', messageData);
+            
+            const { exerciseId, userId, courseId } = messageData;
+            
+            if (!exerciseId || !userId || !courseId) {
+                console.error('❌ بيانات ناقصة');
+                return;
+            }
+            
+            // جلب البيانات من Firebase
+            const progressDoc = await db.collection('users')
+                .doc(userId)
+                .collection('awakening_progress')
+                .doc(courseId)
+                .get();
+            
+            if (progressDoc.exists) {
+                const data = progressDoc.data();
+                const exerciseKey = `exercises.${exerciseId}`;
+                const exerciseData = data[exerciseKey];
+                
+                if (exerciseData) {
+                    console.log('✅ وجدت بيانات محفوظة:', exerciseData);
+                    
+                    // إرسال البيانات للتمرين
+                    const iframe = document.querySelector('iframe');
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({
+                            type: 'load-saved-data',
+                            data: exerciseData
+                        }, '*');
+                        
+                        console.log('📤 تم إرسال البيانات للتمرين');
+                    }
+                } else {
+                    console.log('📝 لا توجد بيانات محفوظة');
+                }
+            } else {
+                console.log('📝 لا توجد بيانات تقدم');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ خطأ في معالجة الرسالة:', error);
+    }
+});
+
+console.log('✅ نظام استقبال التمارين الخارجية جاهز');
         
     </script>
 </body>
