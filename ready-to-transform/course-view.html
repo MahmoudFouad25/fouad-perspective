@@ -6599,17 +6599,19 @@ function renderModuleLessons(lessons) {
     return lessons.map((lesson) => {
        const index = lesson.globalIndex;
 
-// 🆕 فحص الإكمال بالنظامين
+// 🆕 فحص الإكمال بالـ ID فقط (مع التوافق للتمارين)
 let isCompleted = false;
 
-// فحص بنظام الـ IDs الجديد
+// فحص بنظام الـ IDs
 if (lesson.libraryContentId && userProgress.completedLessonsIds) {
     isCompleted = userProgress.completedLessonsIds.includes(lesson.libraryContentId);
 }
 
-// فحص بنظام الـ indexes القديم (للتوافق)
-if (!isCompleted) {
-    isCompleted = completedLessons.includes(index);
+// فحص التمارين من completedExercisesSet
+if (!isCompleted && (lesson.libraryContentType === 'pillar-exercise' || 
+    lesson.libraryContentType === 'external-exercise' || 
+    lesson.type === 'exercise')) {
+    isCompleted = completedExercisesSet.has(lesson.libraryContentId);
 }
 
 // إذا كان تمرين، فحص من Set التمارين المكتملة
@@ -6651,13 +6653,15 @@ if (isCompleted) {
             buttonIcon = 'fa-lock';
         } else {
             // 🆕 تحديد النص حسب نوع المحتوى
-            if (lesson.libraryContentType === 'pillar-exercise' || lesson.type === 'exercise') {
-                buttonText = 'بدء التمرين';
-                buttonIcon = 'fa-dumbbell';
-            } else {
-                buttonText = 'بدء الدرس';
-                buttonIcon = 'fa-play';
-            }
+if (lesson.libraryContentType === 'pillar-exercise' || 
+    lesson.libraryContentType === 'external-exercise' || 
+    lesson.type === 'exercise') {
+    buttonText = 'بدء التمرين';
+    buttonIcon = 'fa-dumbbell';
+} else {
+    buttonText = 'بدء الدرس';
+    buttonIcon = 'fa-play';
+}
             buttonClass = 'lesson-btn btn-play';
         }
 
@@ -20605,29 +20609,46 @@ window.addEventListener('message', async function(event) {
                 displayModulesAndLessons();
             }
             
-            // إضافة للدروس المكتملة
-            if (typeof allLessons !== 'undefined' && typeof userProgress !== 'undefined') {
-                const exerciseLesson = allLessons.find(l => l.libraryContentId === exerciseId);
-                if (exerciseLesson) {
-                    const lessonIndex = exerciseLesson.globalIndex;
-                    
-                    if (!userProgress.completedLessons) {
-                        userProgress.completedLessons = [];
-                    }
-                    
-                    if (!userProgress.completedLessons.includes(lessonIndex)) {
-                        userProgress.completedLessons.push(lessonIndex);
-                        
-                        await db.collection('users')
-                            .doc(userId)
-                            .update({
-                                [`progress.${courseId}.completedLessons`]: userProgress.completedLessons
-                            });
-                        
-                        console.log(`✅ تم إضافة للدروس المكتملة: ${lessonIndex}`);
-                    }
-                }
-            }
+            // إضافة للدروس المكتملة (بالنظامين: index + ID)
+if (typeof allLessons !== 'undefined' && typeof userProgress !== 'undefined') {
+    const exerciseLesson = allLessons.find(l => l.libraryContentId === exerciseId);
+    if (exerciseLesson) {
+        const lessonIndex = exerciseLesson.globalIndex;
+        
+        if (!userProgress.completedLessons) {
+            userProgress.completedLessons = [];
+        }
+        
+        if (!userProgress.completedLessonsIds) {
+            userProgress.completedLessonsIds = [];
+        }
+        
+        let needsUpdate = false;
+        
+        // إضافة بالـ index
+        if (!userProgress.completedLessons.includes(lessonIndex)) {
+            userProgress.completedLessons.push(lessonIndex);
+            needsUpdate = true;
+        }
+        
+        // 🆕 إضافة بالـ ID (الأهم)
+        if (!userProgress.completedLessonsIds.includes(exerciseId)) {
+            userProgress.completedLessonsIds.push(exerciseId);
+            needsUpdate = true;
+        }
+        
+        if (needsUpdate) {
+            await db.collection('users')
+                .doc(userId)
+                .update({
+                    [`progress.${courseId}.completedLessons`]: userProgress.completedLessons,
+                    [`progress.${courseId}.completedLessonsIds`]: userProgress.completedLessonsIds
+                });
+            
+            console.log(`✅ تم إضافة للدروس المكتملة: index=${lessonIndex}, id=${exerciseId}`);
+        }
+    }
+}
             
             // عرض رسالة نجاح
             if (typeof showNotification === 'function') {
