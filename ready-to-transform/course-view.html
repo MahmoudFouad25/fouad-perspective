@@ -6599,21 +6599,17 @@ function renderModuleLessons(lessons) {
     return lessons.map((lesson) => {
        const index = lesson.globalIndex;
 
-// 🆕 فحص الإكمال بالـ ID (مع دعم البيانات القديمة)
+// 🆕 فحص الإكمال بالنظامين
 let isCompleted = false;
 
-if (lesson.libraryContentId) {
-    // فحص بالـ ID (الطريقة الجديدة)
-    if (completedLessons.some(item => 
-        item === lesson.libraryContentId || 
-        (typeof item === 'string' && item === lesson.libraryContentId)
-    )) {
-        isCompleted = true;
-    }
-    // فحص بالـ index (للبيانات القديمة)
-    else if (completedLessons.includes(index)) {
-        isCompleted = true;
-    }
+// فحص بنظام الـ IDs الجديد
+if (lesson.libraryContentId && userProgress.completedLessonsIds) {
+    isCompleted = userProgress.completedLessonsIds.includes(lesson.libraryContentId);
+}
+
+// فحص بنظام الـ indexes القديم (للتوافق)
+if (!isCompleted) {
+    isCompleted = completedLessons.includes(index);
 }
 
 // إذا كان تمرين، فحص من Set التمارين المكتملة
@@ -15669,23 +15665,35 @@ function closeLessonPlayer() {
  // Mark Lesson as Completed
 async function markLessonCompleted(lessonIndex) {
     try {
-        const completedLessons = userProgress.completedLessons || [];
+        // جلب تفاصيل الدرس أولاً
+        const lesson = allLessons[lessonIndex];
+        if (!lesson) {
+            console.error('❌ درس غير موجود');
+            return;
+        }
         
-        if (!completedLessons.includes(lessonIndex)) {
-    // 🆕 حفظ بالـ ID بدل الـ index
-    const lessonId = lesson.libraryContentId;
-    if (!lessonId) {
-        console.error('❌ الدرس بدون ID:', lesson);
-        return;
-    }
-    
-    completedLessons.push(lessonId);
-            
-            const totalLessons = allLessons.length;
-            const newPercentage = totalLessons > 0 ? (completedLessons.length / totalLessons) * 100 : 0;
-            
-            // جلب تفاصيل النقاط للدرس
-            const lesson = allLessons[lessonIndex];
+        const completedLessons = userProgress.completedLessons || [];
+        const completedLessonsIds = userProgress.completedLessonsIds || [];
+        
+        // فحص إذا كان مكتمل بالفعل
+        const alreadyCompletedByIndex = completedLessons.includes(lessonIndex);
+        const alreadyCompletedById = lesson.libraryContentId && completedLessonsIds.includes(lesson.libraryContentId);
+        
+        if (alreadyCompletedByIndex || alreadyCompletedById) {
+            console.log('⚠️ الدرس مكتمل بالفعل');
+            return;
+        }
+        
+        // إضافة للنظامين
+        completedLessons.push(lessonIndex);
+        if (lesson.libraryContentId) {
+            completedLessonsIds.push(lesson.libraryContentId);
+        }
+        
+        const totalLessons = allLessons.length;
+        const newPercentage = totalLessons > 0 ? (completedLessons.length / totalLessons) * 100 : 0;
+        
+        // جلب تفاصيل النقاط للدرس
             let pointsDetail = null;
             let earnedBadges = [];
             
@@ -15719,6 +15727,7 @@ const detailedLessonRecord = {
 const updatedProgress = {
     ...userProgress,
     completedLessons,
+    completedLessonsIds,  // 🆕 إضافة نظام الـ IDs
     percentage: newPercentage,
     lastActivity: firebase.firestore.FieldValue.serverTimestamp(),
     // إضافة السجل التفصيلي
