@@ -6333,40 +6333,31 @@ async function saveAndAddExternalExercise(moduleId, exerciseData) {
 }
 
 
-        // 🆕 دالة تفعيل/تعطيل التأملات الفورية
+       // 🆕 دالة للحصول على courseId من URL
+function getCourseIdFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('id');
+}
+
+// 🆕 دالة تفعيل/تعطيل التأملات الفورية
 async function toggleImmediateReflection(moduleId, lessonId) {
     try {
-        // جلب courseId من الصفحة بطريقة أكثر مرونة
-        let courseId;
-        
-        // محاولة 1: من select element
-        const courseSelect = document.getElementById('courseSelect') || 
-                            document.getElementById('courseId') || 
-                            document.querySelector('select[name="courseId"]');
-        
-        if (courseSelect) {
-            courseId = courseSelect.value;
-        }
-        
-        // محاولة 2: من متغير global
-        if (!courseId && typeof currentCourseId !== 'undefined') {
-            courseId = currentCourseId;
-        }
-        
-        // محاولة 3: من localStorage
-        if (!courseId) {
-            courseId = localStorage.getItem('currentCourseId');
-        }
+        // جلب courseId من URL
+        const courseId = getCourseIdFromURL();
         
         if (!courseId) {
             Swal.fire({
                 icon: 'error',
                 title: 'خطأ',
-                text: 'الرجاء اختيار دورة أولاً',
+                text: 'معرّف الدورة غير موجود في الرابط',
                 confirmButtonColor: '#ef4444'
             });
             return;
         }
+        
+        console.log('🔍 courseId:', courseId);
+        console.log('🔍 moduleId:', moduleId);
+        console.log('🔍 lessonId:', lessonId);
         
         // جلب بيانات الدرس الحالية
         const lessonRef = db.collection('courses')
@@ -6388,6 +6379,7 @@ async function toggleImmediateReflection(moduleId, lessonId) {
         }
         
         const lessonData = lessonDoc.data();
+        console.log('📄 بيانات الدرس:', lessonData);
         
         // التحقق من نوع المحتوى
         if (lessonData.libraryContentType !== 'educational-video') {
@@ -6400,103 +6392,95 @@ async function toggleImmediateReflection(moduleId, lessonId) {
             return;
         }
         
-        // عكس الحالة الحالية
-        const newStatus = lessonData.enableImmediateReflection === false ? true : false;
+        // عكس الحالة الحالية (افتراضياً true لو مش موجودة)
+        const currentStatus = lessonData.enableImmediateReflection !== false;
+        const newStatus = !currentStatus;
         
-        Swal.fire({
-            title: newStatus ? 'تفعيل التأملات الفورية؟' : 'تعطيل التأملات الفورية؟',
+        console.log('📊 الحالة الحالية:', currentStatus);
+        console.log('📊 الحالة الجديدة:', newStatus);
+        
+        const result = await Swal.fire({
+            title: newStatus ? '⚡ تفعيل التأملات الفورية؟' : '✗ تعطيل التأملات الفورية؟',
             html: newStatus 
-                ? '<p style="color: #fbbf24; font-size: 1.1rem; margin: 15px 0;">⚡ سيتمكن الطالب من رؤية قسم التأمل الفوري بعد مشاهدة الفيديو</p>' 
-                : '<p style="color: #6b7280; font-size: 1.1rem; margin: 15px 0;">✗ لن يظهر قسم التأمل الفوري للطالب</p>',
+                ? '<div style="text-align: center; padding: 20px;"><p style="color: #fbbf24; font-size: 1.2rem; margin: 15px 0; font-weight: 600;">⚡ سيتمكن الطالب من رؤية قسم التأمل الفوري بعد مشاهدة الفيديو</p><small style="color: #a78bfa;">يمكن للطالب الحصول على نقاط إضافية من التأمل الفوري</small></div>' 
+                : '<div style="text-align: center; padding: 20px;"><p style="color: #6b7280; font-size: 1.2rem; margin: 15px 0; font-weight: 600;">✗ لن يظهر قسم التأمل الفوري للطالب</p></div>',
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: newStatus ? '✓ تفعيل' : '✗ تعطيل',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: newStatus ? '#fbbf24' : '#6b7280'
-        }).then(async (result) => {
-            if (result.isConfirmed) {
-                // عرض loader
-                Swal.fire({
-                    title: 'جاري التحديث...',
-                    allowOutsideClick: false,
-                    didOpen: () => {
-                        Swal.showLoading();
-                    }
-                });
-                
-                // تحديث Firebase
-                await lessonRef.update({
-                    enableImmediateReflection: newStatus,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                Swal.fire({
-                    icon: 'success',
-                    title: newStatus ? '⚡ تم التفعيل!' : '✗ تم التعطيل',
-                    text: newStatus 
-                        ? 'التأملات الفورية مفعّلة الآن' 
-                        : 'التأملات الفورية معطّلة الآن',
-                    timer: 1500,
-                    showConfirmButton: false
-                });
-                
-                // تحديث العرض
+            confirmButtonText: newStatus ? '✓ تفعيل الآن' : '✗ تعطيل الآن',
+            cancelButtonText: '❌ إلغاء',
+            confirmButtonColor: newStatus ? '#fbbf24' : '#6b7280',
+            cancelButtonColor: '#94a3b8'
+        });
+        
+        if (result.isConfirmed) {
+            // عرض loader
+            Swal.fire({
+                title: 'جاري التحديث...',
+                html: '<div style="padding: 20px;"><i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: #fbbf24;"></i></div>',
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+            
+            // تحديث Firebase
+            await lessonRef.update({
+                enableImmediateReflection: newStatus,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            console.log('✅ تم التحديث بنجاح');
+            
+            Swal.fire({
+                icon: 'success',
+                title: newStatus ? '⚡ تم التفعيل!' : '✗ تم التعطيل',
+                html: newStatus 
+                    ? '<p style="color: #10b981; font-size: 1.1rem;">التأملات الفورية مفعّلة الآن</p>' 
+                    : '<p style="color: #6b7280; font-size: 1.1rem;">التأملات الفورية معطّلة الآن</p>',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            
+            // تحديث العرض
+            setTimeout(() => {
                 if (typeof loadCourseModules === 'function') {
                     loadCourseModules();
                 } else if (typeof loadModules === 'function') {
                     loadModules();
                 } else {
-                    // Reload الصفحة كحل أخير
-                    setTimeout(() => location.reload(), 1500);
+                    location.reload();
                 }
-            }
-        });
+            }, 2000);
+        }
         
     } catch (error) {
-        console.error('خطأ في تغيير حالة التأملات الفورية:', error);
+        console.error('❌ خطأ في تغيير حالة التأملات الفورية:', error);
         Swal.fire({
             icon: 'error',
             title: 'حدث خطأ',
-            text: error.message,
+            html: `<p style="color: #ef4444;">${error.message}</p>`,
             confirmButtonColor: '#ef4444'
         });
     }
 }
 
-        // 🆕 دالة تفعيل/تعطيل المحتوى للعميل
+// 🆕 دالة تفعيل/تعطيل المحتوى للعميل
 async function toggleContentEnabled(moduleId, lessonId) {
     try {
-        // جلب courseId من الصفحة بطريقة أكثر مرونة
-        let courseId;
-        
-        // محاولة 1: من select element
-        const courseSelect = document.getElementById('courseSelect') || 
-                            document.getElementById('courseId') || 
-                            document.querySelector('select[name="courseId"]');
-        
-        if (courseSelect) {
-            courseId = courseSelect.value;
-        }
-        
-        // محاولة 2: من متغير global
-        if (!courseId && typeof currentCourseId !== 'undefined') {
-            courseId = currentCourseId;
-        }
-        
-        // محاولة 3: من localStorage
-        if (!courseId) {
-            courseId = localStorage.getItem('currentCourseId');
-        }
+        // جلب courseId من URL
+        const courseId = getCourseIdFromURL();
         
         if (!courseId) {
             Swal.fire({
                 icon: 'error',
                 title: 'خطأ',
-                text: 'الرجاء اختيار دورة أولاً',
+                text: 'معرّف الدورة غير موجود في الرابط',
                 confirmButtonColor: '#ef4444'
             });
             return;
         }
+        
+        console.log('🔍 courseId:', courseId);
+        console.log('🔍 moduleId:', moduleId);
+        console.log('🔍 lessonId:', lessonId);
         
         // جلب بيانات الدرس الحالية
         const lessonRef = db.collection('courses')
@@ -6518,69 +6502,80 @@ async function toggleContentEnabled(moduleId, lessonId) {
         }
         
         const lessonData = lessonDoc.data();
+        console.log('📄 بيانات الدرس:', lessonData);
         
-        // عكس الحالة الحالية
-        const newStatus = lessonData.isEnabled === false ? true : false;
+        // عكس الحالة الحالية (افتراضياً true لو مش موجودة)
+        const currentStatus = lessonData.isEnabled !== false;
+        const newStatus = !currentStatus;
         
-        Swal.fire({
-            title: newStatus ? 'تفعيل المحتوى؟' : 'تعطيل المحتوى؟',
+        console.log('📊 الحالة الحالية:', currentStatus);
+        console.log('📊 الحالة الجديدة:', newStatus);
+        
+        const result = await Swal.fire({
+            title: newStatus ? '✓ تفعيل المحتوى؟' : '✗ تعطيل المحتوى؟',
             html: newStatus 
-                ? '<p style="color: #10b981; font-size: 1.1rem; margin: 15px 0;">✓ سيتمكن العميل من الوصول لهذا الدرس داخل الدورة</p>' 
-                : '<p style="color: #ef4444; font-size: 1.1rem; margin: 15px 0;">✗ لن يظهر هذا الدرس للعميل حتى لو كان مشترك</p><small style="color: #f59e0b; display: block; margin-top: 10px;">ملحوظة: المعاينة المجانية لن تتأثر</small>',
+                ? '<div style="text-align: center; padding: 20px;"><p style="color: #10b981; font-size: 1.2rem; margin: 15px 0; font-weight: 600;">✓ سيتمكن العميل من الوصول لهذا الدرس داخل الدورة</p></div>' 
+                : '<div style="text-align: center; padding: 20px;"><p style="color: #ef4444; font-size: 1.2rem; margin: 15px 0; font-weight: 600;">✗ لن يظهر هذا الدرس للعميل حتى لو كان مشترك</p><small style="color: #f59e0b; display: block; margin-top: 10px;">ملحوظة: المعاينة المجانية لن تتأثر</small></div>',
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: newStatus ? '✓ تفعيل' : '✗ تعطيل',
-            cancelButtonText: 'إلغاء',
-            confirmButtonColor: newStatus ? '#3b82f6' : '#6b7280'
-        }).then(async (result) => {
-            if (result.isConfirmed) {
-                // عرض loader
-                Swal.fire({
-                    title: 'جاري التحديث...',
-                    allowOutsideClick: false,
-                    didOpen: () => {
-                        Swal.showLoading();
-                    }
-                });
-                
-                // تحديث Firebase
-                await lessonRef.update({
-                    isEnabled: newStatus,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                Swal.fire({
-                    icon: 'success',
-                    title: newStatus ? '✓ تم التفعيل!' : '✗ تم التعطيل',
-                    text: newStatus 
-                        ? 'المحتوى متاح الآن للعميل' 
-                        : 'المحتوى معطّل الآن',
-                    timer: 1500,
-                    showConfirmButton: false
-                });
-                
-                // تحديث العرض
+            confirmButtonText: newStatus ? '✓ تفعيل الآن' : '✗ تعطيل الآن',
+            cancelButtonText: '❌ إلغاء',
+            confirmButtonColor: newStatus ? '#3b82f6' : '#6b7280',
+            cancelButtonColor: '#94a3b8'
+        });
+        
+        if (result.isConfirmed) {
+            // عرض loader
+            Swal.fire({
+                title: 'جاري التحديث...',
+                html: '<div style="padding: 20px;"><i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: #3b82f6;"></i></div>',
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+            
+            // تحديث Firebase
+            await lessonRef.update({
+                isEnabled: newStatus,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            console.log('✅ تم التحديث بنجاح');
+            
+            Swal.fire({
+                icon: 'success',
+                title: newStatus ? '✓ تم التفعيل!' : '✗ تم التعطيل',
+                html: newStatus 
+                    ? '<p style="color: #10b981; font-size: 1.1rem;">المحتوى متاح الآن للعميل</p>' 
+                    : '<p style="color: #6b7280; font-size: 1.1rem;">المحتوى معطّل الآن</p>',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            
+            // تحديث العرض
+            setTimeout(() => {
                 if (typeof loadCourseModules === 'function') {
                     loadCourseModules();
                 } else if (typeof loadModules === 'function') {
                     loadModules();
                 } else {
-                    // Reload الصفحة كحل أخير
-                    setTimeout(() => location.reload(), 1500);
+                    location.reload();
                 }
-            }
-        });
+            }, 2000);
+        }
         
     } catch (error) {
-        console.error('خطأ في تغيير حالة المحتوى:', error);
+        console.error('❌ خطأ في تغيير حالة المحتوى:', error);
         Swal.fire({
             icon: 'error',
             title: 'حدث خطأ',
-            text: error.message,
+            html: `<p style="color: #ef4444;">${error.message}</p>`,
             confirmButtonColor: '#ef4444'
         });
     }
 }
+
+
+       
 
 // ==========================================
 // ✏️ تعديل تمرين خارجي
