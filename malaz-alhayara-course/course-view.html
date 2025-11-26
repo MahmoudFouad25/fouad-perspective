@@ -5059,24 +5059,76 @@ async function loadAllData() {
         console.log('💰 نقاط المحفظة:', userWalletPoints);
         console.log('🏅 الشارات:', userBadges);
 
-        // 🆕 Migration: تحويل البيانات القديمة تلقائياً (قبل عرض الدروس)
-        if (userProgress.completedLessons && userProgress.completedLessons.length > 0 && !userProgress.completedLessonsIds) {
-            console.log('🔄 تحويل البيانات القديمة...');
-            const completedIds = [];
+        // 🆕 Migration شامل: بناء completedLessonsIds من السجلات الموثوقة
+try {
+    const hasValidIds = userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0;
+    
+    if (!hasValidIds) {
+        console.log('🔄 Migration: بناء completedLessonsIds...');
+        
+        // جلب السجلات من lessonCompletionHistory
+        const historySnapshot = await db.collection('lessonCompletionHistory')
+            .where('userId', '==', userId)
+            .where('courseId', '==', currentCourseId)
+            .get();
+        
+        const completedIds = new Set();
+        
+        // من السجلات (الأدق)
+        historySnapshot.forEach(doc => {
+            const record = doc.data();
+            if (record.libraryContentId) {
+                completedIds.add(record.libraryContentId);
+            }
+        });
+        
+        // لو مفيش سجلات، نجرب من indexes القديمة
+        if (completedIds.size === 0 && userProgress.completedLessons?.length > 0) {
+            console.log('🔄 Fallback: بناء من indexes القديمة...');
             userProgress.completedLessons.forEach(idx => {
                 const lesson = allLessons[idx];
                 if (lesson?.libraryContentId) {
-                    completedIds.push(lesson.libraryContentId);
+                    completedIds.add(lesson.libraryContentId);
                 }
             });
-            if (completedIds.length > 0) {
-                await db.collection('users').doc(userId).update({
-                    [`progress.${currentCourseId}.completedLessonsIds`]: completedIds
-                });
-                userProgress.completedLessonsIds = completedIds;
-                console.log('✅ تم التحويل!', completedIds.length, 'درس');
-            }
         }
+        
+        // حفظ
+        if (completedIds.size > 0) {
+            const idsArray = Array.from(completedIds);
+            await db.collection('users').doc(userId).update({
+                [`progress.${currentCourseId}.completedLessonsIds`]: idsArray
+            });
+            userProgress.completedLessonsIds = idsArray;
+            console.log('✅ Migration ناجح!', idsArray.length, 'درس');
+        }
+    }
+    
+    // تحديث indexes من IDs (للتوافق)
+    if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0) {
+        const syncedIndexes = userProgress.completedLessonsIds
+            .map(id => allLessons.findIndex(l => l.libraryContentId === id))
+            .filter(idx => idx >= 0);
+        userProgress.completedLessons = syncedIndexes;
+        console.log('🔄 Sync indexes:', syncedIndexes.length);
+    }
+    
+    // تنضيف IDs لدروس محذوفة
+    if (userProgress.completedLessonsIds) {
+        const validIds = new Set(allLessons.map(l => l.libraryContentId).filter(id => id));
+        const cleanedIds = userProgress.completedLessonsIds.filter(id => validIds.has(id));
+        if (cleanedIds.length !== userProgress.completedLessonsIds.length) {
+            console.log('🧹 تنضيف:', userProgress.completedLessonsIds.length - cleanedIds.length, 'درس محذوف');
+            userProgress.completedLessonsIds = cleanedIds;
+            await db.collection('users').doc(userId).update({
+                [`progress.${currentCourseId}.completedLessonsIds`]: cleanedIds
+            });
+        }
+    }
+    
+} catch (error) {
+    console.error('❌ خطأ في Migration:', error);
+}
 
        // الآن نعرض الدروس بعد Migration
 displayModulesAndLessons();
