@@ -1895,15 +1895,101 @@ handleAutoLogin();
         document.removeEventListener('click', initSound);
     }, { once: true });
 
-    // التحقق من وجود جلسة سابقة
-const existingUserId = localStorage.getItem('userId');
-if (existingUserId && auth.currentUser) {
-    // المستخدم مسجل دخول بالفعل
-    startPortalTransition();
-    setTimeout(() => {
-        window.location.href = './my-courses.html';
-    }, 1000);
-}
+    // ==================== 🔐 نظام فحص حالة المصادقة ====================
+// استخدام onAuthStateChanged للفحص الصحيح لحالة المستخدم
+firebase.auth().onAuthStateChanged(async (user) => {
+    try {
+        const existingUserId = localStorage.getItem('userId');
+        
+        // إذا كان المستخدم مسجل دخول في Firebase Auth و localStorage
+        if (user && existingUserId) {
+            console.log('✅ مستخدم مسجل دخول بالفعل:', user.email);
+            
+            // التحقق من صحة البيانات في Firestore
+            const userDoc = await db.collection('users').doc(existingUserId).get();
+            
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                
+                // التحقق من حالة الحساب
+                if (userData.accountStatus?.status === 'inactive' || 
+                    userData.accountStatus?.suspended === true) {
+                    // الحساب محجوب - تسجيل الخروج وإظهار رسالة
+                    await firebase.auth().signOut();
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    showError('روحك محجوبة عن الدخول... تواصل مع الحكماء');
+                    return;
+                }
+                
+                // كل شيء تمام - الانتقال للصفحة المناسبة
+                const isAdmin = user.email === 'admin@fouad-academy.com' || 
+                               userData.auth?.role === 'admin';
+                
+                startPortalTransition();
+                
+                setTimeout(() => {
+                    if (isAdmin) {
+                        window.location.href = './admin/dashboard.html';
+                    } else {
+                        window.location.href = './my-courses.html';
+                    }
+                }, 1000);
+            } else {
+                // المستخدم موجود في Auth لكن مش في Firestore - مشكلة
+                console.warn('⚠️ مستخدم موجود في Auth لكن غير موجود في Firestore');
+                await firebase.auth().signOut();
+                localStorage.clear();
+                sessionStorage.clear();
+            }
+        } else if (user && !existingUserId) {
+            // المستخدم مسجل في Firebase Auth لكن مش في localStorage
+            // ده ممكن يحصل بعد مسح الـ localStorage
+            console.log('⚠️ مستخدم في Auth بدون localStorage - جاري المزامنة...');
+            
+            // البحث عن المستخدم في Firestore
+            const usersQuery = await db.collection('users')
+                .where('personalInfo.email', '==', user.email)
+                .limit(1)
+                .get();
+            
+            if (!usersQuery.empty) {
+                const userDoc = usersQuery.docs[0];
+                const userData = userDoc.data();
+                const userId = userDoc.id;
+                
+                // إعادة حفظ البيانات في localStorage
+                localStorage.setItem('userId', userId);
+                localStorage.setItem('userEmail', user.email);
+                localStorage.setItem('userName', userData.personalInfo?.name || 'روح باحثة');
+                localStorage.setItem('userLevel', userData.accountStatus?.level || 'STANDARD');
+                localStorage.setItem('userStatus', userData.accountStatus?.status || 'active');
+                
+                // الانتقال للصفحة المناسبة
+                const isAdmin = user.email === 'admin@fouad-academy.com' || 
+                               userData.auth?.role === 'admin';
+                
+                setTimeout(() => {
+                    if (isAdmin) {
+                        window.location.href = './admin/dashboard.html';
+                    } else {
+                        window.location.href = './my-courses.html';
+                    }
+                }, 500);
+            }
+        } else {
+            // لا يوجد مستخدم مسجل - الصفحة تعمل بشكل طبيعي
+            console.log('📝 جاهز لتسجيل الدخول');
+        }
+    } catch (error) {
+        console.error('❌ خطأ في فحص حالة المصادقة:', error);
+        // في حالة حدوث خطأ، مسح كل شيء والبدء من جديد
+        await firebase.auth().signOut();
+        localStorage.clear();
+        sessionStorage.clear();
+    }
+});
+// ==================== نهاية نظام فحص حالة المصادقة ====================
 });
 
 // تأثيرات إضافية عند الكتابة
