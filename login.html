@@ -1323,10 +1323,8 @@ async function handleLogin(event) {
     const email = document.getElementById('email').value.trim().toLowerCase();
     const password = document.getElementById('password').value;
     
-    // رسالة تتبع 1
     console.log('🔵 [1] بدء تسجيل الدخول...');
     console.log('📧 Email:', email);
-    console.log('🔑 Password length:', password.length);
     
     if (!email || !password) {
         showError('املأ كل الحقول يا باحث');
@@ -1347,10 +1345,8 @@ async function handleLogin(event) {
             .limit(1)
             .get();
         
-        console.log('🔵 [3] نتيجة البحث - عدد المستخدمين:', usersQuery.size);
-        
         if (usersQuery.empty) {
-            console.log('❌ [4] المستخدم غير موجود في Firestore');
+            console.log('❌ المستخدم غير موجود في Firestore');
             throw new Error('البيانات غير صحيحة... حاول مرة أخرى');
         }
         
@@ -1358,107 +1354,108 @@ async function handleLogin(event) {
         const userData = userDoc.data();
         const userId = userDoc.id;
         
-        console.log('🔵 [4] تم العثور على المستخدم - ID:', userId);
-        console.log('📦 بيانات المستخدم:', {
-            email: userData.personalInfo?.email,
-            name: userData.personalInfo?.name,
-            hasAuth: !!userData.auth,
-            hasTempPassword: !!userData.auth?.tempPassword,
-            accountStatus: userData.accountStatus?.status
-        });
+        console.log('🔵 [3] تم العثور على المستخدم - ID:', userId);
         
         // التحقق من حالة الحساب
-        if (userData.accountStatus) {
-            if (userData.accountStatus.status === 'inactive' || 
-                userData.accountStatus.suspended === true) {
-                console.log('❌ [5] الحساب محجوب');
-                throw new Error('روحك محجوبة عن الدخول... تواصل مع الحكماء');
-            }
+        if (userData.accountStatus?.status === 'inactive' || 
+            userData.accountStatus?.suspended === true) {
+            console.log('❌ الحساب محجوب');
+            throw new Error('روحك محجوبة عن الدخول... تواصل مع الحكماء');
         }
         
-        console.log('🔵 [5] حالة الحساب: نشط ✓');
+        console.log('🔵 [4] حالة الحساب: نشط ✓');
         
-        // محاولة تسجيل الدخول
+        // استراتيجية تسجيل دخول محسّنة
         let authSuccess = false;
+        let authMethod = '';
         
-        console.log('🔵 [6] محاولة تسجيل الدخول عبر Firebase Auth...');
-        
+        // المحاولة 1: تسجيل دخول مباشر عبر Firebase Auth
+        console.log('🔵 [5] محاولة 1: تسجيل دخول مباشر...');
         try {
             await auth.signInWithEmailAndPassword(email, password);
             authSuccess = true;
-            console.log('✅ [7] تم تسجيل الدخول عبر Firebase Auth بنجاح');
-            
+            authMethod = 'direct-auth';
+            console.log('✅ [6] نجح تسجيل الدخول المباشر');
         } catch (authError) {
-            console.log('⚠️ [7] فشل تسجيل الدخول عبر Firebase Auth:', authError.code);
-            console.log('🔵 [8] محاولة التحقق من كلمة المرور المخزنة...');
+            console.log('⚠️ [6] فشل تسجيل الدخول المباشر:', authError.code);
             
-            // التحقق من كلمة المرور المحفوظة
-            if (userData.auth && userData.auth.tempPassword) {
-                const savedPassword = atob(userData.auth.tempPassword);
-                console.log('🔑 طول كلمة المرور المخزنة:', savedPassword.length);
-                console.log('🔑 طول كلمة المرور المدخلة:', password.length);
-                console.log('🔑 هل تتطابق؟', password === savedPassword);
+            // المحاولة 2: التحقق من كلمة المرور في Firestore
+            if (userData.auth?.tempPassword) {
+                console.log('🔵 [7] محاولة 2: التحقق من كلمة المرور المخزنة...');
                 
-                if (password === savedPassword) {
-                    authSuccess = true;
-                    console.log('✅ [9] كلمة المرور صحيحة - محاولة إنشاء حساب Auth...');
+                try {
+                    const savedPassword = atob(userData.auth.tempPassword);
                     
-                    // محاولة إنشاء/تحديث حساب Auth
-                    try {
-                        await auth.createUserWithEmailAndPassword(email, password);
-                        console.log('✅ [10] تم إنشاء حساب Auth جديد');
-                    } catch (e) {
-                        console.log('⚠️ [10] الحساب موجود بالفعل في Auth أو حدث خطأ:', e.code);
+                    if (password === savedPassword) {
+                        console.log('✅ [8] كلمة المرور صحيحة');
                         
-                        // محاولة أخيرة - تسجيل الدخول مرة أخرى
-                        try {
-                            await auth.signInWithEmailAndPassword(email, password);
-                            console.log('✅ [11] تم تسجيل الدخول بنجاح في المحاولة الثانية');
-                        } catch (finalError) {
-                            console.log('❌ [11] فشلت كل محاولات المصادقة:', finalError.code);
+                        // محاولة إنشاء حساب Auth جديد
+                        if (authError.code === 'auth/user-not-found' || 
+                            authError.code === 'auth/wrong-password') {
+                            
+                            console.log('🔵 [9] محاولة إنشاء حساب Auth جديد...');
+                            
+                            try {
+                                await auth.createUserWithEmailAndPassword(email, password);
+                                authSuccess = true;
+                                authMethod = 'created-new-auth';
+                                console.log('✅ [10] تم إنشاء حساب Auth جديد بنجاح');
+                            } catch (createError) {
+                                console.log('⚠️ [10] فشل إنشاء الحساب:', createError.code);
+                                
+                                // إذا كان الحساب موجود، نحاول تسجيل دخول مرة أخرى
+                                if (createError.code === 'auth/email-already-in-use') {
+                                    console.log('🔵 [11] الحساب موجود - سيحتاج المستخدم لإعادة تعيين كلمة المرور');
+                                    throw new Error('يوجد مشكلة في حسابك - استخدم "نسيت كلمة المرور" أو تواصل مع الدعم');
+                                } else if (createError.code === 'auth/too-many-requests') {
+                                    throw new Error('تم حظر الدخول مؤقتاً بسبب المحاولات الكثيرة - انتظر 5 دقائق وحاول مرة أخرى');
+                                }
+                            }
+                        } else if (authError.code === 'auth/too-many-requests') {
+                            throw new Error('تم حظر الدخول مؤقتاً بسبب المحاولات الكثيرة - انتظر 5 دقائق وحاول مرة أخرى');
                         }
+                    } else {
+                        console.log('❌ [8] كلمة المرور غير صحيحة');
+                        throw new Error('الطريق مغلق... تأكد من مفتاحك');
                     }
-                } else {
-                    console.log('❌ [9] كلمة المرور غير صحيحة');
+                } catch (decodeError) {
+                    console.log('❌ خطأ في فك تشفير كلمة المرور:', decodeError);
                 }
-            } else {
-                console.log('❌ [8] لا توجد كلمة مرور مخزنة في Firestore');
             }
             
             if (!authSuccess) {
-                throw new Error('الطريق مغلق... تأكد من مفتاحك');
+                if (authError.code === 'auth/too-many-requests') {
+                    throw new Error('تم حظر الدخول مؤقتاً - انتظر 5 دقائق وحاول مرة أخرى');
+                } else {
+                    throw new Error('الطريق مغلق... تأكد من مفتاحك');
+                }
             }
         }
         
         if (authSuccess) {
-            console.log('🔵 [12] تسجيل الدخول ناجح - تحديث البيانات...');
+            console.log('🔵 [12] تسجيل الدخول ناجح بطريقة:', authMethod);
             
             // تحديث آخر دخول
             await db.collection('users').doc(userId).update({
                 'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
-                'auth.loginCount': firebase.firestore.FieldValue.increment(1)
+                'auth.loginCount': firebase.firestore.FieldValue.increment(1),
+                'auth.lastAuthMethod': authMethod
             });
             
-            console.log('🔵 [13] حفظ البيانات في localStorage...');
+            console.log('🔵 [13] حفظ البيانات...');
             
-            // حفظ البيانات في localStorage
+            // حفظ البيانات
             localStorage.setItem('userId', userId);
             localStorage.setItem('userEmail', email);
-            localStorage.setItem('userName', userData.personalInfo?.name || userData.name || 'روح باحثة');
+            localStorage.setItem('userName', userData.personalInfo?.name || 'روح باحثة');
             localStorage.setItem('userLevel', userData.accountStatus?.level || 'STANDARD');
             localStorage.setItem('userStatus', userData.accountStatus?.status || 'active');
-            
-            console.log('✅ [14] تم حفظ البيانات في localStorage:', {
-                userId: localStorage.getItem('userId'),
-                userEmail: localStorage.getItem('userEmail'),
-                userName: localStorage.getItem('userName')
-            });
             
             // حفظ نسخة مشفرة
             SecureStorage.setItem('user', {
                 id: userId,
                 email: email,
-                name: userData.personalInfo?.name || userData.name || 'روح باحثة',
+                name: userData.personalInfo?.name || 'روح باحثة',
                 level: userData.accountStatus?.level || 'STANDARD',
                 status: userData.accountStatus?.status || 'active',
                 timestamp: Date.now()
@@ -1471,7 +1468,7 @@ async function handleLogin(event) {
                 timestamp: Date.now()
             }));
             
-            console.log('🔵 [15] تحديد نوع المستخدم...');
+            console.log('✅ [14] تم حفظ كل البيانات بنجاح');
             
             // التحقق من نوع المستخدم
             const isAdmin = email === 'admin@fouad-academy.com' || 
@@ -1482,25 +1479,21 @@ async function handleLogin(event) {
             // تأثير الانتقال
             startPortalTransition();
             
-            console.log('🔵 [16] جاري التوجيه للصفحة المناسبة...');
+            const targetPage = isAdmin ? './admin/dashboard.html' : './my-courses.html';
+            console.log('🚀 [15] التوجيه إلى:', targetPage);
             
             setTimeout(() => {
-                const targetPage = isAdmin ? './admin/dashboard.html' : './my-courses.html';
-                console.log('🚀 [17] التوجيه إلى:', targetPage);
                 window.location.href = targetPage;
             }, 1500);
         }
         
     } catch (error) {
         console.error('❌ [ERROR] خطأ في الدخول:', error);
-        console.error('❌ تفاصيل الخطأ:', error.message);
-        console.error('❌ Stack:', error.stack);
         showError(error.message || 'حدث خطأ في فتح البوابة');
         button.innerHTML = originalText;
         button.disabled = false;
     }
 }
-
 // تأثير الموجة عند الضغط
 // تأثير الموجة المحسن عند الضغط
 function createRipple(button, event) {
