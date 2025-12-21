@@ -6989,7 +6989,7 @@ calculate() {
         }
     },
     
-    applyCoupon() {
+   async applyCoupon() {
     const couponInput = document.getElementById('calcCoupon');
     const couponCode = couponInput.value.trim().toUpperCase();
     
@@ -7003,84 +7003,142 @@ calculate() {
         return;
     }
     
-    // البحث عن الكوبون
-    const validCoupon = this.coupons.find(c => c.code === couponCode);
-    
-    if (!validCoupon) {
+    try {
+        // 🔍 البحث عن الكوبون في Firebase أولاً
+        const couponSnapshot = await db.collection('coupons')
+            .where('code', '==', couponCode)
+            .limit(1)
+            .get();
+        
+        let validCoupon = null;
+        
+        if (!couponSnapshot.empty) {
+            // ✅ وجدنا الكوبون في Firebase (كوبون محفظة)
+            const couponDoc = couponSnapshot.docs[0];
+            const firebaseCoupon = {
+                id: couponDoc.id,
+                ...couponDoc.data(),
+                isFirebase: true
+            };
+            
+            // التحقق من الحالة
+            if (firebaseCoupon.status === 'used') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'كود مستخدم',
+                    text: 'هذا الكود تم استخدامه من قبل',
+                    confirmButtonColor: '#E11D48'
+                });
+                return;
+            }
+            
+            if (firebaseCoupon.status === 'expired') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'كود منتهي',
+                    text: 'هذا الكود منتهي الصلاحية',
+                    confirmButtonColor: '#E11D48'
+                });
+                return;
+            }
+            
+            validCoupon = firebaseCoupon;
+            
+        } else {
+            // 🔍 البحث في الكوبونات المحلية (الكوبونات العادية)
+            validCoupon = this.coupons.find(c => c.code === couponCode);
+            
+            if (validCoupon) {
+                // التحقق من الاستخدام للكوبونات المحلية
+                if (validCoupon.maxUses && validCoupon.used >= validCoupon.maxUses) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'كود مستخدم',
+                        text: 'تم استخدام هذا الكود العدد الأقصى من المرات',
+                        confirmButtonColor: '#E11D48'
+                    });
+                    return;
+                }
+                validCoupon.isFirebase = false;
+            }
+        }
+        
+        // ❌ الكوبون غير موجود
+        if (!validCoupon) {
+            Swal.fire({
+                icon: 'error',
+                title: 'كود غير صحيح',
+                text: 'هذا الكود غير موجود أو منتهي الصلاحية',
+                confirmButtonColor: '#E11D48'
+            });
+            return;
+        }
+        
+        // ✅ تطبيق الكوبون
+        this.appliedCoupon = validCoupon;
+        
+        // تحديث الواجهة
+        couponInput.disabled = true;
+        document.getElementById('applyCouponCalc').style.display = 'none';
+        
+        // إضافة زر إزالة
+        const couponSection = document.querySelector('.coupon-section');
+        if (!document.querySelector('.coupon-remove-btn')) {
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'coupon-remove-btn';
+            removeBtn.innerHTML = '<i class="fas fa-times"></i> إزالة الكود';
+            removeBtn.onclick = () => this.removeCoupon();
+            couponSection.appendChild(removeBtn);
+        }
+        
+        // رسالة نجاح
         Swal.fire({
-            icon: 'error',
-            title: 'كود غير صحيح',
-            text: 'هذا الكود غير موجود أو منتهي الصلاحية',
-            confirmButtonColor: '#E11D48'
+            icon: 'success',
+            title: 'تم التطبيق!',
+            text: `كود ${couponCode} تم تطبيقه بنجاح`,
+            confirmButtonColor: '#22C55E',
+            timer: 2000
         });
-        return;
-    }
-    
-    // التحقق من الاستخدام
-    if (validCoupon.maxUses && validCoupon.used >= validCoupon.maxUses) {
-        Swal.fire({
-            icon: 'error',
-            title: 'كود مستخدم',
-            text: 'تم استخدام هذا الكود العدد الأقصى من المرات',
-            confirmButtonColor: '#E11D48'
-        });
-        return;
-    }
-    
-    // تطبيق الكوبون
-    this.appliedCoupon = validCoupon;
-    
-    // تحديث الواجهة
-    couponInput.disabled = true;
-    document.getElementById('applyCouponCalc').style.display = 'none';
-    
-    // إضافة زر إزالة
-    const couponSection = document.querySelector('.coupon-section');
-    if (!document.querySelector('.coupon-remove-btn')) {
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'coupon-remove-btn';
-        removeBtn.innerHTML = '<i class="fas fa-times"></i> إزالة الكود';
-        removeBtn.onclick = () => this.removeCoupon();
-        couponSection.appendChild(removeBtn);
-    }
-    
-    // رسالة نجاح
-    Swal.fire({
-        icon: 'success',
-        title: 'تم التطبيق!',
-        text: `كود ${couponCode} تم تطبيقه بنجاح`,
-        confirmButtonColor: '#22C55E',
-        timer: 2000
-    });
-
+        
         // إضافة رسالة في واجهة المستخدم
-const messageDiv = document.getElementById('calcCouponMessage');
-if (messageDiv) {
-    messageDiv.innerHTML = `
-        <div style="background: rgba(34,197,94,0.1); 
-                    border: 1px solid #22C55E; 
-                    padding: 10px; 
-                    border-radius: 8px; 
-                    color: #22C55E;
-                    margin-top: 10px;">
-            <i class="fas fa-check-circle"></i>
-            كود الخصم <strong>${couponCode}</strong> مُفعّل
-            ${validCoupon.type === 'percentage' ? 
-              `(خصم ${validCoupon.value}%)` : 
-              `(خصم ${validCoupon.value} ج.م)`}
-        </div>
-    `;
-}
-
-// تغيير لون الحقل للأخضر
-couponInput.style.background = '#22C55E20';
-couponInput.style.borderColor = '#22C55E';
-
-// حفظ الحالة
-this.saveToStorage();
-    
-    // إعادة حساب
-    this.calculate();
+        const messageDiv = document.getElementById('calcCouponMessage');
+        if (messageDiv) {
+            messageDiv.innerHTML = `
+                <div style="background: rgba(34,197,94,0.1); 
+                            border: 1px solid #22C55E; 
+                            padding: 10px; 
+                            border-radius: 8px; 
+                            color: #22C55E;
+                            margin-top: 10px;">
+                    <i class="fas fa-check-circle"></i>
+                    كود الخصم <strong>${couponCode}</strong> مُفعّل
+                    ${validCoupon.type === 'percentage' ? 
+                      `(خصم ${validCoupon.value}%)` : 
+                      `(خصم ${validCoupon.value} ج.م)`}
+                    ${validCoupon.isFirebase ? '<span style="color: #10b981; font-size: 0.85rem;"> • كوبون محفظة</span>' : ''}
+                </div>
+            `;
+        }
+        
+        // تغيير لون الحقل للأخضر
+        couponInput.style.background = '#22C55E20';
+        couponInput.style.borderColor = '#22C55E';
+        
+        // حفظ الحالة
+        this.saveToStorage();
+        
+        // إعادة حساب
+        this.calculate();
+        
+    } catch (error) {
+        console.error('خطأ في تطبيق الكوبون:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'حدث خطأ',
+            text: 'لم نتمكن من التحقق من الكوبون. حاول مرة أخرى.',
+            confirmButtonColor: '#E11D48'
+        });
+    }
 },
 
 removeCoupon() {
@@ -7560,7 +7618,10 @@ handleMainAction() {
                 },
                 
                 // بيانات السعر
-                pricing: this.getDisplayedValues(),
+pricing: this.getDisplayedValues(),
+
+// ✨ إضافة بيانات الكوبون لو موجود
+appliedCoupon: this.appliedCoupon || null,
                 
                 // طريقة الدفع
                 payment: this.getSelectedPaymentMethod()
@@ -8626,9 +8687,32 @@ async function saveToFirebaseDirectly(data, proceedBtn) {
         
         console.log('📦 البيانات المرسلة:', data);
         
-        // حفظ في Firebase
-        const docRef = await db.collection('tempBookings').add(data);
-        console.log('✅ تم الحفظ بنجاح، المعرف:', docRef.id);
+       // حفظ في Firebase
+const docRef = await db.collection('tempBookings').add(data);
+console.log('✅ تم الحفظ بنجاح، المعرف:', docRef.id);
+
+// ✨ تحديث حالة الكوبون لو كان من المحفظة
+if (data.appliedCoupon && data.appliedCoupon.isFirebase && data.appliedCoupon.id) {
+    try {
+        const userId = localStorage.getItem('userId') || 
+                      SecureStorage?.getItem('user')?.id || 
+                      'unknown';
+        
+        await db.collection('coupons').doc(data.appliedCoupon.id).update({
+            used: firebase.firestore.FieldValue.increment(1),
+            status: 'used',
+            usedBy: userId,
+            usedByName: data.customer?.name || 'مستخدم',
+            usedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            usedInCourse: data.courseName || 'unknown',
+            bookingId: data.bookingId
+        });
+        
+        console.log('✅ تم تحديث حالة كوبون المحفظة');
+    } catch (couponError) {
+        console.error('⚠️ خطأ في تحديث الكوبون (لن يؤثر على الحجز):', couponError);
+    }
+}
         
         // رسالة النجاح المحفزة
         await Swal.fire({
@@ -8844,7 +8928,62 @@ function getCourseReturnUrl() {
     const courseName = window.courseName || window.currentCourseData?.title || 'default';
     return `course-discover.html?course=${encodeURIComponent(courseName)}`;
 }
+
+
+        // ═══════════════════════════════════════════════════════════
+// 💾 تحديث حالة كوبون المحفظة بعد الحجز
+// ═══════════════════════════════════════════════════════════
+async updateCouponUsageInFirebase(couponData, bookingData) {
+    if (!couponData || !couponData.isFirebase || !couponData.id) {
+        return; // مش كوبون من المحفظة
+    }
     
+    try {
+        const userId = localStorage.getItem('userId'); // أو أي طريقة تجيب بيها الـ userId
+        const userName = bookingData.name || 'مستخدم';
+        
+        // تحديث الكوبون في Firebase
+        await db.collection('coupons').doc(couponData.id).update({
+            used: firebase.firestore.FieldValue.increment(1),
+            status: 'used', // لأن limit = 1 دايماً
+            usedBy: userId,
+            usedByName: userName,
+            usedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            usedInCourse: bookingData.courseId || 'unknown'
+        });
+        
+        console.log('✅ تم تحديث حالة الكوبون في Firebase');
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحديث الكوبون:', error);
+    }
+}
+
+        // ═══════════════════════════════════════════════════════════
+// 📋 نسخ كود التليجرام
+// ═══════════════════════════════════════════════════════════
+function copyCode() {
+    const codeElement = document.getElementById('telegramCode');
+    const messageElement = document.getElementById('copyMessage');
+    
+    if (codeElement) {
+        const code = codeElement.textContent.trim();
+        
+        navigator.clipboard.writeText(code).then(() => {
+            // إظهار رسالة النجاح
+            if (messageElement) {
+                messageElement.style.display = 'block';
+                setTimeout(() => {
+                    messageElement.style.display = 'none';
+                }, 3000);
+            }
+        }).catch(err => {
+            console.error('خطأ في النسخ:', err);
+            alert('تم نسخ الكود: ' + code);
+        });
+    }
+}
+        
         // === التحميل النهائي للصفحة - نسخة واحدة فقط ===
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 الصفحة جاهزة للعمل');
