@@ -27202,7 +27202,9 @@ async function loadCourseData() {
                         fakeEnrollments = course.socialProof.fakeEnrollments;
                     }
                 }
-                
+
+                // ✅ تحميل الكوبونات من Firebase
+await loadCourseCoupons();
                 // تحميل الشهادات
                 if (course.testimonials) {
                     if (course.testimonials.testimonials) {
@@ -27852,12 +27854,12 @@ function togglePaymentMethod(method) {
     }
 }
 
-function addCoupon() {
+async function addCoupon() {
     const code = document.getElementById('couponCode').value.trim().toUpperCase();
     const type = document.getElementById('couponType').value;
     const value = parseFloat(document.getElementById('couponValue').value) || 0;
     const limit = parseInt(document.getElementById('couponLimit')?.value) || null;
-    
+
     if (!code || value === 0) {
         Swal.fire({
             icon: 'error',
@@ -27866,30 +27868,73 @@ function addCoupon() {
         });
         return;
     }
-    
-    const coupon = { 
-        code, 
-        type, 
-        value, 
-        limit: limit,
-        used: 0
-    };
-    
-    if (!courseData.coupons) courseData.coupons = [];
-    courseData.coupons.push(coupon);
-    
-    // Clear inputs
-    document.getElementById('couponCode').value = '';
-    document.getElementById('couponValue').value = '';
-    if (document.getElementById('couponLimit')) {
-        document.getElementById('couponLimit').value = '';
+
+    try {
+        // ✅ حفظ الكوبون في coupons collection
+        await db.collection('coupons').add({
+            code: code,
+            type: type,
+            value: value,
+            limit: limit,
+            used: 0,
+            status: 'active',
+            source: 'admin',  // علامة إنه من الأدمن
+            courseId: courseId,  // الدورة اللي ينتمي ليها
+            courseName: courseData.name,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdBy: userId,
+            createdByName: userName
+        });
+
+        // Clear inputs
+        document.getElementById('couponCode').value = '';
+        document.getElementById('couponValue').value = '';
+        if (document.getElementById('couponLimit')) {
+            document.getElementById('couponLimit').value = '';
+        }
+
+        await loadCourseCoupons();  // إعادة تحميل الكوبونات
+        
+        Swal.fire({
+            icon: 'success',
+            title: 'تم الإضافة',
+            text: 'تم إضافة الكوبون بنجاح',
+            timer: 2000,
+            showConfirmButton: false
+        });
+        
+    } catch (error) {
+        console.error('خطأ في إضافة الكوبون:', error);
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ أثناء إضافة الكوبون'
+        });
     }
-    
-    renderCoupons();
-    updatePricePreview();
-    autoSave();
 }
 
+        async function loadCourseCoupons() {
+    try {
+        const snapshot = await db.collection('coupons')
+            .where('courseId', '==', courseId)
+            .orderBy('createdAt', 'desc')
+            .get();
+        
+        courseData.coupons = [];
+        
+        snapshot.forEach(doc => {
+            courseData.coupons.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        renderCoupons();
+        
+    } catch (error) {
+        console.error('خطأ في تحميل الكوبونات:', error);
+    }
+}
         
         // ========================================
         // FINAL ACTIONS
@@ -28123,8 +28168,8 @@ function renderCoupons() {
         container.innerHTML = '<p class="text-muted">لا توجد كوبونات حالياً</p>';
         return;
     }
-    
-    container.innerHTML = courseData.coupons.map((coupon, index) => `
+
+    container.innerHTML = courseData.coupons.map((coupon) => `
         <div class="card mb-2" style="background-color: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3);">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
@@ -28141,13 +28186,16 @@ function renderCoupons() {
                             </span>` : 
                             `<span class="ms-2" style="color: #10b981; font-weight: 500;">غير محدود</span>`
                         }
+                        <span class="ms-2" style="color: ${coupon.status === 'active' ? '#10b981' : '#ef4444'}; font-weight: 500;">
+                            ${coupon.status === 'active' ? '• نشط' : '• معطل'}
+                        </span>
                     </div>
                     <div>
-                        <button class="btn btn-sm btn-outline-primary me-1" onclick="editCoupon(${index})" 
+                        <button class="btn btn-sm btn-outline-primary me-1" onclick="editCoupon('${coupon.id}')" 
                                 style="background-color: transparent; border-color: #6366f1; color: #6366f1;">
                             <i class="fas fa-edit"></i> تعديل
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="removeCoupon(${index})"
+                        <button class="btn btn-sm btn-danger" onclick="removeCoupon('${coupon.id}')"
                                 style="background-color: #ef4444; border-color: #ef4444; color: white;">
                             <i class="fas fa-trash"></i> حذف
                         </button>
@@ -28158,99 +28206,102 @@ function renderCoupons() {
     `).join('');
 }
 
-function editCoupon(index) {
-    const coupon = courseData.coupons[index];
+async function editCoupon(couponId) {
+    const coupon = courseData.coupons.find(c => c.id === couponId);
     if (!coupon) return;
-    
-    Swal.fire({
+
+    const result = await Swal.fire({
         title: 'تعديل الكوبون',
         html: `
             <div style="text-align: right; direction: rtl;">
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">كود الكوبون</label>
-                    <input type="text" id="editCouponCode" 
-                           value="${coupon.code}" 
-                           style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem; text-transform: uppercase;">
+                    <label>كود الكوبون</label>
+                    <input type="text" id="editCouponCode" value="${coupon.code}" 
+                           style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem;">
                 </div>
-                
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">نوع الخصم</label>
-                    <select id="editCouponType" style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem;">
+                    <label>نوع الخصم</label>
+                    <select id="editCouponType" style="width: 100%; padding: 0.75rem;">
                         <option value="percentage" ${coupon.type === 'percentage' ? 'selected' : ''}>نسبة مئوية</option>
                         <option value="fixed" ${coupon.type === 'fixed' ? 'selected' : ''}>مبلغ ثابت</option>
                     </select>
                 </div>
-                
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">القيمة</label>
-                    <input type="number" id="editCouponValue" 
-                           value="${coupon.value}" min="0"
-                           style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem;">
+                    <label>القيمة</label>
+                    <input type="number" id="editCouponValue" value="${coupon.value}" min="0"
+                           style="width: 100%; padding: 0.75rem;">
                 </div>
-                
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">العدد المتاح</label>
-                    <input type="number" id="editCouponLimit" 
-                           value="${coupon.limit || ''}" placeholder="غير محدود" min="0"
-                           style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem;">
-                    <small style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem; display: block;">
-                        استُخدم ${coupon.used || 0} مرة
-                    </small>
+                    <label>العدد المتاح</label>
+                    <input type="number" id="editCouponLimit" value="${coupon.limit || ''}" 
+                           placeholder="غير محدود" min="0"
+                           style="width: 100%; padding: 0.75rem;">
+                    <small>استُخدم ${coupon.used || 0} مرة</small>
                 </div>
             </div>
         `,
-        confirmButtonText: 'حفظ التغييرات',
+        confirmButtonText: 'حفظ',
         showCancelButton: true,
         cancelButtonText: 'إلغاء',
-        confirmButtonColor: '#6366f1',
-        cancelButtonColor: '#6b7280',
-        width: '500px',
-        customClass: {
-            popup: 'swal-rtl-popup'
-        },
         preConfirm: () => {
-            const code = document.getElementById('editCouponCode').value.trim().toUpperCase();
-            const type = document.getElementById('editCouponType').value;
-            const value = parseFloat(document.getElementById('editCouponValue').value) || 0;
-            const limit = parseInt(document.getElementById('editCouponLimit').value) || null;
-            
-            if (!code || value === 0) {
-                Swal.showValidationMessage('يرجى إدخال كود الكوبون والقيمة');
-                return false;
-            }
-            
             return {
-                ...coupon,
-                code: code,
-                type: type,
-                value: value,
-                limit: limit
+                code: document.getElementById('editCouponCode').value.trim().toUpperCase(),
+                type: document.getElementById('editCouponType').value,
+                value: parseFloat(document.getElementById('editCouponValue').value) || 0,
+                limit: parseInt(document.getElementById('editCouponLimit').value) || null
             };
         }
-    }).then((result) => {
-        if (result.isConfirmed) {
-            courseData.coupons[index] = result.value;
-            renderCoupons();
-            updatePricePreview();
-            autoSave(); // هنا الحفظ في Firebase
+    });
+
+    if (result.isConfirmed) {
+        try {
+            await db.collection('coupons').doc(couponId).update({
+                code: result.value.code,
+                type: result.value.type,
+                value: result.value.value,
+                limit: result.value.limit
+            });
+            
+            await loadCourseCoupons();
             
             Swal.fire({
                 icon: 'success',
                 title: 'تم التحديث',
-                text: 'تم تحديث الكوبون بنجاح',
                 timer: 2000,
                 showConfirmButton: false
             });
+        } catch (error) {
+            console.error('خطأ في التحديث:', error);
         }
+    }
+}
+async function removeCoupon(couponId) {
+    const result = await Swal.fire({
+        title: 'تأكيد الحذف',
+        text: 'هل تريد حذف هذا الكوبون؟',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف',
+        cancelButtonText: 'إلغاء',
+        confirmButtonColor: '#ef4444'
     });
-}
-function removeCoupon(index) {
-    courseData.coupons.splice(index, 1);
-    renderCoupons();
-    updatePricePreview();
-    autoSave();
-}
 
+    if (result.isConfirmed) {
+        try {
+            await db.collection('coupons').doc(couponId).delete();
+            await loadCourseCoupons();
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'تم الحذف',
+                timer: 2000,
+                showConfirmButton: false
+            });
+        } catch (error) {
+            console.error('خطأ في الحذف:', error);
+        }
+    }
+}
         function renderPaymentPlans() {
     const container = document.getElementById('paymentPlansList');
     if (!courseData.paymentPlans || courseData.paymentPlans.length === 0) {
