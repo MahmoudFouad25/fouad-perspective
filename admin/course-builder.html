@@ -2568,6 +2568,24 @@ input:focus, textarea:focus, select:focus {
     </div>
 </div>
 </div>
+
+    <!-- كوبونات المحفظة المستخدمة -->
+<div class="form-section mt-4">
+    <h2 class="section-title">
+        <i class="fas fa-wallet"></i>
+        كوبونات المحفظة المستخدمة في هذه الدورة
+        <span id="walletCouponsCount" class="badge bg-primary">0</span>
+    </h2>
+    
+    <div id="walletCouponsList" class="mb-3">
+        <p class="text-muted">لا توجد كوبونات محفظة مستخدمة حتى الآن</p>
+    </div>
+    
+    <button class="btn btn-outline-primary" onclick="loadWalletCoupons()">
+        <i class="fas fa-sync"></i> تحديث
+    </button>
+</div>
+    
 <!-- برنامج المنح -->
 <div class="form-section">
     <h2 class="section-title">
@@ -27205,6 +27223,8 @@ async function loadCourseData() {
 
                 // ✅ تحميل الكوبونات من Firebase
 await loadCourseCoupons();
+                // ✅ تحميل كوبونات المحفظة المستخدمة
+await loadWalletCoupons();
                 // تحميل الشهادات
                 if (course.testimonials) {
                     if (course.testimonials.testimonials) {
@@ -27943,6 +27963,138 @@ async function loadCourseCoupons() {
         
     } catch (error) {
         console.error('خطأ في تحميل الكوبونات:', error);
+    }
+}
+
+
+    // ✅ دالة تحميل كوبونات المحفظة المستخدمة في الدورة
+async function loadWalletCoupons() {
+    if (!courseId && !courseData.name) {
+        console.log('⚠️ مفيش courseId أو courseName');
+        return;
+    }
+    
+    try {
+        // جلب كوبونات المحفظة المستخدمة في هذه الدورة
+        const snapshot = await db.collection('coupons')
+            .where('source', '==', 'wallet_points')
+            .where('status', '==', 'used')
+            .get();
+        
+        // فلترة الكوبونات الخاصة بالدورة دي
+        const walletCoupons = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            // تأكد إن الكوبون اتستخدم في الدورة دي
+            if (data.usedInCourse === courseData.name || data.usedInCourse === courseId) {
+                walletCoupons.push({
+                    id: doc.id,
+                    ...data
+                });
+            }
+        });
+        
+        console.log(`✅ تم العثور على ${walletCoupons.length} كوبون محفظة`);
+        
+        // تحديث العداد
+        document.getElementById('walletCouponsCount').textContent = walletCoupons.length;
+        
+        // عرض الكوبونات
+        renderWalletCoupons(walletCoupons);
+        
+    } catch (error) {
+        console.error('خطأ في تحميل كوبونات المحفظة:', error);
+    }
+}
+
+// ✅ دالة عرض كوبونات المحفظة
+function renderWalletCoupons(coupons) {
+    const container = document.getElementById('walletCouponsList');
+    
+    if (!coupons || coupons.length === 0) {
+        container.innerHTML = '<p class="text-muted">لا توجد كوبونات محفظة مستخدمة حتى الآن</p>';
+        return;
+    }
+    
+    container.innerHTML = coupons.map(coupon => {
+        const usedDate = coupon.usedAt ? 
+            new Date(coupon.usedAt.toDate()).toLocaleDateString('ar-EG', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }) : 'غير متوفر';
+        
+        return `
+            <div class="card mb-2" style="background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3);">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-3">
+                            <span class="badge" style="background-color: #10b981; color: white; font-weight: bold; padding: 0.5rem 1rem; font-size: 1rem;">
+                                ${coupon.code}
+                            </span>
+                        </div>
+                        <div class="col-md-3">
+                            <div style="color: var(--text-primary);">
+                                <i class="fas fa-user"></i>
+                                <strong>${coupon.usedByName || coupon.createdByName || 'غير متوفر'}</strong>
+                            </div>
+                            <small class="text-muted">ID: ${coupon.usedBy || coupon.createdBy || 'N/A'}</small>
+                        </div>
+                        <div class="col-md-2">
+                            <div style="color: #8b5cf6; font-weight: 500;">
+                                خصم ${coupon.value} ج.م
+                            </div>
+                            <small class="text-muted">${coupon.pointsDeducted || 0} نقطة</small>
+                        </div>
+                        <div class="col-md-3">
+                            <div style="color: #6b7280; font-size: 0.9rem;">
+                                <i class="fas fa-clock"></i>
+                                ${usedDate}
+                            </div>
+                        </div>
+                        <div class="col-md-1">
+                            ${coupon.bookingId ? 
+                                `<a href="#" onclick="viewBooking('${coupon.bookingId}')" class="btn btn-sm btn-outline-info">
+                                    <i class="fas fa-eye"></i>
+                                </a>` : 
+                                '<small class="text-muted">-</small>'
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ✅ دالة لعرض تفاصيل الحجز (اختياري)
+async function viewBooking(bookingId) {
+    try {
+        const doc = await db.collection('tempBookings').doc(bookingId).get();
+        
+        if (doc.exists) {
+            const booking = doc.data();
+            
+            Swal.fire({
+                title: 'تفاصيل الحجز',
+                html: `
+                    <div style="text-align: right; direction: rtl;">
+                        <p><strong>العميل:</strong> ${booking.customer?.name || 'غير متوفر'}</p>
+                        <p><strong>البريد:</strong> ${booking.customer?.email || 'غير متوفر'}</p>
+                        <p><strong>الهاتف:</strong> ${booking.customer?.phone || 'غير متوفر'}</p>
+                        <p><strong>السعر النهائي:</strong> ${booking.pricing?.finalPriceNumber || 0} ج.م</p>
+                        <p><strong>الخصم:</strong> ${booking.coupon?.value || 0} ج.م</p>
+                        <p><strong>طريقة الدفع:</strong> ${booking.payment?.method || 'غير متوفر'}</p>
+                    </div>
+                `,
+                confirmButtonText: 'حسناً',
+                width: '600px'
+            });
+        }
+    } catch (error) {
+        console.error('خطأ في جلب الحجز:', error);
     }
 }
         // ========================================
