@@ -4623,7 +4623,12 @@ let courseData = {
     totalLessons: 0,
     totalDuration: 0,
     createdAt: null,
-    updatedAt: null
+    updatedAt: null,
+    
+    // 🌟 بيانات تصنيف الرحلة
+    journeyName: null,
+    journeyIcon: '✨',
+    journeyDescription: null
 };
 
         
@@ -6260,6 +6265,27 @@ function buildExerciseLibraryHTML(exercises, usageData, currentModuleId) {
             .exercise-library-card:hover {
                 box-shadow: 0 8px 30px rgba(59, 130, 246, 0.3);
             }
+            /* أنيميشن المعاينة الحية */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* تحسين مظهر الراديو بتنز */
+input[type="radio"] {
+    cursor: pointer;
+    accent-color: #FBBF24;
+}
+
+input[type="radio"]:checked + span {
+    color: #FBBF24 !important;
+}
         </style>
     `;
     
@@ -27610,6 +27636,14 @@ function collectFormData() {
     
     // ========== الشهادات والتقييمات ==========
     courseData.testimonials = collectTestimonialsData();
+
+        // 🌟 جمع بيانات تصنيف الرحلة
+    const journeyData = getJourneyData();
+    courseData.journeyName = journeyData.journeyName;
+    courseData.journeyIcon = journeyData.journeyIcon;
+    courseData.journeyDescription = journeyData.journeyDescription;
+    
+    console.log('✅ تم جمع بيانات الرحلة:', journeyData);
 }
 
 // ========================================
@@ -32053,6 +32087,11 @@ if (validation.errors.length > 0) {
         // تجهيز البيانات للحفظ
         const dataToSave = {
             ...courseData,
+                        // التأكد من وجود بيانات الرحلة
+            journeyName: courseData.journeyName || null,
+            journeyIcon: courseData.journeyIcon || '✨',
+            journeyDescription: courseData.journeyDescription || null,
+
             slug: finalSlug,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             marketingOffers: collectMarketingData(),
@@ -32326,6 +32365,208 @@ async function saveModuleRitualSettings() {
     }
 }
 
+        // ═══════════════════════════════════════════════════════════
+// 🌟 نظام تصنيف الرحلات - Journey Classification System
+// ═══════════════════════════════════════════════════════════
+
+// المتغيرات العامة
+let existingJourneys = new Set();
+let selectedJourneyIcon = '';
+
+// 1️⃣ تحميل الرحلات الموجودة من Firebase
+async function loadExistingJourneys() {
+    try {
+        console.log('🔄 جاري تحميل الرحلات الموجودة...');
+        
+        const coursesSnapshot = await db.collection('courses').get();
+        const journeySelect = document.getElementById('journeyNameSelect');
+        
+        // مسح الخيارات القديمة
+        journeySelect.innerHTML = '<option value="">-- اختر رحلة موجودة --</option>';
+        
+        // جمع الرحلات الفريدة
+        coursesSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.journeyName) {
+                existingJourneys.add(data.journeyName);
+            }
+        });
+        
+        // إضافة الرحلات للقائمة
+        if (existingJourneys.size > 0) {
+            existingJourneys.forEach(journeyName => {
+                const option = document.createElement('option');
+                option.value = journeyName;
+                option.textContent = journeyName;
+                journeySelect.appendChild(option);
+            });
+            console.log(`✅ تم تحميل ${existingJourneys.size} رحلة`);
+        } else {
+            console.log('ℹ️ لا توجد رحلات محفوظة بعد');
+        }
+        
+    } catch (error) {
+        console.error('❌ خطأ في تحميل الرحلات:', error);
+    }
+}
+
+// 2️⃣ التبديل بين اختيار موجود أو جديد
+function toggleJourneyNameInput() {
+    const selectedOption = document.querySelector('input[name="journeyNameOption"]:checked').value;
+    const selectElement = document.getElementById('journeyNameSelect');
+    const inputElement = document.getElementById('journeyNameNew');
+    
+    if (selectedOption === 'existing') {
+        // إظهار القائمة المنسدلة
+        selectElement.style.display = 'block';
+        inputElement.style.display = 'none';
+        inputElement.value = ''; // مسح القيمة
+    } else {
+        // إظهار حقل الإدخال
+        selectElement.style.display = 'none';
+        selectElement.value = ''; // مسح الاختيار
+        inputElement.style.display = 'block';
+    }
+    
+    updateJourneyPreview();
+}
+
+// 3️⃣ اختيار أيقونة الرحلة
+function selectJourneyIcon(icon) {
+    selectedJourneyIcon = icon;
+    
+    // تحديث حقل الإدخال
+    document.getElementById('journeyIcon').value = icon;
+    
+    // إزالة التحديد من كل الأزرار
+    document.querySelectorAll('.emoji-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // تحديد الزر المضغوط
+    event.target.classList.add('selected');
+    
+    updateJourneyPreview();
+}
+
+// 4️⃣ تحديث المعاينة الحية
+function updateJourneyPreview() {
+    const preview = document.getElementById('journeyPreview');
+    const previewIcon = document.getElementById('previewIcon');
+    const previewName = document.getElementById('previewName');
+    const previewDescription = document.getElementById('previewDescription');
+    
+    // جلب القيم
+    const selectedOption = document.querySelector('input[name="journeyNameOption"]:checked').value;
+    let journeyName = '';
+    
+    if (selectedOption === 'existing') {
+        journeyName = document.getElementById('journeyNameSelect').value;
+    } else {
+        journeyName = document.getElementById('journeyNameNew').value;
+    }
+    
+    const journeyIcon = document.getElementById('journeyIcon').value;
+    const journeyDescription = document.getElementById('journeyDescription').value;
+    
+    // إظهار المعاينة إذا كان هناك محتوى
+    if (journeyName || journeyIcon || journeyDescription) {
+        preview.style.display = 'block';
+        
+        // تحديث المعاينة
+        previewIcon.textContent = journeyIcon || '✨';
+        previewName.textContent = journeyName || 'رحلة غير معنونة';
+        previewDescription.textContent = journeyDescription || 'لم يتم إضافة وصف بعد';
+        
+        // إضافة أنيميشن خفيف
+        preview.style.animation = 'fadeIn 0.5s ease';
+    } else {
+        preview.style.display = 'none';
+    }
+}
+
+// 5️⃣ الاستماع للتغييرات في الحقول
+document.addEventListener('DOMContentLoaded', function() {
+    // تحميل الرحلات عند فتح الصفحة
+    loadExistingJourneys();
+    
+    // الاستماع للتغييرات في حقل الرحلة المنسدل
+    const journeySelect = document.getElementById('journeyNameSelect');
+    if (journeySelect) {
+        journeySelect.addEventListener('change', updateJourneyPreview);
+    }
+    
+    // الاستماع للكتابة في حقل الرحلة الجديدة
+    const journeyNewInput = document.getElementById('journeyNameNew');
+    if (journeyNewInput) {
+        journeyNewInput.addEventListener('input', updateJourneyPreview);
+    }
+    
+    // الاستماع للكتابة في حقل الأيقونة
+    const journeyIconInput = document.getElementById('journeyIcon');
+    if (journeyIconInput) {
+        journeyIconInput.addEventListener('input', function() {
+            selectedJourneyIcon = this.value;
+            updateJourneyPreview();
+        });
+    }
+    
+    // الاستماع للكتابة في وصف الرحلة
+    const journeyDescInput = document.getElementById('journeyDescription');
+    if (journeyDescInput) {
+        journeyDescInput.addEventListener('input', updateJourneyPreview);
+    }
+});
+
+// 6️⃣ جلب بيانات الرحلة النهائية
+function getJourneyData() {
+    const selectedOption = document.querySelector('input[name="journeyNameOption"]:checked').value;
+    let journeyName = '';
+    
+    if (selectedOption === 'existing') {
+        journeyName = document.getElementById('journeyNameSelect').value;
+    } else {
+        journeyName = document.getElementById('journeyNameNew').value.trim();
+    }
+    
+    const journeyIcon = document.getElementById('journeyIcon').value.trim() || '✨';
+    const journeyDescription = document.getElementById('journeyDescription').value.trim();
+    
+    return {
+        journeyName: journeyName || null,
+        journeyIcon: journeyIcon,
+        journeyDescription: journeyDescription || null
+    };
+}
+
+// 7️⃣ التحقق من صحة البيانات
+function validateJourneyData() {
+    const journeyData = getJourneyData();
+    
+    if (!journeyData.journeyName) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'بيانات ناقصة',
+            text: 'يرجى إدخال اسم الرحلة',
+            confirmButtonColor: '#FBBF24'
+        });
+        return false;
+    }
+    
+    if (!journeyData.journeyIcon) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'بيانات ناقصة',
+            text: 'يرجى اختيار أيقونة الرحلة',
+            confirmButtonColor: '#FBBF24'
+        });
+        return false;
+    }
+    
+    return true;
+}
+
+console.log('✅ تم تحميل نظام تصنيف الرحلات بنجاح');
         
         
     </script>
