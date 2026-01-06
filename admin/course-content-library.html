@@ -795,6 +795,27 @@
 .badge-item:active {
     cursor: grabbing;
 }
+
+        /* تنسيق السحب والإفلات */
+.sortable-ghost {
+    opacity: 0.4;
+    background: rgba(59, 130, 246, 0.3) !important;
+}
+
+.sortable-drag {
+    opacity: 1;
+    cursor: grabbing !important;
+}
+
+.drag-handle:hover {
+    background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+    transform: scale(1.05);
+}
+
+.drag-handle:active {
+    cursor: grabbing !important;
+}
+
     </style>
     
 </head>
@@ -1047,7 +1068,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js"></script>
     <!-- SweetAlert2 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
- <!-- ترتيب محتوي -->
+    <!-- مكتبة SortableJS للسحب والإفلات -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>    
 <script>
 // Firebase Configuration
@@ -4453,7 +4474,18 @@ function generateTypeSpecificEditForm(content) {
                         </div>
                         
                         <!-- أزرار التحكم -->
-                        <div style="display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; flex-direction: column; gap: 8px;">
+    <!-- مقبض السحب -->
+    <div class="drag-handle" style="
+        background: linear-gradient(135deg, #6b7280, #4b5563);
+        color: white;
+        padding: 10px;
+        border-radius: 8px;
+        cursor: grab;
+        text-align: center;
+        font-size: 1.2rem;
+        user-select: none;
+    " title="اسحب لإعادة الترتيب">
                             <button type="button" onclick="editEditReflectionMoment(${index})" 
                                     style="background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem; white-space: nowrap;">
                                 ✏️ تعديل
@@ -4462,6 +4494,7 @@ function generateTypeSpecificEditForm(content) {
                                     style="background: linear-gradient(135deg, #dc2626, #991b1b); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem;">
                                 🗑️ حذف
                             </button>
+                                </div>
                         </div>
                     </div>
                 </div>
@@ -4936,22 +4969,22 @@ function addEditReflectionMoment() {
     const totalPoints = couragePoints + mirrorPoints + actionPoints + witnessPoints;
     
     if (!time || !title || !question) {
-        console.log('⚠️ أكمل جميع الحقول');
+        alert('⚠️ من فضلك أكمل جميع الحقول');
         return;
     }
     
     if (totalPoints === 0) {
-        console.log('⚠️ يجب إضافة نقاط');
+        alert('⚠️ يجب إضافة نقاط على الأقل لركيزة واحدة');
         return;
     }
     
     const timeInSeconds = convertTimeToSeconds(time);
     if (timeInSeconds === null) {
-        console.log('❌ صيغة الوقت غير صحيحة');
+        alert('❌ صيغة الوقت غير صحيحة. استخدم HH:MM:SS أو MM:SS');
         return;
     }
     
-    editReflectionMomentsArray.push({
+    const momentData = {
         time,
         timeInSeconds,
         title,
@@ -4963,10 +4996,38 @@ function addEditReflectionMoment() {
             action: actionPoints,
             witness: witnessPoints
         }
-    });
+    };
+    
+    // 🆕 لو في لحظة قيد التعديل، نحدّثها
+    if (currentEditingMomentIndex !== -1) {
+        editReflectionMomentsArray[currentEditingMomentIndex] = momentData;
+        console.log('✅ تم تحديث اللحظة');
+        
+        // إعادة تعيين حالة التعديل
+        currentEditingMomentIndex = -1;
+        currentEditingMomentBackup = null;
+        
+        // إعادة نص الزر
+        const addButton = document.querySelector('button[onclick="addEditReflectionMoment()"]');
+        if (addButton) {
+            addButton.textContent = '✅ إضافة اللحظة';
+            addButton.style.background = 'linear-gradient(135deg, #8b5cf6, #7c3aed)';
+        }
+        
+        // حذف زر الإلغاء
+        const cancelButton = document.getElementById('cancelEditMomentButton');
+        if (cancelButton) {
+            cancelButton.remove();
+        }
+    } else {
+        // إضافة لحظة جديدة
+        editReflectionMomentsArray.push(momentData);
+        console.log('✅ تم إضافة لحظة جديدة');
+    }
     
     updateEditReflectionMomentsList();
     
+    // تفريغ الحقول
     document.getElementById('editMomentTimeInput').value = '';
     document.getElementById('editMomentTitleInput').value = '';
     document.getElementById('editMomentQuestionInput').value = '';
@@ -5073,12 +5134,72 @@ function updateEditReflectionMomentsList() {
     container.innerHTML = html;
     
     updateEditTotalReflectionPoints();
+    html += '</div>';
+    container.innerHTML = html;
+    
+    updateEditTotalReflectionPoints();
+    
+    // 🆕 تفعيل السحب والإفلات
+    setTimeout(() => enableReflectionMomentsDragDrop(), 100);
+}
+}
+
+    // تفعيل السحب والإفلات
+function enableReflectionMomentsDragDrop() {
+    const container = document.getElementById('editReflectionMomentsList');
+    if (!container || editReflectionMomentsArray.length === 0) return;
+    
+    // إزالة Sortable القديم إن وجد
+    if (container.sortableInstance) {
+        container.sortableInstance.destroy();
+    }
+    
+    // إنشاء Sortable جديد
+    container.sortableInstance = Sortable.create(container, {
+        animation: 200,
+        handle: '.drag-handle', // سنضيف هذا
+        ghostClass: 'sortable-ghost',
+        dragClass: 'sortable-drag',
+        onEnd: function(evt) {
+            // تحديث المصفوفة بناءً على الترتيب الجديد
+            const oldIndex = evt.oldIndex;
+            const newIndex = evt.newIndex;
+            
+            if (oldIndex !== newIndex) {
+                const movedItem = editReflectionMomentsArray.splice(oldIndex, 1)[0];
+                editReflectionMomentsArray.splice(newIndex, 0, movedItem);
+                
+                console.log('🔄 تم تغيير ترتيب اللحظات');
+                updateEditReflectionMomentsList();
+            }
+        }
+    });
 }
 
 // دالة تعديل لحظة في صندوق التعديل
+// متغير لتتبع اللحظة قيد التعديل
+let currentEditingMomentIndex = -1;
+let currentEditingMomentBackup = null;
+
 function editEditReflectionMoment(index) {
     const moment = editReflectionMomentsArray[index];
     if (!moment) return;
+    
+    // لو في لحظة قيد التعديل حالياً، نسأل المستخدم
+    if (currentEditingMomentIndex !== -1 && currentEditingMomentIndex !== index) {
+        const confirmSwitch = confirm('⚠️ لديك لحظة قيد التعديل. هل تريد إلغاء التعديل الحالي والانتقال لتعديل لحظة أخرى؟\n\n(إذا اخترت "موافق" سيتم إلغاء التعديل الحالي واستعادة اللحظة)');
+        
+        if (!confirmSwitch) {
+            return; // المستخدم اختار عدم الانتقال
+        }
+        
+        // إلغاء التعديل الحالي واستعادة اللحظة
+        cancelEditReflectionMoment();
+    }
+    
+    // حفظ نسخة احتياطية
+    currentEditingMomentIndex = index;
+    currentEditingMomentBackup = JSON.parse(JSON.stringify(moment));
     
     // التوافق مع النظام القديم
     const pillarsPoints = moment.pillarsPoints || {
@@ -5088,6 +5209,7 @@ function editEditReflectionMoment(index) {
         witness: 0
     };
     
+    // ملء الحقول
     document.getElementById('editMomentTimeInput').value = moment.time;
     document.getElementById('editMomentTitleInput').value = moment.title;
     document.getElementById('editMomentQuestionInput').value = moment.question;
@@ -5096,13 +5218,109 @@ function editEditReflectionMoment(index) {
     document.getElementById('editMomentActionPoints').value = pillarsPoints.action;
     document.getElementById('editMomentWitnessPoints').value = pillarsPoints.witness;
     
-    editReflectionMomentsArray.splice(index, 1);
-    updateEditReflectionMomentsList();
     updateEditMomentTotalPreview();
     
-    console.log('✏️ اللحظة جاهزة للتعديل');
+    // تغيير نص الزر لـ "تحديث اللحظة"
+    const addButton = document.querySelector('button[onclick="addEditReflectionMoment()"]');
+    if (addButton) {
+        addButton.textContent = '✏️ تحديث اللحظة';
+        addButton.style.background = 'linear-gradient(135deg, #3b82f6, #2563eb)';
+    }
+    
+    // إضافة زر إلغاء
+    let cancelButton = document.getElementById('cancelEditMomentButton');
+    if (!cancelButton) {
+        cancelButton = document.createElement('button');
+        cancelButton.id = 'cancelEditMomentButton';
+        cancelButton.type = 'button';
+        cancelButton.textContent = '❌ إلغاء التعديل';
+        cancelButton.style.cssText = `
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 900;
+            width: 100%;
+            font-size: 1.1rem;
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        `;
+        cancelButton.onmouseover = function() {
+            this.style.transform = 'scale(1.02)';
+            this.style.boxShadow = '0 6px 20px rgba(239, 68, 68, 0.6)';
+        };
+        cancelButton.onmouseout = function() {
+            this.style.transform = 'scale(1)';
+            this.style.boxShadow = '0 4px 15px rgba(239, 68, 68, 0.4)';
+        };
+        cancelButton.onclick = cancelEditReflectionMoment;
+        
+        addButton.parentNode.insertBefore(cancelButton, addButton.nextSibling);
+    }
+    
+    // تمييز اللحظة قيد التعديل
+    document.querySelectorAll('.edit-reflection-moment').forEach((el, i) => {
+        if (i === index) {
+            el.style.border = '3px solid #3b82f6';
+            el.style.boxShadow = '0 0 20px rgba(59, 130, 246, 0.5)';
+        } else {
+            el.style.border = '2px solid rgba(139, 92, 246, 0.5)';
+            el.style.boxShadow = '0 3px 12px rgba(139, 92, 246, 0.2)';
+        }
+    });
+    
+    console.log('✏️ اللحظة جاهزة للتعديل (محفوظة نسخة احتياطية)');
+    
+    // التمرير للنموذج
+    document.getElementById('editMomentTimeInput').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+// دالة إلغاء التعديل
+function cancelEditReflectionMoment() {
+    if (currentEditingMomentIndex === -1 || !currentEditingMomentBackup) return;
+    
+    // استعادة اللحظة الأصلية (بدون حذف أي شيء)
+    // لأننا لم نحذفها من الأساس
+    
+    // تفريغ الحقول
+    document.getElementById('editMomentTimeInput').value = '';
+    document.getElementById('editMomentTitleInput').value = '';
+    document.getElementById('editMomentQuestionInput').value = '';
+    document.getElementById('editMomentCouragePoints').value = '0';
+    document.getElementById('editMomentMirrorPoints').value = '5';
+    document.getElementById('editMomentActionPoints').value = '0';
+    document.getElementById('editMomentWitnessPoints').value = '0';
+    
+    updateEditMomentTotalPreview();
+    
+    // إعادة نص الزر لـ "إضافة"
+    const addButton = document.querySelector('button[onclick="addEditReflectionMoment()"]');
+    if (addButton) {
+        addButton.textContent = '✅ إضافة اللحظة';
+        addButton.style.background = 'linear-gradient(135deg, #8b5cf6, #7c3aed)';
+    }
+    
+    // حذف زر الإلغاء
+    const cancelButton = document.getElementById('cancelEditMomentButton');
+    if (cancelButton) {
+        cancelButton.remove();
+    }
+    
+    // إزالة التمييز
+    document.querySelectorAll('.edit-reflection-moment').forEach(el => {
+        el.style.border = '2px solid rgba(139, 92, 246, 0.5)';
+        el.style.boxShadow = '0 3px 12px rgba(139, 92, 246, 0.2)';
+    });
+    
+    // إعادة تعيين المتغيرات
+    currentEditingMomentIndex = -1;
+    currentEditingMomentBackup = null;
+    
+    console.log('❌ تم إلغاء التعديل');
+}
     function removeEditReflectionMomentByIndex(index) {
     editReflectionMomentsArray.splice(index, 1);
     updateEditReflectionMomentsList();
