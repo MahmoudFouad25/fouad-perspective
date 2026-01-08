@@ -4249,62 +4249,89 @@ await loadStudents();
 
 window.assignCourseToStudent = assignCourseToStudent;
         // ==================== 🤖 نظام الأتمتة الذكي ====================
-        // 🔍 دالة البحث عن عميل موجود بالتليفون أو الإيميل
-async function findExistingUserAccount(customerPhone, customerEmail) {
+       // دالة البحث عن حساب موجود - محسّنة
+async function findExistingUserAccount(phone, email) {
     try {
         console.log('🔍 البحث عن حساب موجود...');
-        console.log('📱 التليفون:', customerPhone);
-        console.log('📧 الإيميل:', customerEmail);
+        console.log('📱 التليفون:', phone);
+        console.log('📧 الإيميل:', email);
         
-        // البحث أولاً بالتليفون (الأهم والأدق)
-        if (customerPhone) {
-            const phoneQuery = await db.collection('users')
-                .where('personalInfo.phone', '==', customerPhone)
-                .limit(1)
-                .get();
+        // البحث في users collection
+        const usersSnapshot = await db.collection('users').get();
+        
+        for (const userDoc of usersSnapshot.docs) {
+            const userData = userDoc.data();
+            const userPhone = userData.personalInfo?.phone || userData.personalInfo?.whatsapp;
+            const userEmail = userData.personalInfo?.email;
             
-            if (!phoneQuery.empty) {
-                const userDoc = phoneQuery.docs[0];
-                console.log('✅ تم العثور على حساب بنفس رقم التليفون');
-                return {
-                    found: true,
-                    userId: userDoc.id,
-                    userData: userDoc.data()
-                };
+            // مطابقة بالتليفون (مع تنظيف الأرقام)
+            if (phone && userPhone) {
+                const cleanPhone = phone.replace(/\D/g, '');
+                const cleanUserPhone = userPhone.replace(/\D/g, '');
+                
+                if (cleanPhone === cleanUserPhone) {
+                    console.log('✅ تم العثور على حساب موجود عبر التليفون!');
+                    console.log('👤 User ID:', userDoc.id);
+                    return {
+                        found: true,
+                        userId: userDoc.id,
+                        matchType: 'phone'
+                    };
+                }
             }
-        }
-        
-        // إذا لم نجد بالتليفون، نبحث بالإيميل (إذا كان إيميل حقيقي وليس تلقائي)
-        if (customerEmail && !customerEmail.includes('@fouad.academy')) {
-            const emailQuery = await db.collection('users')
-                .where('personalInfo.email', '==', customerEmail)
-                .limit(1)
-                .get();
             
-            if (!emailQuery.empty) {
-                const userDoc = emailQuery.docs[0];
-                console.log('✅ تم العثور على حساب بنفس البريد الإلكتروني');
-                return {
-                    found: true,
-                    userId: userDoc.id,
-                    userData: userDoc.data()
-                };
+            // مطابقة بالإيميل (حساسة للحالة)
+            if (email && userEmail) {
+                const cleanEmail = email.toLowerCase().trim();
+                const cleanUserEmail = userEmail.toLowerCase().trim();
+                
+                if (cleanEmail === cleanUserEmail) {
+                    console.log('✅ تم العثور على حساب موجود عبر الإيميل!');
+                    console.log('👤 User ID:', userDoc.id);
+                    return {
+                        found: true,
+                        userId: userDoc.id,
+                        matchType: 'email'
+                    };
+                }
+            }
+            
+            // مطابقة تقريبية للإيميل (للأخطاء الإملائية الشائعة)
+            if (email && userEmail) {
+                const emailVariations = [
+                    email.replace('@gmail.com', '@gmail.con'),
+                    email.replace('@gmail.con', '@gmail.com'),
+                    email.replace('@gamil.com', '@gmail.com'),
+                    email.replace('@gmil.com', '@gmail.com')
+                ];
+                
+                for (const variation of emailVariations) {
+                    if (variation.toLowerCase() === userEmail.toLowerCase()) {
+                        console.log('✅ تم العثور على حساب موجود عبر إيميل مشابه!');
+                        console.log('👤 User ID:', userDoc.id);
+                        console.log('📧 الإيميل الأصلي:', userEmail);
+                        console.log('📧 الإيميل المطابق:', variation);
+                        return {
+                            found: true,
+                            userId: userDoc.id,
+                            matchType: 'email_variation'
+                        };
+                    }
+                }
             }
         }
         
         console.log('❌ لم يتم العثور على حساب موجود - سيتم إنشاء حساب جديد');
         return {
             found: false,
-            userId: null,
-            userData: null
+            userId: null
         };
         
     } catch (error) {
-        console.error('❌ خطأ في البحث عن الحساب:', error);
+        console.error('❌ خطأ في البحث عن حساب موجود:', error);
         return {
             found: false,
-            userId: null,
-            userData: null
+            userId: null
         };
     }
 }
@@ -4432,7 +4459,7 @@ ${student.courseName}
 }
         
         // 🔍 البحث عن حساب موجود للعميل
-        const customerPhone = student.customer?.phone || student.phone;
+        const customerPhone = student.customer?.phone || student.customer?.whatsapp || student.phone || student.whatsapp;
         const customerEmail = student.customer?.email || student.email;
         
         console.log('🔍 بدء البحث عن حساب موجود...');
@@ -5344,7 +5371,7 @@ async function showPendingBookingsSelector() {
                 (!data.userId || data.accountStatus === 'pending_creation')) {
                 
                 // 🔍 فحص هل العميل موجود مسبقاً
-                const customerPhone = data.customer?.phone || data.phone;
+                const customerPhone = data.customer?.phone || data.customer?.whatsapp || data.phone || data.whatsapp;
                 const customerEmail = data.customer?.email || data.email;
                 
                 // 🔍 التحقق من وجود حساب موجود
@@ -5359,7 +5386,7 @@ if (data.userAccountInfo && data.userAccountInfo.hasExistingAccount) {
     console.log(`✅ [${data.customer?.name}] قراءة من البيانات المحفوظة:`, existingAccount.userId);
 } else {
     // ثانياً: عمل فحص جديد
-    const customerPhone = data.customer?.phone || data.phone;
+    const customerPhone = data.customer?.phone || data.customer?.whatsapp || data.phone || data.whatsapp;
     const customerEmail = data.customer?.email || data.email;
     
     console.log(`🔍 [${data.customer?.name}] فحص جديد - Email: ${customerEmail}, Phone: ${customerPhone}`);
