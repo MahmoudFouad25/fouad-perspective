@@ -5347,7 +5347,33 @@ async function showPendingBookingsSelector() {
                 const customerPhone = data.customer?.phone || data.phone;
                 const customerEmail = data.customer?.email || data.email;
                 
-                const existingAccount = await findExistingUserAccount(customerPhone, customerEmail);
+                // ✅ القراءة من البيانات المحفوظة مسبقاً
+let existingAccount = { found: false, userId: null };
+
+if (data.userAccountInfo && data.userAccountInfo.hasExistingAccount) {
+    // البيانات موجودة مسبقاً
+    existingAccount = {
+        found: true,
+        userId: data.userAccountInfo.existingUserId
+    };
+    console.log('✅ قراءة من البيانات المحفوظة:', existingAccount.userId);
+} else {
+    // عمل فحص جديد وحفظ النتيجة
+    const customerPhone = data.customer?.phone || data.phone;
+    const customerEmail = data.customer?.email || data.email;
+    
+    existingAccount = await findExistingUserAccount(customerPhone, customerEmail);
+    
+    // حفظ النتيجة في الـ document
+    if (existingAccount.found) {
+        await db.collection('individualStudents').doc(doc.id).update({
+            'userAccountInfo.hasExistingAccount': true,
+            'userAccountInfo.existingUserId': existingAccount.userId,
+            'userAccountInfo.checkedAt': new Date().toISOString()
+        });
+        console.log('💾 تم حفظ معلومات الحساب الموجود');
+    }
+}
                 
                 pendingBookings.push({
                     id: doc.id,
@@ -5543,8 +5569,14 @@ async function processSingleBooking(bookingId, isExistingCustomer) {
     });
     
     try {
-        const processResult = await autoCreateAccountAndAssignCourse(bookingId, true);
-        
+        // جلب بيانات الطالب الكاملة
+const studentDoc = await db.collection('individualStudents').doc(bookingId).get();
+const studentData = studentDoc.data();
+const fromTelegram = studentData.telegramChatId ? true : false;
+
+// المعالجة مع تمرير معلومات الحساب
+const processResult = await autoCreateAccountAndAssignCourse(bookingId, fromTelegram);
+        console.log('📊 نتيجة المعالجة:', processResult);
         if (processResult && processResult.success) {
             await Swal.fire({
                 icon: 'success',
