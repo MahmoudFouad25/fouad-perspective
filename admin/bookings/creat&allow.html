@@ -4330,6 +4330,106 @@ async function autoCreateAccountAndAssignCourse(studentId, fromTelegram = false)
                 ...studentDoc.data()
             };
         }
+
+        // ✅ أولاً: التحقق من المعلومات المحفوظة مسبقاً
+if (student.userAccountInfo && student.userAccountInfo.hasExistingAccount) {
+    console.log('✅ تم العثور على معلومات الحساب المحفوظة مسبقاً');
+    
+    const existingUserId = student.userAccountInfo.existingUserId;
+    
+    // تخطي عملية البحث والانتقال مباشرة للتخصيص
+    console.log('✅ حساب موجود - سيتم تخصيص الدورة له:', existingUserId);
+    
+    // تحديث بيانات الطالب
+    await db.collection('individualStudents').doc(studentId).update({
+        accountCreated: true,
+        accountStatus: 'active',
+        userId: existingUserId,
+        accountLinkedAt: new Date().toISOString(),
+        linkedToExistingAccount: true
+    });
+    
+    // تخصيص الدورة
+    if (student.courseName) {
+        await autoAssignCourse(studentId, existingUserId);
+    }
+    
+    // إرسال رسالة تليجرام
+    if (fromTelegram && student.telegramChatId) {
+        const autoLoginToken = generateSecureToken();
+        
+        await db.collection('users').doc(existingUserId).update({
+            'auth.telegramAutoLoginToken': autoLoginToken,
+            'auth.tokenGeneratedAt': new Date().toISOString()
+        });
+        
+        const autoLoginUrl = `https://mahmoudfouad25.github.io/fouad-perspective/login.html?uid=${existingUserId}&token=${autoLoginToken}`;
+        
+        const message = `
+✅ *تم تخصيص الدورة بنجاح!*
+━━━━━━━━━━━━━━━━━━
+
+مرحباً ${student.customer?.name || 'عميلنا العزيز'} 🌟
+
+تم إضافة دورة جديدة لحسابك الموجود بنجاح!
+
+📚 *الدورة المخصصة:*
+${student.courseName}
+
+━━━━━━━━━━━━━━━━━━
+*للدخول السريع:*
+اضغط على الزرار أدناه 👇
+
+💡 *ملاحظة:*
+الدورة الجديدة تمت إضافتها لحسابك الحالي مباشرة
+
+مع تحيات فريق منظور الفؤاد 💜
+        `.trim();
+        
+        await fetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/send-custom-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: student.telegramChatId,
+                message: message,
+                buttons: [
+                    [{ text: '⚡ دخول سريع للمنصة', url: autoLoginUrl }],
+                    [{ text: '✅ الحساب يعمل بنجاح', callback_data: 'account_working' }]
+                ]
+            })
+        });
+    }
+    
+    // تحديث العرض
+    if (typeof allStudents !== 'undefined') {
+        const studentIndex = allStudents.findIndex(s => s.id === studentId);
+        if (studentIndex !== -1) {
+            allStudents[studentIndex] = {
+                ...allStudents[studentIndex],
+                accountCreated: true,
+                accountStatus: 'active',
+                userId: existingUserId,
+                linkedToExistingAccount: true
+            };
+        }
+    }
+    
+    if (typeof filterByTab === 'function') {
+        filterByTab(currentFilter || 'all');
+    }
+    if (typeof updateStatistics === 'function') {
+        updateStatistics();
+    }
+    
+    console.log('✅ تم تخصيص الدورة للحساب الموجود بنجاح');
+    
+    return {
+        success: true,
+        accountExisted: true,
+        userId: existingUserId,
+        message: 'تم تخصيص الدورة للحساب الموجود'
+    };
+}
         
         // 🔍 البحث عن حساب موجود للعميل
         const customerPhone = student.customer?.phone || student.phone;
