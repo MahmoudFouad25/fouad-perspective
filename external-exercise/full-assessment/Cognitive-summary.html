@@ -552,6 +552,75 @@
             '9': { name: 'التقييم من خلال التوازن', icon: '⚖️', group: 'evaluation', groupName: '🔍 التقييم' }
         };
         
+        // Scan Firebase to find all exercises
+        async function scanFirebaseExercises() {
+            console.log('🔍 بدء فحص Firebase...');
+            
+            try {
+                const exercisesRef = db.collection('courses')
+                    .doc(courseId)
+                    .collection('users')
+                    .doc(userId)
+                    .collection('exercises');
+                
+                const snapshot = await exercisesRef.get();
+                
+                console.log(`📦 عدد التمارين المتاحة: ${snapshot.size}`);
+                
+                const exercises = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    exercises.push({
+                        id: doc.id,
+                        completed: data.completed || false,
+                        results: data.results || null,
+                        completedAt: data.completedAt || null
+                    });
+                });
+                
+                console.table(exercises);
+                
+                // Find perceptual modules by checking results structure
+                const perceptualModules = {
+                    module13: null,
+                    module14: null,
+                    module15: null
+                };
+                
+                exercises.forEach(ex => {
+                    if (!ex.results || !ex.results.scores) return;
+                    
+                    const scores = ex.results.scores;
+                    
+                    // Module 13: has type1, type3, type6
+                    if (scores.type1 !== undefined && scores.type3 !== undefined && scores.type6 !== undefined &&
+                        scores.type4 === undefined && scores.type7 === undefined) {
+                        perceptualModules.module13 = ex.id;
+                        console.log('✅ وجدت المحطة 13 (التنفيذ):', ex.id);
+                    }
+                    
+                    // Module 14: has type4, type7, type8
+                    if (scores.type4 !== undefined && scores.type7 !== undefined && scores.type8 !== undefined &&
+                        scores.type1 === undefined && scores.type2 === undefined) {
+                        perceptualModules.module14 = ex.id;
+                        console.log('✅ وجدت المحطة 14 (الابتكار):', ex.id);
+                    }
+                    
+                    // Module 15: has type2, type5, type9
+                    if (scores.type2 !== undefined && scores.type5 !== undefined && scores.type9 !== undefined &&
+                        scores.type1 === undefined && scores.type4 === undefined) {
+                        perceptualModules.module15 = ex.id;
+                        console.log('✅ وجدت المحطة 15 (التقييم):', ex.id);
+                    }
+                });
+                
+                return perceptualModules;
+            } catch (error) {
+                console.error('❌ خطأ في فحص Firebase:', error);
+                return null;
+            }
+        }
+        
         // Main function
         async function loadAndDisplayResults() {
             try {
@@ -559,11 +628,24 @@
                     throw new Error('معلومات المستخدم غير موجودة');
                 }
                 
+                // First, scan Firebase to find correct module IDs
+                console.log('🔍 فحص Firebase للعثور على المحطات...');
+                const discoveredModules = await scanFirebaseExercises();
+                
+                // Use discovered IDs or fall back to default
+                const finalModuleIds = {
+                    module13: discoveredModules?.module13 || moduleIds.module13,
+                    module14: discoveredModules?.module14 || moduleIds.module14,
+                    module15: discoveredModules?.module15 || moduleIds.module15
+                };
+                
+                console.log('📌 استخدام Module IDs:', finalModuleIds);
+                
                 // Fetch data from all three modules
                 let [module13Data, module14Data, module15Data] = await Promise.all([
-                    getModuleData(moduleIds.module13),
-                    getModuleData(moduleIds.module14),
-                    getModuleData(moduleIds.module15)
+                    getModuleData(finalModuleIds.module13),
+                    getModuleData(finalModuleIds.module14),
+                    getModuleData(finalModuleIds.module15)
                 ]);
                 
                 // Check if any module is missing and show appropriate message
@@ -592,13 +674,13 @@
                     `);
                 }
                 
-                console.log('Module 13:', module13Data);
-                console.log('Module 14:', module14Data);
-                console.log('Module 15:', module15Data);
+                console.log('📊 Module 13 Data:', module13Data);
+                console.log('📊 Module 14 Data:', module14Data);
+                console.log('📊 Module 15 Data:', module15Data);
                 
                 // Calculate results
                 const results = calculateResults(module13Data, module14Data, module15Data);
-                console.log('Calculated Results:', results);
+                console.log('✅ Calculated Results:', results);
                 
                 // Display results
                 displayRanking(results.allTypes);
@@ -612,10 +694,11 @@
                 document.getElementById('mainContent').style.display = 'block';
                 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('❌ Error:', error);
                 document.getElementById('loadingSection').innerHTML = `
                     <p style="color: #ef4444; font-size: 1.2rem;">⚠️ حدث خطأ في تحميل النتائج</p>
                     <p style="color: rgba(255, 255, 255, 0.7); margin-top: 1rem;">${error.message}</p>
+                    <p style="color: rgba(255, 255, 255, 0.6); margin-top: 0.5rem; font-size: 0.9rem;">افتح Console (F12) لمزيد من التفاصيل</p>
                 `;
             }
         }
