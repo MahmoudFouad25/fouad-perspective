@@ -1152,6 +1152,10 @@
 .highlight-blue:hover {
     background: linear-gradient(transparent 50%, rgba(59, 130, 246, 0.7) 50%);
 }
+        /* تأثير عند الانتقال للتظليل */
+[data-highlight-id] {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
 
 /* قائمة الألوان عند التحديد */
 .highlight-menu {
@@ -1762,7 +1766,10 @@ body.sepia-mode ::-webkit-scrollbar-track {
     <!-- Highlights Panel -->
 <div class="highlights-panel" id="highlightsPanel">
     <div class="highlights-header">
-        <h3 class="highlights-title">✨ التظليلات</h3>
+        <div style="display: flex; align-items: center; gap: 10px;">
+    <h3 class="highlights-title">✨ التظليلات</h3>
+    <span class="highlights-count">0</span>
+</div>
         <button class="close-btn" id="closeHighlights">✕</button>
     </div>
     <div id="highlightsList" class="highlights-list">
@@ -2640,6 +2647,279 @@ function escapeRegex(string) {
 }
 
 console.log('✅ نظام التظليل جاهز');
+// اكتشاف تحديد النص
+document.addEventListener('mouseup', (e) => {
+    // تجاهل لو الضغط في القوائم
+    if (e.target.closest('.highlight-menu') || 
+        e.target.closest('.highlights-panel') ||
+        e.target.closest('.settings-panel') ||
+        e.target.closest('.note-modal')) {
+        return;
+    }
+    
+    const selection = window.getSelection();
+    const text = selection.toString().trim();
+    
+    // لو في نص محدد
+    if (text.length > 0) {
+        selectedText = text;
+        selectedRange = selection.getRangeAt(0);
+        
+        // التحقق من أن النص محدد من فقرة قابلة للتظليل
+        const container = selection.anchorNode.parentElement;
+        if (container.closest('.story-paragraph') || 
+            container.closest('.quote-block') ||
+            container.closest('.emphasis-block') ||
+            container.closest('.moment-preview') ||
+            container.closest('.modal-story')) {
+            
+            showHighlightMenu(e.pageX, e.pageY);
+        }
+    } else {
+        hideHighlightMenu();
+    }
+});
+
+// إظهار قائمة الألوان
+function showHighlightMenu(x, y) {
+    highlightMenu.style.left = x + 'px';
+    highlightMenu.style.top = (y - 100) + 'px';
+    highlightMenu.classList.add('active');
+    
+    // التحقق من وجود تظليل على هذا النص
+    const existingHighlight = highlights.find(h => h.text === selectedText);
+    if (existingHighlight) {
+        removeHighlightBtn.style.display = 'block';
+        currentHighlightId = existingHighlight.id;
+    } else {
+        removeHighlightBtn.style.display = 'none';
+        currentHighlightId = null;
+    }
+}
+
+// إخفاء قائمة الألوان
+function hideHighlightMenu() {
+    highlightMenu.classList.remove('active');
+}
+
+// إخفاء القائمة عند الضغط في أي مكان
+document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('.highlight-menu')) {
+        hideHighlightMenu();
+    }
+});
+
+// أزرار الألوان
+document.querySelectorAll('.color-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const color = btn.dataset.color;
+        
+        // التحقق من وجود تظليل قديم على نفس النص
+        const existingIndex = highlights.findIndex(h => h.text === selectedText);
+        
+        if (existingIndex !== -1) {
+            // تحديث اللون فقط
+            highlights[existingIndex].color = color;
+        } else {
+            // إضافة تظليل جديد
+            const highlight = {
+                id: Date.now(),
+                text: selectedText,
+                color: color,
+                note: '',
+                createdAt: new Date().toISOString()
+            };
+            highlights.push(highlight);
+        }
+        
+        saveHighlights();
+        applyHighlights();
+        hideHighlightMenu();
+        
+        // مسح التحديد
+        window.getSelection().removeAllRanges();
+        
+        // إشعار
+        showNotification(`✅ تم التظليل بـ ${getColorName(color)}`);
+        
+        // تحديث العداد
+        updateHighlightsCount();
+        
+        console.log('✅ تم إضافة تظليل:', selectedText.substring(0, 30) + '...');
+    });
+});
+
+// زر حذف التظليل
+if (removeHighlightBtn) {
+    removeHighlightBtn.addEventListener('click', () => {
+        if (currentHighlightId) {
+            removeHighlight(currentHighlightId);
+        }
+        hideHighlightMenu();
+    });
+}
+
+// حذف تظليل
+function removeHighlight(id) {
+    const index = highlights.findIndex(h => h.id === id);
+    if (index !== -1) {
+        highlights.splice(index, 1);
+        saveHighlights();
+        applyHighlights();
+        renderHighlights();
+        updateHighlightsCount();
+        showNotification('🗑️ تم حذف التظليل');
+        console.log('🗑️ تم حذف تظليل');
+    }
+}
+
+// أسماء الألوان
+function getColorName(color) {
+    const names = {
+        yellow: 'الأصفر 🟡',
+        green: 'الأخضر 🟢',
+        red: 'الأحمر 🔴',
+        blue: 'الأزرق 🔵'
+    };
+    return names[color] || color;
+}
+
+// إشعار بسيط
+function showNotification(message) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, var(--adam-accent), var(--adam-blue));
+        color: white;
+        padding: 15px 30px;
+        border-radius: 50px;
+        box-shadow: 0 8px 30px rgba(83, 52, 131, 0.5);
+        z-index: 10003;
+        font-family: var(--font-ui);
+        font-size: 14px;
+        font-weight: 600;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+    `;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => notification.style.opacity = '1', 100);
+    setTimeout(() => notification.style.opacity = '0', 2500);
+    setTimeout(() => notification.remove(), 3000);
+}
+
+// تحديث عداد التظليلات
+function updateHighlightsCount() {
+    const countEl = document.querySelector('.highlights-count');
+    if (countEl) {
+        countEl.textContent = highlights.length;
+    }
+}
+
+        // عرض التظليلات في القائمة
+function renderHighlights() {
+    if (highlights.length === 0) {
+        highlightsList.style.display = 'none';
+        highlightsEmpty.style.display = 'block';
+        updateHighlightsCount();
+        return;
+    }
+    
+    highlightsList.style.display = 'flex';
+    highlightsEmpty.style.display = 'none';
+    
+    highlightsList.innerHTML = highlights.map(highlight => `
+        <div class="highlight-item ${highlight.color}" data-highlight-id="${highlight.id}">
+            <div class="highlight-text">"${highlight.text.substring(0, 100)}${highlight.text.length > 100 ? '...' : ''}"</div>
+            ${highlight.note ? `<div class="highlight-note">📝 ${highlight.note}</div>` : ''}
+            <div class="highlight-actions">
+                <button class="highlight-action-btn" onclick="scrollToHighlight(${highlight.id})">📍 الانتقال</button>
+                <button class="highlight-action-btn" onclick="addNoteToHighlight(${highlight.id})">📝 ملاحظة</button>
+                <button class="highlight-action-btn delete" onclick="removeHighlight(${highlight.id})">🗑️ حذف</button>
+            </div>
+        </div>
+    `).join('');
+    
+    updateHighlightsCount();
+}
+
+// الانتقال إلى تظليل
+function scrollToHighlight(id) {
+    const highlightEl = document.querySelector(`[data-highlight-id="${id}"]`);
+    if (highlightEl && highlightEl.classList.contains('highlight-yellow', 'highlight-green', 'highlight-red', 'highlight-blue')) {
+        highlightEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        // تأثير بصري
+        highlightEl.style.transform = 'scale(1.05)';
+        setTimeout(() => {
+            highlightEl.style.transform = 'scale(1)';
+        }, 300);
+        
+        // إغلاق اللوحة على الموبايل
+        if (window.innerWidth <= 768) {
+            highlightsPanel.classList.remove('open');
+            settingsOverlay.classList.remove('active');
+            highlightsBtn.classList.remove('active');
+        }
+    }
+}
+
+// إضافة ملاحظة لتظليل
+function addNoteToHighlight(id) {
+    currentHighlightId = id;
+    const highlight = highlights.find(h => h.id === id);
+    
+    if (highlight) {
+        noteTextarea.value = highlight.note || '';
+        noteModal.classList.add('active');
+        noteTextarea.focus();
+    }
+}
+
+// حفظ الملاحظة
+if (saveNoteBtn) {
+    saveNoteBtn.addEventListener('click', () => {
+        if (currentHighlightId) {
+            const highlight = highlights.find(h => h.id === currentHighlightId);
+            if (highlight) {
+                highlight.note = noteTextarea.value.trim();
+                saveHighlights();
+                renderHighlights();
+                noteModal.classList.remove('active');
+                showNotification('💾 تم حفظ الملاحظة');
+            }
+        }
+    });
+}
+
+// إلغاء الملاحظة
+if (cancelNoteBtn) {
+    cancelNoteBtn.addEventListener('click', () => {
+        noteModal.classList.remove('active');
+        noteTextarea.value = '';
+    });
+}
+
+// إغلاق Modal عند الضغط خارجها
+noteModal.addEventListener('click', (e) => {
+    if (e.target === noteModal) {
+        noteModal.classList.remove('active');
+        noteTextarea.value = '';
+    }
+});
+
+// تحميل التظليلات عند تحميل الصفحة
+window.addEventListener('load', () => {
+    loadHighlights();
+    renderHighlights();
+});
+
+console.log('✅ نظام التظليل مكتمل بالكامل!');
         
         
         // Load Saved Settings
