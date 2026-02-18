@@ -17,7 +17,7 @@
     <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     
-    <!-- <script src="./js/security-layer.js"></script> -->
+    <script src="./js/security-layer.js"></script>
     <style>
       :root {
     /* ✨ هوية ملاذ الحياري - مرحلة النداء */
@@ -4923,7 +4923,7 @@ let moduleCompletionBadges = {};
         }
     }
 
-   // Load All Required Data - نسخة محدثة
+  // Load All Required Data - نسخة محدثة
 async function loadAllData() {
     try {
         console.log('📋 تحميل بيانات الدورة:', courseId);
@@ -5059,50 +5059,90 @@ async function loadAllData() {
         console.log('💰 نقاط المحفظة:', userWalletPoints);
         console.log('🏅 الشارات:', userBadges);
 
-        // 🆕 Migration: تحويل البيانات القديمة تلقائياً (قبل عرض الدروس)
-        if (userProgress.completedLessons && userProgress.completedLessons.length > 0 && !userProgress.completedLessonsIds) {
-            console.log('🔄 تحويل البيانات القديمة...');
-            const completedIds = [];
-            userProgress.completedLessons.forEach(idx => {
-                const lesson = allLessons[idx];
-                if (lesson?.libraryContentId) {
-                    completedIds.push(lesson.libraryContentId);
-                }
-            });
-            if (completedIds.length > 0) {
-                await db.collection('users').doc(userId).update({
-                    [`progress.${currentCourseId}.completedLessonsIds`]: completedIds
+        // ⚠️ أولاً: عرض الدروس لملء allLessons
+        displayModulesAndLessons();
+        
+        console.log('📚 allLessons بعد displayModulesAndLessons:', allLessons?.length);
+
+        // 🆕 Migration شامل (بعد ما allLessons اتملت)
+        try {
+            const hasValidIds = userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0;
+            
+            if (!hasValidIds && allLessons && allLessons.length > 0) {
+                console.log('🔄 Migration: بناء completedLessonsIds...');
+                
+                // جلب السجلات من lessonCompletionHistory
+                const historySnapshot = await db.collection('lessonCompletionHistory')
+                    .where('userId', '==', userId)
+                    .where('courseId', '==', currentCourseId)
+                    .get();
+                
+                const completedIds = new Set();
+                
+                // من السجلات (الأدق)
+                historySnapshot.forEach(doc => {
+                    const record = doc.data();
+                    if (record.libraryContentId) {
+                        completedIds.add(record.libraryContentId);
+                    }
                 });
-                userProgress.completedLessonsIds = completedIds;
-                console.log('✅ تم التحويل!', completedIds.length, 'درس');
+                
+                console.log('📥 IDs من السجلات:', completedIds.size);
+                
+                // لو مفيش سجلات، نجرب من indexes القديمة
+                if (completedIds.size === 0 && userProgress.completedLessons?.length > 0) {
+                    console.log('🔄 Fallback: بناء من indexes القديمة...');
+                    userProgress.completedLessons.forEach(idx => {
+                        const lesson = allLessons[idx];
+                        if (lesson?.libraryContentId) {
+                            completedIds.add(lesson.libraryContentId);
+                        }
+                    });
+                }
+                
+                // حفظ
+                if (completedIds.size > 0) {
+                    const idsArray = Array.from(completedIds);
+                    await db.collection('users').doc(userId).update({
+                        [`progress.${currentCourseId}.completedLessonsIds`]: idsArray
+                    });
+                    userProgress.completedLessonsIds = idsArray;
+                    console.log('✅ Migration ناجح!', idsArray.length, 'درس');
+                }
             }
+            
+            // تحديث indexes من IDs (للتوافق)
+            if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0 && allLessons && allLessons.length > 0) {
+                const syncedIndexes = userProgress.completedLessonsIds
+                    .map(id => allLessons.findIndex(l => l.libraryContentId === id))
+                    .filter(idx => idx >= 0);
+                userProgress.completedLessons = syncedIndexes;
+                console.log('🔄 Sync indexes:', syncedIndexes.length);
+            }
+            
+            // تنضيف IDs لدروس محذوفة (فقط لو allLessons فيها دروس)
+            if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0 && allLessons && allLessons.length > 0) {
+                const validIds = new Set(allLessons.map(l => l.libraryContentId).filter(id => id));
+                
+                // فقط لو فيه IDs صالحة
+                if (validIds.size > 0) {
+                    const cleanedIds = userProgress.completedLessonsIds.filter(id => validIds.has(id));
+                    if (cleanedIds.length !== userProgress.completedLessonsIds.length && cleanedIds.length > 0) {
+                        console.log('🧹 تنضيف:', userProgress.completedLessonsIds.length - cleanedIds.length, 'درس محذوف');
+                        userProgress.completedLessonsIds = cleanedIds;
+                        await db.collection('users').doc(userId).update({
+                            [`progress.${currentCourseId}.completedLessonsIds`]: cleanedIds
+                        });
+                    }
+                }
+            }
+            
+        } catch (error) {
+            console.error('❌ خطأ في Migration:', error);
         }
 
-       // الآن نعرض الدروس بعد Migration
-displayModulesAndLessons();
-
-// 🆕 تحديث indexes من IDs (بعد ما allLessons اتملت)
-if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0) {
-    const syncedIndexes = userProgress.completedLessonsIds
-        .map(id => allLessons.findIndex(l => l.libraryContentId === id))
-        .filter(idx => idx >= 0);
-    userProgress.completedLessons = syncedIndexes;
-    console.log('🔄 تم مزامنة indexes:', syncedIndexes);
-
-       // 🧹 تنضيف تلقائي: حذف IDs لدروس غير موجودة في الدورة
-const validIds = new Set(allLessons.map(l => l.libraryContentId).filter(id => id));
-const cleanedIds = userProgress.completedLessonsIds.filter(id => validIds.has(id));
-if (cleanedIds.length !== userProgress.completedLessonsIds.length) {
-    console.log(`🧹 تنضيف: حذف ${userProgress.completedLessonsIds.length - cleanedIds.length} درس محذوف`);
-    userProgress.completedLessonsIds = cleanedIds;
-    await db.collection('users').doc(userId).update({
-        [`progress.${currentCourseId}.completedLessonsIds`]: cleanedIds
-    });
-}
-    
-    // إعادة عرض الدروس بعد المزامنة
-    displayModulesAndLessons();
-}
+        // إعادة عرض الدروس بعد Migration
+        displayModulesAndLessons();
         
         // استخراج النقاط من الدروس
         await loadLessonPoints();
@@ -6597,6 +6637,13 @@ if (avatar) {
             if (module.lessons && module.lessons.length > 0) {
                 module.lessons.forEach((lesson, lessonIndex) => {
                     const globalIndex = allLessons.length;
+                    
+                    // 🆕 جلب نوع المحتوى من المكتبة إن وُجد
+                    let libraryContentType = lesson.type; // fallback
+                    if (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
+                        libraryContentType = courseContentDetails[lesson.libraryContentId].type;
+                    }
+                    
                     // نضيف معرف المحتوى للدرس
                     const lessonData = {
                         ...lesson,
@@ -6604,13 +6651,15 @@ if (avatar) {
                         moduleIndex: moduleIndex,
                         lessonIndex: lessonIndex,
                         globalIndex: globalIndex,
-                        contentId: lesson.libraryContentId // مهم جداً
-                    };
+                        contentId: lesson.libraryContentId, // مهم جداً
+                        libraryContentType: libraryContentType // 🆕 إضافة نوع المحتوى
+                        };
                     allLessons.push(lessonData);
                     moduleLessons.push({
                         ...lesson,
                         globalIndex: globalIndex,
-                        contentId: lesson.libraryContentId
+                        contentId: lesson.libraryContentId,
+                        libraryContentType: libraryContentType // 🆕 إضافة نوع المحتوى
                     });
                     // امسح السطور المكررة من هنا
                 });
@@ -6708,6 +6757,12 @@ if (!isCompleted && (lesson.libraryContentType === 'pillar-exercise' || lesson.t
             const isNext = !isCompleted && (index === 0 || completedLessons.includes(index - 1));
             isLocked = !isCompleted && !isNext;
         }
+
+        // 🔒 فحص تفعيل الدرس من الإدارة
+        const isDisabledByAdmin = lesson.isEnabled === false;
+        if (isDisabledByAdmin) {
+            isLocked = true; // إذا معطّل من الإدارة، يصبح مقفل
+        }
        
         let itemClass = 'lesson-item';
         if (isCompleted) {
@@ -6730,9 +6785,16 @@ if (isCompleted) {
     }
     buttonClass = 'lesson-btn btn-completed';
         } else if (isLocked) {
-            buttonText = 'مقفل';
-            buttonClass = 'lesson-btn btn-lock';
-            buttonIcon = 'fa-lock';
+            // 🔒 تمييز الدروس المعطّلة من الإدارة عن المقفلة بالتسلسل
+            if (isDisabledByAdmin) {
+                buttonText = 'غير متاح حالياً';
+                buttonClass = 'lesson-btn btn-disabled';
+                buttonIcon = 'fa-clock';
+            } else {
+                buttonText = 'مقفل';
+                buttonClass = 'lesson-btn btn-lock';
+                buttonIcon = 'fa-lock';
+            }
         } else {
             // 🆕 تحديد النص حسب نوع المحتوى
 if (lesson.libraryContentType === 'pillar-exercise' || 
@@ -6907,18 +6969,23 @@ if (lesson.libraryContentType === 'pillar-exercise' ||
        }
 
        function getTypeLabel(type) {
-           const labels = {
-               'video': 'فيديو',
-               'text': 'نص',
-               'quiz': 'اختبار',
-               'assignment': 'مهمة',
-               'resource': 'مورد',
-               'live': 'جلسة حية',
-               'library-content': 'محتوى',
-               'file': 'ملف'
-           };
-           return labels[type] || 'درس';
-       }
+    const labels = {
+        'video': 'فيديو',
+        'educational-video': 'فيديو تعليمي',
+        'text': 'نص',
+        'quiz': 'اختبار',
+        'assignment': 'مهمة',
+        'resource': 'مورد',
+        'live': 'جلسة حية',
+        'library-content': 'محتوى',
+        'file': 'ملف',
+        'external-exercise': 'تمرين خارجي',
+        'pillar-exercise': 'تمرين',
+        'exercise': 'تمرين'
+    };
+    return labels[type] || 'درس';
+}
+
 
       // Display User Progress - نسخة محدثة
 // Display User Progress - نسخة محدثة
@@ -7057,6 +7124,19 @@ document.addEventListener('DOMContentLoaded', function() {
 async function startLesson(lessonIndex) {
     const lesson = allLessons[lessonIndex];
     if (!lesson) return;
+
+    // 🔒 التحقق من تفعيل الدرس
+    if (lesson.isEnabled === false) {
+        Swal.fire({
+            icon: 'info',
+            title: '⏳ هذا الدرس غير متاح حالياً',
+            html: '<p style="color: #64748b; font-size: 1.1rem; line-height: 1.8;">سيتم إتاحة هذا الدرس قريباً إن شاء الله</p>',
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#3b82f6'
+        });
+        return;
+    }
+    
     
     currentLessonIndex = lessonIndex;
     currentLesson = lesson; // 👈 ده السطر المضاف المهم
@@ -7375,9 +7455,11 @@ async function startVideoJourney() {
     displayPillarExercise(contentData, lesson.libraryContentId);
     break;
 
-                           case 'external-exercise':  // 🆕 أضف السطرين دول
-        displayExternalExercise(contentData, lesson.libraryContentId);
-        break;
+                           case 'external-exercise':
+    // 🆕 خلي التمارين الخارجية fullscreen
+    makeModalFullscreen();
+    displayExternalExercise(contentData, lesson.libraryContentId);
+    break;
 
                    default:
                        displayGenericContent(contentData);
@@ -7594,10 +7676,10 @@ currentContentData = {
                 </div>
             `;
         } else {
-            // بدون لحظات تأمل
+            // بدون لحظات تأمل - فيديو عادي
             enhancedVideoHtml += `
                 <div style="
-                    margin-bottom: ${(hasKeyPoints || hasReviewQuestions || hasNotes) ? '24px' : '0'};
+                    margin-bottom: 24px;
                     padding: 8px;
                     background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.05));
                     border-radius: 16px;
@@ -7800,8 +7882,12 @@ const immediateReflection = contentData.videoData?.immediateReflection || {
     witness: 0
 };
 const immediateReflectionTotal = immediateReflection.courage + immediateReflection.mirror + immediateReflection.action + immediateReflection.witness;
+        const hasImmediateReflection = immediateReflectionTotal > 0;
         // 6️⃣ التأمل الفوري - بعد المشاهدة
-        if (hasReflectionMoments) {
+        // 🆕 التحقق من تفعيل التأملات الفورية
+        const immediateReflectionEnabled = currentLesson?.enableImmediateReflection !== false;
+        
+        if (hasImmediateReflection && immediateReflectionEnabled) {
             enhancedVideoHtml += `
                 <div id="immediateReflectionSection" style="
                     background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.1));
@@ -15130,6 +15216,24 @@ function showLoading(message = 'جاري التحميل...') {
     #questionsModal {
         z-index: 2147483646 !important;
     }
+
+    /* 🔒 تنسيق الدروس المعطّلة من الإدارة */
+.lesson-item .btn-disabled {
+    background: linear-gradient(135deg, rgba(100, 116, 139, 0.2), rgba(71, 85, 105, 0.15));
+    border: 2px solid rgba(100, 116, 139, 0.4);
+    color: #94a3b8;
+    cursor: not-allowed;
+}
+
+.lesson-item .btn-disabled:hover {
+    background: linear-gradient(135deg, rgba(100, 116, 139, 0.25), rgba(71, 85, 105, 0.2));
+    transform: none;
+}
+
+.lesson-item .btn-disabled i {
+    color: #cbd5e1;
+}
+
 </style>
         </style>
     `;
@@ -15745,6 +15849,8 @@ const lesson = lastCompletedLesson;
        // Close Lesson Player
        // Close Lesson Player
 function closeLessonPlayer() {
+    // 🆕 إرجاع حجم الـ modal العادي
+    resetModalSize();
     // 🆕 إخفاء الطقس إذا كان ظاهراً
     const ritualContainer = document.getElementById('preVideoRitual');
     if (ritualContainer) {
@@ -20200,6 +20306,7 @@ async function displayExternalExercise(contentData, libraryContentId) {
     }
 }
 
+       
 // ==========================================
 // 📺 عرض في iframe
 // ==========================================
@@ -20210,36 +20317,75 @@ function displayExternalExerciseInIframe(contentData, url, libraryContentId, ext
         return;
     }
     
+    // 🆕 خلي الـ container ياخد المساحة كلها
+    container.style.padding = '0';
+    container.style.margin = '0';
+    container.style.maxWidth = '100%';
+    container.style.width = '100%';
+    container.style.height = '100%';
+    
     container.style.display = 'block';
     
+    // 🆕 تحسين للموبايل
+    const isMobile = window.innerWidth <= 768;
+    const headerHeight = isMobile ? '140px' : '80px';
+    const containerPadding = isMobile ? '0.5rem' : '0.8rem';
+    
     const html = `
-        <div style="padding: 1rem; max-width: 100%; margin: 0 auto;">
+        <div style="
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+        ">
+            <!-- العنوان والوصف - مضغوط -->
             <div style="
                 text-align: center;
-                margin-bottom: 1.5rem;
-                padding: 1.5rem;
+                padding: ${containerPadding};
                 background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
-                border-radius: 12px;
+                border-radius: 8px;
                 border: 2px solid rgba(245, 158, 11, 0.3);
+                margin-bottom: 0.5rem;
+                flex-shrink: 0;
             ">
-                <h2 style="color: #f59e0b; margin: 0 0 0.5rem 0; font-size: 1.8rem;">
+                <h2 style="
+                    color: #f59e0b;
+                    margin: 0;
+                    font-size: ${isMobile ? '1.2rem' : '1.5rem'};
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                ">
                     🌐 ${contentData.name}
                 </h2>
                 ${contentData.description ? `
-                    <p style="color: rgba(255, 255, 255, 0.8); margin: 0; font-size: 1rem;">
+                    <p style="
+                        color: rgba(255, 255, 255, 0.8);
+                        margin: 0.3rem 0 0 0;
+                        font-size: ${isMobile ? '0.85rem' : '0.95rem'};
+                    ">
                         ${contentData.description}
                     </p>
                 ` : ''}
-                <div style="margin-top: 1rem; color: #fbbf24; font-size: 0.9rem;">
+                <div style="
+                    margin-top: 0.3rem;
+                    color: #fbbf24;
+                    font-size: ${isMobile ? '0.8rem' : '0.85rem'};
+                ">
                     <i class="fas fa-star"></i> ${externalData.totalPoints || 0} نقطة
                 </div>
             </div>
             
+            <!-- الـ iframe - ياخد باقي المساحة كلها -->
             <div style="
                 position: relative;
                 width: 100%;
-                height: 80vh;
-                border-radius: 12px;
+                flex: 1;
+                min-height: ${isMobile ? '500px' : '600px'};
+                border-radius: 8px;
                 overflow: hidden;
                 border: 2px solid rgba(245, 158, 11, 0.2);
                 background: rgba(0, 0, 0, 0.2);
@@ -20251,6 +20397,7 @@ function displayExternalExerciseInIframe(contentData, url, libraryContentId, ext
                         width: 100%;
                         height: 100%;
                         border: none;
+                        display: block;
                     "
                     allow="fullscreen"
                 ></iframe>
@@ -20260,7 +20407,7 @@ function displayExternalExerciseInIframe(contentData, url, libraryContentId, ext
     
     container.innerHTML = html;
     
-    console.log('✅ تم عرض التمرين في iframe');
+    console.log('✅ تم عرض التمرين في iframe - عرض كامل');
     
     // إخفاء زر "إكمال الدرس"
     const completeLessonBtn = document.getElementById('completeLessonBtn');
@@ -20270,6 +20417,50 @@ function displayExternalExerciseInIframe(contentData, url, libraryContentId, ext
     
     // الاستماع لرسائل من الـ iframe
     window.addEventListener('message', handleExternalExerciseMessage);
+}
+
+       // 🆕 دالة لتحويل الـ modal لـ fullscreen للتمارين
+function makeModalFullscreen() {
+    const modal = document.getElementById('lessonModal');
+    const modalContent = document.querySelector('.lesson-player');
+    
+    if (modal && modalContent) {
+        // خلي الـ modal ياخد الشاشة كلها
+        modal.style.padding = '0';
+        modalContent.style.maxWidth = '100vw';
+        modalContent.style.width = '100vw';
+        modalContent.style.height = '100vh';
+        modalContent.style.margin = '0';
+        modalContent.style.borderRadius = '0';
+        
+        // خلي الـ content area تاخد كل المساحة
+        const lessonContent = document.querySelector('.lesson-content');
+        if (lessonContent) {
+            lessonContent.style.padding = '0';
+            lessonContent.style.height = 'calc(100vh - 60px)';
+        }
+    }
+}
+
+// 🆕 دالة لإرجاع الـ modal للحجم العادي
+function resetModalSize() {
+    const modal = document.getElementById('lessonModal');
+    const modalContent = document.querySelector('.lesson-player');
+    
+    if (modal && modalContent) {
+        modal.style.padding = '';
+        modalContent.style.maxWidth = '';
+        modalContent.style.width = '';
+        modalContent.style.height = '';
+        modalContent.style.margin = '';
+        modalContent.style.borderRadius = '';
+        
+        const lessonContent = document.querySelector('.lesson-content');
+        if (lessonContent) {
+            lessonContent.style.padding = '';
+            lessonContent.style.height = '';
+        }
+    }
 }
 
 // ==========================================
