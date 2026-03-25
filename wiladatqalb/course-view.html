@@ -85,7 +85,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--fb);font-size:var(-
 <body>
 <div class="pbar"><div class="pfill" id="pf"></div></div>
 <nav class="tbar" id="tbar"><div class="tbar-in">
-  <div class="tbar-r"><div class="tlogo" onclick="goHome()">و</div><button class="bb" onclick="toggleSide()">☰</button></div>
+  <div class="tbar-r"><a href="../my-courses.html" class="bb" title="العودة للدورات" style="text-decoration:none;font-size:13px">↩</a><div class="tlogo" onclick="goHome()">و</div><button class="bb" onclick="toggleSide()">☰</button></div>
   <div class="tbar-c" id="tbarTitle"></div>
   <div class="tbar-l"><button class="bb" onclick="toggleSett()">⚙</button><button class="bb" onclick="toggleThQ()" id="thqBtn">🌙</button></div>
 </div></nav>
@@ -94,6 +94,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--fb);font-size:var(-
   <div class="bbar-a">
     <button class="bb" onclick="toggleNotes()" title="ملاحظاتي" style="font-size:14px">📝</button>
     <button class="bb" onclick="toggleAS()" id="asBtn" title="قراءة تلقائية" style="font-size:14px">▶</button>
+    <button class="bb" onclick="goToBM()" id="goBtn" title="الذهاب لآخر موضع محفوظ" style="font-size:14px;display:none">📍</button>
     <button class="bb" onclick="saveBM()" id="bmBtn" title="حفظ الموضع" style="font-size:14px">🔖</button>
   </div>
   <div class="bbar-c"><span id="chNum"></span><span class="bbar-dot"></span><span id="chTotal"></span></div>
@@ -128,12 +129,6 @@ body{background:var(--bg);color:var(--txt);font-family:var(--fb);font-size:var(-
   <div id="notesList" style="padding:14px 18px;overflow-y:auto;flex:1"></div>
 </div>
 <div class="iframe-wrap pad" id="iframeWrap" style="display:none"><iframe id="chFrame" src="about:blank"></iframe></div>
-<!-- Bookmark resume notification -->
-<div id="bmResume" style="display:none;position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:280;background:var(--card);border:1.5px solid var(--gld);border-radius:14px;padding:12px 20px;box-shadow:0 8px 30px rgba(0,0,0,.15);text-align:center;direction:rtl;min-width:240px">
-  <div style="font-size:13px;color:var(--txt);margin-bottom:8px;font-weight:600">📍 لديك موضع محفوظ</div>
-  <button onclick="resumeBM()" style="padding:8px 24px;background:var(--grn);color:#F8F3EC;border:none;border-radius:8px;font-family:var(--fb);font-size:13px;font-weight:600;cursor:pointer;margin-left:6px">متابعة القراءة</button>
-  <button onclick="dismissBM()" style="padding:8px 16px;background:none;color:var(--muted);border:1px solid var(--bdr);border-radius:8px;font-family:var(--fb);font-size:12px;cursor:pointer">إغلاق</button>
-</div>
 <main class="mc" id="mc"><div class="loading"><div class="llogo">و</div><p>جاري التحميل...</p></div></main>
 
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -173,19 +168,35 @@ function loadBook(){
 }
 
 /* Load bookmark THEN show reader — ensures _pendingScroll is set before chapter renders */
+/* Load bookmark — reads from localStorage (instant) then falls back to Firebase */
 function loadBMThenShow(){
-  if(!uid){showReader();return}
-  db.collection('wiladatqalb_bookmarks').doc(uid).get().then(function(bm){
-    if(bm.exists){
-      var d=bm.data();
-      if(d.baabId===curBaab.id && d.chapterIdx===curChIdx && d.scrollY>100){
-        _pendingScroll=d.scrollY||0;
-        /* Show resume notification after a short delay */
-        setTimeout(function(){document.getElementById('bmResume').style.display='block'},1200);
+  /* Try localStorage first — instant, no network wait */
+  var bmLocal=localStorage.getItem('wq-bm');
+  if(bmLocal){
+    try{
+      var bm=JSON.parse(bmLocal);
+      if(bm.baabId===curBaab.id && bm.ch===curChIdx && bm.y>100){
+        _pendingScroll=bm.y;
+        /* Show the 📍 button so user can re-navigate to bookmark anytime */
+        setTimeout(function(){var g=document.getElementById('goBtn');if(g)g.style.display=''},500);
       }
-    }
-    showReader();
-  }).catch(function(){showReader()});
+    }catch(e){}
+  }
+  /* Also try Firebase as backup (async, may override) */
+  if(uid){
+    db.collection('wiladatqalb_bookmarks').doc(uid).get().then(function(doc){
+      if(doc.exists){
+        var d=doc.data();
+        if(d.baabId===curBaab.id && d.chapterIdx===curChIdx && d.scrollY>100){
+          if(!_pendingScroll){_pendingScroll=d.scrollY}
+          /* Also update localStorage for next time */
+          localStorage.setItem('wq-bm',JSON.stringify({baabId:d.baabId,ch:d.chapterIdx,y:d.scrollY}));
+          setTimeout(function(){var g=document.getElementById('goBtn');if(g)g.style.display=''},500);
+        }
+      }
+    }).catch(function(){});
+  }
+  showReader();
 }
 
 /* ═══ COVER ═══ */
@@ -287,9 +298,9 @@ function updateNav(){
   document.getElementById('navNext').style.visibility=nx?'':'hidden';document.getElementById('navPrev').style.visibility=pv?'':'hidden';
   updateSideActive();
 }
-function goNext(){if(curChIdx<curBaab.chapters.length-1){curChIdx++;_pendingScroll=0;renderCh();loadHL();loadNotes();closeAll()}}
-function goPrev(){if(curChIdx>0){curChIdx--;_pendingScroll=0;renderCh();loadHL();loadNotes();closeAll()}}
-function goToCh(idx){curChIdx=idx;_pendingScroll=0;renderCh();loadHL();loadNotes();closeAll()}
+function goNext(){if(curChIdx<curBaab.chapters.length-1){curChIdx++;_pendingScroll=0;var g=document.getElementById('goBtn');if(g)g.style.display='none';renderCh();loadHL();loadNotes();closeAll()}}
+function goPrev(){if(curChIdx>0){curChIdx--;_pendingScroll=0;var g=document.getElementById('goBtn');if(g)g.style.display='none';renderCh();loadHL();loadNotes();closeAll()}}
+function goToCh(idx){curChIdx=idx;_pendingScroll=0;var g=document.getElementById('goBtn');if(g)g.style.display='none';renderCh();loadHL();loadNotes();closeAll()}
 
 /* ═══ SIDEBAR ═══ */
 function buildSide(){
@@ -371,6 +382,9 @@ function saveProg(){if(!uid||!curBaab)return;db.collection('wiladatqalb_progress
 function saveBM(){
   if(!uid||!curBaab)return;
   var scrollVal=curMode==='iframe'?_iframeScrollY:window.scrollY;
+  /* Save to localStorage for instant access on reload */
+  localStorage.setItem('wq-bm',JSON.stringify({baabId:curBaab.id,ch:curChIdx,y:scrollVal}));
+  /* Save to Firebase as backup */
   db.collection('wiladatqalb_bookmarks').doc(uid).set({
     baabId:curBaab.id,
     chapterIdx:curChIdx,
@@ -380,8 +394,12 @@ function saveBM(){
     var b=document.getElementById('bmBtn');b.textContent='✅';setTimeout(function(){b.textContent='🔖'},1500);
   }).catch(function(){});
 }
-function resumeBM(){document.getElementById('bmResume').style.display='none';window.location.reload();}
-function dismissBM(){document.getElementById('bmResume').style.display='none';}
+/* Go to saved bookmark position — does reload so scroll works reliably */
+function goToBM(){
+  var bm=localStorage.getItem('wq-bm');
+  if(!bm)return;
+  window.location.reload();
+}
 
 /* ═══ AUTO-SCROLL ═══ */
 var asOn=false,asInt;
