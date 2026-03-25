@@ -246,6 +246,7 @@ function renderCh(){
       const ff=localStorage.getItem('wq-ff');if(ff)sendToIframe('fontFamily',ff);
       const cw=localStorage.getItem('wq-cw');if(cw)sendToIframe('contentWidth',cw);
       if(curTh)sendToIframe('theme',curTh);
+      injectIframeHL();
       renderNotes();
     };
     // Listen for scroll from iframe
@@ -278,8 +279,12 @@ function renderCh(){
 }
 
 function hideIframe(){document.getElementById('iframeWrap').style.display='none';document.getElementById('mc').style.display='';window.removeEventListener('message',handleIframeMsg)}
-function handleIframeMsg(e){if(e.data&&e.data.type==='scroll')document.getElementById('pf').style.width=e.data.pct+'%'}
+function handleIframeMsg(e){if(!e.data)return;if(e.data.type==='scroll')document.getElementById('pf').style.width=e.data.pct+'%';if(e.data.type==='iframeSel'){selTxt=e.data.text;showHLMAt(e.data.x,e.data.y)}}
 function rich(t){if(!t)return'';return t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\*(.*?)\*/g,'<em>$1</em>').replace(/\n/g,'<br>')}
+
+function injectIframeHL(){try{var doc=document.getElementById('chFrame').contentDocument;if(!doc)return;var st=doc.createElement('style');st.textContent='.hl-yellow{background:rgba(251,191,36,0.3);padding:1px 0;border-radius:2px}.hl-green{background:rgba(34,197,94,0.3);padding:1px 0;border-radius:2px}.hl-red{background:rgba(239,68,68,0.25);padding:1px 0;border-radius:2px}.hl-blue{background:rgba(59,130,246,0.25);padding:1px 0;border-radius:2px}';doc.head.appendChild(st);var sc=doc.createElement('script');sc.textContent='document.addEventListener("mouseup",function(){setTimeout(function(){var s=window.getSelection(),t=s.toString().trim();if(t.length>2){try{var r=s.getRangeAt(0).getBoundingClientRect();var fr=frameElement.getBoundingClientRect();parent.postMessage({type:"iframeSel",text:t,x:r.left+fr.left+(r.width/2),y:r.top+fr.top},"*")}catch(e){}}},150)});';doc.body.appendChild(sc);applyHLInIframe()}catch(e){}}
+
+function applyHLInIframe(){try{var doc=document.getElementById('chFrame').contentDocument;if(!doc)return;doc.querySelectorAll('[data-hlid]').forEach(function(el){var p=el.parentNode;p.replaceChild(doc.createTextNode(el.textContent),el);p.normalize()});var all=doc.querySelectorAll('p,h1,h2,h3,div,span');highlights.filter(function(h){return h.ch===curChIdx}).forEach(function(hl){all.forEach(function(c){if(!c.textContent.includes(hl.text))return;var w=doc.createTreeWalker(c,NodeFilter.SHOW_TEXT);var n;while(n=w.nextNode()){var i=n.textContent.indexOf(hl.text);if(i===-1)continue;var before=n.textContent.substring(0,i),after=n.textContent.substring(i+hl.text.length);var span=doc.createElement('span');span.className='hl-'+hl.color;span.setAttribute('data-hlid',hl.id);span.textContent=hl.text;var p=n.parentNode;if(before)p.insertBefore(doc.createTextNode(before),n);p.insertBefore(span,n);if(after)p.insertBefore(doc.createTextNode(after),n);p.removeChild(n);break}})})}catch(e){}}
 
 /* ═══ NAV ═══ */
 function updateNav(){
@@ -291,9 +296,9 @@ function updateNav(){
   document.getElementById('navNext').style.visibility=nx?'':'hidden';document.getElementById('navPrev').style.visibility=pv?'':'hidden';
   updateSideActive();
 }
-function goNext(){if(curChIdx<curBaab.chapters.length-1){curChIdx++;renderCh();closeAll()}}
-function goPrev(){if(curChIdx>0){curChIdx--;renderCh();closeAll()}}
-function goToCh(idx){curChIdx=idx;renderCh();closeAll()}
+function goNext(){if(curChIdx<curBaab.chapters.length-1){curChIdx++;renderCh();loadHL();loadNotes();closeAll()}}
+function goPrev(){if(curChIdx>0){curChIdx--;renderCh();loadHL();loadNotes();closeAll()}}
+function goToCh(idx){curChIdx=idx;renderCh();loadHL();loadNotes();closeAll()}
 
 /* ═══ SIDEBAR ═══ */
 function buildSide(){
@@ -341,7 +346,13 @@ document.addEventListener('mousedown',e=>{if(!e.target.closest('#hlm'))hideHLM()
 let notes=[];
 async function loadNotes(){if(!uid||!curBaab)return;try{const d=await db.collection('wiladatqalb_notes').doc(uid+'_'+curBaab.id).get();notes=d.exists?(d.data().items||[]):[]}catch(e){notes=[]}renderNotes()}
 async function saveNotes(){if(!uid||!curBaab)return;try{await db.collection('wiladatqalb_notes').doc(uid+'_'+curBaab.id).set({items:notes,updatedAt:firebase.firestore.FieldValue.serverTimestamp()})}catch(e){}}
-function renderNotes(){const el=document.getElementById('notesList');const cn=notes.filter(n=>n.ch===curChIdx);if(!cn.length){el.innerHTML='<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">لا ملاحظات في هذا الفصل بعد</div>';return}el.innerHTML=cn.map(n=>'<div class="ni"><div class="ni-t">'+n.text+'</div><div class="ni-r">'+(n.ref||'')+'</div></div>').join('')}
+function renderNotes(){const el=document.getElementById('notesList');const cn=notes.filter(n=>n.ch===curChIdx);let h='';
+  if(!cn.length)h='<div style="text-align:center;padding:40px 20px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">📝</div><p style="font-size:14px">لا ملاحظات في هذا الفصل بعد</p><p style="font-size:12px;margin-top:6px">حدد نصًا واختر "إضافة ملاحظة"</p></div>';
+  else cn.forEach(n=>{const sr=(n.ref||'').replace(/'/g,"\\'");h+=`<div class="ni" onclick="scrollToNote('${sr}')"><div class="ni-t">${n.text}</div><div class="ni-r">📍 ${n.ref||'ملاحظة عامة'}</div><button class="ni-del" onclick="event.stopPropagation();delNote(${n.id})">✕</button></div>`});
+  h+='<button class="np-add" onclick="addFreeNote()">+ إضافة ملاحظة جديدة</button>';el.innerHTML=h}
+function delNote(id){notes=notes.filter(n=>n.id!==id);saveNotes();renderNotes()}
+function addFreeNote(){const text=prompt('اكتب ملاحظتك:');if(!text)return;notes.push({id:Date.now(),text,ref:'ملاحظة عامة',ch:curChIdx,at:new Date().toISOString()});saveNotes();renderNotes()}
+function scrollToNote(ref){if(!ref||ref==='ملاحظة عامة')return;closeAll();const searchIn=curMode==='iframe'?document.getElementById('chFrame').contentDocument.body:document.getElementById('mc');const w=document.createTreeWalker(searchIn,NodeFilter.SHOW_TEXT);let node;const search=ref.substring(0,30);while(node=w.nextNode()){if(node.textContent.includes(search)){const el=node.parentElement;if(el){if(curMode==='iframe'){try{el.scrollIntoView({behavior:'smooth',block:'center'})}catch(e){}}else{el.scrollIntoView({behavior:'smooth',block:'center'});el.style.transition='background .3s';el.style.background='rgba(200,150,62,0.2)';setTimeout(()=>el.style.background='',2000)}}return}}}
 function toggleNotes(){const p=document.getElementById('npanel');p.style.display=p.style.display==='block'?'none':'block'}
 function addNoteFromHL(){hideHLM();const text=prompt('اكتب ملاحظتك:');if(!text)return;notes.push({id:Date.now(),text:text,ref:selTxt?selTxt.substring(0,40)+'...':'',ch:curChIdx,at:new Date().toISOString()});saveNotes();renderNotes();window.getSelection().removeAllRanges()}
 
