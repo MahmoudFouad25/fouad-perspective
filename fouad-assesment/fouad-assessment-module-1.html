@@ -1261,7 +1261,10 @@ body::before {
       <!-- Actions -->
       <div class="result-actions">
         <button class="btn-primary" onclick="sendResults()">
-          إرسال النتائج والمتابعة ←
+          ✓ إرسال النتائج وحفظها
+        </button>
+        <button class="btn-secondary" onclick="goToNextModule()">
+          المحطة التالية ←
         </button>
         <button class="btn-secondary" onclick="navigateTo('reading')">
           📖 مراجعة المحتوى التعليمي
@@ -1453,6 +1456,14 @@ const spectrumQuestions = [
     text: "لما حد قريب مني يسألني 'إنت مضايق من حاجة؟' أو 'إنت عايز إيه بالضبط دلوقتي؟' — بلاقي إن الإجابة مش جاية. مش لأني بخبّي حاجة عنه — لأني فعلًا مش حاسس بحاجة واضحة أقولها. كأن فيه ضباب بيني وبين اللي جوايا — بحاول أبصّ جوا وملاقيش ملامح. وساعات بلاقي نفسي بجاوب إجابة عشان الموقف يعدّي أو عشان الشخص ده يرتاح — مش لأنها إجابتي الحقيقية بل لأن البحث عن الإجابة الحقيقية محتاج مجهود أنا مش لاقيه. والأصعب من ده كله — إني أغلب الوقت مش واخد بالي إن ده بيحصل. الضباب نفسه مش بيضايقني — لأن الانزعاج محتاج طاقة مش عندي."
   }
 ];
+
+// ═══════════════════════════════════════════
+// URL PARAMS — read exerciseId from parent iframe
+// ═══════════════════════════════════════════
+const urlParams = new URLSearchParams(window.location.search);
+const EXERCISE_ID = urlParams.get('exerciseId') || 'module-1';
+const USER_ID = urlParams.get('userId') || '';
+const MODULE_INDEX = parseInt(urlParams.get('moduleIndex') || '0');
 
 // ═══════════════════════════════════════════
 // STATE
@@ -1788,6 +1799,9 @@ function computeResults() {
 
   // === Build Rich Data for Storage ===
   buildStorageData(typeScores, typePercentages, winnerKey, spectrumAvg, spectrumPct);
+  
+  // === Auto-send to parent on compute ===
+  autoSendResults();
 }
 
 // ═══════════════════════════════════════════
@@ -1857,7 +1871,15 @@ function buildStorageData(typeScores, typePercentages, winnerKey, spectrumAvg, s
     contradictions: [],
     
     // === Narrative Summary for Claude ===
-    narrativeSummary: ""
+    narrativeSummary: "",
+    
+    // === typeScores for course-view report generator ===
+    // course-view.html generateReport() expects results.typeScores with numeric keys
+    typeScores: {
+      1: typeScores.type1,
+      8: typeScores.type8,
+      9: typeScores.type9
+    }
   };
   
   // Find hot spots in identification
@@ -1947,22 +1969,56 @@ function buildStorageData(typeScores, typePercentages, winnerKey, spectrumAvg, s
 }
 
 // ═══════════════════════════════════════════
-// SEND RESULTS (postMessage to parent)
+// AUTO-SEND on compute (saves automatically)
+// ═══════════════════════════════════════════
+function autoSendResults() {
+  const data = window._moduleResult;
+  if (!data) return;
+  
+  if (window.parent !== window) {
+    window.parent.postMessage({
+      type: 'exercise-completed',
+      data: {
+        exerciseId: EXERCISE_ID,
+        completedAt: new Date().toISOString(),
+        results: data,
+        answers: {
+          identification: idAnswers,
+          spectrum: spAnswers
+        }
+      }
+    }, '*');
+    console.log('✅ Auto-sent exercise-completed for:', EXERCISE_ID);
+  }
+}
+
+// ═══════════════════════════════════════════
+// SEND RESULTS (postMessage to parent — matches course-view.html)
 // ═══════════════════════════════════════════
 function sendResults() {
   const data = window._moduleResult;
   if (!data) return;
   
-  // Send to parent iframe
+  // Build the message in EXACT format that course-view.html expects
+  // course-view listens for type: 'exercise-completed'
+  // and expects data.exerciseId, data.results, data.answers, data.completedAt
   if (window.parent !== window) {
     window.parent.postMessage({
-      type: 'fouad_module_complete',
-      moduleId: MODULE_ID,
-      data: data
+      type: 'exercise-completed',
+      data: {
+        exerciseId: EXERCISE_ID,
+        completedAt: new Date().toISOString(),
+        results: data,  // all the rich computed data
+        answers: {
+          identification: idAnswers,
+          spectrum: spAnswers
+        }
+      }
     }, '*');
   }
   
   // Also log to console for debugging
+  console.log('✅ exercise-completed sent for:', EXERCISE_ID);
   console.log('Module Result Data:', JSON.stringify(data, null, 2));
   
   // Visual feedback
@@ -1971,6 +2027,54 @@ function sendResults() {
   btn.style.background = 'linear-gradient(135deg, var(--olive-600), var(--olive-700))';
   btn.disabled = true;
 }
+
+// ═══════════════════════════════════════════
+// GO TO NEXT MODULE (tells course-view to navigate)
+// ═══════════════════════════════════════════
+function goToNextModule() {
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: 'go-to-next-module', data: {} }, '*');
+  }
+}
+
+// ═══════════════════════════════════════════
+// LISTEN FOR SAVED DATA FROM PARENT
+// ═══════════════════════════════════════════
+window.addEventListener('message', function(e) {
+  if (!e.data || !e.data.type) return;
+  
+  if (e.data.type === 'load-saved-data' && e.data.data) {
+    console.log('📥 Received saved data from parent');
+    const saved = e.data.data;
+    
+    // If module was already completed, restore the state
+    if (saved.completed && saved.answers) {
+      if (saved.answers.identification) idAnswers = saved.answers.identification;
+      if (saved.answers.spectrum) spAnswers = saved.answers.spectrum;
+      
+      // Mark all sections as completed and show results
+      sectionsCompleted.reading = true;
+      sectionsCompleted.identification = true;
+      sectionsCompleted.spectrum = true;
+      
+      markTabCompleted('reading');
+      markTabCompleted('identification');
+      markTabCompleted('spectrum');
+      enableTab('identification');
+      enableTab('spectrum');
+      enableTab('results');
+      
+      computeResults();
+      navigateTo('results');
+    }
+    // If draft saved, restore answers but don't auto-navigate
+    else if (saved.answers) {
+      if (saved.answers.identification) idAnswers = saved.answers.identification;
+      if (saved.answers.spectrum) spAnswers = saved.answers.spectrum;
+      renderIdQuestion();
+    }
+  }
+});
 
 // ═══════════════════════════════════════════
 // UTILITIES
@@ -1992,6 +2096,15 @@ window.addEventListener('scroll', () => {
 document.addEventListener('DOMContentLoaded', () => {
   // Pre-build progress dots
   renderIdQuestion();
+  
+  // Request saved data from parent (course-view.html)
+  if (window.parent !== window) {
+    window.parent.postMessage({
+      type: 'request-saved-data',
+      data: { exerciseId: EXERCISE_ID }
+    }, '*');
+    console.log('📤 Requested saved data for:', EXERCISE_ID);
+  }
 });
 </script>
 </body>
