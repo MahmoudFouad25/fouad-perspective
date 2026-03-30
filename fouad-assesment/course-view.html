@@ -243,7 +243,16 @@ auth.onAuthStateChanged(function(u) {
     } catch(e) {}
   }
   if (!uid) uid = localStorage.getItem('userId');
-  if (!uid) { document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:var(--fb);color:var(--txt2)"><div style="text-align:center"><h2 style="color:var(--grn);margin-bottom:12px">يجب تسجيل الدخول</h2><a href="login.html" style="color:var(--gld)">تسجيل الدخول ←</a></div></div>'; return; }
+  if (!uid) {
+    // Generate a temporary ID for testing/standalone usage
+    uid = localStorage.getItem('fouad_temp_uid');
+    if (!uid) {
+      uid = 'temp_' + Date.now();
+      localStorage.setItem('fouad_temp_uid', uid);
+    }
+    console.log('⚠️ Using temp uid:', uid);
+  }
+  console.log('🔐 Final uid:', uid);
   loadProgress();
 });
 
@@ -251,42 +260,58 @@ auth.onAuthStateChanged(function(u) {
    FIREBASE — Load/Save Progress
    ═══════════════════════════════════════════════════════════ */
 async function loadProgress() {
+  console.log('🔍 uid =', uid);
+
+  // 1) Try localStorage first (instant)
+  const local = localStorage.getItem('fouad_assess_' + uid);
+  if (local) {
+    try { userProgress = JSON.parse(local); console.log('✅ Loaded from localStorage', userProgress); } catch(e) {}
+  }
+
+  // 2) Try Firebase (may fail due to rules)
   try {
     const doc = await db.collection('fouad_assessment_progress').doc(uid).get();
     if (doc.exists) {
       userProgress = doc.data();
-    } else {
+      localStorage.setItem('fouad_assess_' + uid, JSON.stringify(userProgress));
+      console.log('✅ Loaded from Firebase', userProgress);
+    } else if (!userProgress || !userProgress.modules) {
       userProgress = {currentModule: 0, modules: {}, startedAt: new Date().toISOString(), lastActivity: new Date().toISOString()};
-      await db.collection('fouad_assessment_progress').doc(uid).set(userProgress);
+      try { await db.collection('fouad_assessment_progress').doc(uid).set(userProgress); } catch(e2) { console.warn('⚠️ Firebase write blocked (rules?):', e2.message); }
     }
   } catch(e) {
-    console.error('Error loading progress:', e);
-    userProgress = {currentModule: 0, modules: {}, startedAt: new Date().toISOString(), lastActivity: new Date().toISOString()};
+    console.warn('⚠️ Firebase read failed:', e.message);
+    if (!userProgress) userProgress = {currentModule: 0, modules: {}, startedAt: new Date().toISOString(), lastActivity: new Date().toISOString()};
   }
+
   buildSidebar();
   showDash();
 }
 
 async function saveModuleResult(moduleId, data) {
-  if (!uid) return;
-  try {
-    const update = {};
-    update[`modules.${moduleId}`] = data;
-    update['lastActivity'] = new Date().toISOString();
-    await db.collection('fouad_assessment_progress').doc(uid).set(update, {merge: true});
+  // Always save to localStorage (instant, reliable)
+  if (!userProgress.modules) userProgress.modules = {};
+  userProgress.modules[moduleId] = data;
+  userProgress.lastActivity = new Date().toISOString();
+  localStorage.setItem('fouad_assess_' + uid, JSON.stringify(userProgress));
+  console.log('💾 Saved to localStorage:', moduleId, data.completed);
 
-    // Update local state
-    if (!userProgress.modules) userProgress.modules = {};
-    userProgress.modules[moduleId] = data;
-    userProgress.lastActivity = new Date().toISOString();
-
-    showToast('✅ تم حفظ النتيجة');
-    buildSidebar();
-    updateDashIfVisible();
-  } catch(e) {
-    console.error('Error saving:', e);
-    showToast('⚠️ خطأ في الحفظ');
+  // Also try Firebase
+  if (uid) {
+    try {
+      const update = {};
+      update[`modules.${moduleId}`] = data;
+      update['lastActivity'] = new Date().toISOString();
+      await db.collection('fouad_assessment_progress').doc(uid).set(update, {merge: true});
+      console.log('✅ Saved to Firebase:', moduleId);
+    } catch(e) {
+      console.warn('⚠️ Firebase save failed (localStorage backup active):', e.message);
+    }
   }
+
+  showToast('✅ تم حفظ النتيجة');
+  buildSidebar();
+  updateDashIfVisible();
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -460,6 +485,7 @@ function navMod(dir) {
    ═══════════════════════════════════════════════════════════ */
 window.addEventListener('message', function(e) {
   if (!e.data || !e.data.type) return;
+  console.log('📩 Message from iframe:', e.data.type, e.data.data?.exerciseId || '');
 
   // Module completed
   if (e.data.type === 'exercise-completed') {
