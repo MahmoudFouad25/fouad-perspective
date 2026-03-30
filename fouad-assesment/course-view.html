@@ -89,7 +89,6 @@
 .final-box{width:600px;max-width:94vw;max-height:88vh;background:var(--card);border-radius:20px;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2);padding:40px 32px;text-align:center}
 .final-box h2{font-family:var(--fd);font-size:1.8em;color:var(--grn);margin-bottom:16px}
 
-/* Debug panel */
 .debug-panel{position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,0.85);color:#0f0;font-family:monospace;font-size:11px;padding:10px;border-radius:8px;max-width:350px;max-height:200px;overflow-y:auto;z-index:999;display:none;direction:ltr;text-align:left}
 .debug-panel.show{display:block}
 .debug-toggle{position:fixed;bottom:10px;left:10px;width:40px;height:40px;border-radius:50%;background:var(--grn);color:#fff;border:none;font-size:16px;cursor:pointer;z-index:999;display:flex;align-items:center;justify-content:center}
@@ -151,7 +150,6 @@
 <div class="toast" id="toast"></div>
 <div class="final-ov" id="finalOv"><div class="final-box" id="finalBox"></div></div>
 
-<!-- Debug Panel -->
 <button class="debug-toggle" onclick="toggleDebug()" title="تشخيص">🔍</button>
 <div class="debug-panel" id="debugPanel"></div>
 
@@ -164,7 +162,7 @@ const db=firebase.firestore(), auth=firebase.auth();
 const toAr=n=>String(n).replace(/[0-9]/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
 
 /* ═══════════════════════════════════════════════════════════
-   DEBUG SYSTEM — لوحة تشخيص مرئية
+   DEBUG
    ═══════════════════════════════════════════════════════════ */
 const debugLogs = [];
 function debugLog(emoji, msg) {
@@ -174,13 +172,11 @@ function debugLog(emoji, msg) {
   console.log(entry);
   const panel = document.getElementById('debugPanel');
   if (panel) {
-    panel.innerHTML = debugLogs.slice(-20).join('<br>');
+    panel.innerHTML = debugLogs.slice(-25).join('<br>');
     panel.scrollTop = panel.scrollHeight;
   }
 }
-function toggleDebug() {
-  document.getElementById('debugPanel').classList.toggle('show');
-}
+function toggleDebug() { document.getElementById('debugPanel').classList.toggle('show'); }
 
 /* ═══════════════════════════════════════════════════════════
    MODULE CONFIG
@@ -247,41 +243,28 @@ let userProgress = null;
 let currentModuleIdx = -1;
 
 /* ═══════════════════════════════════════════════════════════
-   AUTH — تحديد الـ uid بشكل متسق مع باقي النظام
+   AUTH
    ═══════════════════════════════════════════════════════════ */
 auth.onAuthStateChanged(function(u) {
-  debugLog('🔐', 'Auth state changed: ' + (u ? u.uid : 'null'));
-
-  // الأولوية ١: Firebase Auth uid
+  debugLog('🔐', 'Auth state: ' + (u ? u.uid : 'null'));
   uid = u ? u.uid : null;
 
-  // الأولوية ٢: SecureStorage (نفس الطريقة في my-courses.html)
   if (!uid) {
     try {
       const enc = localStorage.getItem('_enc_user');
       if (enc) {
-        const parsed = JSON.parse(decodeURIComponent(atob(enc.split('').reverse().join(''))));
-        uid = parsed.id;
+        uid = JSON.parse(decodeURIComponent(atob(enc.split('').reverse().join('')))).id;
         debugLog('🔑', 'uid from SecureStorage: ' + uid);
       }
-    } catch(e) {
-      debugLog('⚠️', 'SecureStorage read failed');
-    }
+    } catch(e) {}
   }
-
-  // الأولوية ٣: localStorage userId
   if (!uid) {
     uid = localStorage.getItem('userId');
     if (uid) debugLog('🔑', 'uid from localStorage: ' + uid);
   }
-
-  // الأولوية ٤: uid مؤقت للتجربة
   if (!uid) {
     uid = localStorage.getItem('fouad_temp_uid');
-    if (!uid) {
-      uid = 'temp_' + Date.now();
-      localStorage.setItem('fouad_temp_uid', uid);
-    }
+    if (!uid) { uid = 'temp_' + Date.now(); localStorage.setItem('fouad_temp_uid', uid); }
     debugLog('⚠️', 'Using temp uid: ' + uid);
   }
 
@@ -290,39 +273,30 @@ auth.onAuthStateChanged(function(u) {
 });
 
 /* ═══════════════════════════════════════════════════════════
-   FIREBASE — Load Progress
+   LOAD PROGRESS
    ═══════════════════════════════════════════════════════════ */
 async function loadProgress() {
-  debugLog('📥', 'Loading progress for uid: ' + uid);
-
-  // Default empty progress
+  debugLog('📥', 'Loading progress...');
   userProgress = {currentModule: 0, modules: {}, startedAt: new Date().toISOString(), lastActivity: new Date().toISOString()};
 
-  // ===== 1) Try Firebase FIRST (source of truth) =====
   try {
     const doc = await db.collection('fouad_assessment_progress').doc(uid).get();
     if (doc.exists) {
       userProgress = doc.data();
-      const completedModules = userProgress.modules ? Object.keys(userProgress.modules).filter(k => userProgress.modules[k].completed) : [];
+      // تأكد إن modules موجودة كـ object
+      if (!userProgress.modules) userProgress.modules = {};
+      const completedModules = Object.keys(userProgress.modules).filter(k => userProgress.modules[k] && userProgress.modules[k].completed);
       debugLog('✅', 'Firebase loaded — completed: [' + completedModules.join(', ') + ']');
     } else {
-      debugLog('📝', 'No Firebase doc — creating initial...');
+      debugLog('📝', 'No doc — creating...');
       await db.collection('fouad_assessment_progress').doc(uid).set(userProgress);
-      debugLog('✅', 'Initial doc created in Firebase');
+      debugLog('✅', 'Initial doc created');
     }
   } catch(e) {
-    debugLog('❌', 'Firebase load FAILED: ' + e.message);
-
-    // Fallback to localStorage
+    debugLog('❌', 'Firebase load error: ' + e.message);
     const local = localStorage.getItem('fouad_assess_' + uid);
     if (local) {
-      try {
-        userProgress = JSON.parse(local);
-        const completedModules = userProgress.modules ? Object.keys(userProgress.modules).filter(k => userProgress.modules[k].completed) : [];
-        debugLog('💾', 'localStorage fallback — completed: [' + completedModules.join(', ') + ']');
-      } catch(e2) {
-        debugLog('❌', 'localStorage parse failed');
-      }
+      try { userProgress = JSON.parse(local); debugLog('💾', 'Loaded from localStorage'); } catch(e2) {}
     }
   }
 
@@ -331,76 +305,109 @@ async function loadProgress() {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   FIREBASE — Save Module Result (الإصلاح الجذري)
+   ★★★ SAVE MODULE RESULT — الإصلاح الجذري ★★★
+   
+   المشكلة كانت: set({merge:true}) مع 'modules.module-1'
+   كان بيحفظ حقل اسمه الحرفي "modules.module-1" 
+   بدل ما يحطه جوه modules > module-1
+   
+   الحل: استخدام update() اللي بتفهم النقطة كمسار
+   مع fallback لـ set() لو الـ document مش موجود
    ═══════════════════════════════════════════════════════════ */
 async function saveModuleResult(moduleId, data) {
-  debugLog('💾', '========= SAVE START: ' + moduleId + ' =========');
-  debugLog('💾', 'uid: ' + uid);
-  debugLog('💾', 'completed: ' + data.completed);
+  debugLog('💾', '======= SAVE START: ' + moduleId + ' =======');
 
   // تحديث الـ state المحلي
   if (!userProgress.modules) userProgress.modules = {};
   userProgress.modules[moduleId] = data;
   userProgress.lastActivity = new Date().toISOString();
 
-  // ===== 1) حفظ في localStorage كنسخة احتياطية =====
+  // 1) localStorage
   try {
     localStorage.setItem('fouad_assess_' + uid, JSON.stringify(userProgress));
-    debugLog('💾', 'localStorage saved ✓');
+    debugLog('💾', 'localStorage ✓');
   } catch(e) {
-    debugLog('❌', 'localStorage FAILED: ' + e.message);
+    debugLog('❌', 'localStorage failed: ' + e.message);
   }
 
-  // ===== 2) حفظ في Firebase (المصدر الأساسي) =====
+  // 2) Firebase — باستخدام update() مش set()
   if (!uid) {
-    debugLog('❌', 'NO UID — cannot save to Firebase!');
-    showToast('⚠️ خطأ: لا يوجد معرف مستخدم');
+    debugLog('❌', 'NO UID!');
     return;
   }
 
   try {
-    // تنظيف البيانات — إزالة أي قيم غير متوافقة مع Firebase
     const cleanData = JSON.parse(JSON.stringify(data));
-    debugLog('💾', 'Data cleaned, size: ' + JSON.stringify(cleanData).length + ' bytes');
+    debugLog('💾', 'Data size: ' + JSON.stringify(cleanData).length + ' bytes');
 
-    // بناء الـ update object
+    // بناء الـ update object مع dot notation
     const updateObj = {};
     updateObj['modules.' + moduleId] = cleanData;
     updateObj['lastActivity'] = new Date().toISOString();
 
-    debugLog('💾', 'Writing to Firebase: fouad_assessment_progress/' + uid);
+    const docRef = db.collection('fouad_assessment_progress').doc(uid);
 
-    // الكتابة في Firebase
-    await db.collection('fouad_assessment_progress').doc(uid).set(updateObj, {merge: true});
+    // محاولة update أولاً (بتفهم النقطة كمسار متداخل)
+    try {
+      debugLog('💾', 'Trying update()...');
+      await docRef.update(updateObj);
+      debugLog('✅', 'update() succeeded!');
+    } catch(updateErr) {
+      // لو الـ document مش موجود — ننشئه بالكامل
+      if (updateErr.code === 'not-found') {
+        debugLog('⚠️', 'Doc not found — creating with set()...');
+        const fullDoc = {
+          modules: {},
+          startedAt: new Date().toISOString(),
+          lastActivity: new Date().toISOString()
+        };
+        fullDoc.modules[moduleId] = cleanData;
+        await docRef.set(fullDoc);
+        debugLog('✅', 'set() with full doc succeeded!');
+      } else {
+        throw updateErr;
+      }
+    }
 
-    debugLog('✅', 'Firebase write completed!');
-
-    // ===== 3) التحقق: قراءة البيانات مرة تانية للتأكد =====
-    debugLog('🔍', 'Verifying save...');
-    const verifyDoc = await db.collection('fouad_assessment_progress').doc(uid).get();
+    // 3) التحقق: قراءة البيانات للتأكد
+    debugLog('🔍', 'Verifying...');
+    const verifyDoc = await docRef.get();
 
     if (verifyDoc.exists) {
-      const verifyData = verifyDoc.data();
-      if (verifyData.modules && verifyData.modules[moduleId]) {
-        const savedCompleted = verifyData.modules[moduleId].completed;
-        debugLog('✅✅', 'VERIFIED: ' + moduleId + ' saved in Firebase (completed=' + savedCompleted + ')');
-        showToast('✅ تم حفظ النتيجة بنجاح في Firebase');
+      const vData = verifyDoc.data();
+      debugLog('🔍', 'Doc fields: ' + Object.keys(vData).join(', '));
+
+      if (vData.modules) {
+        debugLog('🔍', 'modules keys: ' + Object.keys(vData.modules).join(', '));
+
+        if (vData.modules[moduleId]) {
+          debugLog('✅✅', 'VERIFIED! ' + moduleId + ' saved (completed=' + vData.modules[moduleId].completed + ')');
+          showToast('✅ تم حفظ النتيجة بنجاح');
+        } else {
+          debugLog('❌', 'Module NOT in modules! Keys: ' + Object.keys(vData.modules).join(', '));
+          
+          // تشخيص إضافي: هل فيه حقل بنقطة في اسمه؟
+          const allKeys = Object.keys(vData);
+          const dotKeys = allKeys.filter(k => k.includes('.'));
+          if (dotKeys.length > 0) {
+            debugLog('🐛', 'FOUND DOT-KEYS: ' + dotKeys.join(', '));
+            debugLog('🐛', 'This means set() was used instead of update()!');
+          }
+        }
       } else {
-        debugLog('❌', 'VERIFICATION FAILED: module not found after save!');
-        showToast('⚠️ مشكلة في التحقق من الحفظ');
+        debugLog('❌', 'No modules field at all! Fields: ' + Object.keys(vData).join(', '));
       }
     } else {
-      debugLog('❌', 'VERIFICATION FAILED: document not found!');
+      debugLog('❌', 'Doc does not exist after save!');
     }
 
   } catch(e) {
     debugLog('❌', 'Firebase SAVE FAILED: ' + e.message);
-    debugLog('❌', 'Error code: ' + (e.code || 'none'));
-    debugLog('❌', 'Full error: ' + JSON.stringify({message: e.message, code: e.code, name: e.name}));
-    showToast('⚠️ فشل الحفظ في Firebase: ' + e.message);
+    debugLog('❌', 'Code: ' + (e.code || 'none'));
+    showToast('⚠️ فشل الحفظ: ' + e.message);
   }
 
-  debugLog('💾', '========= SAVE END: ' + moduleId + ' =========');
+  debugLog('💾', '======= SAVE END: ' + moduleId + ' =======');
   buildSidebar();
   updateDashIfVisible();
 }
@@ -508,8 +515,7 @@ function updateDashIfVisible() { if (currentModuleIdx === -1) renderDash(); }
 function openMirror(mi) {
   const mMods = MIRRORS[mi].modules;
   for (let i = 0; i < mMods.length; i++) {
-    const mod = mMods[i];
-    if (mod.htmlFile && (!userProgress.modules || !userProgress.modules[mod.id] || !userProgress.modules[mod.id].completed)) {
+    if (mMods[i].htmlFile && (!userProgress.modules || !userProgress.modules[mMods[i].id] || !userProgress.modules[mMods[i].id].completed)) {
       openModule(mi * 3 + i); return;
     }
   }
@@ -532,126 +538,85 @@ function openModule(gIdx) {
   document.getElementById('tbarTitle').innerHTML = `<b>${mod.mirrorName}</b> · ${mod.title}`;
   document.getElementById('modBarInfo').innerHTML = `المحطة <b>${toAr(gIdx + 1)}</b> من ٢١ — ${mod.mirrorName}: ${mod.title}`;
 
-  const hasPrev = gIdx > 0 && ALL_MODULES[gIdx - 1].htmlFile;
-  const hasNext = gIdx < 20 && ALL_MODULES[gIdx + 1] && ALL_MODULES[gIdx + 1].htmlFile;
-  document.getElementById('btnPrev').disabled = !hasPrev;
-  document.getElementById('btnNext').disabled = !hasNext;
+  document.getElementById('btnPrev').disabled = !(gIdx > 0 && ALL_MODULES[gIdx - 1].htmlFile);
+  document.getElementById('btnNext').disabled = !(gIdx < 20 && ALL_MODULES[gIdx + 1] && ALL_MODULES[gIdx + 1].htmlFile);
 
   const frame = document.getElementById('modFrame');
-  const url = mod.htmlFile + '?exerciseId=' + mod.id + '&userId=' + uid + '&moduleIndex=' + gIdx;
-  frame.src = url;
+  frame.src = mod.htmlFile + '?exerciseId=' + mod.id + '&userId=' + uid + '&moduleIndex=' + gIdx;
 
-  debugLog('📖', 'Opened module: ' + mod.id + ' | iframe: ' + url);
-
+  debugLog('📖', 'Opened: ' + mod.id);
   buildSidebar();
   closeSide();
 }
 
 function navMod(dir) {
   const newIdx = currentModuleIdx + dir;
-  if (newIdx < 0 || newIdx > 20) return;
-  if (!ALL_MODULES[newIdx].htmlFile) return;
+  if (newIdx < 0 || newIdx > 20 || !ALL_MODULES[newIdx].htmlFile) return;
   openModule(newIdx);
 }
 
 /* ═══════════════════════════════════════════════════════════
-   IFRAME COMMUNICATION (الإصلاح الجذري)
+   IFRAME MESSAGES
    ═══════════════════════════════════════════════════════════ */
 window.addEventListener('message', function(e) {
-  // تجاهل الرسائل الفارغة
   if (!e.data || !e.data.type) return;
-
   const msgType = e.data.type;
   const msgData = e.data.data;
 
-  debugLog('📩', 'Message received: ' + msgType + ' | exerciseId: ' + (msgData?.exerciseId || 'none'));
+  debugLog('📩', msgType + ' | ' + (msgData?.exerciseId || ''));
 
-  // ===== المودويل اكتمل =====
   if (msgType === 'exercise-completed') {
-    debugLog('🎯', '===== MODULE COMPLETED =====');
-
-    if (!msgData) {
-      debugLog('❌', 'No data in exercise-completed message!');
+    if (!msgData || !msgData.exerciseId) {
+      debugLog('❌', 'Invalid exercise-completed data!');
       return;
     }
+    debugLog('🎯', 'MODULE COMPLETED: ' + msgData.exerciseId);
 
-    if (!msgData.exerciseId) {
-      debugLog('❌', 'No exerciseId in data!');
-      return;
-    }
-
-    debugLog('🎯', 'exerciseId: ' + msgData.exerciseId);
-    debugLog('🎯', 'Has results: ' + !!msgData.results);
-    debugLog('🎯', 'Has answers: ' + !!msgData.answers);
-
-    // بناء كائن البيانات المنظف
-    const saveData = {
+    saveModuleResult(msgData.exerciseId, {
       completed: true,
       completedAt: msgData.completedAt || new Date().toISOString(),
       results: msgData.results || msgData.customData || {},
       answers: msgData.answers || {}
-    };
-
-    debugLog('🎯', 'Save data size: ' + JSON.stringify(saveData).length + ' bytes');
-
-    // حفظ النتيجة
-    saveModuleResult(msgData.exerciseId, saveData);
+    });
   }
 
-  // ===== المودويل يطلب بيانات محفوظة =====
   if (msgType === 'request-saved-data') {
-    debugLog('📤', 'Sending saved data for: ' + (msgData?.exerciseId || 'unknown'));
     if (msgData && msgData.exerciseId && userProgress.modules && userProgress.modules[msgData.exerciseId]) {
-      const saved = userProgress.modules[msgData.exerciseId];
-      debugLog('📤', 'Found saved data, completed: ' + saved.completed);
+      debugLog('📤', 'Sending saved: ' + msgData.exerciseId);
       document.getElementById('modFrame').contentWindow.postMessage({
         type: 'load-saved-data',
-        data: saved
+        data: userProgress.modules[msgData.exerciseId]
       }, '*');
     } else {
-      debugLog('📤', 'No saved data found');
+      debugLog('📤', 'No saved data for: ' + (msgData?.exerciseId || ''));
     }
   }
 
-  // ===== انتقل للمودويل التالي =====
   if (msgType === 'go-to-next-module') {
-    debugLog('➡️', 'Go to next module requested');
-    if (currentModuleIdx < 20) {
-      const nextIdx = currentModuleIdx + 1;
-      if (ALL_MODULES[nextIdx] && ALL_MODULES[nextIdx].htmlFile) {
-        openModule(nextIdx);
-      } else {
-        showDash();
-        showToast('🎉 أحسنت! انتقل للمحطة التالية المتاحة');
-      }
+    if (currentModuleIdx < 20 && ALL_MODULES[currentModuleIdx + 1] && ALL_MODULES[currentModuleIdx + 1].htmlFile) {
+      openModule(currentModuleIdx + 1);
     } else {
       showDash();
-      showToast('🎉 رائع! أكملت كل المحطات المتاحة');
+      showToast('🎉 أحسنت!');
     }
   }
 
-  // ===== حفظ مسودة =====
-  if (msgType === 'exercise-draft-save') {
-    if (msgData && msgData.exerciseId) {
-      debugLog('📝', 'Draft save: ' + msgData.exerciseId);
-      saveModuleResult(msgData.exerciseId, {
-        completed: false,
-        savedAt: msgData.savedAt || new Date().toISOString(),
-        answers: msgData.answers || {}
-      });
-    }
+  if (msgType === 'exercise-draft-save' && msgData && msgData.exerciseId) {
+    saveModuleResult(msgData.exerciseId, {
+      completed: false,
+      savedAt: new Date().toISOString(),
+      answers: msgData.answers || {}
+    });
   }
 });
 
 /* ═══════════════════════════════════════════════════════════
-   REPORT GENERATION
+   REPORT
    ═══════════════════════════════════════════════════════════ */
 function generateReport() {
   const allResults = {};
   ALL_MODULES.forEach(mod => {
-    if (userProgress.modules && userProgress.modules[mod.id]) {
-      allResults[mod.id] = userProgress.modules[mod.id];
-    }
+    if (userProgress.modules && userProgress.modules[mod.id]) allResults[mod.id] = userProgress.modules[mod.id];
   });
 
   const typeTotal = {};
@@ -683,7 +648,7 @@ function generateReport() {
     tritype[center] = best;
   });
 
-  let h = `<h2>🎉 مبروك! أكملت مقياس الفؤاد</h2>
+  document.getElementById('finalBox').innerHTML = `<h2>🎉 مبروك! أكملت مقياس الفؤاد</h2>
     <p style="color:var(--txt2);margin-bottom:24px">إليك ملخص نتائجك:</p>
     <div style="padding:20px;background:var(--grn-bg);border-radius:14px;border:1px solid rgba(27,67,50,0.12);margin-bottom:20px">
       <p style="font-size:13px;color:var(--mu);margin-bottom:8px">طابعك الأساسي</p>
@@ -696,8 +661,6 @@ function generateReport() {
     </div>
     <p style="color:var(--txt2);font-size:14px;line-height:1.9;margin:20px 0">التقرير التفصيلي المخصص بالذكاء الاصطناعي سيكون متاحاً قريباً.</p>
     <button onclick="document.getElementById('finalOv').classList.remove('on')" style="padding:12px 28px;background:var(--grn);color:#F8F3EC;border:none;border-radius:10px;font-family:var(--fb);font-size:14px;cursor:pointer">إغلاق</button>`;
-
-  document.getElementById('finalBox').innerHTML = h;
   document.getElementById('finalOv').classList.add('on');
 }
 
