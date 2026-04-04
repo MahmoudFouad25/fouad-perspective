@@ -189,18 +189,32 @@ body{font-family:var(--fb);font-size:15px;line-height:1.7;color:var(--txt);backg
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 <script>
 // ═══════════════════════════════════════
-// FIREBASE (same config as viewer/course-view)
+// FIREBASE — SAME config as admin page (proven working)
 // ═══════════════════════════════════════
 firebase.initializeApp({
-  apiKey:"AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+  apiKey:"AIzaSyDkpewiOKLW_9Se5BhULlNFOPorezSM9Fo",
   authDomain:"fouad-perspective.firebaseapp.com",
   projectId:"fouad-perspective",
   storageBucket:"fouad-perspective.firebasestorage.app",
-  messagingSenderId:"1068763865336",
-  appId:"1:1068763865336:web:b791abcd22d536aedd5b0d"
+  messagingSenderId:"858286757338",
+  appId:"1:858286757338:web:772beb67805706fdeeda9d",
+  measurementId:"G-3RTSD9MSMB"
 });
 const db = firebase.firestore();
 const auth = firebase.auth();
+
+// ═══════════════════════════════════════
+// DEBUG LOGGER
+// ═══════════════════════════════════════
+const _logs = [];
+function dlog(emoji, msg) {
+  const t = new Date().toLocaleTimeString('en',{hour12:false});
+  const entry = t + ' ' + emoji + ' ' + msg;
+  _logs.push(entry);
+  console.log(entry);
+  const p = document.getElementById('debugPanel');
+  if (p) { p.innerHTML = _logs.slice(-30).join('<br>'); p.scrollTop = p.scrollHeight; }
+}
 
 // ═══════════════════════════════════════
 // CONSTANTS
@@ -267,10 +281,10 @@ let coachingSections = [];
 let currentView = 'dashboard'; // dashboard | mirror-X | final
 
 // ═══════════════════════════════════════
-// AUTH & INIT (same mechanism as course-view.html)
+// AUTH & INIT
 // ═══════════════════════════════════════
 auth.onAuthStateChanged(async function(u) {
-  console.log('🔐 Auth state:', u ? u.uid : 'null');
+  dlog('🔐', 'Auth state: ' + (u ? u.uid : 'null'));
   userId = u ? u.uid : null;
 
   // Fallback 1: encrypted localStorage
@@ -279,73 +293,119 @@ auth.onAuthStateChanged(async function(u) {
       const enc = localStorage.getItem('_enc_user');
       if (enc) {
         userId = JSON.parse(decodeURIComponent(atob(enc.split('').reverse().join('')))).id;
-        console.log('🔑 uid from SecureStorage:', userId);
+        dlog('🔑', 'uid from SecureStorage: ' + userId);
       }
-    } catch(e) {}
+    } catch(e) { dlog('⚠️', 'SecureStorage parse error: ' + e.message); }
   }
 
   // Fallback 2: plain localStorage
   if (!userId) {
     userId = localStorage.getItem('userId');
-    if (userId) console.log('🔑 uid from localStorage:', userId);
+    if (userId) dlog('🔑', 'uid from localStorage: ' + userId);
   }
 
   // No auth at all
   if (!userId) {
+    dlog('❌', 'NO UID FOUND!');
     document.getElementById('loadingScreen').innerHTML = '<div style="text-align:center;padding:40px;color:var(--mu)"><p style="font-size:18px;margin-bottom:8px">⚠️</p><p>لم يتم تسجيل الدخول</p><p style="font-size:12px;margin-top:8px;color:var(--mu)">يرجى تسجيل الدخول أولاً من المنصة الرئيسية</p></div>';
     return;
   }
 
-  console.log('✅ Final uid:', userId);
+  dlog('✅', 'Final uid: ' + userId);
   await loadClientData();
 });
 
 async function loadClientData() {
   try {
-    // Load user data
+    // 1) Load user profile
+    dlog('📥', 'Loading user doc: users/' + userId);
     const userDoc = await db.collection('users').doc(userId).get();
     if (userDoc.exists) {
       const ud = userDoc.data();
       clientName = ud.personalInfo?.name || ud.displayName || ud.name || ud.email || '';
+      dlog('👤', 'User name: ' + clientName);
+    } else {
+      dlog('⚠️', 'User doc does NOT exist!');
     }
 
-    // Load assessment results — find courseId automatically
+    // 2) Load assessment results
+    dlog('📥', 'Loading awakening_progress...');
     const progressSnap = await db.collection('users').doc(userId).collection('awakening_progress').get();
+    dlog('📊', 'Progress docs found: ' + progressSnap.size);
     
     if (!progressSnap.empty) {
-      // Use the first (or only) progress document
-      const progDoc = progressSnap.docs[0];
-      courseId = progDoc.id;
-      const progData = progDoc.data();
-      
-      console.log('📚 Found courseId:', courseId);
-      
-      for (const [moduleKey, moduleId] of Object.entries(MODULE_IDS)) {
-        const exData = progData['exercises.' + moduleId];
-        const hasAnswers = exData && exData.answers;
-        modulesStatus[moduleKey] = {
-          completed: !!(hasAnswers && exData.completed),
-          hasAnswers: !!hasAnswers,
-          answers: hasAnswers ? exData.answers : null
-        };
+      // Try each progress document
+      for (const progDoc of progressSnap.docs) {
+        courseId = progDoc.id;
+        const progData = progDoc.data();
+        const allFields = Object.keys(progData);
+        
+        dlog('📚', 'CourseId: ' + courseId + ' — fields: ' + allFields.length);
+        
+        // Log first few field names to understand structure
+        const exerciseFields = allFields.filter(f => f.startsWith('exercises.'));
+        const nonExerciseFields = allFields.filter(f => !f.startsWith('exercises.'));
+        dlog('🔍', 'Exercise fields: ' + exerciseFields.length + ' | Other fields: ' + nonExerciseFields.join(', '));
+        
+        if (exerciseFields.length > 0) {
+          dlog('🔍', 'Sample exercise field: ' + exerciseFields[0]);
+        }
+        
+        // Also check if there's a nested "exercises" object
+        if (progData.exercises) {
+          const nestedKeys = Object.keys(progData.exercises);
+          dlog('🔍', 'NESTED exercises object found! Keys: ' + nestedKeys.length);
+          if (nestedKeys.length > 0) dlog('🔍', 'Sample nested key: ' + nestedKeys[0]);
+        }
+
+        let foundCount = 0;
+        for (const [moduleKey, moduleId] of Object.entries(MODULE_IDS)) {
+          // Try BOTH formats: dot-notation field AND nested object
+          let exData = progData['exercises.' + moduleId];
+          
+          // If dot-notation didn't work, try nested
+          if (!exData && progData.exercises) {
+            exData = progData.exercises[moduleId];
+          }
+          
+          const hasAnswers = exData && exData.answers;
+          if (hasAnswers) foundCount++;
+          
+          modulesStatus[moduleKey] = {
+            completed: !!(hasAnswers && exData.completed),
+            hasAnswers: !!hasAnswers,
+            answers: hasAnswers ? exData.answers : null
+          };
+        }
+        
+        dlog('✅', 'Modules with data: ' + foundCount + '/21');
+        
+        if (foundCount > 0) {
+          results = calculateResults(modulesStatus);
+          dlog('✅', 'Results calculated! Primary type: ' + (results?.primaryType?.type || 'none'));
+          break; // Found data, stop
+        }
       }
-      results = calculateResults(modulesStatus);
-      
-      const completedCount = Object.values(modulesStatus).filter(m => m.hasAnswers).length;
-      console.log('✅ Loaded results — completed:', completedCount, '/21');
     } else {
-      console.log('⚠️ No awakening_progress found');
+      dlog('⚠️', 'No awakening_progress documents found!');
     }
 
-    // Load coaching content
-    const coachDoc = await db.collection('fouad_coaching').doc(userId).get();
-    if (coachDoc.exists) {
-      const cData = coachDoc.data();
-      coachingSections = (cData.sections || []).filter(s => s.visible !== false);
-      console.log('📋 Coaching sections loaded:', coachingSections.length);
+    // 3) Load coaching content
+    dlog('📥', 'Loading coaching data...');
+    try {
+      const coachDoc = await db.collection('fouad_coaching').doc(userId).get();
+      if (coachDoc.exists) {
+        const cData = coachDoc.data();
+        coachingSections = (cData.sections || []).filter(s => s.visible !== false);
+        dlog('📋', 'Coaching sections: ' + coachingSections.length);
+      } else {
+        dlog('📋', 'No coaching data yet');
+      }
+    } catch(ce) {
+      dlog('⚠️', 'Coaching load error (non-fatal): ' + ce.message);
     }
 
-    // Render
+    // 4) Render
     document.getElementById('sClientName').textContent = clientName;
     buildSidebar();
     showDashboard();
@@ -353,7 +413,8 @@ async function loadClientData() {
     setTimeout(() => { document.getElementById('loadingScreen').style.display = 'none'; }, 500);
 
   } catch(e) {
-    console.error('❌ Error:', e);
+    dlog('❌', 'FATAL ERROR: ' + e.message);
+    dlog('❌', 'Stack: ' + e.stack);
     document.getElementById('loadingScreen').innerHTML = '<div style="text-align:center;padding:40px;color:var(--mu)"><p style="font-size:18px;margin-bottom:8px">⚠️</p><p>حدث خطأ في تحميل البيانات</p><p style="font-size:12px;margin-top:8px;direction:ltr">' + e.message + '</p></div>';
   }
 }
@@ -672,5 +733,9 @@ function closeSide() { document.getElementById('side').classList.remove('open');
 // ═══════════════════════════════════════
 // Auth listener handles init automatically
 </script>
+
+<button onclick="document.getElementById('debugPanel').classList.toggle('show')" style="position:fixed;bottom:10px;left:10px;width:40px;height:40px;border-radius:50%;background:var(--grn);color:#fff;border:none;font-size:16px;cursor:pointer;z-index:999;display:flex;align-items:center;justify-content:center">🔍</button>
+<div id="debugPanel" style="position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,0.9);color:#0f0;font-family:monospace;font-size:11px;padding:12px;border-radius:10px;max-width:400px;max-height:250px;overflow-y:auto;z-index:999;display:none;direction:ltr;text-align:left;line-height:1.6"></div>
+<style>#debugPanel.show{display:block!important}</style>
 </body>
 </html>
