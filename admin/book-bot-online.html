@@ -557,6 +557,9 @@
         <div class="top-toolbar">
             <span style="color: #6B7280; font-size: 0.9rem;">
                 آخر تحديث: <span id="lastUpdate">--</span>
+                <button onclick="loadBookings()" style="background: var(--success); color: white; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; margin-right: 10px; transition: all 0.3s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                    <i class="fas fa-sync-alt"></i> تحديث
+                </button>
             </span>
             <div class="export-buttons">
                 <button class="btn-export" onclick="exportToExcel()" style="background: #059669;">
@@ -687,9 +690,6 @@ let activeQuickFilter = 'active';
 // ============================================
 document.addEventListener('DOMContentLoaded', function() {
     loadBookings();
-    setInterval(() => {
-        if (!showingArchive) loadBookings();
-    }, 60000);
 });
 
 // ============================================
@@ -1337,11 +1337,23 @@ async function markAsPaidWithAutomation(bookingId) {
             if (!recheck.exists || recheck.data().status !== 'paid') return;
             const updated = {id:recheck.id,...recheck.data()};
             if (updated.telegramChatId && updated.telegramConnected) {
-                await sendTelegramMessage(updated.telegramChatId, '🎉 تم تأكيد دفعتك!\n📚 '+updated.courseName+'\n⏳ جاري إنشاء حسابك...\nشكراً 💚');
+                const customerName = updated.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+                const isInst = updated.paymentDetails?.type === 'installment';
+                let message = '';
+                if (isInst) {
+                    message = `🎉 *رائع يا ${customerName}!*\n\nتم تأكيد استلام القسط الأول بنجاح ✅\n\n━━━━━━━━━━━━━━━━━━\n📚 الدورة: *${updated.courseName || 'الدورة'}*\n\n💰 *تفاصيل الدفعة:*\n- المبلغ المستلم: *${(updated.paymentDetails?.paidAmount || 0).toLocaleString('ar-EG')} ج.م*\n- طريقة الدفع: ${updated.paymentMethod || 'غير محدد'}\n- تاريخ الدفع: ${new Date().toLocaleDateString('ar-EG')}\n\n📊 *حالة الأقساط:*\n- الأقساط المدفوعة: ${updated.paymentDetails?.paidInstallments || 1} من ${updated.paymentDetails?.totalInstallments || 0}\n- المتبقي: *${(updated.paymentDetails?.remainingAmount || 0).toLocaleString('ar-EG')} ج.م*\n\n📅 القسط القادم: ${new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })}\n━━━━━━━━━━━━━━━━━━\n\n⏳ *ماذا يحدث الآن؟*\n\n1️⃣ إنشاء حسابك الشخصي\n2️⃣ تخصيص الرحلة التدريبية لك\n3️⃣ تجهيز المواد التعليمية\n\n🚀 سيتم إرسال بيانات الدخول قريباً فور الانتهاء من تجهيزات استقبالك...\n\nشكراً لثقتك في منظور الفؤاد 💚`;
+                } else {
+                    const paidAmount = updated.paymentDetails?.paidAmount || updated.paymentDetails?.totalAmount || updated.pricing?.finalPriceNumber || 0;
+                    message = `🎉 *مبروك يا ${customerName}!*\n\nتم تأكيد دفعتك الكاملة بنجاح ✅\n\n━━━━━━━━━━━━━━━━━━\n📚 الدورة: *${updated.courseName || 'الدورة'}*\n\n💰 *تفاصيل الدفع:*\n- المبلغ المدفوع: *${paidAmount.toLocaleString('ar-EG')} ج.م*\n- طريقة الدفع: ${updated.paymentMethod || 'غير محدد'}\n- الحالة: مدفوع بالكامل ✅\n\n━━━━━━━━━━━━━━━━━━\n\n⏳ *ماذا يحدث الآن؟*\n\n1️⃣ إنشاء حسابك الشخصي\n2️⃣ تخصيص الرحلة التدريبية لك\n3️⃣ تجهيز المواد التعليمية\n\n🚀 سيتم إرسال بيانات الدخول قريباً فور الانتهاء من تجهيزات استقبالك...\n\nشكراً لثقتك في منظور الفؤاد 💚`;
+                }
+                await sendTelegramMessage(updated.telegramChatId, message);
             }
             setTimeout(()=>autoTransferToSpecialized(bookingId), 2000);
         } else {
-            if (booking.telegramChatId) await sendTelegramMessage(booking.telegramChatId, '🎉 تم تأكيد دفعتك!\n⏳ جاري إنشاء حسابك...\nشكراً 💚');
+            if (booking.telegramChatId) {
+                const name = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+                await sendTelegramMessage(booking.telegramChatId, `🎉 *مبروك يا ${name}!*\n\nتم تأكيد دفعتك بنجاح ✅\n📚 ${booking.courseName || 'الدورة'}\n\n⏳ جاري إنشاء حسابك وتخصيص الدورة...\n🚀 ستصلك بيانات الدخول قريباً\n\nشكراً لثقتك في منظور الفؤاد 💚`);
+            }
             setTimeout(()=>autoTransferToSpecialized(bookingId), 2000);
         }
     } catch(e) { console.error(e); Swal.fire('خطأ!','حدث خطأ','error'); }
@@ -1354,15 +1366,47 @@ async function markAsPaidWithGrantAutomation(bookingId) {
         const booking = {id:doc.id,...doc.data()};
         const isFullGrant = booking.isFullGrant || booking.pricing?.finalPriceNumber === 0;
         if (isFullGrant) {
-            const r = await Swal.fire({title:'🎉 تأكيد المنحة الكاملة',html:'<p>لا مبلغ مطلوب. سيتم إرسال تهاني.</p>',showCancelButton:true,confirmButtonText:'تأكيد',confirmButtonColor:'#10B981'});
+            const r = await Swal.fire({
+                title: '🎉 تأكيد المنحة الكاملة',
+                html: `<div style="text-align: right;">
+                    <div style="background: linear-gradient(135deg, #10B981, #059669); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h3 style="margin: 0; color: white;"><i class="fas fa-gift"></i> منحة كاملة 100%</h3>
+                        <p style="margin: 10px 0; font-size: 1.1rem;">لا يوجد أي مبلغ مطلوب من العميل</p>
+                    </div>
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 10px;">
+                        <h4 style="color: #059669;">📚 ${booking.courseName || 'الدورة'}</h4>
+                        <p><strong>العميل:</strong> ${booking.customer?.name || 'غير محدد'}</p>
+                        <p><strong>القيمة الأصلية:</strong> ${booking.pricing?.basePrice || '0 ج.م'}</p>
+                        <p><strong>المطلوب من العميل:</strong> <span style="color: #10B981; font-weight: bold;">0 ج.م</span></p>
+                    </div>
+                    <div style="background: #EFF6FF; padding: 15px; border-radius: 10px; margin-top: 15px;">
+                        <p style="color: #1E40AF; margin: 0;"><i class="fas fa-info-circle"></i> سيتم إرسال رسالة تهاني للعميل وبدء إنشاء الحساب تلقائياً</p>
+                    </div>
+                </div>`,
+                showCancelButton:true, confirmButtonText:'🎉 تأكيد وإرسال التهاني', cancelButtonText:'إلغاء', confirmButtonColor:'#10B981', width:'600px'
+            });
             if (!r.isConfirmed) return;
             await db.collection('tempBookings').doc(bookingId).update({status:'paid',paidAt:new Date().toISOString(),paymentMethod:'منحة كاملة 100%',paymentConfirmed:true,paymentConfirmedAt:new Date().toISOString(),paymentDetails:{type:'full_grant',totalAmount:0,paidAmount:0,remainingAmount:0,fullyPaid:true}});
-            if (booking.telegramChatId) await sendTelegramMessage(booking.telegramChatId, '🎊 مبروك '+(booking.customer?.name?.split(' ')[0]||'')+'!\nمنحة كاملة 100%!\n🚀 جاري إنشاء حسابك...\nشكراً 💚');
-            Swal.fire({icon:'success',title:'تم!',confirmButtonColor:'#10B981'});
+            if (booking.telegramChatId) {
+                const name = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+                await sendTelegramMessage(booking.telegramChatId, `🎊🎊🎊 *يا ألف مبروك يا ${name}!* 🎊🎊🎊\n━━━━━━━━━━━━━━━━━━\n🏆 *إنجاز استثنائي!*\nحصلت على منحة كاملة 100%!\n\n✨ *امتيازاتك:*\n━━━━━━━━━━━━━━━━━━\n✅ دورة ${booking.courseName || 'الدورة'} كاملة مجاناً\n✅ كل المحتوى والمواد متاحة\n✅ الدعم الكامل من الفريق\n✅ شهادة معتمدة عند الإنجاز\n\n🚫 *لا يوجد أي دفع مطلوب*\n\n━━━━━━━━━━━━━━━━━━\n⚡ *جاري الآن:*\n1️⃣ إنشاء حسابك الشخصي\n2️⃣ تخصيص الدورة لك\n3️⃣ تجهيز المواد التعليمية\n\n🚀 ستصلك بيانات الدخول قريباً فور الانتهاء من تجهيزات استقبالك...\n\nشكراً لثقتك في منظور الفؤاد 💚`);
+            }
+            Swal.fire({icon:'success',title:'تم تأكيد المنحة الكاملة!',html:'<p style="color: #059669;">تم إرسال رسالة التهاني للعميل</p>',confirmButtonColor:'#10B981'});
             loadBookings();
         } else {
             await markAsPaid(bookingId);
-            setTimeout(async()=>{const r=await db.collection('tempBookings').doc(bookingId).get();if(r.exists&&r.data().status==='paid'&&r.data().telegramChatId) await sendTelegramMessage(r.data().telegramChatId,'💎 تم تأكيد دفعتك!\n🚀 جاري إنشاء حسابك...\nشكراً 💚');},2000);
+            setTimeout(async()=>{
+                const r=await db.collection('tempBookings').doc(bookingId).get();
+                if(r.exists&&r.data().status==='paid'&&r.data().telegramChatId) {
+                    const name = r.data().customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+                    const pd = r.data().paymentDetails || {};
+                    const isInst = pd.type === 'installment';
+                    let msg = `💎 *مبروك يا ${name}! قرار حكيم ورائع!*\n━━━━━━━━━━━━━━━━━━\n✨ تم تأكيد ${isInst ? 'القسط الأول' : 'دفعتك'} بنجاح!\n\n🎯 *تفاصيل منحتك:*\n━━━━━━━━━━━━━━━━━━\n📚 الدورة: *${r.data().courseName || 'الدورة'}*\n💰 المبلغ المدفوع: *${(pd.paidAmount || 0).toLocaleString('ar-EG')} ج.م*\n💳 طريقة الدفع: ${r.data().paymentMethod || 'غير محدد'}`;
+                    if (isInst) msg += `\n\n📊 *حالة الأقساط:*\n- المدفوعة: ${pd.paidInstallments || 1} من ${pd.totalInstallments || 0}\n- المتبقي: *${(pd.remainingAmount || 0).toLocaleString('ar-EG')} ج.م*\n📅 القسط القادم: ${new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' })}`;
+                    msg += `\n\n━━━━━━━━━━━━━━━━━━\n⏳ *ماذا يحدث الآن؟*\n1️⃣ إنشاء حسابك الشخصي\n2️⃣ تخصيص الدورة لك\n3️⃣ تجهيز المواد التعليمية\n\n🚀 ستصلك بيانات الدخول قريباً\n\nشكراً لثقتك في منظور الفؤاد 💚`;
+                    await sendTelegramMessage(r.data().telegramChatId, msg);
+                }
+            },2000);
         }
     } catch(e) { console.error(e); Swal.fire('خطأ!','حدث خطأ','error'); }
 }
@@ -1386,12 +1430,32 @@ async function autoTransferToSpecialized(bookingId) {
         if (!doc.exists) return;
         const booking = {id:doc.id,...doc.data()};
         const userCheck = await checkExistingUser(booking);
-        const data = {...booking, userAccountInfo:{hasExistingAccount:userCheck.exists,existingUserId:userCheck.userId,checkedAt:new Date().toISOString()}, transferInfo:{transferredAt:new Date().toISOString(),transferredFrom:'tempBookings',transferredBy:'auto',originalBookingId:bookingId,automatedTransfer:true}, accountStatus:userCheck.exists?'existing':'pending_creation', automationRequired:true};
+        const data = {...booking, userAccountInfo:{hasExistingAccount:userCheck.exists,existingUserId:userCheck.userId,checkedAt:new Date().toISOString()}, transferInfo:{transferredAt:new Date().toISOString(),transferredFrom:'tempBookings',transferredBy:'auto',originalBookingId:bookingId,automatedTransfer:true,telegramIntegrated:booking.telegramConnected||false,telegramChatId:booking.telegramChatId||null}, paymentInfo:{status:booking.status,paymentConfirmed:booking.paymentConfirmed||false,paymentMethod:booking.paymentMethod||null,paymentReference:booking.paymentReference||null,paymentDetails:booking.paymentDetails||null,isInstallment:booking.paymentDetails?.type==='installment',totalAmount:booking.paymentDetails?.totalAmount||0,paidAmount:booking.paymentDetails?.paidAmount||0,remainingAmount:booking.paymentDetails?.remainingAmount||0,installmentSchedule:booking.paymentDetails?.installmentSchedule||null}, accountStatus:userCheck.exists?'existing':'pending_creation', automationRequired:true, automationStatus:'pending'};
         await db.collection('individualStudents').doc(bookingId).set(data);
         await db.collection('tempBookings').doc(bookingId).update({status:'transferred',transferredAt:new Date().toISOString(),transferredTo:'individualStudents',automatedTransfer:true});
-        Swal.fire({icon:'success',title:'✅ تم التحويل!',html:'<button onclick="window.open(\'bookings/creat&allow.html?id='+bookingId+'\',\'_blank\')" style="background:#10B981;color:white;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;margin-top:15px;">فتح</button>',confirmButtonText:'حسناً',confirmButtonColor:'#3B82F6'});
+        
+        // رسالة تليجرام تفصيلية للعميل
+        if (booking.telegramChatId) {
+            const name = booking.customer?.name?.split(' ')[0] || 'عميلنا العزيز';
+            await sendTelegramMessage(booking.telegramChatId, `⚙️ *جاري معالجة طلبك يا ${name}...*\n\n${userCheck.exists ? '✅ تم العثور على حسابك السابق' : '🆕 إنشاء حساب جديد لك'}\n\n📚 تخصيص دورة: ${booking.courseName || 'الدورة'}\n\n⏳ انتظر حتى الانتهاء من تجهيزات استقبالك....\n\nبعد يومين إلى ثلاثة أيام:\n💡 الوصول الكامل للمحتوى المتجدد\n💡 تفعيل نظام النقاط والشارات\n💡 حضور اللقاءات المباشرة التفاعلية\n💡 مجموعة واتس آب للانضمام إليها`);
+        }
+        
+        const automationUrl = 'bookings/creat&allow.html?id=' + bookingId + '&action=auto';
+        await Swal.fire({
+            icon: 'success', title: '✅ تم التحويل والأتمتة!',
+            html: `<div style="text-align: center;">
+                <p style="font-size: 1.1rem; margin-bottom: 15px;">تم نقل الحجز وبدأت الأتمتة بنجاح</p>
+                <div style="background: #F0F9FF; padding: 15px; border-radius: 10px; margin: 15px 0;">
+                    ${userCheck.exists ? '<p>⚠️ العميل له حساب موجود — سيتم تخصيص الدورة فقط</p>' : '<p>🆕 عميل جديد — سيتم إنشاء حساب + تخصيص الدورة</p>'}
+                </div>
+                <button onclick="window.open('${automationUrl}', '_blank')" style="background: #10B981; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; margin-top: 15px; font-size: 1rem; font-weight: bold;">
+                    <i class="fas fa-external-link-alt"></i> متابعة العملية في الصفحة المخصصة
+                </button>
+            </div>`,
+            confirmButtonText: 'حسناً', confirmButtonColor: '#3B82F6'
+        });
         loadBookings();
-    } catch(e) { console.error(e); Swal.fire('خطأ!','فشل','error'); }
+    } catch(e) { console.error(e); Swal.fire('خطأ!','فشل التحويل','error'); }
 }
 
 async function transferToSpecialized(bookingId, type) {
@@ -1511,64 +1575,122 @@ async function showInstallmentSchedule(bookingId) {
 }
 
 async function markInstallmentAsPaid(bookingId, idx) {
-    const b = allBookings.find(x=>x.id===bookingId); if(!b)return;
+    // Try both collections
+    let bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+    let collection = 'tempBookings';
+    if (!bookingDoc.exists) {
+        bookingDoc = await db.collection('individualStudents').doc(bookingId).get();
+        collection = 'individualStudents';
+    }
+    if (!bookingDoc.exists) { Swal.fire('خطأ!','لم يتم العثور','error'); return; }
+    const b = {id:bookingDoc.id,...bookingDoc.data()};
     const inst = b.paymentDetails.installmentSchedule[idx];
+    
     const r = await Swal.fire({
-        title:'✅ تسجيل قسط '+(inst.installmentNumber+1),
-        html:'<div style="text-align:right;"><p><strong>العميل:</strong> '+(b.customer?.name||'')+'</p><p><strong>المبلغ:</strong> '+inst.amount.toLocaleString('ar-EG')+' ج.م</p><label style="font-weight:bold;display:block;margin-top:15px;">المبلغ المدفوع:</label><input type="number" id="actualPaidAmount" class="swal2-input" value="'+inst.amount+'" style="width:90%;"><label style="font-weight:bold;display:block;margin-top:15px;">طريقة الدفع: *</label><select id="installmentPaymentMethod" class="swal2-input" style="width:90%;"><option value="">اختر</option><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option><option value="bank">تحويل بنكي</option><option value="cash">كاش</option><option value="other">أخرى</option></select><label style="font-weight:bold;display:block;margin-top:15px;">المرجع:</label><input id="installmentPaymentReference" class="swal2-input" style="width:90%;direction:ltr;"></div>',
-        showCancelButton:true, confirmButtonText:'✅ تأكيد', confirmButtonColor:'#10B981', width:'600px',
-        preConfirm:()=>{const m=document.getElementById('installmentPaymentMethod').value;if(!m){Swal.showValidationMessage('اختر طريقة الدفع');return false;}return{method:m,reference:document.getElementById('installmentPaymentReference').value||'',actualAmount:parseFloat(document.getElementById('actualPaidAmount').value)||inst.amount};}
+        title:'✅ تسجيل دفع القسط '+(inst.installmentNumber+1),
+        html:'<div style="text-align:right;"><div style="background: linear-gradient(135deg, #EFF6FF, #DBEAFE); padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #3B82F6;"><h4 style="color: #1E40AF;">تفاصيل القسط</h4><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"><div><span style="color: #6B7280;">العميل:</span><br><strong>'+(b.customer?.name||'')+'</strong></div><div><span style="color: #6B7280;">الدورة:</span><br><strong>'+(b.courseName||'')+'</strong></div><div><span style="color: #6B7280;">رقم القسط:</span><br><strong style="color: #3B82F6; font-size: 1.2rem;">'+(inst.installmentNumber+1)+' من '+b.paymentDetails.totalInstallments+'</strong></div><div><span style="color: #6B7280;">قيمة القسط:</span><br><strong style="color: #DC2626; font-size: 1.2rem;">'+inst.amount.toLocaleString('ar-EG')+' ج.م</strong></div><div><span style="color: #6B7280;">الاستحقاق:</span><br><strong>'+new Date(inst.dueDate).toLocaleDateString('ar-EG')+'</strong></div><div><span style="color: #6B7280;">المتبقي الكلي:</span><br><strong style="color: #F59E0B;">'+(b.paymentDetails.remainingAmount||0).toLocaleString('ar-EG')+' ج.م</strong></div></div></div><div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 3px solid #8B5CF6;"><label style="font-weight: bold; font-size: 1.1rem;">💰 المبلغ المدفوع فعلياً: *</label><input type="number" id="actualPaidAmount" class="swal2-input" value="'+inst.amount+'" style="width:90%; font-size: 1.3rem; text-align: center; font-weight: bold; color: #7C3AED; border: 3px solid #8B5CF6;"><div style="display: flex; gap: 8px; margin-top: 10px;"><button type="button" onclick="document.getElementById(\'actualPaidAmount\').value='+inst.amount+'" style="flex:1;padding:8px;background:#E0E7FF;border:2px solid #6366F1;border-radius:6px;cursor:pointer;font-weight:bold;color:#4338CA;">القسط ('+inst.amount.toLocaleString('ar-EG')+')</button><button type="button" onclick="document.getElementById(\'actualPaidAmount\').value='+(b.paymentDetails.remainingAmount||0)+'" style="flex:1;padding:8px;background:#FEF3C7;border:2px solid #F59E0B;border-radius:6px;cursor:pointer;font-weight:bold;color:#D97706;">الباقي كله ('+(b.paymentDetails.remainingAmount||0).toLocaleString('ar-EG')+')</button></div></div><label style="font-weight:bold;display:block;margin-top:15px;">💳 طريقة الدفع: *</label><select id="installmentPaymentMethod" class="swal2-input" style="width:90%;"><option value="">اختر</option><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option><option value="bank">تحويل بنكي</option><option value="cash">كاش</option><option value="other">أخرى</option></select><label style="font-weight:bold;display:block;margin-top:15px;">📝 رقم المرجع:</label><input id="installmentPaymentReference" class="swal2-input" style="width:90%;direction:ltr;"></div>',
+        showCancelButton:true, confirmButtonText:'✅ تأكيد الدفع', confirmButtonColor:'#10B981', width:'700px',
+        preConfirm:function(){var m=document.getElementById('installmentPaymentMethod').value;if(!m){Swal.showValidationMessage('اختر طريقة الدفع');return false;}return{method:m,reference:document.getElementById('installmentPaymentReference').value||'',actualAmount:parseFloat(document.getElementById('actualPaidAmount').value)||inst.amount};}
     });
     if (!r.isConfirmed) return;
     try {
-        Swal.fire({title:'جاري التسجيل...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
-        const actual = r.value.actualAmount;
+        Swal.fire({title:'جاري التسجيل...',allowOutsideClick:false,didOpen:function(){Swal.showLoading();}});
+        var actual = r.value.actualAmount;
         inst.status='paid'; inst.paidAt=new Date().toISOString(); inst.paymentMethod=r.value.method; inst.reference=r.value.reference; inst.actualPaidAmount=actual;
-        // Distribute extra
-        const extra = actual - inst.amount;
-        let paidCount = 1;
+        var extra = actual - inst.amount;
+        var paidCount = 1;
         if (extra > 0) {
-            let rem = extra;
-            for (let i=idx+1; i<b.paymentDetails.installmentSchedule.length; i++) {
-                const next = b.paymentDetails.installmentSchedule[i];
+            var rem = extra;
+            for (var i=idx+1; i<b.paymentDetails.installmentSchedule.length; i++) {
+                var next = b.paymentDetails.installmentSchedule[i];
                 if (next.status!=='pending'||rem<=0) continue;
-                if (rem >= next.amount) { next.status='paid'; next.paidAt=new Date().toISOString(); next.paymentMethod=r.value.method+' (زائد)'; rem-=next.amount; paidCount++; }
+                if (rem >= next.amount) { next.status='paid'; next.paidAt=new Date().toISOString(); next.paymentMethod=r.value.method+' (من دفعة سابقة)'; next.paidFromExtra=true; rem-=next.amount; paidCount++; }
                 else { next.amount-=rem; rem=0; break; }
             }
         }
-        const pd = b.paymentDetails;
+        var pd = b.paymentDetails;
         pd.paidInstallments = (pd.paidInstallments||0) + paidCount;
         pd.paidAmount = (pd.paidAmount||0) + actual;
         pd.remainingAmount = Math.max(0, (pd.totalAmount||0) - pd.paidAmount);
         if (pd.remainingAmount<=0) pd.fullyPaid = true;
-        await db.collection('tempBookings').doc(bookingId).update({paymentDetails:cleanDataForFirebase(pd)});
-        if (b.telegramChatId) await sendTelegramMessage(b.telegramChatId, '🎉 تم تأكيد دفعتك!\n💰 '+actual.toLocaleString('ar-EG')+' ج.م\n📊 المتبقي: '+pd.remainingAmount.toLocaleString('ar-EG')+' ج.م\nشكراً 💚');
-        Swal.fire({icon:'success',title:pd.fullyPaid?'🎊 مكتمل!':'✅ تم!',confirmButtonColor:'#10B981'});
+        await db.collection(collection).doc(bookingId).update({paymentDetails:cleanDataForFirebase(pd)});
+        // Telegram message
+        if (b.telegramChatId) {
+            var name = (b.customer?.name||'').split(' ')[0] || 'عميلنا العزيز';
+            var msg = '';
+            if (pd.fullyPaid) {
+                msg = '🎊🎉 مبروك يا ' + name + '!\n\nتم إكمال دفع كامل المبلغ! ✅\n\n━━━━━━━━━━━━━━━━━━\n💰 المدفوع: ' + actual.toLocaleString('ar-EG') + ' ج.م\n📅 التاريخ: ' + new Date().toLocaleDateString('ar-EG') + '\n\n📊 ملخص:\n✅ الإجمالي: ' + pd.totalAmount.toLocaleString('ar-EG') + ' ج.م\n✅ المتبقي: 0 ج.م\n\n🎊 تم سداد كامل المبلغ!\n\n━━━━━━━━━━━━━━━━━━\nشكراً لالتزامك 💚\nمنظور الفؤاد';
+            } else {
+                msg = '🎉 شكراً يا ' + name + '!\n\nتم تأكيد دفعتك ✅\n\n━━━━━━━━━━━━━━━━━━\n💰 المدفوع: *' + actual.toLocaleString('ar-EG') + ' ج.م*\n📅 التاريخ: ' + new Date().toLocaleDateString('ar-EG') + '\n💳 الطريقة: ' + r.value.method + '\n\n📊 الأقساط:\n✅ مدفوع: ' + pd.paidInstallments + ' من ' + pd.totalInstallments + '\n⏳ المتبقي: ' + pd.remainingAmount.toLocaleString('ar-EG') + ' ج.م';
+                var nextP = b.paymentDetails.installmentSchedule.find(function(ii){return ii.status === 'pending';});
+                if (nextP) msg += '\n\n📅 القسط القادم: ' + nextP.amount.toLocaleString('ar-EG') + ' ج.م في ' + new Date(nextP.dueDate).toLocaleDateString('ar-EG');
+                msg += '\n\n━━━━━━━━━━━━━━━━━━\nشكراً لالتزامك 💚\nمنظور الفؤاد';
+            }
+            await sendTelegramMessage(b.telegramChatId, msg);
+        }
+        Swal.fire({icon:'success',title:pd.fullyPaid?'🎊 تم إكمال الدفع!':'✅ تم تسجيل الدفع!',html:'<div style="text-align:right;"><div style="background:#D1FAE5;padding:20px;border-radius:15px;border:3px solid #10B981;"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;text-align:center;"><div style="padding:12px;background:#EFF6FF;border-radius:8px;"><div style="font-size:0.85rem;color:#6B7280;">المدفوع</div><div style="font-size:1.3rem;font-weight:bold;color:#3B82F6;">'+actual.toLocaleString('ar-EG')+' ج.م</div></div><div style="padding:12px;background:#F0FDF4;border-radius:8px;"><div style="font-size:0.85rem;color:#6B7280;">الأقساط</div><div style="font-size:1.3rem;font-weight:bold;color:#10B981;">'+pd.paidInstallments+'/'+pd.totalInstallments+'</div></div><div style="padding:12px;background:#FEF3C7;border-radius:8px;"><div style="font-size:0.85rem;color:#6B7280;">المتبقي</div><div style="font-size:1.3rem;font-weight:bold;color:#DC2626;">'+pd.remainingAmount.toLocaleString('ar-EG')+' ج.م</div></div></div>'+(paidCount>1?'<div style="margin-top:15px;padding:10px;background:white;border-radius:8px;"><strong>📊 تم توزيع المبلغ على '+paidCount+' أقساط تلقائياً</strong></div>':'')+(pd.fullyPaid?'<div style="margin-top:15px;padding:15px;background:#FEF3C7;border-radius:10px;text-align:center;"><div style="font-size:2rem;">🎉🎊🎈</div><div style="color:#92400E;font-weight:bold;">تم سداد كامل المبلغ!</div></div>':'')+'</div></div>',confirmButtonColor:'#10B981'});
         loadBookings();
-    } catch(e) { console.error(e); Swal.fire('خطأ!','حدث خطأ','error'); }
+    } catch(e) { console.error(e); Swal.fire('خطأ!','حدث خطأ: '+e.message,'error'); }
+}
+
+async function sendInstallmentReminder(bookingId, idx) {
+    var bookingDoc = await db.collection('tempBookings').doc(bookingId).get();
+    var collection = 'tempBookings';
+    if (!bookingDoc.exists) { bookingDoc = await db.collection('individualStudents').doc(bookingId).get(); collection = 'individualStudents'; }
+    if (!bookingDoc.exists) return;
+    var b = bookingDoc.data();
+    var inst = b.paymentDetails.installmentSchedule[idx];
+    var name = (b.customer?.name||'').split(' ')[0] || 'عميلنا العزيز';
+    var dueDate = new Date(inst.dueDate);
+    var message = '⏰ تذكير بموعد القسط الشهري\n\nمرحباً ' + name + ' 👋\n\nهذا تذكير لطيف بأن القسط الشهري القادم:\n\n━━━━━━━━━━━━━━━━━━\n📚 الدورة: *' + (b.courseName||'الدورة') + '*\n💰 المبلغ المطلوب: *' + inst.amount.toLocaleString('ar-EG') + ' ج.م*\n📅 تاريخ الاستحقاق: ' + dueDate.toLocaleDateString('ar-EG') + '\n\n📊 حالة الأقساط:\n✅ مدفوع: ' + (b.paymentDetails.paidInstallments||0) + ' من ' + ((b.paymentDetails.totalInstallments||0)-1) + ' أقساط\n⏳ المتبقي: ' + (b.paymentDetails.remainingAmount||0).toLocaleString('ar-EG') + ' ج.م\n\n━━━━━━━━━━━━━━━━━━\n💳 طرق الدفع المتاحة:\n📱 فودافون كاش\n💳 انستاباي\n🏦 تحويل بنكي\n\n━━━━━━━━━━━━━━━━━━\nبعد الدفع، يرجى إرسال صورة الإيصال 📸\n\nشكراً لثقتك في منظور الفؤاد 💚';
+    var sent = await sendTelegramMessage(b.telegramChatId, message);
+    if (sent) {
+        var reminders = inst.reminders || [];
+        reminders.push({sentAt: new Date().toISOString(), sentBy: 'admin'});
+        inst.reminders = reminders;
+        await db.collection(collection).doc(bookingId).update({'paymentDetails.installmentSchedule': b.paymentDetails.installmentSchedule});
+        Swal.fire({toast:true, position:'top-end', icon:'success', title:'✅ تم إرسال التذكير', showConfirmButton:false, timer:3000});
+    } else { Swal.fire('خطأ!', 'فشل إرسال التذكير', 'error'); }
 }
 
 async function showInstallmentsManager() {
-    const bookings = allBookings.filter(b=>b.paymentDetails?.type==='installment'&&b.status!=='cancelled');
-    if (bookings.length===0) { Swal.fire({icon:'info',title:'لا توجد أقساط'}); return; }
-    const now = new Date();
-    let overdue=0,dueThisMonth=0,paid=0,listHTML='';
-    bookings.forEach(function(b) {
+    var installmentBookings = [];
+    try {
+        var tempSnap = await db.collection('tempBookings').where('status', 'in', ['pending', 'confirmed', 'paid']).get();
+        tempSnap.forEach(function(doc) { var data = {id:doc.id,...doc.data(),_source:'tempBookings'}; if (data.paymentDetails?.type === 'installment') installmentBookings.push(data); });
+        var studentsSnap = await db.collection('individualStudents').get();
+        studentsSnap.forEach(function(doc) { var data = {id:doc.id,...doc.data(),_source:'individualStudents'}; if (data.paymentDetails?.type === 'installment' && !data.paymentDetails?.fullyPaid) installmentBookings.push(data); });
+    } catch(e) { console.error(e); Swal.fire('خطأ!', 'فشل تحميل الأقساط', 'error'); return; }
+    if (installmentBookings.length===0) { Swal.fire({icon:'info',title:'لا توجد أقساط نشطة'}); return; }
+    var now = new Date();
+    var overdue=0, dueThisMonth=0, paid=0, totalDue=0, allInstallments=[];
+    installmentBookings.forEach(function(b) {
         (b.paymentDetails.installmentSchedule||[]).forEach(function(inst,idx) {
             if (inst.status==='paid') { paid++; return; }
-            const due = new Date(inst.dueDate);
-            const days = Math.floor((now-due)/86400000);
+            var due = new Date(inst.dueDate);
+            var days = Math.floor((now-due)/86400000);
             if (days>0) overdue++;
-            if (due.getMonth()===now.getMonth()) dueThisMonth++;
-            const statusText = days>0?'🔴 متأخر '+days+' يوم':days>-7?'⏰ '+due.toLocaleDateString('ar-EG'):'📅 '+due.toLocaleDateString('ar-EG');
-            listHTML += '<div style="background:white;padding:15px;border-radius:10px;margin-bottom:10px;border-right:4px solid '+(days>0?'#DC2626':'#3B82F6')+';"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;"><div><strong>'+(b.customer?.name||'---')+'</strong> | '+(b.courseName||'---')+' | <strong style="color:#DC2626;">'+inst.amount.toLocaleString('ar-EG')+' ج.م</strong><br><small>'+statusText+' | القسط '+(inst.installmentNumber+1)+'/'+b.paymentDetails.totalInstallments+'</small></div><div style="display:flex;gap:8px;"><button onclick="markInstallmentAsPaid(\''+b.id+'\','+idx+')" style="padding:6px 14px;background:#3B82F6;color:white;border:none;border-radius:6px;cursor:pointer;">تسجيل</button></div></div></div>';
+            if (due.getMonth()===now.getMonth() && due.getFullYear()===now.getFullYear()) dueThisMonth++;
+            totalDue += inst.amount;
+            allInstallments.push({booking:b, inst:inst, idx:idx, days:days, due:due});
         });
     });
+    allInstallments.sort(function(a,b){return b.days - a.days;});
+    var listHTML = '';
+    allInstallments.forEach(function(item) {
+        var b=item.booking, inst=item.inst, idx=item.idx, days=item.days, due=item.due;
+        var statusText = days>0 ? '🔴 متأخر '+days+' يوم' : days===0 ? '⏰ اليوم!' : days>-7 ? '⏰ بعد '+Math.abs(days)+' أيام' : '📅 '+due.toLocaleDateString('ar-EG',{day:'numeric',month:'short'});
+        var borderColor = days>0?'#DC2626':days>-3?'#F59E0B':'#3B82F6';
+        var sourceLabel = b._source==='individualStudents'?'<span style="background:#E9D5FF;color:#7C3AED;padding:2px 8px;border-radius:10px;font-size:0.75rem;margin-right:8px;">طالب نشط</span>':'';
+        listHTML += '<div style="background:white;padding:18px;border-radius:12px;margin-bottom:12px;border-right:5px solid '+borderColor+';box-shadow:0 2px 8px rgba(0,0,0,0.06);"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;"><div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><strong style="font-size:1.1rem;">'+(b.customer?.name||'---')+'</strong>'+sourceLabel+'</div><div style="color:#6B7280;font-size:0.9rem;">'+(b.courseName||'---')+' | القسط '+(inst.installmentNumber+1)+'/'+b.paymentDetails.totalInstallments+' | <strong style="color:#DC2626;font-size:1.1rem;">'+inst.amount.toLocaleString('ar-EG')+' ج.م</strong></div><div style="margin-top:5px;font-size:0.9rem;color:'+(days>0?'#DC2626':'#6B7280')+';">'+statusText+'</div></div><div style="display:flex;gap:8px;"><button onclick="markInstallmentAsPaid(\''+b.id+'\','+idx+')" style="padding:8px 16px;background:linear-gradient(135deg,#3B82F6,#2563EB);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;"><i class="fas fa-check"></i> تسجيل</button>'+(b.telegramChatId?'<button onclick="sendInstallmentReminder(\''+b.id+'\','+idx+')" style="padding:8px 16px;background:linear-gradient(135deg,#10B981,#059669);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;"><i class="fas fa-paper-plane"></i> تذكير</button>':'')+'</div></div></div>';
+    });
     Swal.fire({
-        title:'💳 الأقساط',html:'<div style="text-align:right;max-height:70vh;overflow-y:auto;"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:20px;"><div style="background:#FEE2E2;padding:15px;border-radius:10px;text-align:center;"><div style="font-size:1.8rem;font-weight:bold;color:#DC2626;">'+overdue+'</div><div>متأخر</div></div><div style="background:#FEF3C7;padding:15px;border-radius:10px;text-align:center;"><div style="font-size:1.8rem;font-weight:bold;color:#F59E0B;">'+dueThisMonth+'</div><div>هذا الشهر</div></div><div style="background:#D1FAE5;padding:15px;border-radius:10px;text-align:center;"><div style="font-size:1.8rem;font-weight:bold;color:#10B981;">'+paid+'</div><div>مدفوع</div></div></div>'+(listHTML||'<p style="text-align:center;color:#6B7280;">لا توجد أقساط معلقة</p>')+'</div>',
-        width:'95%',showCloseButton:true,showConfirmButton:false
+        title:'💳 متابعة الأقساط الشهرية',
+        html:'<div style="text-align:right;max-height:75vh;overflow-y:auto;"><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:15px;margin-bottom:25px;"><div style="background:linear-gradient(135deg,#FEE2E2,#FECACA);padding:18px;border-radius:12px;text-align:center;border:2px solid #EF4444;"><div style="font-size:2rem;font-weight:bold;color:#DC2626;">'+overdue+'</div><div style="color:#991B1B;font-weight:600;">🔴 متأخر</div></div><div style="background:linear-gradient(135deg,#FEF3C7,#FDE68A);padding:18px;border-radius:12px;text-align:center;border:2px solid #F59E0B;"><div style="font-size:2rem;font-weight:bold;color:#F59E0B;">'+dueThisMonth+'</div><div style="color:#92400E;font-weight:600;">⏰ هذا الشهر</div></div><div style="background:linear-gradient(135deg,#D1FAE5,#A7F3D0);padding:18px;border-radius:12px;text-align:center;border:2px solid #10B981;"><div style="font-size:2rem;font-weight:bold;color:#10B981;">'+paid+'</div><div style="color:#065F46;font-weight:600;">✅ مدفوع</div></div><div style="background:linear-gradient(135deg,#EDE9FE,#DDD6FE);padding:18px;border-radius:12px;text-align:center;border:2px solid #8B5CF6;"><div style="font-size:1.5rem;font-weight:bold;color:#8B5CF6;">'+totalDue.toLocaleString('ar-EG')+'</div><div style="color:#6B21A8;font-weight:600;">💰 المستحق</div></div></div><h4 style="margin-bottom:15px;color:#1F2937;"><i class="fas fa-list"></i> الأقساط المعلقة ('+allInstallments.length+')</h4>'+(listHTML||'<p style="text-align:center;color:#6B7280;padding:40px;">🎉 لا توجد أقساط معلقة</p>')+'</div>',
+        width:'95%', showCloseButton:true, showConfirmButton:false
     });
 }
+
 
 // ============================================
 // Grants Report
