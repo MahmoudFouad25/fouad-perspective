@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0F1B2D">
+  <title>لوحة التحكّم — منظور الفؤاد</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="admin-shell">
+    <div class="admin-panel">
+
+      <!-- Header -->
+      <div class="admin-header">
+        <div>
+          <div class="brand" style="margin: 0; justify-content: flex-start;">
+            <div class="brand-mark">م.ف</div>
+            <div>
+              <div class="brand-name">منظور الفؤاد</div>
+              <span class="brand-tagline">لوحة تحكّم الجلسة</span>
+            </div>
+          </div>
+        </div>
+        <div class="admin-actions">
+          <a href="display.html" target="_blank" class="secondary-btn">شاشة العرض ↗</a>
+          <a href="live.html" target="_blank" class="secondary-btn">معاينة المشارك ↗</a>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="admin-section">
+        <h3>الإحصائيّات الحيّة</h3>
+        <div class="stat-grid">
+          <div class="stat-box">
+            <div class="stat-label">المتّصلون الآن</div>
+            <div class="stat-value" id="activeCount">—</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">إجمالي المسجّلين في الجلسة</div>
+            <div class="stat-value" id="totalCount">—</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">المرحلة الحاليّة</div>
+            <div class="stat-value" id="currentStageNum" style="font-size: 1.2rem;">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stages -->
+      <div class="admin-section">
+        <h3>التحكّم في المراحل</h3>
+        <p class="text-faint" style="margin-bottom: 1rem;">
+          اضغط على المرحلة لتفعيلها — هتظهر فورًا على شاشة كل المشاركين.
+        </p>
+        <div class="stage-grid" id="stageGrid">
+          <!-- Buttons rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="admin-section">
+        <h3>منطقة الخطر</h3>
+        <p class="text-faint" style="margin-bottom: 1rem;">
+          إعادة بدء الجلسة بتمسح كل المشاركين والإجابات. استعملها بين جلسة وجلسة فقط.
+        </p>
+        <button id="resetBtn" class="danger-btn">إعادة بدء الجلسة بالكامل</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <!-- إعدادات Firebase الموجودة في الجذر -->
+  <script src="../js/firebase-config.js"></script>
+
+  <!-- منطق الجلسة الخاص بالـ Webinar -->
+  <script src="js/session.js"></script>
+
+  <script>
+    /* ────────────────────────────────────────────────────────────────
+       حماية لوحة التحكّم — معطّلة الآن للاختبار
+       لتفعيلها قبل الويبينار الفعليّ، احذف التعليق من السطر التالي:
+       ────────────────────────────────────────────────────────────────
+       
+       window.firebaseAuth.protectAdminPage();
+    */
+
+    // تحويل الأرقام
+    function toArabic(n) {
+      const map = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+      return String(n).split('').map(d => map[+d] ?? d).join('');
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Render stage buttons
+    // ────────────────────────────────────────────────────────────────
+    const grid = document.getElementById('stageGrid');
+    Object.entries(STAGES).forEach(([key, meta]) => {
+      const btn = document.createElement('button');
+      btn.className = 'stage-btn';
+      btn.dataset.stage = key;
+      btn.innerHTML = `
+        <span class="stage-btn-num">${meta.num}</span>
+        <span>${meta.label}</span>
+      `;
+      btn.addEventListener('click', async () => {
+        try {
+          await setStage(key);
+        } catch (err) {
+          console.error(err);
+          alert('حصل خطأ في تغيير المرحلة');
+        }
+      });
+      grid.appendChild(btn);
+    });
+
+    // المرحلة الحاليّة
+    subscribeToStage((stage) => {
+      document.querySelectorAll('.stage-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.stage === stage);
+      });
+      const meta = STAGES[stage];
+      const display = document.getElementById('currentStageNum');
+      if (display && meta) {
+        display.textContent = `${meta.num} · ${meta.label}`;
+      }
+    });
+
+    // العدّادات
+    subscribeToParticipantCount((active, total) => {
+      document.getElementById('activeCount').textContent = toArabic(active);
+      document.getElementById('totalCount').textContent = toArabic(total);
+    });
+
+    // زرّ Reset
+    document.getElementById('resetBtn').addEventListener('click', async () => {
+      const confirm1 = confirm('متأكّد من إعادة بدء الجلسة بالكامل؟ كل المشاركين والإجابات هتتمسح.');
+      if (!confirm1) return;
+      const confirm2 = confirm('تأكيد أخير — هتمسح كل البيانات؟');
+      if (!confirm2) return;
+
+      try {
+        const btn = document.getElementById('resetBtn');
+        btn.disabled = true;
+        btn.textContent = 'جاري المسح...';
+        await resetSession();
+        btn.disabled = false;
+        btn.textContent = 'إعادة بدء الجلسة بالكامل';
+        alert('تم بنجاح. الجلسة جاهزة من جديد.');
+      } catch (err) {
+        console.error(err);
+        alert('حصل خطأ: ' + err.message);
+      }
+    });
+  </script>
+
+</body>
+</html>
