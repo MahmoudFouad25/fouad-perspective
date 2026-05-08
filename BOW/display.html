@@ -15,7 +15,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 4rem;
+      padding: 3rem 4rem;
       position: relative;
     }
 
@@ -27,11 +27,12 @@
       align-items: center;
       gap: 0.75rem;
       opacity: 0.85;
+      z-index: 10;
     }
 
     .display-content {
       text-align: center;
-      max-width: 1100px;
+      max-width: 1300px;
       width: 100%;
     }
 
@@ -104,30 +105,56 @@
     const content = document.getElementById('display-content');
     const stageLabel = document.getElementById('stageLabel');
     let currentStage = null;
+    let activeStageUnsub = null; // cleanup للمرحلة السابقة
 
+    // ────────────────────────────────────────────────────────────────
+    // أرقام عربيّة
+    // ────────────────────────────────────────────────────────────────
     function toArabic(n) {
       const map = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
       return String(n).split('').map(d => map[+d] ?? d).join('');
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // عدّاد المتّصلين
+    // ────────────────────────────────────────────────────────────────
     subscribeToParticipantCount((active, total) => {
       const el = document.getElementById('liveCount');
       if (el) el.textContent = toArabic(active);
     });
 
+    // ────────────────────────────────────────────────────────────────
+    // تغييرات المرحلة
+    // ────────────────────────────────────────────────────────────────
     subscribeToStage((stage, data) => {
       if (stage !== currentStage) {
+        // تنظيف الـ listener السابق
+        if (activeStageUnsub) {
+          activeStageUnsub();
+          activeStageUnsub = null;
+        }
         currentStage = stage;
         const meta = STAGES[stage] || STAGES.welcome;
-        stageLabel.textContent = `${meta.label}`;
+        stageLabel.textContent = meta.label;
         renderStage(stage);
       }
     });
 
+    // ────────────────────────────────────────────────────────────────
+    // Renderer
+    // ────────────────────────────────────────────────────────────────
     function renderStage(stage) {
-      content.innerHTML = views[stage] ? views[stage]() : views.welcome();
+      const view = views[stage] || views.welcome;
+      content.innerHTML = view();
+      // Initializer لكل مرحلة (لو فيها logic خاصّة)
+      if (initializers[stage]) {
+        initializers[stage]();
+      }
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // قوالب الشاشات
+    // ────────────────────────────────────────────────────────────────
     const views = {
       welcome: () => `
         <h1 class="display-title animate-in">من الاحتراق<br>إلى استعادة الاتّزان</h1>
@@ -144,13 +171,6 @@
       opening_poll: () => `
         <h1 class="display-title animate-in">Poll الافتتاح</h1>
         <p class="display-subtitle animate-in delay-1">إرهاق ولّا احتراق؟</p>
-        <div class="display-counter-wrap animate-in delay-2">
-          <div class="display-counter">
-            <div class="display-counter-icon"></div>
-            <span class="display-counter-text">المتّصلون:</span>
-            <span class="display-counter-num" id="liveCount">٠</span>
-          </div>
-        </div>
       `,
 
       khalid_moment: () => `
@@ -158,9 +178,40 @@
         <p class="display-subtitle animate-in delay-1">"بتصحى الـ٣ الفجر؟"</p>
       `,
 
+      // ─── Phase 2: chart التشخيصيّ ───
       diagnostic: () => `
-        <h1 class="display-title animate-in">الاختبار التشخيصيّ</h1>
-        <p class="display-subtitle animate-in delay-1">تسع مواقف — ثلاث محاور</p>
+        <div class="diagnostic-display animate-fade">
+          <h1 class="display-title">توزيع المحاور</h1>
+          <p class="display-subtitle">الجمهور الحاضر — لحظة بلحظة</p>
+
+          <div class="diagnostic-chart" id="diagnosticChart">
+            ${['tamasok', 'haywiyya', 'intima'].map(key => {
+              const ax = AXES[key];
+              return `
+                <div class="chart-column" data-axis="${key}" style="--c: ${ax.color}; --g: ${ax.glow};">
+                  <div class="chart-question">${ax.question}</div>
+                  <div class="chart-bar-wrap">
+                    <div class="chart-bar-track">
+                      <div class="chart-bar-fill" style="height: 0%;"></div>
+                    </div>
+                    <div class="chart-percent">٠٪</div>
+                  </div>
+                  <div class="chart-axis-info">
+                    <div class="chart-axis-name">${ax.name}</div>
+                    <div class="chart-axis-count">٠ شخص</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <div class="diagnostic-status">
+            <span id="completedCount">٠</span>
+            <span class="diagnostic-status-sep">من</span>
+            <span id="totalParticipants">٠</span>
+            <span class="diagnostic-status-label">أكملوا الاختبار</span>
+          </div>
+        </div>
       `,
 
       type_guess: () => `
@@ -179,6 +230,80 @@
         <p class="display-subtitle animate-in delay-2" style="opacity:0.6;">والاتّزان — رحلة، مش لحظة</p>
       `
     };
+
+    // ────────────────────────────────────────────────────────────────
+    // ميتاداتا المحاور للعرض (نسخة مصغّرة من quiz.js)
+    // ────────────────────────────────────────────────────────────────
+    const AXES = {
+      tamasok:  {
+        name: 'التماسك',
+        question: 'هل أنا بخير؟',
+        color: '#D4A24E',
+        glow: 'rgba(212, 162, 78, 0.4)'
+      },
+      haywiyya: {
+        name: 'الحيوية',
+        question: 'هل أنا حيّ؟',
+        color: '#E8543F',
+        glow: 'rgba(232, 84, 63, 0.4)'
+      },
+      intima:   {
+        name: 'الانتماء',
+        question: 'هل أنا منتمي؟',
+        color: '#4ABEDF',
+        glow: 'rgba(74, 190, 223, 0.4)'
+      }
+    };
+
+    // ────────────────────────────────────────────────────────────────
+    // Initializers — كل مرحلة محتاجة logic خاصّة بعد الـ render
+    // ────────────────────────────────────────────────────────────────
+    const initializers = {
+      diagnostic: () => {
+        // اشتراك Live على نتائج الاختبار التشخيصيّ
+        activeStageUnsub = subscribeToStageResults('diagnostic', (results) => {
+          updateDiagnosticChart(results);
+        });
+
+        // عدد المشاركين الإجماليّ (للـ "X من Y")
+        fetchParticipantCounts().then(({ active }) => {
+          const el = document.getElementById('totalParticipants');
+          if (el) el.textContent = toArabic(active);
+        });
+      }
+    };
+
+    // ────────────────────────────────────────────────────────────────
+    // تحديث Chart الاختبار التشخيصيّ Live
+    // ────────────────────────────────────────────────────────────────
+    function updateDiagnosticChart(results) {
+      const counts = { tamasok: 0, haywiyya: 0, intima: 0 };
+      results.forEach(r => {
+        if (r.result?.main_axis) counts[r.result.main_axis]++;
+      });
+
+      const total = counts.tamasok + counts.haywiyya + counts.intima;
+      const max = Math.max(counts.tamasok, counts.haywiyya, counts.intima, 1);
+
+      ['tamasok', 'haywiyya', 'intima'].forEach(key => {
+        const col = document.querySelector(`.chart-column[data-axis="${key}"]`);
+        if (!col) return;
+        const c = counts[key];
+        const heightPct = max > 0 ? (c / max) * 100 : 0;
+        const sharePct = total > 0 ? Math.round((c / total) * 100) : 0;
+
+        const fill = col.querySelector('.chart-bar-fill');
+        const percent = col.querySelector('.chart-percent');
+        const countEl = col.querySelector('.chart-axis-count');
+
+        fill.style.height = `${heightPct}%`;
+        percent.textContent = `${toArabic(sharePct)}٪`;
+        countEl.textContent = `${toArabic(c)} ${c === 1 ? 'شخص' : 'شخص'}`;
+      });
+
+      const completedEl = document.getElementById('completedCount');
+      if (completedEl) completedEl.textContent = toArabic(total);
+    }
   </script>
 
 </body>
