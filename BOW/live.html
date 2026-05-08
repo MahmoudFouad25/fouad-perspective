@@ -11,7 +11,7 @@
 
   <main class="screen">
     <div id="stage-container" class="live-stage">
-      <!-- Initial loader before first stage subscription resolves -->
+      <!-- Loader أوّليّ -->
       <div class="brand animate-in">
         <div class="brand-mark">م.ف</div>
         <div>
@@ -28,16 +28,12 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-
-  <!-- إعدادات Firebase الموجودة في الجذر -->
   <script src="../js/firebase-config.js"></script>
-
-  <!-- منطق الجلسة الخاص بالـ Webinar -->
   <script src="js/session.js"></script>
 
   <script>
     // ────────────────────────────────────────────────────────────────
-    // التأكد من وجود participant ID — لو مفيش، يرجع للصفحة الرئيسيّة
+    // التأكد من وجود participant ID
     // ────────────────────────────────────────────────────────────────
     if (!getParticipantId()) {
       window.location.href = 'index.html';
@@ -45,93 +41,162 @@
 
     const container = document.getElementById('stage-container');
     let currentStage = null;
+    let isInActiveMode = false; // هل المشارك دخل المرحلة فعلًا؟
 
-    // Heartbeat — يأكّد للنظام إنّ المشارك لسه موجود
     startHeartbeat();
 
     // ────────────────────────────────────────────────────────────────
-    // الاستماع للمرحلة الحاليّة من Firebase وتغيير الواجهة تلقائيًّا
+    // الاستماع للمرحلة الحاليّة
     // ────────────────────────────────────────────────────────────────
     subscribeToStage((stage, sessionData) => {
       if (stage !== currentStage) {
         currentStage = stage;
-        renderStage(stage);
+        isInActiveMode = false;     // أيّ مرحلة جديدة، نبدأ في وضع Ready
+        renderStage(stage, false);  // false = ready mode
       }
     });
 
     // ────────────────────────────────────────────────────────────────
-    // عرض المرحلة المناسبة
+    // عرض المرحلة (وضعَين: ready / active)
     // ────────────────────────────────────────────────────────────────
-    function renderStage(stage) {
-      const html = stages[stage] ? stages[stage]() : stages.welcome();
-      container.innerHTML = html;
+    function renderStage(stage, isActive) {
+      const def = stageDefinitions[stage] || stageDefinitions.welcome;
+
+      // Welcome و Closing انتقال أوتوماتيكيّ — مفيش Opt-in
+      if (stage === 'welcome' || stage === 'closing') {
+        container.innerHTML = def.view();
+        return;
+      }
+
+      // باقي المراحل: Opt-in pattern
+      if (isActive) {
+        container.innerHTML = def.activeView();
+      } else {
+        container.innerHTML = def.readyView();
+        const enterBtn = container.querySelector('#enterStageBtn');
+        if (enterBtn) {
+          enterBtn.addEventListener('click', () => {
+            isInActiveMode = true;
+            renderStage(stage, true);
+          });
+        }
+      }
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Stage views
+    // تعريف المراحل: كل واحدة لها readyView و activeView
     // ────────────────────────────────────────────────────────────────
-    const stages = {
-      welcome: () => `
-        <div class="brand animate-in">
-          <div class="brand-mark">م.ف</div>
-          <div>
-            <div class="brand-name">منظور الفؤاد</div>
-            <span class="brand-tagline">جلسة حيّة</span>
+    const stageDefinitions = {
+      welcome: {
+        view: () => `
+          <div class="brand animate-in">
+            <div class="brand-mark">م.ف</div>
+            <div>
+              <div class="brand-name">منظور الفؤاد</div>
+              <span class="brand-tagline">جلسة حيّة</span>
+            </div>
           </div>
-        </div>
-        <div class="status-pill animate-in delay-1">موجود في الجلسة</div>
-        <h2 class="title-section animate-in delay-2">أهلًا بيك</h2>
-        <p class="subtitle animate-in delay-3">
-          الجلسة شغّالة على الزووم.<br>
-          هتلاقي تفاعلات على الشاشة دي خلال الويبينار.<br>
-          سيب الموبايل قدّامك ومتشيلش الصفحة دي.
-        </p>
-        <div class="pulse animate-in delay-4"></div>
-      `,
+          <div class="status-pill animate-in delay-1">موجود في الجلسة</div>
+          <h2 class="title-section animate-in delay-2">أهلًا بيك</h2>
+          <p class="subtitle animate-in delay-3">
+            الجلسة شغّالة على الزووم.<br>
+            خلّي الموبايل قدّامك — هتلاقي تفاعلات على الشاشة دي خلال الويبينار.
+          </p>
+          <div class="pulse animate-in delay-4"></div>
+        `
+      },
 
-      opening_poll: () => `
-        <span class="placeholder-tag">Phase 6 — قيد التطوير</span>
-        <h2 class="title-section">Poll الافتتاح</h2>
-        <p class="subtitle">المرحلة دي هتُبنى لاحقًا (إرهاق ولّا احتراق)</p>
-        <div class="pulse"></div>
-      `,
+      opening_poll: {
+        readyView: () => readyTemplate({
+          title: 'Poll الافتتاح',
+          desc: 'سؤال واحد، خمس إجابات — اختار الأقرب لإحساسك.',
+          btn: 'ابدأ التفاعل'
+        }),
+        activeView: () => activeUnderConstruction('Poll الافتتاح', 'إرهاق ولّا احتراق؟')
+      },
 
-      khalid_moment: () => `
-        <span class="placeholder-tag">Phase 5 — قيد التطوير</span>
-        <h2 class="title-section">لحظة خالد</h2>
-        <p class="subtitle">"حصلّك إنّك بتصحى الـ٣ الفجر بحجر على صدرك؟"</p>
-        <div class="pulse"></div>
-      `,
+      khalid_moment: {
+        readyView: () => readyTemplate({
+          title: 'لحظة شخصيّة',
+          desc: 'سؤال واحد بصدق مع نفسك — جوابك بيظهر على شاشتك إنت بسّ.',
+          btn: 'دخّلني'
+        }),
+        activeView: () => activeUnderConstruction('لحظة خالد', 'هل ده إنت؟')
+      },
 
-      diagnostic: () => `
-        <span class="placeholder-tag">Phase 2 — قيد التطوير</span>
-        <h2 class="title-section">الاختبار التشخيصيّ</h2>
-        <p class="subtitle">٩ مواقف هتكشفلك محورك الرئيسيّ</p>
-        <div class="pulse"></div>
-      `,
+      diagnostic: {
+        readyView: () => readyTemplate({
+          title: 'الاختبار التشخيصيّ',
+          desc: 'تسع مواقف، عشر دقايق — هتكتشف محورك الرئيسيّ.',
+          btn: 'ابدأ الاختبار'
+        }),
+        activeView: () => activeUnderConstruction('الاختبار التشخيصيّ', '٩ مواقف هتكشفلك محورك الرئيسيّ')
+      },
 
-      type_guess: () => `
-        <span class="placeholder-tag">Phase 3 — قيد التطوير</span>
-        <h2 class="title-section">حدس الطابع</h2>
-        <p class="subtitle">٩ كروت — اختار اللي حسّيت إنّه يخصّك</p>
-        <div class="pulse"></div>
-      `,
+      type_guess: {
+        readyView: () => readyTemplate({
+          title: 'حدس الطابع',
+          desc: 'تسع شخصيّات قدّامك — اختار اللي حسّيت إنّه يخصّك.',
+          btn: 'يلّا'
+        }),
+        activeView: () => activeUnderConstruction('حدس الطابع', 'تسع كروت — اختار اللي يشبهك')
+      },
 
-      burnout_stage: () => `
-        <span class="placeholder-tag">Phase 4 — قيد التطوير</span>
-        <h2 class="title-section">على Timeline الاحتراق</h2>
-        <p class="subtitle">حدّد المرحلة اللي حاسس إنّك فيها</p>
-        <div class="pulse"></div>
-      `,
+      burnout_stage: {
+        readyView: () => readyTemplate({
+          title: 'على Timeline الاحتراق',
+          desc: 'إنت في أيّ مرحلة من السبعة؟ حدّد بصدق.',
+          btn: 'افتح الـ Timeline'
+        }),
+        activeView: () => activeUnderConstruction('Timeline الاحتراق', 'إنت في أيّ مرحلة؟')
+      },
 
-      closing: () => `
-        <h2 class="title-section animate-in">شكرًا ليك</h2>
-        <p class="subtitle animate-in delay-1">
-          الجلسة قاربت تنتهي.<br>
-          الإنسان مش مخلوق ليحترق — هو مخلوق ليتّزن.
-        </p>
-      `
+      closing: {
+        view: () => `
+          <h2 class="title-section animate-in">شكرًا ليك</h2>
+          <p class="subtitle animate-in delay-1">
+            الإنسان مش مخلوق ليحترق.<br>
+            هو مخلوق ليتّزن.
+          </p>
+          <p class="text-faint animate-in delay-2" style="margin-top: 1.5rem;">
+            والاتّزان — رحلة، مش لحظة.
+          </p>
+        `
+      }
     };
+
+    // ────────────────────────────────────────────────────────────────
+    // قالب الحالة "Ready" — المشارك يشوف زرّ ويختار يدخل
+    // ────────────────────────────────────────────────────────────────
+    function readyTemplate({ title, desc, btn }) {
+      return `
+        <div class="ready-card animate-scale">
+          <div class="ready-pulse"></div>
+          <h2 class="title-section">${title}</h2>
+          <p class="subtitle" style="margin-bottom: 2rem;">${desc}</p>
+          <button id="enterStageBtn" class="cta-btn">
+            <span>${btn}</span>
+          </button>
+          <p class="hint" style="margin-top: 1.5rem;">
+            خد وقتك — اضغط لمّا تكون جاهز
+          </p>
+        </div>
+      `;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // قالب مؤقت لكل مرحلة لسه ما اتبنتش (هيتبدّل في Phase 2+)
+    // ────────────────────────────────────────────────────────────────
+    function activeUnderConstruction(title, desc) {
+      return `
+        <h2 class="title-section animate-in">${title}</h2>
+        <p class="subtitle animate-in delay-1">${desc}</p>
+        <p class="text-faint animate-in delay-2" style="margin-top: 2rem;">
+          المرحلة دي بنبنيها دلوقتي — هتظهر بالكامل قريب
+        </p>
+        <div class="pulse animate-in delay-3"></div>
+      `;
+    }
   </script>
 
 </body>
