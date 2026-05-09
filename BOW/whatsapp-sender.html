@@ -467,7 +467,8 @@
           <div class="card-sub" style="margin:0">اضغط <strong>إرسال</strong> لكلّ شخص — واحد ورا التاني — والحالة بتتحفظ في Firebase تلقائيًّا.</div>
         </div>
         <div class="btn-row">
-          <button class="btn accent" id="refreshFromSheetBtn" title="جلب التحديثات من Google Sheets">🔄 تحديث من Sheets</button>
+          <input type="text" id="sheetUrlStep3" placeholder="رابط Google Sheets" style="min-width:240px;padding:8px 12px;font-size:13px">
+          <button class="btn accent" id="refreshFromSheetBtn" title="جلب التحديثات من Google Sheets">🔄 تحديث</button>
           <button class="btn secondary" id="exportSentBtn">⬇ المُرسَل</button>
           <button class="btn secondary" id="exportRemainingBtn">⬇ المتبقّي</button>
           <button class="btn danger" id="resetProgressBtn">🗑 إعادة تهيئة</button>
@@ -685,8 +686,10 @@ async function fetchSheetData(url) {
     showToast('رابط غير صالح. تأكّد إنّك ناسخ الرابط الكامل من Google Sheets', 'error');
     return null;
   }
+  // cache-bust so we always get fresh data
+  const bustedUrl = csvUrl + (csvUrl.includes('?') ? '&' : '?') + '_=' + Date.now();
   try {
-    const r = await fetch(csvUrl, { redirect: 'follow' });
+    const r = await fetch(bustedUrl, { redirect: 'follow', cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const text = await r.text();
     if (text.includes('<!DOCTYPE') || text.includes('<html')) {
@@ -755,6 +758,16 @@ async function bulkUpsertContacts(contacts) {
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
     });
+    await batch.commit();
+  }
+}
+
+async function deleteContactsByIds(ids) {
+  const BATCH = 400;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const slice = ids.slice(i, i + BATCH);
+    const batch = db.batch();
+    slice.forEach(id => batch.delete(contactsCol.doc(id)));
     await batch.commit();
   }
 }
@@ -1124,24 +1137,47 @@ function sendOne(id) {
 }
 
 // ============== Refresh from Sheets ==============
+// keep step-3 URL field in sync, both directions
+const sheetUrlStep3 = document.getElementById('sheetUrlStep3');
+sheetUrlStep3.addEventListener('input', e => {
+  STATE.sheetUrl = e.target.value.trim();
+  const inp1 = document.getElementById('sheetUrl');
+  if (document.activeElement !== inp1) inp1.value = STATE.sheetUrl;
+  queueSettingsSave();
+});
+document.getElementById('sheetUrl').addEventListener('input', e => {
+  STATE.sheetUrl = e.target.value.trim();
+  if (document.activeElement !== sheetUrlStep3) sheetUrlStep3.value = STATE.sheetUrl;
+  queueSettingsSave();
+});
+
 document.getElementById('refreshFromSheetBtn').addEventListener('click', async () => {
-  if (!STATE.sheetUrl) {
-    showToast('لم يتمّ ضبط رابط Google Sheets. ارجع للخطوة 1 ← Source C', 'error');
+  // fall back to whichever input has a value
+  const url = (STATE.sheetUrl || sheetUrlStep3.value || document.getElementById('sheetUrl').value || '').trim();
+  if (!url) {
+    showToast('الصق رابط Google Sheets في الخانة جنب الزرّ الأوّل', 'error');
+    sheetUrlStep3.focus();
     return;
   }
+  STATE.sheetUrl = url;
+  await saveSettings();
   const btn = document.getElementById('refreshFromSheetBtn');
   btn.disabled = true; btn.textContent = '⏳ جارٍ التحديث...';
-  const text = await fetchSheetData(STATE.sheetUrl);
-  btn.disabled = false; btn.textContent = '🔄 تحديث من Sheets';
+  const text = await fetchSheetData(url);
+  btn.disabled = false; btn.textContent = '🔄 تحديث';
   if (!text) return;
   const { headers, rows } = parseCSV(text);
   if (rows.length === 0) { showToast('لم يتمّ التعرّف على بيانات', 'error'); return; }
   STATE.headers = headers; STATE.rawRows = rows;
-  const before = new Set(STATE.contacts.map(c => c.phone).filter(Boolean));
+  const beforeIds = new Set(STATE.contacts.map(c => c.id));
+  const beforePhones = new Set(STATE.contacts.map(c => c.phone).filter(Boolean));
   const merged = buildContactsFromRaw(false);
-  const added = merged.filter(c => c.phone && !before.has(c.phone)).length;
+  const afterIds = new Set(merged.map(c => c.id));
+  const removedIds = [...beforeIds].filter(id => !afterIds.has(id));
+  const added = merged.filter(c => c.phone && !beforePhones.has(c.phone)).length;
   setSyncStatus('connecting','Syncing…');
   try {
+    if (removedIds.length) await deleteContactsByIds(removedIds);
     await bulkUpsertContacts(merged);
     setSyncStatus('','Live');
   } catch(e) {
@@ -1150,16 +1186,17 @@ document.getElementById('refreshFromSheetBtn').addEventListener('click', async (
     return;
   }
   renderContactsTable();
+  const parts = [];
+  if (added) parts.push(`+${added} جديد`);
+  if (removedIds.length) parts.push(`−${removedIds.length} محذوف`);
   if (added > 0) {
-    showToast(`تمّ التحديث ✅ — ${added} جهة جديدة`, 'success');
     STATE.filter = 'new';
     document.querySelectorAll('.filter-tabs button').forEach(b => {
       b.classList.toggle('active', b.dataset.filter === 'new');
     });
     renderContactsTable();
-  } else {
-    showToast('تمّ التحديث ✅ — مفيش جديد', 'success');
   }
+  showToast(parts.length ? `تمّ التحديث ✅ — ${parts.join(' / ')}` : 'تمّ التحديث ✅ — مفيش تغيير', 'success');
 });
 
 // ============== Filters / search ==============
@@ -1215,6 +1252,7 @@ document.getElementById('resetProgressBtn').addEventListener('click', async () =
     document.getElementById('mappingArea').classList.add('hidden');
     document.getElementById('pasteArea').value = '';
     document.getElementById('sheetUrl').value = '';
+    document.getElementById('sheetUrlStep3').value = '';
     document.getElementById('msgUnified').value = DEFAULT_TEMPLATE;
     setSyncStatus('','Live');
     updateProgress();
@@ -1277,7 +1315,9 @@ function attachRealtime() {
     if (typeof data.sheetUrl === 'string') {
       STATE.sheetUrl = data.sheetUrl;
       const inp = document.getElementById('sheetUrl');
+      const inp3 = document.getElementById('sheetUrlStep3');
       if (document.activeElement !== inp) inp.value = data.sheetUrl;
+      if (document.activeElement !== inp3) inp3.value = data.sheetUrl;
     }
     STATE.settingsLoaded = true;
     routeAfterLoad();
