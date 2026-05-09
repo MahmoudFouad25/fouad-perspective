@@ -24,13 +24,14 @@ const RESPONSES_REF = SESSION_REF.collection('responses');
 // تعريف المراحل
 // ────────────────────────────────────────────────────────────────────
 const STAGES = {
-  welcome:        { num: '١', label: 'الترحيب والاستقبال' },
-  opening_poll:   { num: '٢', label: 'Poll الافتتاح (إرهاق/احتراق)' },
-  khalid_moment:  { num: '٣', label: 'لحظة خالد — هل ده إنت؟' },
-  diagnostic:     { num: '٤', label: 'الاختبار التشخيصيّ (٩ مواقف)' },
-  type_guess:     { num: '٥', label: 'حدس الطابع (٩ كروت)' },
-  burnout_stage:  { num: '٦', label: 'مرحلة الاحتراق (Timeline)' },
-  closing:        { num: '٧', label: 'الإغلاق' }
+  welcome:           { num: '٠', label: 'انتظار الجمهور' },
+  welcome_question:  { num: '١', label: 'السؤال الافتتاحيّ' },
+  opening_poll:      { num: '٢', label: 'Poll الافتتاح (إرهاق/احتراق)' },
+  khalid_moment:     { num: '٣', label: 'لحظة خالد' },
+  diagnostic:        { num: '٤', label: 'الاختبار التشخيصيّ (٩ مواقف)' },
+  type_guess:        { num: '٥', label: 'حدس الطابع (٩ كروت)' },
+  burnout_stage:     { num: '٦', label: 'مرحلة الاحتراق (Timeline)' },
+  closing:           { num: '٧', label: 'قرار الإغلاق' }
 };
 
 // ────────────────────────────────────────────────────────────────────
