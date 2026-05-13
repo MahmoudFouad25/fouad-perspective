@@ -9,7 +9,7 @@
   'use strict';
 
   const COLLECTION = 'participants';
-  const QUIZ_KEY   = 'quiz_diagnostic';   // ← اسم الـ field اللي بيخزّن فيه quiz.js
+  const QUIZ_KEY   = 'diagnostic_result';   // ← اسم الـ field اللي بيخزّن فيه quiz.js
   const LOCAL_KEY  = 'mfp_admin_overrides';
 
   // ── Firebase availability ──
@@ -38,13 +38,13 @@
     const d = doc.data ? doc.data() : doc;
     const id = doc.id || d.id || d.participant_id || '';
     const quiz = d[QUIZ_KEY] || d.diagnostic || null;
-    const result = quiz && quiz.result ? quiz.result : (d.result || null);
+    const result = quiz || d.result || null;
 
     return {
       id,
       name:      d.name || d.first_name || '',
       whatsapp:  d.whatsapp || d.phone || d.tel || '',
-      created_at: pickDate(d.created_at, d.createdAt, d.timestamp, d.saved_at),
+      created_at: pickDate(d.joined_at, d.contact_saved_at, d.created_at, d.createdAt, d.timestamp, d.saved_at),
       completed_at: pickDate(
         quiz && quiz.completed_at,
         d.quiz_completed_at,
