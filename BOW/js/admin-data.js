@@ -79,11 +79,11 @@
   async function listParticipants() {
     if (hasFirebase()) {
       try {
-        const snap = await db().collection(COLLECTION).get();
+        const snap = await db().collection('webinar_sessions').doc('active').collection('participants').get();
         const rows = [];
         snap.forEach(doc => {
           const row = shape(doc);
-          if (row.result && row.whatsapp) rows.push(row);  // فقط اللي عمل التشخيص وسجّل
+          rows.push(row);  // فقط اللي عمل التشخيص وسجّل
         });
         // ترتيب: الأحدث أولًا
         rows.sort((a, b) => {
@@ -111,13 +111,13 @@
 
     if (hasFirebase()) {
       try {
-        await db().collection(COLLECTION).doc(participantId).update({
+        await db().collection('webinar_sessions').doc('active').collection('participants').doc(participantId).update({
           result_code: newCode
         });
       } catch (err) {
         // لو الـ doc ما يقبلش update جزئيّ
         console.warn('ensureResultCode: update failed, trying set/merge', err);
-        await db().collection(COLLECTION).doc(participantId).set(
+        await db().collection('webinar_sessions').doc('active').collection('participants').doc(participantId).set(
           { result_code: newCode }, { merge: true }
         );
       }
@@ -136,7 +136,7 @@
     const value = sent ? new Date() : null;
 
     if (hasFirebase()) {
-      await db().collection(COLLECTION).doc(participantId).set(
+      await db().collection('webinar_sessions').doc('active').collection('participants').doc(participantId).set(
         { whatsapp_sent_at: value }, { merge: true }
       );
     } else {
@@ -155,7 +155,7 @@
     if (!global.ResultCodes.isValid(code)) throw new Error('INVALID_CODE');
 
     if (hasFirebase()) {
-      const snap = await db().collection(COLLECTION)
+      const snap = await db().collection('webinar_sessions').doc('active').collection('participants')
         .where('result_code', '==', code)
         .limit(1)
         .get();
