@@ -1345,53 +1345,67 @@ function showIndividualDataForm(existingData,proceedBtn){
 }
 
 // ===== Save to Firebase =====
-async function saveToFirebaseDirectly(data,btn){
-  try{
-    Swal.fire({title:'جارٍ حفظ حجزك...',html:'يرجى الانتظار قليلاً',allowOutsideClick:false,didOpen:()=>{Swal.showLoading();}});
-    const payload={
-      ...data,
-      createdAt:firebase.firestore.FieldValue.serverTimestamp(),
-      status:'pending',
-      userAgent:navigator.userAgent
-    };
-    const collectionName=data.bookingType==='grant'?'grant_requests':'bookings';
-    const ref=await db.collection(collectionName).add(payload);
-    if(data.coupon&&data.coupon.applied&&data.coupon.id&&data.coupon.isFirebase){
-      try{await db.collection('coupons').doc(data.coupon.id).update({status:'used',usedAt:firebase.firestore.FieldValue.serverTimestamp(),usedBy:data.customer?.whatsapp||data.customer?.email||'unknown'});}catch(e){console.warn('Coupon update failed',e);}
+async function saveToFirebaseDirectly(data, proceedBtn) {
+    Swal.fire({ title: 'جاري معالجة طلبك...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        data.bookingId = 'BK_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        data.timestamp = new Date().toISOString();
+        data.status = 'pending';
+        data.telegramCode = Math.random().toString(36).substr(2, 6).toUpperCase();
+        data.automationEnabled = true;
+
+        const docRef = await db.collection('tempBookings').add(data);
+
+        const couponData = data.coupon || data.appliedCoupon;
+        if (couponData && couponData.isFirebase && couponData.id) {
+            try {
+                await db.collection('coupons').doc(couponData.id).update({ used: firebase.firestore.FieldValue.increment(1), status: 'used', usedAt: firebase.firestore.FieldValue.serverTimestamp(), bookingId: docRef.id });
+                const ss = localStorage.getItem('calculatorState');
+                if (ss) { const s = JSON.parse(ss); s.coupon = null; localStorage.setItem('calculatorState', JSON.stringify(s)); }
+                window._globalAppliedCoupon = null;
+            } catch (e) { console.error('خطأ في تحديث الكوبون:', e); }
+        }
+
+        await Swal.fire({
+            icon: 'success', title: '🎯 أنت على بُعد خطوة!',
+            html: `<div style="text-align:center;">
+                <div style="background:linear-gradient(135deg,#FEF3C7,#FDE68A);padding:20px;border-radius:15px;margin:20px 0;">
+                    <p style="color:#78350F;font-size:1.1rem;line-height:1.8;">شكراً لاختيارك الانضمام لرحلات منظور الفؤاد 🌟</p></div>
+                <div style="background:linear-gradient(135deg,#E0F2FE,#BAE6FD);padding:25px;border-radius:15px;margin:20px 0;border:2px solid #0EA5E9;">
+                    <h4 style="color:#0369A1;"><i class="fab fa-telegram"></i> لإتمام الحجز:</h4>
+                    <p style="color:#1E293B;">انسخ كود التأكيد:</p>
+                    <div style="background:white;padding:20px;border-radius:10px;margin:15px 0;border:2px dashed #0EA5E9;position:relative;">
+                        <span id="telegramCode" style="font-size:2.5rem;font-weight:bold;color:#0369A1;font-family:monospace;letter-spacing:8px;cursor:pointer;" onclick="copyCode()">${data.telegramCode}</span>
+                        <button onclick="copyCode()" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);background:#0EA5E9;color:white;border:none;padding:8px 12px;border-radius:5px;cursor:pointer;"><i class="fas fa-copy"></i> نسخ</button>
+                    </div>
+                    <div id="copyMessage" style="display:none;background:#10B981;color:white;padding:10px;border-radius:5px;margin-top:10px;">تم نسخ الكود ✅</div>
+                    <p style="color:#475569;font-size:0.95rem;">اضغط الزر بالأسفل للانتقال لبوت التليجرام</p>
+                </div>
+                <div style="background:#FEF2F2;padding:15px;border-radius:10px;margin:20px 0;border-right:4px solid #E11D48;">
+                    <p style="color:#991B1B;text-align:right;"><strong>ملاحظة:</strong><br>اضغط <strong>Start</strong> في التليجرام وانتظر الرد</p></div>
+            </div>`,
+            confirmButtonText: '🚀 إكمال الحجز عبر التليجرام', confirmButtonColor: '#0EA5E9', width: '750px', allowOutsideClick: false
+        }).then(r => {
+            if (r.isConfirmed) {
+                window.open('https://t.me/fouad_academy_bot?start=' + data.telegramCode, '_blank');
+                Swal.fire({ icon: 'info', title: 'تم فتح التليجرام', html: `<p>ابحث عن: @fouad_academy_bot<br>الكود: ${data.telegramCode}</p>`, timer: 10000, timerProgressBar: true });
+            }
+        });
+    } catch (error) {
+        console.error('خطأ:', error);
+        Swal.fire({ icon: 'error', title: 'خطأ!', text: 'حاول مرة أخرى' });
+        if (proceedBtn) { proceedBtn.disabled = false; proceedBtn.textContent = '✅ إدخال البيانات'; }
     }
-    Swal.fire({
-      icon:'success',
-      title:'تمّ تسجيل حجزك بنجاح!',
-      html:`<div style="text-align:right;direction:rtl;line-height:1.9;">
-        <p>سعيدون بانضمامك إلى رحلة <strong style="color:#4A8A5C;">${data.courseName}</strong>.</p>
-        <p>سنتواصل معك عبر <strong>الواتساب</strong> خلال ساعات قليلة لإتمام الدفع وتأكيد التسجيل.</p>
-        <p style="background:#F0FDF4;padding:12px;border-radius:8px;color:#065F46;"><i class="fas fa-receipt"></i> رقم الحجز: <strong>${ref.id.substring(0,8).toUpperCase()}</strong></p>
-      </div>`,
-      confirmButtonText:'تواصل عبر الواتساب الآن',
-      showCancelButton:true,cancelButtonText:'إغلاق',
-      confirmButtonColor:'#25D366'
-    }).then((r)=>{
-      if(r.isConfirmed){
-        const msg=encodeURIComponent(`السلام عليكم، تمّ تسجيل حجزي للدورة "${data.courseName}" برقم ${ref.id.substring(0,8).toUpperCase()}. أرجو مساعدتي لإتمام الدفع.`);
-        window.open(`https://wa.me/201024584537?text=${msg}`,'_blank');
-      }
-    });
-    localStorage.removeItem('calculatorState');
-    smartCalculator.appliedCoupon=null;
-    window._globalAppliedCoupon=null;
-  }catch(e){
-    console.error('Save error:',e);
-    Swal.fire({
-      icon:'error',title:'تعذّر الحفظ',
-      html:`<p>حدث خطأ أثناء حفظ بياناتك. تواصل معنا عبر الواتساب مباشرة:</p>`,
-      confirmButtonText:'الواتساب',
-      confirmButtonColor:'#25D366'
-    }).then((r)=>{if(r.isConfirmed)window.open('https://wa.me/201024584537','_blank');});
-  }
 }
 
+   function copyCode() {
+    const code = document.getElementById('telegramCode')?.textContent?.trim();
+    if (code) navigator.clipboard.writeText(code).then(() => { const m = document.getElementById('copyMessage'); if (m) { m.style.display = 'block'; setTimeout(() => m.style.display = 'none', 3000); } });
+}
+   
+
 // ===== Grant Form =====
-function showGrantDataForm(){
+function showGrantDataForm() {
     const currentData = collectCompleteData();
     const courseName = currentData.courseName || getCurrentCourseName();
     const cd = window.currentCourseData || {};
@@ -1441,11 +1455,10 @@ function showGrantDataForm(){
         html: `<div style="text-align:right;direction:rtl;max-height:500px;overflow-y:auto;">
             <div style="background:linear-gradient(135deg,#10B981,#14B8A6);padding:15px;border-radius:10px;margin-bottom:20px;color:white;">
                 <h4 style="margin:0;"><i class="fas fa-graduation-cap"></i> ${courseName}</h4>
-                
+                <p style="margin:10px 0;">السعر الحالي: <strong style="font-size:1.3rem;">${finalPrice.toLocaleString('ar-EG')} جنيه</strong></p></div>
             <div style="background:rgba(16,185,129,0.1);padding:20px;border-radius:10px;margin-bottom:20px;text-align:center;">
                 <i class="fas fa-heart" style="font-size:2.5rem;color:#10B981;"></i>
                 <h3 style="color:#065F46;">نؤمن أن المال لا يجب أن يكون عائقاً</h3></div>
-            <!-- بيانات شخصية -->
             <div style="background:#F9FAFB;padding:20px;border-radius:10px;margin-bottom:15px;">
                 <h4 style="color:#1F2937;"><i class="fas fa-user"></i> البيانات الشخصية</h4>
                 <div style="margin-bottom:15px;"><label style="font-weight:bold;color:#374151;">الاسم <span style="color:red;">*</span></label><input type="text" id="customerName" style="width:100%;padding:12px;border:2px solid #E5E7EB;border-radius:8px;background:white!important;color:black!important;"></div>
@@ -1458,50 +1471,45 @@ function showGrantDataForm(){
                 <div style="margin-bottom:15px;"><label style="color:#374151;">الوظيفة (اختياري)</label><input type="text" id="customerJob" style="width:100%;padding:12px;border:2px solid #E5E7EB;border-radius:8px;background:white!important;color:black!important;"></div>
                 <div style="margin-bottom:15px;"><label style="color:#374151;">كيف عرفت عنا (اختياري)</label><input type="text" id="customerSource" style="width:100%;padding:12px;border:2px solid #E5E7EB;border-radius:8px;background:white!important;color:black!important;"></div>
             </div>
-            <!-- قصة المنحة -->
-            <div style="background:#F0FDF4;padding:18px;border-radius:10px;margin-bottom:14px;">
-        <h4 style="color:#065F46;margin-bottom:10px;"><i class="fas fa-comment-dots"></i> قصّتك مع الدورة</h4>
-        <div style="margin-bottom:10px;"><label style="color:#047857;font-weight:bold;">لماذا ترغب في هذه الدورة؟ <span style="color:red;">*</span></label>
-          <textarea id="grantStory" rows="4" placeholder="حدّثنا عن نفسك ولماذا تحتاج هذه الدورة الآن..." style="width:100%;padding:11px;border:2px solid #D1FAE5;border-radius:8px;resize:none;background:white;color:black;"></textarea></div>
-        <div style="margin-bottom:10px;"><label style="color:#047857;">ظروفك المالية الحالية (اختياري لكن مفيد)</label>
-          <textarea id="grantSituation" rows="3" style="width:100%;padding:11px;border:2px solid #D1FAE5;border-radius:8px;resize:none;background:white;color:black;"></textarea></div>
-      </div>
-            <!-- نوع الدعم -->
+            <div style="background:#FFF7ED;padding:20px;border-radius:10px;margin-bottom:15px;border-right:4px solid #F59E0B;">
+                <h4 style="color:#7C2D12;"><i class="fas fa-book-open"></i> قصّتك</h4>
+                <div style="margin-bottom:15px;"><label style="font-weight:bold;color:#9A3412;">لماذا تحتاج المنحة؟ <span style="color:red;">*</span></label><textarea id="whyNeedGrant" rows="4" style="width:100%;padding:12px;border:2px solid #FED7AA;border-radius:8px;resize:none;background:white!important;color:black!important;"></textarea></div>
+                <div style="margin-bottom:15px;"><label style="font-weight:bold;color:#9A3412;">التحديات التي تواجهها <span style="color:red;">*</span></label><textarea id="challenges" rows="4" style="width:100%;padding:12px;border:2px solid #FED7AA;border-radius:8px;resize:none;background:white!important;color:black!important;"></textarea></div>
+                <div style="margin-bottom:15px;"><label style="color:#9A3412;">كيف ستساهم في مجتمعك بعد التعلم؟ (اختياري)</label><textarea id="communityContribution" rows="3" style="width:100%;padding:12px;border:2px solid #FED7AA;border-radius:8px;resize:none;background:white!important;color:black!important;"></textarea></div>
+            </div>
             <div style="background:#F3E8FF;padding:20px;border-radius:10px;margin-bottom:15px;">
                 <h4 style="color:#581C87;"><i class="fas fa-hand-holding-heart"></i> الدعم المطلوب</h4>
                 <div style="margin-bottom:20px;"><label style="font-weight:bold;color:#6B21A8;">الوضع الوظيفي <span style="color:red;">*</span></label>
                     <select id="employmentStatus" style="width:100%;padding:12px;border:2px solid #E9D5FF;border-radius:8px;"><option value="">-- اختر --</option><option value="student">طالب</option><option value="employed">موظف</option><option value="freelance">عمل حر</option><option value="unemployed">بدون عمل</option><option value="retired">متقاعد</option><option value="other">أخرى</option></select></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px;">
                     <div><label style="color:#6B21A8;">دخل ثابت؟</label><select id="hasIncome" style="width:100%;padding:12px;border:2px solid #E9D5FF;border-radius:8px;"><option value="">اختياري</option><option value="yes">نعم</option><option value="no">لا</option><option value="irregular">غير منتظم</option></select></div>
-                    <div><label style="color:#6B21A8;">المعالين</label><input type="number" id="dependents" min="0" style="width:100%;padding:12px;border:2px solid #E9D5FF;border-radius:8px;"></div>
+                    <div><label style="color:#6B21A8;">عدد المعالين</label><input type="number" id="dependents" min="0" style="width:100%;padding:12px;border:2px solid #E9D5FF;border-radius:8px;"></div>
                 </div>
                 <label style="font-weight:bold;color:#6B21A8;margin-bottom:10px;display:block;">نوع الدعم <span style="color:red;">*</span></label>
-                <!-- تقسيط -->
                 <div style="background:white;padding:20px;border-radius:10px;margin-bottom:15px;border:2px solid #E9D5FF;">
                     <label style="display:flex;align-items:start;cursor:pointer;"><input type="radio" name="supportType" value="installment" onchange="toggleSupportOptions()" style="margin-left:10px;margin-top:3px;">
-                    <div style="width:100%;"><strong style="color:#581C87;">تقسيط مُيسر</strong><p style="color:#6B7280;font-size:0.9rem;">قسّط على الشهور المناسبة</p>
+                    <div style="width:100%;"><strong style="color:#581C87;">تقسيط مُيسر</strong><p style="color:#6B7280;font-size:0.9rem;">قسّط على الشهور المناسبة لك</p>
                         <div id="installmentDetails" style="display:none;margin-top:15px;">
-                            <input type="range" id="installmentMonths" min="2" max="18" value="3" oninput="updateInstallmentDisplay()" style="width:100%;">
-                            <div style="text-align:center;margin-top:15px;padding:15px;background:#F3E8FF;border-radius:8px;"><div style="font-size:1.2rem;color:#581C87;"><span id="monthsCount">3</span> أشهر</div><div style="font-size:1.5rem;color:#10B981;font-weight:bold;"><span id="monthlyAmount">0</span> جنيه/شهرياً</div></div>
+                            <label style="color:#6B21A8;font-size:0.9rem;">عدد الأشهر:</label>
+                            <input type="range" id="installmentMonths" min="2" max="18" value="3" oninput="updateInstallmentDisplay()" style="width:100%;margin:10px 0;">
+                            <div style="text-align:center;padding:15px;background:#F3E8FF;border-radius:8px;"><div style="font-size:1.2rem;color:#581C87;font-weight:bold;"><span id="monthsCount">3</span> أشهر</div><div style="font-size:1.5rem;color:#10B981;font-weight:bold;"><span id="monthlyAmount">0</span> جنيه / شهرياً</div></div>
                         </div></div></label></div>
-                <!-- جزئية -->
                 <div style="background:white;padding:20px;border-radius:10px;margin-bottom:15px;border:2px solid #E9D5FF;">
                     <label style="display:flex;align-items:start;cursor:pointer;"><input type="radio" name="supportType" value="partial" onchange="toggleSupportOptions()" style="margin-left:10px;margin-top:3px;">
                     <div style="width:100%;"><strong style="color:#581C87;">منحة جزئية</strong><p style="color:#6B7280;font-size:0.9rem;">خصم إضافي حسب إمكانياتك</p>
                         <div id="partialDetails" style="display:none;margin-top:15px;">
-                            <input type="range" id="affordableAmount" min="0" max="100" value="50" oninput="updateAffordableDisplay()" style="width:100%;">
-                            <div style="text-align:center;margin-top:15px;padding:15px;background:#F3E8FF;border-radius:8px;"><div style="color:#581C87;"><span id="percentageAmount">50</span>%</div><div style="font-size:1.5rem;color:#10B981;font-weight:bold;"><span id="finalAmount">0</span> جنيه</div></div>
-                            <div style="margin-top:20px;padding:15px;background:#FEF3C7;border-radius:8px;">
-                                <label style="cursor:pointer;"><input type="checkbox" id="installPartial" onchange="togglePartialInstallment()" style="margin-left:10px;"> أريد تقسيط هذا المبلغ</label>
+                            <label style="color:#6B21A8;font-size:0.9rem;">نسبة ما تستطيع دفعه:</label>
+                            <input type="range" id="affordableAmount" min="10" max="90" value="50" oninput="updateAffordableDisplay()" style="width:100%;margin:10px 0;">
+                            <div style="text-align:center;padding:15px;background:#F3E8FF;border-radius:8px;"><div style="color:#581C87;font-size:1rem;">ستدفع <strong><span id="percentageAmount">50</span>%</strong> من السعر</div><div style="font-size:1.5rem;color:#10B981;font-weight:bold;"><span id="finalAmount">0</span> جنيه</div></div>
+                            <div style="margin-top:15px;padding:15px;background:#FEF3C7;border-radius:8px;">
+                                <label style="cursor:pointer;display:flex;align-items:center;gap:10px;"><input type="checkbox" id="installPartial" onchange="togglePartialInstallment()"> أريد تقسيط هذا المبلغ على أشهر</label>
                                 <div id="partialInstallmentDetails" style="display:none;margin-top:15px;"><input type="range" id="partialInstallmentMonths" min="2" max="12" value="3" oninput="updatePartialInstallment()" style="width:100%;"><div style="text-align:center;margin-top:10px;padding:10px;background:white;border-radius:8px;"><span id="partialMonthsCount">3</span> أشهر × <strong id="partialMonthlyAmount">0</strong> جنيه</div></div>
                             </div>
                         </div></div></label></div>
-                <!-- كاملة -->
                 <div style="background:white;padding:20px;border-radius:10px;margin-bottom:15px;border:2px solid #E9D5FF;">
                     <label style="display:flex;align-items:start;cursor:pointer;"><input type="radio" name="supportType" value="full" onchange="toggleSupportOptions()" style="margin-left:10px;margin-top:3px;">
-                    <div><strong style="color:#581C87;">منحة كاملة</strong><p style="color:#6B7280;font-size:0.9rem;">100% مجاناً</p></div></label></div>
+                    <div><strong style="color:#581C87;">منحة كاملة 100%</strong><p style="color:#6B7280;font-size:0.9rem;">لا أستطيع الدفع حالياً</p></div></label></div>
             </div>
-            <!-- وسيلة دفع -->
             <div style="background:#FEF3C7;padding:20px;border-radius:10px;margin-bottom:15px;">
                 <h4 style="color:#92400E;"><i class="fas fa-credit-card"></i> وسيلة الدفع (اختياري)</h4>
                 <div style="display:grid;gap:10px;">
@@ -1510,17 +1518,15 @@ function showGrantDataForm(){
                     <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #E5E7EB;border-radius:8px;cursor:pointer;"><input type="checkbox" name="paymentMethod" value="bank" style="margin-left:10px;"><strong>تحويل بنكي</strong></label>
                 </div>
             </div>
-            <!-- التعهدات -->
             <div style="background:#FEF2F2;padding:20px;border-radius:10px;margin-bottom:15px;">
                 <h4 style="color:#991B1B;"><i class="fas fa-handshake"></i> التعهدات</h4>
-                <div style="margin-bottom:10px;"><label style="cursor:pointer;"><input type="checkbox" id="commitment1" style="margin-left:10px;"> أتعهد بالحضور الكامل</label></div>
-                <div style="margin-bottom:10px;"><label style="cursor:pointer;"><input type="checkbox" id="commitment2" style="margin-left:10px;"> أتعهد بالمشاركة الفعالة</label></div>
-                <div style="margin-bottom:10px;"><label style="cursor:pointer;"><input type="checkbox" id="commitment3" style="margin-left:10px;"> المعلومات صحيحة</label></div>
-                <div style="margin-top:20px;padding:15px;background:#F0FDF4;border-radius:8px;"><label style="cursor:pointer;"><input type="checkbox" id="volunteerCommitment" style="margin-left:10px;"> أتطوع بمساعدة 3 أشخاص (اختياري)</label></div>
+                <div style="margin-bottom:10px;"><label style="cursor:pointer;display:flex;align-items:center;gap:10px;"><input type="checkbox" id="commitment1"> أتعهد بالحضور الكامل واستثمار المحتوى</label></div>
+                <div style="margin-bottom:10px;"><label style="cursor:pointer;display:flex;align-items:center;gap:10px;"><input type="checkbox" id="commitment2"> أتعهد بالمشاركة الفعّالة والتفاعل الجاد</label></div>
+                <div style="margin-bottom:10px;"><label style="cursor:pointer;display:flex;align-items:center;gap:10px;"><input type="checkbox" id="commitment3"> المعلومات التي أدخلتها صحيحة وحقيقية</label></div>
+                <div style="margin-top:15px;padding:15px;background:#F0FDF4;border-radius:8px;"><label style="cursor:pointer;display:flex;align-items:center;gap:10px;"><input type="checkbox" id="volunteerCommitment"> أتطوّع بمساعدة 3 أشخاص من مجتمعي (اختياري)</label></div>
             </div>
-            <div style="background:#EFF6FF;padding:13px;border-radius:10px;border-right:3px solid #3B82F6;">
-        <p style="color:#1E40AF;margin:0;text-align:center;font-size:.92rem;"><i class="fas fa-lock"></i> طلبك يُعامَل بسريّة تامّة واحترام كامل</p></div>
-    </div>`,
+            <div style="background:#DCFCE7;padding:15px;border-radius:10px;border-right:3px solid #22C55E;"><p style="color:#14532D;margin:0;text-align:center;"><i class="fas fa-clock"></i> سيتم مراجعة طلبك خلال 24-48 ساعة</p></div>
+        </div>`,
         showCancelButton: true, confirmButtonText: '✅ إرسال طلب المنحة', cancelButtonText: 'رجوع',
         confirmButtonColor: '#10B981', width: window.innerWidth <= 768 ? '95%' : '900px', allowOutsideClick: false,
         didOpen: () => { document.getElementById('customerName')?.focus(); updateInstallmentDisplay(); updateAffordableDisplay(); },
@@ -1528,10 +1534,10 @@ function showGrantDataForm(){
             if (!document.getElementById('customerName').value.trim()) { Swal.showValidationMessage('أدخل اسمك'); return false; }
             if (!document.getElementById('customerWhatsapp').value.trim()) { Swal.showValidationMessage('أدخل الواتساب'); return false; }
             if (!document.getElementById('whyNeedGrant').value.trim()) { Swal.showValidationMessage('اشرح سبب المنحة'); return false; }
-            if (!document.getElementById('challenges').value.trim()) { Swal.showValidationMessage('اشرح التحديات'); return false; }
+            if (!document.getElementById('challenges').value.trim()) { Swal.showValidationMessage('اشرح التحديات التي تواجهها'); return false; }
             if (!document.getElementById('employmentStatus').value) { Swal.showValidationMessage('حدد الوضع الوظيفي'); return false; }
             if (!document.querySelector('input[name="supportType"]:checked')) { Swal.showValidationMessage('اختر نوع الدعم'); return false; }
-            if (!document.getElementById('commitment1').checked || !document.getElementById('commitment2').checked || !document.getElementById('commitment3').checked) { Swal.showValidationMessage('وافق على التعهدات'); return false; }
+            if (!document.getElementById('commitment1').checked || !document.getElementById('commitment2').checked || !document.getElementById('commitment3').checked) { Swal.showValidationMessage('يجب الموافقة على التعهدات الثلاثة'); return false; }
             return true;
         }
     }).then(async (result) => {
@@ -1540,23 +1546,30 @@ function showGrantDataForm(){
         const supportType = document.querySelector('input[name="supportType"]:checked').value;
         let fpn = 0, ts = 0, sd = {};
         if (supportType === 'full') { fpn = 0; ts = basePrice; sd = { type: 'full', discount: 100 }; }
-        else if (supportType === 'partial') { fpn = Math.round(finalPrice * (selectedPercentage / 100)); ts = basePrice - fpn; sd = { type: 'partial', percentage: selectedPercentage, affordableAmount: fpn, installmentRequested: document.getElementById('installPartial')?.checked || false }; }
+        else if (supportType === 'partial') { fpn = Math.round(finalPrice * (selectedPercentage / 100)); ts = basePrice - fpn; sd = { type: 'partial', percentage: selectedPercentage, affordableAmount: fpn, installmentRequested: document.getElementById('installPartial')?.checked || false, installmentMonths: document.getElementById('installPartial')?.checked ? selectedPartialMonths : null }; }
         else { fpn = finalPrice; ts = basePrice - finalPrice; sd = { type: 'installment', months: selectedInstallmentMonths, monthlyAmount: Math.ceil(finalPrice / selectedInstallmentMonths) }; }
-        
+
         const grantData = {
-            courseName, coursePrice: basePrice, salePrice: finalPrice, bookingType: 'grant_request',
-            bookingDate: new Date().toISOString(), status: 'pending', timestamp: new Date().toISOString(),
+            courseName, courseId: new URLSearchParams(window.location.search).get('course') || 'unknown',
+            coursePrice: basePrice, salePrice: finalPrice, bookingType: 'grant_request',
+            bookingDate: new Date().toISOString(), status: 'pending',
             customer: {
-                name: document.getElementById('customerName').value.trim(), whatsapp: document.getElementById('customerWhatsapp').value.trim(),
-                email: document.getElementById('customerEmail').value.trim() || '', title: document.getElementById('customerTitle').value.trim() || '',
-                age: document.getElementById('customerAge').value || '', country: document.getElementById('customerCountry').value.trim() || '',
-                city: document.getElementById('customerCity').value.trim() || '', job: document.getElementById('customerJob').value.trim() || '',
-                source: document.getElementById('customerSource').value.trim() || '', paymentMethods: payments
+                name: document.getElementById('customerName').value.trim(),
+                whatsapp: document.getElementById('customerWhatsapp').value.trim(),
+                email: document.getElementById('customerEmail').value.trim() || '',
+                title: document.getElementById('customerTitle').value.trim() || '',
+                age: document.getElementById('customerAge').value || '',
+                country: document.getElementById('customerCountry').value.trim() || '',
+                city: document.getElementById('customerCity').value.trim() || '',
+                job: document.getElementById('customerJob').value.trim() || '',
+                source: document.getElementById('customerSource').value.trim() || '',
+                paymentMethods: payments
             },
             pricing: { basePriceNumber: basePrice, finalPriceNumber: fpn, finalPrice: `${fpn.toLocaleString('ar-EG')} ج.م` },
-            totalSavings: ts, discounts: currentData.discounts?.filter(d => d.type !== 'cash') || [],
+            totalSavings: ts,
             grantDetails: {
-                reason: document.getElementById('whyNeedGrant').value.trim(), challenges: document.getElementById('challenges').value.trim(),
+                reason: document.getElementById('whyNeedGrant').value.trim(),
+                challenges: document.getElementById('challenges').value.trim(),
                 communityContribution: document.getElementById('communityContribution').value.trim() || '',
                 financial: { employmentStatus: document.getElementById('employmentStatus').value, hasIncome: document.getElementById('hasIncome').value || '', dependents: document.getElementById('dependents').value || '' },
                 supportType, supportDetails: sd,
