@@ -83,7 +83,7 @@
         const rows = [];
         snap.forEach(doc => {
           const row = shape(doc);
-          rows.push(row);  // فقط اللي عمل التشخيص وسجّل
+          if (row.result && row.result.main_axis) rows.push(row);  // فقط اللي عمل التشخيص وسجّل
         });
         // ترتيب: الأحدث أولًا
         rows.sort((a, b) => {
