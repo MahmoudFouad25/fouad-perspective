@@ -7,7 +7,7 @@
 
   // ── إعدادات ──
   const CONFIG = {
-    resultPageUrl: location.href.replace(/admin\.html.*$/, 'result.html'),
+    resultPageUrl: location.href.replace(/[^/]*(\?.*)?$/, 'result.html'),
     groupUrl:      'https://chat.whatsapp.com/H0RyRnCJP1bJVC6YDF0yju',
     nextSessionUrl: 'https://youtu.be/AlfsYx-2z3M?si=oMflxvCh3wQ8TJzP',
   };
