@@ -438,7 +438,7 @@
               انضم لجروب الواتس — تفاصيل اللقاء الجاي
             </a>
             <button class="btn btn-ghost" id="shareBtn">
-              شارك تقريرك مع صاحب يستفيد
+              شارك تقريرك مع من تحب أن يعرف عنك هذا الجانب
             </button>
             <a href="${CONFIG.nextSessionUrl}" target="_blank" class="cta-link">
               راجع تسجيل اللقاء الأوّل
