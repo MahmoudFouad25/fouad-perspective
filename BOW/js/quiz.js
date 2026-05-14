@@ -405,12 +405,19 @@ const DiagnosticQuiz = {
           <p>${main.essence}</p>
         </div>
 
+        <div style="margin: 24px 0; padding: 18px 22px; background: rgba(255,255,255,0.04); border-radius: 10px; border-right: 3px solid var(--axis-color); text-align: right;">
+          <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 14px; font-weight: 500;">في الـ ٢٤ ساعة الجايّة هيوصلك على الواتس:</p>
+          <span class="capture-list-item">· تقريرك الكامل بالأبعاد التلاتة لمحورك</span>
+          <span class="capture-list-item">· وجه الفطرة ووجه القناع</span>
+          <span class="capture-list-item">· خطوة عمليّة للأسبوع الجاي</span>
+          <span class="capture-list-item">· دعوتك الشخصيّة للقاء الجاي</span>
+        </div>
         <div class="reveal-actions">
           <button id="revealCaptureBtn" class="cta-btn">
-            احفظ تشخيصك على الواتس
+            استلم تقريرك على الواتس
           </button>
-          <button id="revealSkipBtn" class="text-link-btn">
-            تابع التجربة بدون حفظ
+          <button id="revealSkipBtn" class="text-link-btn" style="opacity: 0.45; font-size: 12px; margin-top: 14px;">
+            مش دلوقتي
           </button>
         </div>
       </div>
@@ -467,7 +474,7 @@ const DiagnosticQuiz = {
           </div>
 
           <button type="submit" class="cta-btn">احفظ بياناتي</button>
-          <button type="button" id="captureSkipBtn" class="text-link-btn">
+          <button type="button" id="captureSkipBtn" class="text-link-btn" style="opacity: 0.4; font-size: 11px; margin-top: 12px;">
             مش دلوقتي
           </button>
         </form>
