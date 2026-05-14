@@ -92,7 +92,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
+            <div class="brand-name"> هدية ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -110,7 +110,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
+            <div class="brand-name"> هدية ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -156,7 +156,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
+            <div class="brand-name"> هدية ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -199,7 +199,7 @@
     const axis = AXIS_CONTENT[data.result.main_axis];
     if (!axis) { renderError('في خطأ في البيانات', 'نتيجة المحور غير معروفة.', false); return; }
 
-    document.title = `${data.name || 'تقريرك'} — ${axis.name} —  ويبينار "Burnout at the Top"`;
+    document.title = `${data.name || 'تقريرك'} — ${axis.name} —  هدية ويبينار "Burnout at the Top"`;
     document.body.style.setProperty('--axis-color',       axis.color);
     document.body.style.setProperty('--axis-color-deep',  axis.color_deep);
     document.body.style.setProperty('--axis-glow-soft',   axis.glow_soft);
@@ -244,7 +244,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
+            <div class="brand-name"> هدية ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
