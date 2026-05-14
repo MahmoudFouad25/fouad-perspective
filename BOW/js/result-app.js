@@ -93,7 +93,7 @@
           <div class="brand-mark">م.ف</div>
           <div>
             <div class="brand-name">منظور الفؤاد</div>
-            <span class="brand-tagline">تقريرك الشخصيّ</span>
+            <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
         <div class="state-page-inner">
@@ -111,7 +111,7 @@
           <div class="brand-mark">م.ف</div>
           <div>
             <div class="brand-name">منظور الفؤاد</div>
-            <span class="brand-tagline">تقريرك الشخصيّ</span>
+            <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
         <div class="state-page-inner">
@@ -157,7 +157,7 @@
           <div class="brand-mark">م.ف</div>
           <div>
             <div class="brand-name">منظور الفؤاد</div>
-            <span class="brand-tagline">تقريرك الشخصيّ</span>
+            <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
         <div class="state-page-inner">
@@ -245,7 +245,7 @@
           <div class="brand-mark">م.ف</div>
           <div>
             <div class="brand-name">منظور الفؤاد</div>
-            <span class="brand-tagline">تقريرك الشخصيّ</span>
+            <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
         <div style="font-size: 11px; color: var(--text-muted); letter-spacing: 1.6px;">
