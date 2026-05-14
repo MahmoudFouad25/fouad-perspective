@@ -413,6 +413,8 @@
       CONFIG.nextSessionUrl,
       '',
       '— محمود فؤاد',
+             'مصمم الـ Compassionate Enneagram™ Framework — إطار أصيل لفهم الطبائع البشرية في بيئات القيادة وفرق العمل'
+
       'وأتشرف بإنضمامي لفريق عمل Proactive Development Solutions'
     ].join('\n');
   }
