@@ -385,7 +385,7 @@
     const axisName = AXIS_AR[r.result?.main_axis] || '';
     const url = resultUrl(r);
     return [
-      `أهلاً ${r.name}،`,
+      `السلام عليكم.. مساء الخيرات والبركات يا ${r.name}،`,
 
              '',
       'ممتنين لاهتمامك والتسجيل فى ويبينار "Burnout at the Top"..',
