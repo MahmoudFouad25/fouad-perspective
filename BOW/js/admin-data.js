@@ -86,7 +86,10 @@
           if (row.result && row.result.main_axis) rows.push(row);  // فقط اللي عمل التشخيص وسجّل
         });
         // ترتيب: الأحدث أولًا
+        const priority = r => r.whatsapp_sent_at ? 3 : (r.whatsapp ? 1 : 2);
         rows.sort((a, b) => {
+          const pa = priority(a), pb = priority(b);
+          if (pa !== pb) return pa - pb;
           const ta = (a.created_at || 0).valueOf?.() || 0;
           const tb = (b.created_at || 0).valueOf?.() || 0;
           return tb - ta;
