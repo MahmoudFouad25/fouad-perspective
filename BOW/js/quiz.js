@@ -442,9 +442,10 @@ const DiagnosticQuiz = {
         <h2 class="title-section">احفظ تشخيصك</h2>
         <p class="subtitle">
           هابعتلك على الواتس:<br>
-          <span class="capture-list-item">· تشخيصك الكامل</span>
-          <span class="capture-list-item">· هديّة الويبينار</span>
-          <span class="capture-list-item">· إيميلات إنت تستفيد منها</span>
+          <span class="capture-list-item">·هديتنا-تقريرك الكامل بالأبعاد التلاتة</span>
+          <span class="capture-list-item">· وجه الفطرة ووجه القناع</span>
+          <span class="capture-list-item">· خطوة عمليّة للأسبوع الجاي</span>
+          <span class="capture-list-item">· دعوتك للقاء الجاي</span>
         </p>
 
         <form id="captureForm" class="capture-form">
@@ -526,11 +527,12 @@ const DiagnosticQuiz = {
         <p class="complete-axis">
           محورك الرئيسيّ: <strong style="color: ${main.color};">${main.name}</strong>
         </p>
-        <p class="subtitle">
-          ${saved
-            ? 'تشخيصك هيوصلك على الواتس بعد الويبينار.'
-            : 'احتفظ بنتيجتك في ذهنك — هنبني عليها بعدين.'}
-        </p>
+        ${saved ? `
+          <p class="subtitle">تشخيصك هيوصلك على الواتس بعد الويبينار.</p>
+        ` : `
+          <p class="subtitle" style="margin-bottom: 18px;">لسه ما سجّلتش تشخيصك. تحبّ تستلمه على الواتس؟</p>
+          <button id="completeBackToCaptureBtn" class="cta-btn">احفظ تشخيصي على الواتس</button>
+        `}
         <div class="complete-divider"></div>
         <p class="text-faint">
           ارجع للزووم — في حاجات أعمق هنفتحها سوا
@@ -538,5 +540,14 @@ const DiagnosticQuiz = {
         <div class="pulse" style="margin-top: var(--space-md);"></div>
       </div>
     `;
+
+    const backBtn = document.getElementById('completeBackToCaptureBtn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        this.state.screen = 'capture';
+        this.saveToLocalStorage();
+        this.render();
+      });
+    }
   }
 };
