@@ -154,13 +154,17 @@
     });
     const total = all.length || 1;
     const sent = all.filter(r => r.whatsapp_sent_at).length;
+    const ready = all.filter(r => r.whatsapp && !r.whatsapp_sent_at).length;
+    const noContact = all.filter(r => !r.whatsapp).length;
 
     els.statsStrip.innerHTML = `
       <div class="stat-card">
-        <div class="stat-label">مسجّلين كملوا التشخيص</div>
-        <div class="stat-value">${toArNum(all.length)}<span class="unit">${all.length === 1 ? 'مشارك' : 'مشارك'}</span></div>
-        <div style="margin-top: 12px; color: var(--text-muted); font-size: 13px;">
-          ${toArNum(sent)} اتبعتلهم الرسالة · ${toArNum(all.length - sent)} لسه
+        <div class="stat-label">إجماليّ المكمّلين</div>
+        <div class="stat-value">${toArNum(all.length)}<span class="unit">مشارك</span></div>
+        <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px;">
+          <div style="color: #25D366;">● ${toArNum(ready)} جاهزين للإرسال</div>
+          <div style="color: var(--text-muted);">○ ${toArNum(sent)} اتبعتلهم</div>
+          <div style="color: var(--text-faint);">○ ${toArNum(noContact)} بدون تسجيل</div>
         </div>
       </div>
       <div class="stat-card tamasok">
@@ -235,13 +239,32 @@
     const rows = getFilteredRows();
 
     if (rows.length === 0) {
+      const noData = state.rows.length === 0;
+      const filterStatus = state.filter.status;
+      let title, msg;
+
+      if (noData) {
+        title = 'لسه مفيش مكمّلين';
+        msg = 'الصفحة دي بتعرض اللي كملوا الاختبار التشخيصيّ. لمّا أوّل مشارك يكمّل، هيظهر هنا تلقائيًّا.';
+      } else if (filterStatus === 'ready') {
+        title = 'مفيش حدّ جاهز للإرسال دلوقتي';
+        msg = 'يا إمّا كل المسجّلين اتبعتلهم بالفعل (تمام!)، يا إمّا في تاب "بدون تسجيل" ناس كملوا الاختبار بس ما سجّلوش رقم. شوف هناك.';
+      } else if (filterStatus === 'sent') {
+        title = 'لسه ما اتبعتش لحدّ';
+        msg = 'لمّا تبعت رسالة لأوّل مشارك، هيظهر هنا. روح تاب "جاهزين للإرسال".';
+      } else if (filterStatus === 'no_contact') {
+        title = 'كل اللي كمّلوا سجّلوا أرقامهم 🎉';
+        msg = 'كل واحد كمّل الاختبار سجّل اسمه ورقمه. حالة مثاليّة.';
+      } else {
+        title = 'مفيش نتيجة للفلتر ده';
+        msg = 'جرّب تغيّر التابات أو تمسح حقل البحث.';
+      }
+
       els.list.innerHTML = `
         <div class="empty">
           <div class="pulse" style="background: var(--text-faint); box-shadow: none;"></div>
-          <h3>${state.rows.length === 0 ? 'لسه مفيش مسجّلين' : 'مفيش نتيجة للبحث'}</h3>
-          <p>${state.rows.length === 0
-            ? 'الصفحة دي بتعرض اللي كملوا الاختبار التشخيصيّ وسجّلوا أسماءهم ورقم الواتس. لمّا أوّل مشارك يكمّل — هيظهر هنا تلقائيًّا.'
-            : 'جرّب تغيّر المحور أو تمسح البحث.'}</p>
+          <h3>${title}</h3>
+          <p>${msg}</p>
         </div>
       `;
       return;
