@@ -420,19 +420,133 @@
   }
 
   function sendWA(r) {
-    const phone = (r.whatsapp || '').replace(/\D/g, '');
-    if (!phone) { toast('رقم الواتس مش متوفّر'); return; }
-    const normalized = phone.startsWith('20') ? phone
-                     : phone.startsWith('0')  ? '2' + phone
-                     :                          '20' + phone;
-    const url = `https://wa.me/${normalized}?text=${encodeURIComponent(waMessage(r))}`;
-    window.open(url, '_blank');
+    const raw = String(r.whatsapp || '').trim();
+    if (!raw) { toast('رقم الواتس مش متوفّر'); return; }
 
-    // مش بنعلّم تلقائيًّا — المسؤول هو اللي بيقول "اتبعتت"
+    const hadPlus = raw.startsWith('+');
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) { toast('رقم الواتس مش متوفّر'); return; }
+
+    let number = null;
+    if (hadPlus) {
+      number = digits;                              // +966... → 966...
+    } else if (digits.startsWith('00')) {
+      number = digits.slice(2);                     // 00966... → 966...
+    } else if (digits.length === 11 && digits.startsWith('01')) {
+      number = '20' + digits.slice(1);              // 01xxxxxxxxx → 201xxxxxxxxx
+    } else if (digits.length === 10 && digits.startsWith('1')) {
+      number = '20' + digits;                       // 1xxxxxxxxx → 201xxxxxxxxx
+    } else if (digits.startsWith('20') && digits.length >= 11) {
+      number = digits;                              // already correct
+    } else if (!digits.startsWith('0') && digits.length >= 10) {
+      number = digits;                              // probably international, no prefix
+    }
+
+    if (number) {
+      openWA(r, number);
+      return;
+    }
+
+    // غامض (غالبًا رقم محلّيّ غير مصريّ) — نخلّيك تختار الدولة
+    openCountryPicker(r, digits);
+  }
+
+  function openWA(r, number) {
+    const url = `https://wa.me/${number}?text=${encodeURIComponent(waMessage(r))}`;
+    window.open(url, '_blank');
     setTimeout(() => {
       if (!confirm('تمّ فتح واتس آب. تعلّم الصفّ ده "اتبعت"؟')) return;
       toggleSent(r, true);
     }, 600);
+  }
+
+  function openCountryPicker(r, digits) {
+    const localNum = digits.replace(/^0+/, '');
+
+    const countries = [
+      { code: '966', name: 'السعوديّة' },
+      { code: '971', name: 'الإمارات' },
+      { code: '965', name: 'الكويت' },
+      { code: '974', name: 'قطر' },
+      { code: '973', name: 'البحرين' },
+      { code: '968', name: 'عُمان' },
+      { code: '962', name: 'الأردنّ' },
+      { code: '961', name: 'لبنان' },
+      { code: '963', name: 'سوريا' },
+      { code: '964', name: 'العراق' },
+      { code: '967', name: 'اليمن' },
+      { code: '970', name: 'فلسطين' },
+      { code: '218', name: 'ليبيا' },
+      { code: '249', name: 'السودان' },
+      { code: '212', name: 'المغرب' },
+      { code: '216', name: 'تونس' },
+      { code: '213', name: 'الجزائر' },
+      { code: '233', name: 'غانا' },
+      { code: '20',  name: 'مصر' },
+      { code: '90',  name: 'تركيا' }
+    ];
+
+    const html = `
+      <div class="modal-backdrop" id="countryPickerBackdrop">
+        <div class="modal" style="max-width: 580px;">
+          <div class="modal-header">
+            <div>
+              <div class="modal-title">اختار كود الدولة</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                الرقم المسجّل: <strong style="color: var(--text-bright);">${escape(r.whatsapp)}</strong> — مش واضح من أيّ دولة
+              </div>
+            </div>
+            <button class="btn-icon" id="cpCloseBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+              ${countries.map(c => `
+                <button class="btn btn-ghost btn-sm" data-code="${c.code}" style="justify-content: space-between; padding: 11px 14px; font-size: 13px;">
+                  <span>${c.name}</span>
+                  <span style="color: var(--text-muted); font-variant-numeric: tabular-nums;">+${c.code}</span>
+                </button>
+              `).join('')}
+            </div>
+            <div style="margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft);">
+              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px;">أو اكتب الكود يدويًّا (بدون +):</p>
+              <div style="display: flex; gap: 8px;">
+                <input type="text" id="cpCustomCode" placeholder="مثال: 966" style="flex: 1; padding: 10px 14px; background: var(--bg-raised); border: 1px solid var(--border-mid); border-radius: var(--r-md); color: var(--text-bright); font-size: 14px;" inputmode="numeric">
+                <button class="btn btn-primary btn-sm" id="cpCustomGo">افتح</button>
+              </div>
+              <p style="font-size: 11px; color: var(--text-faint); margin-top: 10px; line-height: 1.6;">
+                هنبني الرقم النهائيّ كده: كود الدولة + ${escape(localNum)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    document.body.appendChild(wrap.firstElementChild);
+
+    const close = () => document.getElementById('countryPickerBackdrop')?.remove();
+    const proceed = (code) => { close(); openWA(r, code + localNum); };
+
+    const backdrop = document.getElementById('countryPickerBackdrop');
+    backdrop.addEventListener('click', close);
+    backdrop.querySelector('.modal').addEventListener('click', (e) => e.stopPropagation());
+    document.getElementById('cpCloseBtn').addEventListener('click', close);
+    backdrop.querySelectorAll('[data-code]').forEach(b => {
+      b.addEventListener('click', () => proceed(b.dataset.code));
+    });
+    document.getElementById('cpCustomGo').addEventListener('click', () => {
+      const v = document.getElementById('cpCustomCode').value.trim().replace(/\D/g, '');
+      if (!v) return;
+      proceed(v);
+    });
+    document.getElementById('cpCustomCode').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('cpCustomGo').click(); }
+    });
+    document.getElementById('cpCustomCode').focus();
   }
 
   async function toggleSent(r, force) {
