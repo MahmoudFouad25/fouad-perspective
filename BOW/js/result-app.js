@@ -92,7 +92,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name">منظور الفؤاد</div>
+            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -110,7 +110,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name">منظور الفؤاد</div>
+            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -156,7 +156,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name">منظور الفؤاد</div>
+            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -199,7 +199,7 @@
     const axis = AXIS_CONTENT[data.result.main_axis];
     if (!axis) { renderError('في خطأ في البيانات', 'نتيجة المحور غير معروفة.', false); return; }
 
-    document.title = `${data.name || 'تقريرك'} — ${axis.name} — منظور الفؤاد`;
+    document.title = `${data.name || 'تقريرك'} — ${axis.name} —  ويبينار "Burnout at the Top"`;
     document.body.style.setProperty('--axis-color',       axis.color);
     document.body.style.setProperty('--axis-color-deep',  axis.color_deep);
     document.body.style.setProperty('--axis-glow-soft',   axis.glow_soft);
@@ -244,7 +244,7 @@
         <div class="brand">
           <div class="brand-mark">م.ف</div>
           <div>
-            <div class="brand-name">منظور الفؤاد</div>
+            <div class="brand-name"> ويبينار "Burnout at the Top"</div>
             <span class="brand-tagline">تقريرك الشخصيّ السريع المختصر</span>
           </div>
         </div>
@@ -446,8 +446,8 @@
           </div>
 
           <div class="signature">
-            <strong>محمود فؤاد</strong> — مُصمِّم إطار "منظور الفؤاد"<br>
-            من الاحتراق إلى استعادة الاتّزان
+            <strong>محمود فؤاد</strong> — مصمم الـ Compassionate Enneagram™ Framework — إطار أصيل لفهم الطبائع البشرية في بيئات القيادة وفرق العمل<br>
+            وأتشرف بإنضمامي لفريق عمل Proactive Development Solutions
           </div>
         </div>
       </section>
@@ -510,7 +510,7 @@
     if (shareBtn) {
       shareBtn.addEventListener('click', async () => {
         const shareUrl = location.origin + location.pathname; // الرابط بدون كود — للمشاركة العامّة
-        const text = 'لو حضرت ويبينار "من الاحتراق إلى استعادة الاتّزان" مع محمود فؤاد — اعمل التشخيص واشوف محورك:';
+        const text = 'لو حضرت ويبينار "Burnout at the Top" مع محمود فؤاد — اعمل التشخيص واشوف محورك:';
         if (navigator.share) {
           try {
             await navigator.share({ title: 'منظور الفؤاد', text, url: shareUrl });
