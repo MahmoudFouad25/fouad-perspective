@@ -15,7 +15,7 @@
   // ── State ──
   const state = {
     rows: [],
-    filter: { axis: 'all', query: '' },
+    filter: { axis: 'all', status: 'all', query: '' },
     selectedRow: null,
     loading: true,
     error: null
@@ -85,9 +85,10 @@
   // ── Filters & search ──
   function setupFilters() {
     els.filterBar.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-axis]');
+      const btn = e.target.closest('button[data-axis], button[data-status]');
       if (!btn) return;
-      state.filter.axis = btn.dataset.axis;
+      if (btn.dataset.status) state.filter.status = btn.dataset.status;
+      if (btn.dataset.axis) state.filter.axis = btn.dataset.axis;
       render();
     });
   }
@@ -125,6 +126,9 @@
   function getFilteredRows() {
     return state.rows.filter(r => {
       if (state.filter.axis !== 'all' && r.result?.main_axis !== state.filter.axis) return false;
+      if (state.filter.status === 'ready' && (!r.whatsapp || r.whatsapp_sent_at)) return false;
+      if (state.filter.status === 'sent' && !r.whatsapp_sent_at) return false;
+      if (state.filter.status === 'no_contact' && r.whatsapp) return false;
       if (state.filter.query) {
         const q = state.filter.query;
         const hay = `${r.name} ${r.whatsapp} ${r.result_code || ''}`.toLowerCase();
@@ -180,11 +184,30 @@
   function renderFilters() {
     const all = state.rows;
     const c = { tamasok: 0, haywiyya: 0, intima: 0 };
-    all.forEach(r => { if (r.result?.main_axis) c[r.result.main_axis]++; });
+    const s = { ready: 0, sent: 0, no_contact: 0 };
+    all.forEach(r => {
+      if (r.result?.main_axis) c[r.result.main_axis]++;
+      if (r.whatsapp_sent_at) s.sent++;
+      else if (r.whatsapp) s.ready++;
+      else s.no_contact++;
+    });
 
     els.filterBar.innerHTML = `
+      <button data-status="all" class="${state.filter.status === 'all' ? 'active' : ''}">
+        الكلّ <span class="count">${toArNum(all.length)}</span>
+      </button>
+      <button data-status="ready" class="${state.filter.status === 'ready' ? 'active' : ''}">
+        جاهزين للإرسال <span class="count">${toArNum(s.ready)}</span>
+      </button>
+      <button data-status="sent" class="${state.filter.status === 'sent' ? 'active' : ''}">
+        اتبعتلهم <span class="count">${toArNum(s.sent)}</span>
+      </button>
+      <button data-status="no_contact" class="${state.filter.status === 'no_contact' ? 'active' : ''}">
+        بدون تسجيل <span class="count">${toArNum(s.no_contact)}</span>
+      </button>
+      <span style="width: 1px; height: 24px; background: var(--border-soft); margin: 0 6px; align-self: center;"></span>
       <button data-axis="all" class="${state.filter.axis === 'all' ? 'active' : ''}">
-        الكل <span class="count">${toArNum(all.length)}</span>
+        كل المحاور
       </button>
       <button data-axis="tamasok" class="${state.filter.axis === 'tamasok' ? 'active tamasok' : ''}">
         التماسك <span class="count">${toArNum(c.tamasok)}</span>
