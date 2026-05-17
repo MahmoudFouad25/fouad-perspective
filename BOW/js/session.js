@@ -1,11 +1,12 @@
 /* ====================================================================
-   منظور الفؤاد — Webinar Live Session Layer (v2 — Optimized)
+   منظور الفؤاد — Webinar Live Session Layer (v3 — Mirror Stages)
    ────────────────────────────────────────────────────────────────────
-   التحسينات في v2:
-   • Heartbeat: 30s → 90s (يقلّل الكتابات بمقدار الثلث)
-   • count() Aggregation بدل subscribe على كل المشاركين
-   • Polling-based count refresh كل 20s (بدل listener دائم)
-   • دوال جديدة: submitQuizResult, saveContact, subscribeToStageResults
+   الجديد في v3:
+   • ٣ مراحل جديدة لمرآة المشاعر:
+     - mirror_containment      (الاحتواء — ليلى/كريم/عمر)
+     - mirror_full_expression  (التعبير الكامل — سلمى/طارق/سامي)
+     - mirror_transformation   (التحويل — ندى/أحمد/هانم)
+   • type_guess معدّلة لتعرض الطبائع منظّمة بالمرايا
    ──────────────────────────────────────────────────────────────────── */
 
 if (typeof db === 'undefined') {
@@ -21,17 +22,23 @@ const PARTICIPANTS_REF = SESSION_REF.collection('participants');
 const RESPONSES_REF = SESSION_REF.collection('responses');
 
 // ────────────────────────────────────────────────────────────────────
-// تعريف المراحل
+// تعريف المراحل (مع المراحل الجديدة للمرايا)
 // ────────────────────────────────────────────────────────────────────
 const STAGES = {
-  welcome:           { num: '٠', label: 'انتظار الجمهور' },
-  welcome_question:  { num: '١', label: 'السؤال الافتتاحيّ' },
-  opening_poll:      { num: '٢', label: 'Poll الافتتاح (إرهاق/احتراق)' },
-  khalid_moment:     { num: '٣', label: 'لحظة خالد' },
-  diagnostic:        { num: '٤', label: 'الاختبار التشخيصيّ (٩ مواقف)' },
-  type_guess:        { num: '٥', label: 'حدس الطابع (٩ كروت)' },
-  burnout_stage:     { num: '٦', label: 'مرحلة الاحتراق (Timeline)' },
-  closing:           { num: '٧', label: 'قرار الإغلاق' }
+  welcome:                 { num: '٠',  label: 'انتظار الجمهور' },
+  welcome_question:        { num: '١',  label: 'السؤال الافتتاحيّ' },
+  opening_poll:            { num: '٢',  label: 'Poll الافتتاح (إرهاق/احتراق)' },
+  khalid_moment:           { num: '٣',  label: 'لحظة خالد' },
+  diagnostic:              { num: '٤',  label: 'الاختبار التشخيصيّ (٩ مواقف)' },
+
+  // ── المراحل الجديدة لمرآة المشاعر ──
+  mirror_containment:      { num: '٥',  label: 'مرآة المشاعر — الاحتواء (ليلى/كريم/عمر)' },
+  mirror_full_expression:  { num: '٦',  label: 'مرآة المشاعر — التعبير الكامل (سلمى/طارق/سامي)' },
+  mirror_transformation:   { num: '٧',  label: 'مرآة المشاعر — التحويل (ندى/أحمد/هانم)' },
+
+  type_guess:              { num: '٨',  label: 'حدس الطابع (٩ كروت منظّمة بالمرايا)' },
+  burnout_stage:           { num: '٩',  label: 'مرحلة الاحتراق (Timeline)' },
+  closing:                 { num: '١٠', label: 'قرار الإغلاق' }
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -60,7 +67,7 @@ async function joinSession() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// ⚡ Heartbeat — كل 90 ثانية (محسّن)
+// Heartbeat — كل 90 ثانية
 // ────────────────────────────────────────────────────────────────────
 async function pingHeartbeat() {
   const id = getParticipantId();
@@ -79,11 +86,11 @@ async function pingHeartbeat() {
 
 function startHeartbeat() {
   pingHeartbeat();
-  return setInterval(pingHeartbeat, 90000); // 90s
+  return setInterval(pingHeartbeat, 90000);
 }
 
 // ────────────────────────────────────────────────────────────────────
-// الاشتراك في تغييرات المرحلة
+// Stage subscription
 // ────────────────────────────────────────────────────────────────────
 function subscribeToStage(callback) {
   return SESSION_REF.onSnapshot(snap => {
@@ -94,21 +101,18 @@ function subscribeToStage(callback) {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// ⚡ count() Aggregation بدل listener على كل المشاركين
+// Participant counts (polling-based)
 // ────────────────────────────────────────────────────────────────────
 async function fetchParticipantCounts() {
-  // النشط = آخر heartbeat له خلال آخر 4 دقايق (90s heartbeat + buffer)
   const fourMinAgo = firebase.firestore.Timestamp.fromMillis(
     Date.now() - 4 * 60 * 1000
   );
-
   try {
     const activeSnap = await PARTICIPANTS_REF
       .where('last_seen', '>', fourMinAgo)
       .count()
       .get();
     const totalSnap = await PARTICIPANTS_REF.count().get();
-
     return {
       active: activeSnap.data().count,
       total: totalSnap.data().count
@@ -119,23 +123,19 @@ async function fetchParticipantCounts() {
   }
 }
 
-// Polling-based subscription (بدل listener — توفير ضخم في الـ reads)
 function subscribeToParticipantCount(callback) {
   let intervalId;
-
   const poll = async () => {
     const { active, total } = await fetchParticipantCounts();
     callback(active, total);
   };
-
-  poll(); // فورًا
-  intervalId = setInterval(poll, 20000); // كل 20 ثانية
-
+  poll();
+  intervalId = setInterval(poll, 20000);
   return () => clearInterval(intervalId);
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Admin: تغيير المرحلة
+// Admin controls
 // ────────────────────────────────────────────────────────────────────
 async function setStage(stage) {
   await SESSION_REF.set({
@@ -145,9 +145,6 @@ async function setStage(stage) {
   }, { merge: true });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Admin: إعادة بدء الجلسة
-// ────────────────────────────────────────────────────────────────────
 async function resetSession() {
   const partSnap = await PARTICIPANTS_REF.get();
   const batch1 = db.batch();
@@ -168,13 +165,12 @@ async function resetSession() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// ⚡ NEW: حفظ نتيجة الاختبار التشخيصيّ
+// Quiz / Poll result submission
 // ────────────────────────────────────────────────────────────────────
 async function submitQuizResult(stage, answers, result) {
   const id = getParticipantId();
   if (!id) return;
 
-  // 1. حفظ في responses (للتحليل التفصيليّ)
   await RESPONSES_REF.doc(`${id}_${stage}`).set({
     participant_id: id,
     stage: stage,
@@ -183,20 +179,15 @@ async function submitQuizResult(stage, answers, result) {
     submitted_at: firebase.firestore.FieldValue.serverTimestamp()
   });
 
-  // 2. حفظ على المشارك نفسه (للوصول السريع)
   await PARTICIPANTS_REF.doc(id).set({
     [`${stage}_result`]: result,
     last_seen: firebase.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// ⚡ NEW: حفظ بيانات الواتس (الاسم + الرقم)
-// ────────────────────────────────────────────────────────────────────
 async function saveContact(name, whatsapp) {
   const id = getParticipantId();
   if (!id) throw new Error('No participant ID');
-
   await PARTICIPANTS_REF.doc(id).set({
     name: name,
     whatsapp: whatsapp,
@@ -204,9 +195,6 @@ async function saveContact(name, whatsapp) {
   }, { merge: true });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// ⚡ NEW: الاشتراك في كل نتائج مرحلة معيّنة (لشاشة العرض)
-// ────────────────────────────────────────────────────────────────────
 function subscribeToStageResults(stage, callback) {
   return RESPONSES_REF.where('stage', '==', stage).onSnapshot(snap => {
     const results = [];
@@ -215,4 +203,4 @@ function subscribeToStageResults(stage, callback) {
   });
 }
 
-console.log('✅ Webinar session layer ready (v2 — optimized)');
+console.log('✅ Webinar session layer ready (v3 — mirror stages)');
