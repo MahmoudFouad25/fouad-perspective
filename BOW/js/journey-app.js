@@ -13,23 +13,7 @@ const JOURNEY_CONFIG = {
   contactWhatsapp: ""
 };
 
-/* ===== حفظ تقدّم الرحلة في المتصفّح (يمنع ضياع البيانات عند الـ Refresh) ===== */
-const JOURNEY_SAVE_KEY = "mfp_journey_progress";
 
-function saveJourneyLocal(){
-  try {
-    localStorage.setItem(JOURNEY_SAVE_KEY, JSON.stringify({
-      participantId:     journeyState.participantId,
-      resultCode:        journeyState.resultCode,
-      user:              journeyState.user,
-      currentStation:    journeyState.currentStation,
-      completedStations: journeyState.completedStations,
-      choices:           journeyState.choices,
-      fingerprint:       journeyState.fingerprint,
-      savedAt:           Date.now()
-    }));
-  } catch(e){ console.warn("saveJourneyLocal", e); }
-}
 
 function loadJourneyLocal(){
   try {
