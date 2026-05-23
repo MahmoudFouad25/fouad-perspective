@@ -117,6 +117,8 @@
         flavor:          fp.flavor != null ? fp.flavor : null,
         fingerprint_name: fp.name || null,
         burnout_type:    fp.burnoutType || null,
+         match_score:     (ch.station4_matchScore != null ? ch.station4_matchScore : null),
+        axis_corrected:  !!ch.station4_corrected,
         covenant: cov
       }, { merge: true });
       return true;
@@ -168,6 +170,8 @@
       flavor:         (d.flavor != null ? d.flavor : (fp.flavor != null ? fp.flavor : null)),
       fingerprint_name: d.fingerprint_name || fp.name || null,
       burnout_type:   d.burnout_type || fp.burnoutType || null,
+       match_score:    (d.match_score != null ? d.match_score : (ch.station4_matchScore != null ? ch.station4_matchScore : null)),
+      axis_corrected: !!(d.axis_corrected || ch.station4_corrected),
       covenant: cov,
       choices: ch,
       fingerprint: fp
