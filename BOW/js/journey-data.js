@@ -119,6 +119,9 @@
         burnout_type:    fp.burnoutType || null,
          match_score:     (ch.station4_matchScore != null ? ch.station4_matchScore : null),
         axis_corrected:  !!ch.station4_corrected,
+         flavor_match:    (ch.station5_flavorMatch != null ? ch.station5_flavorMatch : null),
+        flavor_corrected: !!ch.station5_flavorCorrected,
+        door_changed:    !!ch.station5_doorChanged,
         covenant: cov
       }, { merge: true });
       return true;
@@ -172,6 +175,9 @@
       burnout_type:   d.burnout_type || fp.burnoutType || null,
        match_score:    (d.match_score != null ? d.match_score : (ch.station4_matchScore != null ? ch.station4_matchScore : null)),
       axis_corrected: !!(d.axis_corrected || ch.station4_corrected),
+       flavor_match:    (d.flavor_match != null ? d.flavor_match : (ch.station5_flavorMatch != null ? ch.station5_flavorMatch : null)),
+      flavor_corrected: !!(d.flavor_corrected || ch.station5_flavorCorrected),
+      door_changed:    !!(d.door_changed || ch.station5_doorChanged),
       covenant: cov,
       choices: ch,
       fingerprint: fp
@@ -202,7 +208,7 @@
       const rows = [];
       snap.forEach(doc => {
         const r = shape(doc);
-        if (r.completed && r.main_axis) rows.push(r);   // اللي خلّصوا الرحلة بس
+        if (r.main_axis) rows.push(r);   // أي حد وصل للمحور (حتى لو لسه بيكمّل)
       });
       const priority = r => r.whatsapp_sent_at ? 3 : (r.whatsapp ? 1 : 2);
       rows.sort((a, b) => {
