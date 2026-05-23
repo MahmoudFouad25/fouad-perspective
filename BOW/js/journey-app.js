@@ -111,6 +111,28 @@ function buildRail(){
    - المحطات اللي فيها interaction: مفيش placeholder + الزر مقفول
    - باقي المحطات: placeholder + زر مفتوح
    ============================================================ */
+/* بلوك فيديو Vimeo (مع زرّ احتياطي للفتح الخارجي) */
+function vimeoBlock(id, title){
+  if (!id){
+    return `
+      <div class="station-video" aria-label="${CONTENT.ui.videoPlaceholder}">
+        <div class="station-video__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+        </div>
+        <div class="station-video__label">${CONTENT.ui.videoPlaceholder}</div>
+      </div>`;
+  }
+  return `
+    <div class="jv-wrap">
+      <div class="jv-frame">
+        <iframe src="https://player.vimeo.com/video/${id}?badge=0&autopause=0&player_id=0&app_id=58479"
+                frameborder="0" allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
+                referrerpolicy="strict-origin-when-cross-origin" title="${escapeHtml(title || "")}"></iframe>
+      </div>
+      <a class="jv-ext" href="https://vimeo.com/${id}" target="_blank" rel="noopener">لو الفيديو ما اشتغلش هنا — افتحه على Vimeo ↗</a>
+    </div>`;
+}
+
 function buildStations(){
   const wrap = document.getElementById("stationContainer");
   const total = CONTENT.stations.length;
@@ -135,15 +157,7 @@ function buildStations(){
           </div>
         </header>
 
-        <!-- مكان الفيديو (placeholder حتى يجي videoId) -->
-        <div class="station-video" aria-label="${CONTENT.ui.videoPlaceholder}">
-          <div class="station-video__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="6 4 20 12 6 20 6 4"></polygon>
-            </svg>
-          </div>
-          <div class="station-video__label">${CONTENT.ui.videoPlaceholder}</div>
-        </div>
+        ${ vimeoBlock(s.videoId, s.title) }
 
         <!-- منطقة التفاعل (هتتبني بـ renderInteraction لو فيه interaction) -->
         <div class="station-interaction" data-role="interaction"></div>
@@ -1175,7 +1189,24 @@ function renderAxisCrossover(station, mountEl){
     .ar-cmp-ax{flex-shrink:0;width:70px;color:var(--cream);font-weight:600;font-size:14px;}
     .ar-cmp-txt{color:var(--muted);font-size:14px;line-height:1.7;}
     .ar-cmp-pick{font-size:16px;color:var(--cream);margin:18px 0 12px;font-weight:600;}
-    @media (max-width:768px){.ar-card{padding:22px 18px;}.ar-cmp-row{flex-direction:column;gap:2px;}.ar-cmp-ax{width:auto;}}`;
+    @media (max-width:768px){.ar-card{padding:22px 18px;}.ar-cmp-row{flex-direction:column;gap:2px;}.ar-cmp-ax{width:auto;}}`
+       .jv-wrap{margin:24px 0;}
+    .jv-frame{position:relative;padding-top:56.25%;border-radius:10px;overflow:hidden;border:1px solid rgba(212,175,55,.3);background:#000;}
+    .jv-frame iframe{position:absolute;inset:0;width:100%;height:100%;}
+    .jv-ext{display:inline-block;margin-top:8px;font-size:12px;color:var(--muted);text-decoration:underline;}
+    .jv-ext:hover{color:var(--gold);}
+    .fl-doorvid{margin:18px 0 6px;}
+    .fl-otherbtn{appearance:none;background:transparent;color:var(--cream);border:1px dashed rgba(212,175,55,.4);border-radius:8px;padding:12px 18px;font:inherit;font-size:14px;cursor:pointer;margin-top:18px;transition:all .2s;}
+    .fl-otherbtn:hover{border-color:var(--gold);color:var(--gold);}
+    .fl-other{margin-top:18px;display:flex;flex-direction:column;gap:22px;}
+    .fl-other__door{background:var(--navy);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:18px;}
+    .fl-other__name{color:var(--gold);font-weight:700;font-size:16px;margin:0 0 12px;}
+    .fl-other__flavors{display:flex;flex-direction:column;gap:8px;margin-top:12px;}
+    .fl-other__fl{display:flex;gap:10px;font-size:14px;color:var(--muted);line-height:1.7;}
+    .fl-other__fl b{color:var(--cream);}
+    .fl-changebtn{appearance:none;background:rgba(212,175,55,.08);color:var(--cream);border:1px solid var(--gold);border-radius:8px;padding:11px 16px;font:inherit;font-size:13px;cursor:pointer;margin-top:10px;transition:all .2s;}
+    .fl-changebtn:hover{background:rgba(212,175,55,.16);color:var(--gold);}
+    .fl-verify{margin-top:22px;padding:20px;background:var(--navy-raised);border:1px solid rgba(212,175,55,.35);border-radius:10px;};
     document.head.appendChild(s);
   }
 
@@ -1339,16 +1370,17 @@ function buildDoorPhase2(mountEl, stationEl, ix, local){
   const phase2El = mountEl.querySelector(".ix-phase[data-phase='2']");
   const prompt   = ix.q2.promptByDoor[local.door];
   const flavors  = ix.q2.flavorsByDoor[local.door];
+  const doorVid  = ix.doorVideos ? ix.doorVideos[local.door] : "";
 
   phase2El.innerHTML = `
+    ${ doorVid ? `<div class="fl-doorvid">${vimeoBlock(doorVid, DOOR_AR[local.door] || "")}</div>` : `` }
     <h2 class="ix__prompt">${escapeHtml(prompt)}</h2>
     <div class="ix-choice__list" role="radiogroup" aria-label="${escapeHtml(prompt)}">
       ${flavors.map(f => `
-        <button type="button" class="ix-choice__btn ix-choice__btn--lg" data-flavor="${f.id}" role="radio" aria-checked="false">
+        <button type="button" class="ix-choice__btn" data-flavor="${f.id}" role="radio" aria-checked="false">
           <span class="ix-choice__label">${escapeHtml(f.label)}</span>
           <span class="ix-choice__mark" aria-hidden="true">✓</span>
-        </button>
-      `).join("")}
+        </button>`).join("")}
     </div>
   `;
 
@@ -1359,35 +1391,172 @@ function buildDoorPhase2(mountEl, stationEl, ix, local){
     b.addEventListener("click", () => {
       if (chosen) return;
       chosen = +b.dataset.flavor;
-
       buttons.forEach(other => {
         const isMatch = other === b;
         other.classList.toggle("is-selected", isMatch);
         other.setAttribute("aria-checked", isMatch ? "true" : "false");
         if (!isMatch){ other.classList.add("is-disabled"); other.disabled = true; }
       });
-
-      // احفظ النكهة + اسم البصمة
-      const axis = journeyState.fingerprint.axis;
-      const fingerprintName = BURNOUT_FINGERPRINTS[`${axis}_${chosen}`] || "";
-      journeyState.choices.station5_flavor = chosen;
-      journeyState.fingerprint.flavor      = chosen;
-      journeyState.fingerprint.name        = fingerprintName;
-
-      // صدى النكهة
+      saveFlavor(chosen);
       showEcho(stationEl, ix.q2.flavorEchoes[chosen], true);
-      completeStation(5);
       setTimeout(() => smoothScrollTo(stationEl.querySelector("[data-role='echo']")), 380);
+      setTimeout(() => renderFlavorVerify(stationEl, mountEl, ix, local), 1400);
+    });
+  });
+}
 
-      // بعد ما يقرا الصدى لشوية، نطوي شاشة السؤال ونعرض بطاقة البصمة
-      setTimeout(() => {
-        mountEl.innerHTML = renderFingerprintCardHtml(ix);
-        animateFingerprintCard(mountEl, /*delayedStart=*/true);
-        unlockNext(stationEl);
+/* حفظ النكهة + اسم البصمة */
+function saveFlavor(flavorId){
+  const axis = journeyState.fingerprint.axis;
+  journeyState.choices.station5_flavor = flavorId;
+  journeyState.fingerprint.flavor      = flavorId;
+  journeyState.fingerprint.name        = BURNOUT_FINGERPRINTS[`${axis}_${flavorId}`] || "";
+  saveJourneyLocal();
+}
 
-        // scroll لطيف عشان البطاقة تبان
-        setTimeout(() => smoothScrollTo(mountEl.querySelector(".ix-fingerprint-card"), 100), 600);
-      }, 1400);
+/* سؤال التحقق من النكهة */
+function renderFlavorVerify(stationEl, mountEl, ix, local){
+  injectAxisReportStyles();
+  const host = mountEl.querySelector(".ix-phase[data-phase='2']") || mountEl;
+  const old = host.querySelector(".fl-verify"); if (old) old.remove();
+  const box = document.createElement("div");
+  box.className = "fl-verify";
+  box.innerHTML = `
+    <h3 class="ar-verify-q">${escapeHtml(ix.flavorVerifyPrompt || "النكهة دي بتوصفك؟")}</h3>
+    <p class="ar-verify-note">${escapeHtml(ix.flavorCommit[journeyState.fingerprint.flavor] || "")}</p>
+    <div class="ar-scale">
+      ${[["5","بتوصفني تمامًا"],["4","لحدٍّ كبير"],["3","لحدٍّ ما"],["2","مش حاسس بيها قوي"],["1","مش أنا خالص"]].map(([v,l]) =>
+        `<button type="button" class="ar-scale-btn" data-score="${v}">${escapeHtml(l)}</button>`).join("")}
+    </div>`;
+  host.appendChild(box);
+  setTimeout(() => smoothScrollTo(box, 80), 200);
+
+  box.querySelectorAll(".ar-scale-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const score = +btn.dataset.score;
+      box.querySelectorAll(".ar-scale-btn").forEach(b => { b.disabled = true; if (b!==btn) b.classList.add("ar-dim-out"); });
+      btn.classList.add("ar-picked");
+      journeyState.choices.station5_flavorMatch = score;
+      saveJourneyLocal();
+      if (score >= 3) flavorConfirmed(stationEl, mountEl, ix, local);
+      else renderFlavorCorrection(stationEl, mountEl, ix, local, box);
+    });
+  });
+}
+
+/* تصحيح النكهة جوّه نفس الباب */
+function renderFlavorCorrection(stationEl, mountEl, ix, local, verifyBox){
+  const flavors = ix.q2.flavorsByDoor[local.door];
+  const box = document.createElement("div");
+  box.className = "ar-correct";
+  box.innerHTML = `
+    <h3 class="ar-h3">خلّينا نتأكّد — قارن بين نكهات بابك</h3>
+    <p class="ar-p">اقرا التزام كل نكهة المخفي، واختار اللي بيوصفك فعلًا:</p>
+    <div class="ix-choice__list">
+      ${flavors.map(f => `
+        <button type="button" class="ix-choice__btn" data-flavor="${f.id}">
+          <span class="ix-choice__label"><b>${escapeHtml(FLAVOR_AR[f.id])}</b> — ${escapeHtml(ix.flavorCommit[f.id] || "")}</span>
+          <span class="ix-choice__mark">✓</span>
+        </button>`).join("")}
+    </div>`;
+  verifyBox.appendChild(box);
+  setTimeout(() => smoothScrollTo(box, 80), 200);
+
+  box.querySelectorAll(".ix-choice__btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const newFlavor = +btn.dataset.flavor;
+      box.querySelectorAll(".ix-choice__btn").forEach(b => { b.disabled = true; if (+b.dataset.flavor!==newFlavor) b.classList.add("is-disabled"); });
+      btn.classList.add("is-selected");
+      const changed = newFlavor !== journeyState.fingerprint.flavor;
+      if (changed){ saveFlavor(newFlavor); journeyState.choices.station5_flavorCorrected = true; }
+      const msg = document.createElement("p");
+      msg.className = "ar-confirmed";
+      msg.textContent = changed ? `صحّحنا نكهتك إلى ${FLAVOR_AR[newFlavor]}. نكمّل.` : "أكّدت نكهتك. نكمّل.";
+      box.appendChild(msg);
+      setTimeout(() => flavorConfirmed(stationEl, mountEl, ix, local), 700);
+    });
+  });
+}
+
+/* بعد تأكيد النكهة: بطاقة البصمة + مشاهدة الأبواب التانية + تغيير نهائي */
+function flavorConfirmed(stationEl, mountEl, ix, local){
+  completeStation(5);
+  saveJourneyRemote();
+  mountEl.innerHTML = renderFingerprintCardHtml(ix);
+  animateFingerprintCard(mountEl, true);
+
+  const otherBtn = document.createElement("button");
+  otherBtn.type = "button";
+  otherBtn.className = "fl-otherbtn";
+  otherBtn.textContent = "حابب تتفرّج على الأبواب التانية قبل ما تكمّل؟";
+  mountEl.appendChild(otherBtn);
+  otherBtn.addEventListener("click", () => { otherBtn.remove(); renderOtherDoors(stationEl, mountEl, ix, local); });
+
+  unlockNext(stationEl);
+  setTimeout(() => smoothScrollTo(mountEl.querySelector(".ix-fingerprint-card"), 100), 600);
+}
+
+/* عرض كل الأبواب التانية بفيديوهاتها ونكهاتها + إمكانية تغيير نهائي */
+function renderOtherDoors(stationEl, mountEl, ix, local){
+  const allDoors = Object.keys(ix.q1.doorEchoes);
+  const others = allDoors.filter(d => d !== local.door);
+  const wrap = document.createElement("div");
+  wrap.className = "fl-other";
+  wrap.innerHTML = others.map(door => {
+    const vid = ix.doorVideos ? ix.doorVideos[door] : "";
+    const flavors = ix.q2.flavorsByDoor[door];
+    return `
+      <div class="fl-other__door">
+        <p class="fl-other__name">${escapeHtml(DOOR_AR[door] || "")}</p>
+        ${ vid ? vimeoBlock(vid, DOOR_AR[door] || "") : `` }
+        <div class="fl-other__flavors">
+          ${flavors.map(f => `<div class="fl-other__fl"><b>${escapeHtml(FLAVOR_AR[f.id])}:</b> ${escapeHtml(ix.flavorCommit[f.id] || "")}</div>`).join("")}
+        </div>
+        <button type="button" class="fl-changebtn" data-door="${door}">حسّيت إن «${escapeHtml(DOOR_AR[door])}» أقرب ليّ — غيّر بصمتي</button>
+      </div>`;
+  }).join("");
+  mountEl.appendChild(wrap);
+  setTimeout(() => smoothScrollTo(wrap, 80), 200);
+
+  wrap.querySelectorAll(".fl-changebtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const newDoor = btn.dataset.door;
+      renderDoorChange(stationEl, mountEl, ix, local, newDoor, wrap);
+    });
+  });
+}
+
+/* تغيير الباب → اختيار نكهة جديدة فيه → إعادة بناء البصمة */
+function renderDoorChange(stationEl, mountEl, ix, local, newDoor, wrap){
+  const flavors = ix.q2.flavorsByDoor[newDoor];
+  const box = document.createElement("div");
+  box.className = "ar-correct";
+  box.innerHTML = `
+    <h3 class="ar-h3">اختار نكهتك في باب ${escapeHtml(DOOR_AR[newDoor])}</h3>
+    <div class="ix-choice__list">
+      ${flavors.map(f => `
+        <button type="button" class="ix-choice__btn" data-flavor="${f.id}">
+          <span class="ix-choice__label"><b>${escapeHtml(FLAVOR_AR[f.id])}</b> — ${escapeHtml(ix.flavorCommit[f.id] || "")}</span>
+          <span class="ix-choice__mark">✓</span>
+        </button>`).join("")}
+    </div>`;
+  wrap.appendChild(box);
+  setTimeout(() => smoothScrollTo(box, 80), 200);
+
+  box.querySelectorAll(".ix-choice__btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const newFlavor = +btn.dataset.flavor;
+      local.door = newDoor;
+      journeyState.choices.station5_door = newDoor;
+      journeyState.fingerprint.door      = newDoor;
+      saveFlavor(newFlavor);
+      journeyState.choices.station5_doorChanged = true;
+      saveJourneyRemote();
+      // أعد بناء البطاقة بالكامل
+      mountEl.innerHTML = renderFingerprintCardHtml(ix);
+      animateFingerprintCard(mountEl, true);
+      unlockNext(stationEl);
+      setTimeout(() => smoothScrollTo(mountEl.querySelector(".ix-fingerprint-card"), 100), 500);
     });
   });
 }
