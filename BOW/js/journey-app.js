@@ -1298,12 +1298,18 @@ function renderDoorFlavor(station, mountEl){
   const stationEl = mountEl.closest(".station");
  
   /* الاسترجاع الكامل: لو خلّص كل المحطة قبل كده */
+  /* الاسترجاع الكامل: لو خلّص كل المحطة قبل كده */
   const savedDoor   = journeyState.choices.station5_door;
   const savedFlavor = journeyState.choices.station5_flavor;
   if (savedDoor && savedFlavor != null && ix.q2.flavorEchoes[savedFlavor]){
-    mountEl.innerHTML = `<div class="df-stage"></div>`;
+    mountEl.innerHTML = `<div class="df-stage" data-current="E"></div>`;
     const stage = mountEl.querySelector(".df-stage");
-    dfRenderFingerprint(stage, ix, { door: savedDoor }, /*isResumed=*/true);
+    const localResumed = {
+      door:   savedDoor,
+      flavor: savedFlavor,
+      flavorMatch: journeyState.choices.station5_flavorMatch || null
+    };
+    dfRenderPhaseE(stage, ix, localResumed);
     unlockNext(stationEl);
     return;
   }
