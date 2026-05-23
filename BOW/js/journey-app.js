@@ -256,10 +256,13 @@ function goToStation(n){
    completeStation — إضافة محطة للمكتملة
    ============================================================ */
 function completeStation(n){
+  let isNew = false;
   if (!journeyState.completedStations.includes(n)){
     journeyState.completedStations.push(n);
+    isNew = true;
   }
   saveJourneyLocal();
+  if (isNew) saveJourneyRemote();
   updateProgress();
 }
 
@@ -416,7 +419,14 @@ function renderForm(station, mountEl){
     refreshParticipant();
     // ── حفظ best-effort: إنشاء المشارك + توليد كود التقرير ──
     Persist.register({ ...journeyState.user }).then(res => {
-      if (res){ journeyState.participantId = res.id; journeyState.resultCode = res.code; }
+      if (res){
+        journeyState.participantId = res.id;
+        journeyState.resultCode = res.code;
+        putCodeInUrl(res.code);
+        saveJourneyLocal();
+        saveJourneyRemote();
+        showResumeBanner(res.code);
+      }
     });
     disableForm(form);
     showFormWelcome(stationEl, station, true);
@@ -1292,6 +1302,7 @@ function showFingerprintScreen(){
     user:        { ...journeyState.user },
     choices:     JSON.parse(JSON.stringify(journeyState.choices)),
     fingerprint: { ...journeyState.fingerprint },
+    completedStations: [...journeyState.completedStations],
     code:        journeyState.resultCode
   });
 
@@ -1650,14 +1661,212 @@ function refreshParticipant(){
 }
 
 /* ============================================================
+   حفظ التقدّم + الاستئناف عبر الأجهزة
+   ============================================================ */
+const JOURNEY_SAVE_KEY = "mfp_journey_progress";
+
+function saveJourneyLocal(){
+  try {
+    localStorage.setItem(JOURNEY_SAVE_KEY, JSON.stringify({
+      participantId: journeyState.participantId, resultCode: journeyState.resultCode,
+      user: journeyState.user, currentStation: journeyState.currentStation,
+      completedStations: journeyState.completedStations, choices: journeyState.choices,
+      fingerprint: journeyState.fingerprint, savedAt: Date.now()
+    }));
+  } catch(e){ console.warn("saveJourneyLocal", e); }
+}
+function loadJourneyLocal(){
+  try {
+    const raw = localStorage.getItem(JOURNEY_SAVE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (!d || (Date.now() - (d.savedAt||0)) > 7*24*60*60*1000){
+      localStorage.removeItem(JOURNEY_SAVE_KEY); return false;
+    }
+    journeyState.participantId     = d.participantId || null;
+    journeyState.resultCode        = d.resultCode || null;
+    journeyState.user              = d.user || journeyState.user;
+    journeyState.currentStation    = d.currentStation || 1;
+    journeyState.completedStations = d.completedStations || [];
+    journeyState.choices           = d.choices || journeyState.choices;
+    journeyState.fingerprint       = d.fingerprint || journeyState.fingerprint;
+    return true;
+  } catch(e){ console.warn("loadJourneyLocal", e); return false; }
+}
+function saveJourneyRemote(){
+  try {
+    if (window.MFPJourney && window.MFPJourney.saveProgress && journeyState.participantId){
+      window.MFPJourney.saveProgress(journeyState.participantId, {
+        currentStation: journeyState.currentStation,
+        completedStations: journeyState.completedStations,
+        choices: journeyState.choices, fingerprint: journeyState.fingerprint,
+        user: journeyState.user
+      });
+    }
+  } catch(e){ console.warn("saveJourneyRemote", e); }
+}
+function putCodeInUrl(code){
+  if (!code) return;
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.get("c") === code) return;
+    url.searchParams.set("c", code);
+    history.replaceState(null, "", url.toString());
+  } catch(e){}
+}
+async function tryResume(){
+  const params = new URLSearchParams(location.search);
+  const urlCode = params.get("c") || params.get("code");
+  let codeFailed = false;
+  if (urlCode && window.MFPJourney && window.MFPJourney.hasFirebase && window.MFPJourney.hasFirebase()){
+    try {
+      const d = await window.MFPJourney.fetchByCode(urlCode);
+      applyResumedData(d); saveJourneyLocal();
+      return { resumed:true, codeFailed:false };
+    } catch(e){ console.warn("resume by code failed", e); codeFailed = true; }
+  }
+  if (loadJourneyLocal()){
+    if (journeyState.resultCode) putCodeInUrl(journeyState.resultCode);
+    return { resumed:true, codeFailed:false };
+  }
+  return { resumed:false, codeFailed };
+}
+function applyResumedData(d){
+  if (!d) return;
+  journeyState.participantId = d.id || null;
+  journeyState.resultCode    = d.result_code || null;
+  journeyState.user = {
+    name: d.name||"", email: d.email||"", job: d.job||"",
+    ageRange: d.age_range||"", whatsapp: d.whatsapp||"",
+    consentWhatsapp: !!d.consent_whatsapp, consentFollowup: false
+  };
+  if (d.choices)     journeyState.choices     = d.choices;
+  if (d.fingerprint) journeyState.fingerprint = d.fingerprint;
+  journeyState.completedStations = Array.isArray(d.completed_stations) ? d.completed_stations : [];
+  const comp = journeyState.completedStations;
+  journeyState.currentStation = comp.length
+    ? Math.min(Math.max(...comp) + 1, CONTENT.stations.length)
+    : (d.current_station || 1);
+}
+
+/* واجهة الحفظ والعودة */
+function injectResumeStyles(){
+  if (document.getElementById("jr-resume-styles")) return;
+  const style = document.createElement("style");
+  style.id = "jr-resume-styles";
+  style.textContent = `
+  .jr-banner{max-width:var(--content-max);margin:14px auto 0;padding:16px 18px;background:rgba(212,175,55,.07);border:1px solid rgba(212,175,55,.4);border-radius:10px;display:flex;flex-direction:column;gap:10px;}
+  .jr-banner__top{display:flex;align-items:flex-start;gap:10px;}
+  .jr-banner__icon{color:var(--gold);flex-shrink:0;margin-top:2px;}
+  .jr-banner__txt{font-size:14px;line-height:1.7;color:var(--cream);}
+  .jr-banner__txt b{color:var(--gold);}
+  .jr-banner__code{font-family:monospace;letter-spacing:2px;color:var(--gold);font-size:16px;font-weight:700;background:rgba(0,0,0,.2);padding:6px 12px;border-radius:6px;display:inline-block;margin-top:4px;}
+  .jr-banner__actions{display:flex;flex-wrap:wrap;gap:8px;}
+  .jr-banner__btn{appearance:none;background:transparent;color:var(--cream);border:1px solid var(--sky);border-radius:6px;padding:9px 16px;font:inherit;font-size:13px;cursor:pointer;transition:all .2s;}
+  .jr-banner__btn:hover{border-color:var(--gold);color:var(--gold);}
+  .jr-banner__hide{margin-inline-start:auto;background:none;border:none;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;}
+  .jr-resume{max-width:var(--content-max);margin:14px auto 0;padding:14px 18px;background:rgba(255,255,255,.03);border:1px dashed rgba(184,184,184,.3);border-radius:10px;font-size:13px;color:var(--muted);}
+  .jr-resume__q{cursor:pointer;color:var(--cream);}
+  .jr-resume__q b{color:var(--gold);text-decoration:underline;}
+  .jr-resume__form{display:none;gap:8px;margin-top:12px;flex-wrap:wrap;}
+  .jr-resume__form.is-open{display:flex;}
+  .jr-resume__input{flex:1;min-width:160px;background:var(--navy-deep);color:var(--cream);border:1px solid rgba(184,184,184,.25);border-radius:6px;padding:11px 14px;font:inherit;text-align:center;letter-spacing:3px;text-transform:uppercase;}
+  .jr-resume__input:focus{outline:none;border-color:var(--gold);}
+  .jr-resume__go{background:var(--gold);color:var(--navy-deep);border:none;border-radius:6px;padding:11px 20px;font:inherit;font-weight:700;cursor:pointer;}
+  .jr-loading{position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--navy);}
+  .jr-loading__box{text-align:center;color:var(--muted);font-size:14px;}
+  .jr-loading__spin{width:38px;height:38px;border-radius:50%;border:2px solid rgba(212,175,55,.2);border-top-color:var(--gold);animation:jr-spin 1s linear infinite;margin:0 auto 16px;}
+  @keyframes jr-spin{to{transform:rotate(360deg);}}
+  @media (max-width:768px){.jr-banner,.jr-resume{margin-inline:14px;}}`;
+  document.head.appendChild(style);
+}
+function showLoadingOverlay(){
+  if (document.getElementById("jrLoading")) return;
+  const el = document.createElement("div");
+  el.id = "jrLoading"; el.className = "jr-loading";
+  el.innerHTML = `<div class="jr-loading__box"><div class="jr-loading__spin"></div>بنفتح رحلتك المحفوظة…</div>`;
+  document.body.appendChild(el);
+}
+function hideLoadingOverlay(){ document.getElementById("jrLoading")?.remove(); }
+function showResumeBanner(code){
+  if (!code) return;
+  const main = document.getElementById("stationContainer");
+  if (!main) return;
+  document.getElementById("jrBanner")?.remove();
+  const link = `${location.origin}${location.pathname}?c=${encodeURIComponent(code)}`;
+  const banner = document.createElement("div");
+  banner.id = "jrBanner"; banner.className = "jr-banner";
+  banner.innerHTML = `
+    <div class="jr-banner__top">
+      <span class="jr-banner__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+      <div class="jr-banner__txt"><b>رحلتك بتتحفظ تلقائيًّا.</b> لو قفلت الصفحة أو حبّيت تكمّل من موبايل أو جهاز تاني، ارجع من نفس الرابط وهتلاقي نفسك في نفس المكان.<br>كودك الخاص: <span class="jr-banner__code">${escapeHtml(code)}</span></div>
+      <button type="button" class="jr-banner__hide" data-jr="hide">إخفاء</button>
+    </div>
+    <div class="jr-banner__actions">
+      <button type="button" class="jr-banner__btn" data-jr="copy-link">📋 انسخ رابط رحلتي</button>
+      <button type="button" class="jr-banner__btn" data-jr="copy-code">انسخ الكود</button>
+    </div>`;
+  main.parentNode.insertBefore(banner, main);
+  banner.querySelector('[data-jr="hide"]').addEventListener("click", () => banner.remove());
+  banner.querySelector('[data-jr="copy-link"]').addEventListener("click", () => copyText(link, "اتنسخ الرابط — احفظه عندك"));
+  banner.querySelector('[data-jr="copy-code"]').addEventListener("click", () => copyText(code, "اتنسخ الكود"));
+}
+function showReturningEntry(){
+  const main = document.getElementById("stationContainer");
+  if (!main || document.getElementById("jrResume")) return;
+  const box = document.createElement("div");
+  box.id = "jrResume"; box.className = "jr-resume";
+  box.innerHTML = `
+    <span class="jr-resume__q" data-jr="toggle">بدأت الرحلة قبل كده على جهاز تاني؟ <b>افتح رحلتك بالكود</b></span>
+    <div class="jr-resume__form" data-jr="form">
+      <input type="text" class="jr-resume__input" data-jr="input" placeholder="X X X X — X X X X" maxlength="9" autocomplete="off" spellcheck="false">
+      <button type="button" class="jr-resume__go" data-jr="go">افتح رحلتي</button>
+    </div>`;
+  main.parentNode.insertBefore(box, main);
+  const form = box.querySelector('[data-jr="form"]');
+  const input = box.querySelector('[data-jr="input"]');
+  box.querySelector('[data-jr="toggle"]').addEventListener("click", () => {
+    form.classList.toggle("is-open");
+    if (form.classList.contains("is-open")) input.focus();
+  });
+  input.addEventListener("input", (e) => {
+    let v = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, "");
+    if (v.length > 4) v = v.slice(0,4) + "-" + v.slice(4,8);
+    e.target.value = v;
+  });
+  const go = () => { const code = input.value.trim(); if (code) location.search = "?c=" + encodeURIComponent(code); };
+  box.querySelector('[data-jr="go"]').addEventListener("click", go);
+  input.addEventListener("keypress", (e) => { if (e.key === "Enter"){ e.preventDefault(); go(); } });
+}
+function copyText(text, okMsg){
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(() => showToast(okMsg||"اتنسخ")).catch(() => prompt("انسخ:", text));
+  } else { prompt("انسخ:", text); }
+}
+
+/* ============================================================
    init
    ============================================================ */
-function init(){
-  loadJourneyLocal();
+async function init(){
+  injectResumeStyles();
+  const params = new URLSearchParams(location.search);
+  const hasUrlCode = !!(params.get("c") || params.get("code"));
+  if (hasUrlCode) showLoadingOverlay();
+
+  const status = await tryResume();
+  hideLoadingOverlay();
+
   buildRail();
   buildStations();
   refreshParticipant();
   render();
+
+  if (journeyState.resultCode){
+    showResumeBanner(journeyState.resultCode);
+  } else {
+    showReturningEntry();
+    if (status.codeFailed) showToast("الكود مش موجود — تأكد إنك كتبته صح");
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);
