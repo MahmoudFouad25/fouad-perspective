@@ -1206,7 +1206,7 @@ function renderAxisCrossover(station, mountEl){
     .fl-other__fl b{color:var(--cream);}
     .fl-changebtn{appearance:none;background:rgba(212,175,55,.08);color:var(--cream);border:1px solid var(--gold);border-radius:8px;padding:11px 16px;font:inherit;font-size:13px;cursor:pointer;margin-top:10px;transition:all .2s;}
     .fl-changebtn:hover{background:rgba(212,175,55,.16);color:var(--gold);}
-    .fl-verify{margin-top:22px;padding:20px;background:var(--navy-raised);border:1px solid rgba(212,175,55,.35);border-radius:10px;};
+    .fl-verify{margin-top:22px;padding:20px;background:var(--navy-raised);border:1px solid rgba(212,175,55,.35);border-radius:10px;}`;
     document.head.appendChild(s);
   }
 
