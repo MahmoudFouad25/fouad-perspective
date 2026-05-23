@@ -289,6 +289,7 @@ function renderInteraction(station, mountEl){
     case "form":           return renderForm(station, mountEl);
     case "single-choice":  return renderSingleChoice(station, mountEl);
     case "axis-picker":    return renderAxisPicker(station, mountEl);
+    case "axis-crossover": return renderAxisCrossover(station, mountEl);
     case "door-flavor":    return renderDoorFlavor(station, mountEl);
     case "multi-choice":   return renderMultiChoice(station, mountEl);
     case "covenant":       return renderCovenant(station, mountEl);
@@ -820,6 +821,265 @@ function buildAxisPhase2(mountEl, stationEl, ix, local){
       }, 900);
     });
   });
+}
+
+                        /* ============================================================
+   النوع (ج-جديد): axis-crossover — مواقف + تقاطع + واتساب
+   ============================================================ */
+function injectCrossStyles(){
+  if (document.getElementById("jr-cross-styles")) return;
+  const s = document.createElement("style");
+  s.id = "jr-cross-styles";
+  s.textContent = `
+  .ix-cross__progress{display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:12px;color:var(--muted);}
+  .ix-cross__bar{flex:1;height:4px;background:rgba(255,255,255,.06);border-radius:99px;overflow:hidden;}
+  .ix-cross__fill{height:100%;background:var(--gold);border-radius:99px;transition:width .4s var(--ease);}
+  .ix-cross__intro{font-size:15px;color:var(--muted);line-height:1.8;margin:0 0 18px;}
+  .ix-cross__scenario{margin-bottom:22px;}
+  .ix-cross__text{font-size:18px;color:var(--cream);line-height:1.7;margin:0 0 8px;}
+  .ix-cross__prompt{font-size:15px;color:var(--gold);margin:0;}
+  .ix-cross__wa{margin-top:24px;padding-top:20px;border-top:1px solid rgba(212,175,55,.18);}`;
+  document.head.appendChild(s);
+}
+
+function composeAxisEcho(ix, main, caseType, didTiebreak, behaviorLeader){
+  let frame;
+  if (caseType === "discovery"){
+    frame = ix.framing.discovery.replace("{behavior}", AXIS_AR[behaviorLeader] || "");
+  } else if (didTiebreak){
+    frame = ix.framing.tiebreakNote;
+  } else if (caseType === "agreement"){
+    frame = ix.framing.agreement;
+  } else {
+    frame = ix.framing.neutral;
+  }
+  return frame + "\n\n" + (ix.axisDescriptions[main] || "");
+}
+
+function renderAxisCrossover(station, mountEl){
+  injectCrossStyles();
+  const ix = station.interaction;
+  const stationEl = mountEl.closest(".station");
+
+  /* الاسترجاع: لو المحطة خلصت قبل كده — اعرض النتيجة بس */
+  const savedMain = journeyState.choices.station4_axisMain;
+  if (savedMain && ix.axisDescriptions[savedMain]){
+    const echo = composeAxisEcho(ix, savedMain,
+      journeyState.choices.station4_caseType,
+      journeyState.choices.station4_didTiebreak,
+      journeyState.choices.station4_behaviorLeader);
+    mountEl.innerHTML = `<div class="ix ix-axis ix-axis--done"><p class="ix-form__note">حفظنا بصمتك. تقدر تكمّل لمحطتك الجاية في أي وقت.</p></div>`;
+    showEcho(stationEl, echo, false);
+    unlockNext(stationEl);
+    return;
+  }
+
+  const local = {
+    scenarioIdx: 0,
+    behavior: { tamasok:0, hayawiyya:0, intima:0 },
+    answers: {}, elim: null, retained: null,
+    caseType: null, needTiebreak: false, behaviorLeader: null,
+    autoMain: null, main: null, didTiebreak: false
+  };
+
+  renderScenario();
+
+  function lockButtons(btns, chosen){
+    btns.forEach(x => { x.dataset.locked = "1"; x.disabled = true;
+      if (x !== chosen) x.classList.add("is-disabled"); });
+    chosen.classList.add("is-selected");
+  }
+
+  function renderScenario(){
+    const total = ix.scenarios.length;
+    const s = ix.scenarios[local.scenarioIdx];
+    const num = local.scenarioIdx + 1;
+    mountEl.innerHTML = `
+      <div class="ix ix-axis ix-cross">
+        <div class="ix-cross__progress">
+          <span>الموقف ${toArabicDigits(num)} / ${toArabicDigits(total)}</span>
+          <div class="ix-cross__bar"><div class="ix-cross__fill" style="width:${(num/total)*100}%"></div></div>
+        </div>
+        ${ local.scenarioIdx === 0 ? `<p class="ix-cross__intro">${escapeHtml(ix.intro)}</p>` : `` }
+        <div class="ix-cross__scenario">
+          <p class="ix-cross__text">${escapeHtml(s.scenario)}</p>
+          ${ s.prompt ? `<p class="ix-cross__prompt">${escapeHtml(s.prompt)}</p>` : `` }
+        </div>
+        <div class="ix-choice__list" role="radiogroup">
+          ${s.options.map(o => `
+            <button type="button" class="ix-choice__btn" data-axis="${escapeHtml(o.axis)}">
+              <span class="ix-choice__label">${escapeHtml(o.label)}</span>
+              <span class="ix-choice__mark" aria-hidden="true">✓</span>
+            </button>`).join("")}
+        </div>
+      </div>`;
+    const btns = mountEl.querySelectorAll(".ix-choice__btn");
+    btns.forEach(b => b.addEventListener("click", () => {
+      if (b.dataset.locked) return;
+      lockButtons(btns, b);
+      local.behavior[b.dataset.axis]++;
+      local.answers["s" + (local.scenarioIdx + 1)] = b.dataset.axis;
+      setTimeout(() => {
+        local.scenarioIdx++;
+        if (local.scenarioIdx >= total) renderElimination();
+        else renderScenario();
+        smoothScrollTo(stationEl.querySelector(".station-header"), 90);
+      }, 300);
+    }));
+  }
+
+  function renderElimination(){
+    const e = ix.elimination;
+    mountEl.innerHTML = `
+      <div class="ix ix-axis ix-cross">
+        <p class="ix-cross__intro">${escapeHtml(ix.eliminationIntro)}</p>
+        <h2 class="ix__prompt">${escapeHtml(e.prompt)}</h2>
+        <div class="ix-choice__list" role="radiogroup">
+          ${e.options.map(o => `
+            <button type="button" class="ix-choice__btn" data-axis="${escapeHtml(o.id)}">
+              <span class="ix-choice__label">${escapeHtml(o.label)}</span>
+              <span class="ix-choice__mark" aria-hidden="true">✓</span>
+            </button>`).join("")}
+        </div>
+      </div>`;
+    const btns = mountEl.querySelectorAll(".ix-choice__btn");
+    btns.forEach(b => b.addEventListener("click", () => {
+      if (b.dataset.locked) return;
+      lockButtons(btns, b);
+      local.elim = b.dataset.axis;
+      compute();
+      setTimeout(() => { local.needTiebreak ? renderTiebreak() : finalize(); }, 350);
+    }));
+  }
+
+  function compute(){
+    const axes = ["tamasok","hayawiyya","intima"];
+    const bh = local.behavior;
+    local.retained = axes.filter(a => a !== local.elim);
+    const counts = axes.map(a => bh[a]);
+    const maxC = Math.max(...counts), minC = Math.min(...counts);
+    const elimSoleMax = bh[local.elim] === maxC && counts.filter(c => c === maxC).length === 1;
+    const elimSoleMin = bh[local.elim] === minC && counts.filter(c => c === minC).length === 1;
+    local.caseType = elimSoleMax ? "discovery" : (elimSoleMin ? "agreement" : "neutral");
+    local.behaviorLeader = axes.reduce((a,b) => bh[b] > bh[a] ? b : a);
+    const [r1, r2] = local.retained;
+    local.autoMain = bh[r1] >= bh[r2] ? r1 : r2;
+    local.needTiebreak = (bh[r1] === bh[r2]) || (local.caseType === "discovery");
+  }
+
+  function renderTiebreak(){
+    const [r1, r2] = local.retained;
+    const t = ix.tiebreak;
+    const prompt = t.promptTemplate.replace("{a}", AXIS_AR[r1]).replace("{b}", AXIS_AR[r2]);
+    mountEl.innerHTML = `
+      <div class="ix ix-axis ix-cross">
+        ${ local.caseType === "discovery" ? `<p class="ix-cross__intro">${escapeHtml(t.discoveryHint)}</p>` : `` }
+        <h2 class="ix__prompt">${escapeHtml(prompt)}</h2>
+        <div class="ix-choice__list" role="radiogroup">
+          ${[r1, r2].map(ax => `
+            <button type="button" class="ix-choice__btn" data-axis="${ax}">
+              <span class="ix-choice__label">${escapeHtml(t.keepLabels[ax])}</span>
+              <span class="ix-choice__mark" aria-hidden="true">✓</span>
+            </button>`).join("")}
+        </div>
+      </div>`;
+    const btns = mountEl.querySelectorAll(".ix-choice__btn");
+    btns.forEach(b => b.addEventListener("click", () => {
+      if (b.dataset.locked) return;
+      lockButtons(btns, b);
+      local.main = b.dataset.axis;
+      local.didTiebreak = true;
+      setTimeout(finalize, 350);
+    }));
+  }
+
+  function finalize(){
+    const main = local.main || local.autoMain;
+    const sub  = local.retained.find(a => a !== main);
+    journeyState.choices.station4_axisMain       = main;
+    journeyState.choices.station4_axisSub        = sub;
+    journeyState.choices.station4_eliminated     = local.elim;
+    journeyState.choices.station4_behavior       = { ...local.behavior };
+    journeyState.choices.station4_scenarios      = { ...local.answers };
+    journeyState.choices.station4_caseType       = local.caseType;
+    journeyState.choices.station4_didTiebreak    = !!local.didTiebreak;
+    journeyState.choices.station4_behaviorLeader = local.behaviorLeader;
+    journeyState.fingerprint.axis                = main;
+
+    const echo = composeAxisEcho(ix, main, local.caseType, !!local.didTiebreak, local.behaviorLeader);
+    mountEl.innerHTML = `<div class="ix ix-axis ix-axis--done"><p class="ix-form__note">${escapeHtml(ix.resultNote)}</p></div>`;
+    showEcho(stationEl, echo, true);
+    completeStation(4);
+    setTimeout(() => smoothScrollTo(stationEl.querySelector("[data-role='echo']")), 380);
+    setTimeout(renderWhatsapp, 1200);
+  }
+
+  function renderWhatsapp(){
+    const w = ix.whatsapp;
+    const host = mountEl.querySelector(".ix-axis--done") || mountEl;
+    const block = document.createElement("div");
+    block.className = "ix-cross__wa";
+    block.innerHTML = `
+      <h2 class="ix__prompt">${escapeHtml(w.prompt)}</h2>
+      <form class="ix-form ix-form--stack" novalidate>
+        <div class="ix-radio-group" role="radiogroup">
+          ${w.radioOptions.map(o => `
+            <label class="ix-radio">
+              <input type="radio" name="wa_consent" value="${escapeHtml(o.value)}">
+              <span class="ix-radio__mark" aria-hidden="true"></span>
+              <span class="ix-radio__label">${escapeHtml(o.label)}</span>
+            </label>`).join("")}
+          <div class="ix-field__error" role="alert" data-role="consent-error"></div>
+        </div>
+        <div class="ix-field" data-field="whatsapp" hidden>
+          <label class="ix-field__label">${escapeHtml(w.whatsappLabel)}</label>
+          <input class="ix-field__input" type="tel" name="whatsapp" inputmode="tel" dir="ltr" style="text-align:right;" placeholder="${escapeHtml(w.whatsappPlaceholder)}" autocomplete="off">
+          <div class="ix-field__error" role="alert"></div>
+        </div>
+        <p class="ix-form__note">${escapeHtml(w.note)}</p>
+        <div class="ix-form__actions">
+          <button type="submit" class="ix-form__submit">${escapeHtml(w.submitLabel)}</button>
+        </div>
+      </form>`;
+    host.appendChild(block);
+
+    const form = block.querySelector("form");
+    const waField = block.querySelector(".ix-field[data-field='whatsapp']");
+    const waInput = waField.querySelector("input");
+    const rads = form.querySelectorAll("[name='wa_consent']");
+    const cErr = form.querySelector("[data-role='consent-error']");
+
+    rads.forEach(r => r.addEventListener("change", () => {
+      waField.hidden = (r.value !== "yes"); cErr.textContent = "";
+    }));
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      cErr.textContent = "";
+      waField.querySelector(".ix-field__error").textContent = "";
+      const chosen = [...rads].find(r => r.checked);
+      if (!chosen){ cErr.textContent = w.errors.consent; return; }
+      if (chosen.value === "yes"){
+        const val = waInput.value.trim();
+        if (!val){ waField.querySelector(".ix-field__error").textContent = w.errors.whatsapp; waInput.focus(); return; }
+        journeyState.user.whatsapp = val; journeyState.user.consentWhatsapp = true;
+      } else {
+        journeyState.user.whatsapp = ""; journeyState.user.consentWhatsapp = false;
+      }
+      Persist.saveContact(journeyState.participantId, {
+        whatsapp: journeyState.user.whatsapp,
+        consentWhatsapp: journeyState.user.consentWhatsapp
+      });
+      saveJourneyLocal();
+      form.classList.add("is-submitted");
+      form.querySelectorAll("input, button").forEach(el => el.disabled = true);
+      const ok = document.createElement("p");
+      ok.className = "ix-form__note"; ok.style.color = "var(--gold)";
+      ok.textContent = w.thanks; block.appendChild(ok);
+      unlockNext(stationEl);
+      setTimeout(() => smoothScrollTo(stationEl.querySelector(".station-nav"), 120), 250);
+    });
+  }
 }
 
 /* ============================================================
