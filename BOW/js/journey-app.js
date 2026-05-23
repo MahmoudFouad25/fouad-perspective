@@ -112,7 +112,10 @@ function buildRail(){
    - باقي المحطات: placeholder + زر مفتوح
    ============================================================ */
 /* بلوك فيديو Vimeo (مع زرّ احتياطي للفتح الخارجي) */
-function vimeoBlock(id, title){
+/* ====================================================================
+   (١) استبدال vimeoBlock — حلّ مشكلة الحجم والـ fallback link
+   ──────────────────────────────────────────────────────────────────── */
+function vimeoBlock(id, title, variant){
   if (!id){
     return `
       <div class="station-video" aria-label="${CONTENT.ui.videoPlaceholder}">
@@ -122,16 +125,20 @@ function vimeoBlock(id, title){
         <div class="station-video__label">${CONTENT.ui.videoPlaceholder}</div>
       </div>`;
   }
+  const variantClass = variant ? ` jv-wrap--${variant}` : "";
   return `
-    <div class="jv-wrap">
+    <div class="jv-wrap${variantClass}">
       <div class="jv-frame">
         <iframe src="https://player.vimeo.com/video/${id}?badge=0&autopause=0&player_id=0&app_id=58479"
-                frameborder="0" allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
-                referrerpolicy="strict-origin-when-cross-origin" title="${escapeHtml(title || "")}"></iframe>
+                allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
+                referrerpolicy="strict-origin-when-cross-origin"
+                title="${escapeHtml(title || "")}"
+                loading="lazy"></iframe>
       </div>
-      <a class="jv-ext" href="https://vimeo.com/${id}" target="_blank" rel="noopener">لو الفيديو ما اشتغلش هنا — افتحه على Vimeo ↗</a>
     </div>`;
 }
+ 
+
 
 function buildStations(){
   const wrap = document.getElementById("stationContainer");
@@ -1283,285 +1290,538 @@ function renderAxisCrossover(station, mountEl){
 /* ============================================================
    النوع (د): door-flavor — اختيار الباب ثم النكهة → بطاقة بصمة
    ============================================================ */
+/* ====================================================================
+   (٢) renderDoorFlavor الجديد — Phase A → F
+   ──────────────────────────────────────────────────────────────────── */
 function renderDoorFlavor(station, mountEl){
   const ix = station.interaction;
   const stationEl = mountEl.closest(".station");
-
-  /* الاسترجاع الكامل: الباب + النكهة محفوظين → اعرض النتيجة فقط */
+ 
+  /* الاسترجاع الكامل: لو خلّص كل المحطة قبل كده */
   const savedDoor   = journeyState.choices.station5_door;
   const savedFlavor = journeyState.choices.station5_flavor;
   if (savedDoor && savedFlavor != null && ix.q2.flavorEchoes[savedFlavor]){
-    showEcho(stationEl, ix.q2.flavorEchoes[savedFlavor], false);
-    mountEl.innerHTML = renderFingerprintCardHtml(ix);
-    requestAnimationFrame(() => animateFingerprintCard(mountEl, /*delayedStart=*/false));
+    mountEl.innerHTML = `<div class="df-stage"></div>`;
+    const stage = mountEl.querySelector(".df-stage");
+    dfRenderFingerprint(stage, ix, { door: savedDoor }, /*isResumed=*/true);
     unlockNext(stationEl);
     return;
   }
-
-  /* البناء الأولي: مرحلتين، التانية فاضية لحد ما الباب يتختار */
-  mountEl.innerHTML = `
-    <div class="ix ix-axis ix-door-flavor">
-      <!-- المرحلة 1: اختيار الباب -->
-      <div class="ix-phase is-fading" data-phase="1">
-        <h2 class="ix__prompt">${escapeHtml(ix.q1.prompt)}</h2>
-        <div class="ix-choice__list" role="radiogroup" aria-label="${escapeHtml(ix.q1.prompt)}">
-          ${ix.q1.options.map(o => `
-            <button type="button" class="ix-choice__btn" data-door="${escapeHtml(o.id)}" role="radio" aria-checked="false">
-              <span class="ix-choice__label">${escapeHtml(o.label)}</span>
-              <span class="ix-choice__mark" aria-hidden="true">✓</span>
+ 
+  /* البناء الأولي */
+  mountEl.innerHTML = `<div class="df-stage" data-current="A"></div>`;
+  const stage = mountEl.querySelector(".df-stage");
+ 
+  const local = {
+    door: null,
+    flavor: null,
+    flavorMatch: null
+  };
+ 
+  dfRenderPhaseA(stage, ix, local);
+}
+ 
+/* ── أيقونات الأبواب ── */
+const DF_DOOR_ICONS = {
+  hemma: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  ons:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`,
+  yaqeen:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`
+};
+ 
+const DF_DOOR_LINES = {
+  hemma:  "الحركة والفعل تيجي أول",
+  ons:    "الصلة والقُرب تيجي أول",
+  yaqeen: "الفهم والوضوح يجوا أول"
+};
+ 
+/* ────────────────────────────────────────────────────────────────────
+   Phase A — اختيار الباب
+   ──────────────────────────────────────────────────────────────────── */
+function dfRenderPhaseA(stage, ix, local){
+  stage.dataset.current = "A";
+  stage.innerHTML = `
+    <div class="df-phase is-entering" data-phase="A">
+      <p class="df-question">${escapeHtml(ix.q1.prompt)}</p>
+      <div class="df-doors" role="radiogroup" aria-label="اختر بابك">
+        ${ix.q1.options.map(o => `
+          <button type="button" class="df-door-card" data-door="${escapeHtml(o.id)}" role="radio" aria-checked="false">
+            <span class="df-door-card__icon" aria-hidden="true">${DF_DOOR_ICONS[o.id] || ""}</span>
+            <p class="df-door-card__name">${escapeHtml(DOOR_AR[o.id] || o.label)}</p>
+            <p class="df-door-card__line">${escapeHtml(DF_DOOR_LINES[o.id] || "")}</p>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+ 
+  const cards = stage.querySelectorAll(".df-door-card");
+  cards.forEach(card => {
+    card.addEventListener("click", () => {
+      if (local.door) return;
+      local.door = card.dataset.door;
+ 
+      // حفظ الباب
+      journeyState.choices.station5_door = local.door;
+      journeyState.fingerprint.door = local.door;
+ 
+      // تأثير اختيار
+      cards.forEach(c => {
+        const isMatch = c === card;
+        c.classList.toggle("is-selected", isMatch);
+        c.setAttribute("aria-checked", isMatch ? "true" : "false");
+        if (!isMatch) c.classList.add("is-dim");
+      });
+ 
+      // انتقال لـ Phase B
+      setTimeout(() => dfTransitionTo(stage, () => dfRenderPhaseB(stage, ix, local)), 500);
+    });
+  });
+}
+ 
+/* ────────────────────────────────────────────────────────────────────
+   Phase B — شاشة الباب: فيديو الباب + الـecho + كروت النكهات
+   ──────────────────────────────────────────────────────────────────── */
+function dfRenderPhaseB(stage, ix, local){
+  stage.dataset.current = "B";
+  const doorVid    = ix.doorVideos ? ix.doorVideos[local.door] : "";
+  const doorName   = DOOR_AR[local.door] || "";
+  const doorEcho   = ix.q1.doorEchoes[local.door] || "";
+  const flavors    = ix.q2.flavorsByDoor[local.door];
+  const flavorsPrompt = ix.q2.promptByDoor[local.door];
+ 
+  stage.innerHTML = `
+    <div class="df-phase is-entering" data-phase="B">
+      <div class="df-door-header">
+        <p class="df-door-header__eyebrow">بابك</p>
+        <h2 class="df-door-header__name">${escapeHtml(doorName)}</h2>
+      </div>
+ 
+      ${ doorVid ? vimeoBlock(doorVid, doorName, "door") : "" }
+ 
+      <div class="df-door-echo">${textToParagraphs(doorEcho)}</div>
+ 
+      <p class="df-flavors-prompt">${escapeHtml(flavorsPrompt)}</p>
+ 
+      <div class="df-flavors" role="radiogroup" aria-label="اختر نكهتك">
+        ${flavors.map(f => `
+          <button type="button" class="df-flavor-card" data-flavor="${f.id}" role="radio" aria-checked="false">
+            <span class="df-flavor-card__num">${toArabicDigits(f.id)}</span>
+            <div class="df-flavor-card__body">
+              <p class="df-flavor-card__name">${escapeHtml(FLAVOR_AR[f.id])}</p>
+              <p class="df-flavor-card__line">${escapeHtml(f.label)}</p>
+            </div>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+ 
+  // scroll لأعلى الـ phase
+  setTimeout(() => smoothScrollTo(stage, 80), 100);
+ 
+  const cards = stage.querySelectorAll(".df-flavor-card");
+  cards.forEach(card => {
+    card.addEventListener("click", () => {
+      if (local.flavor != null) return;
+      local.flavor = +card.dataset.flavor;
+ 
+      // حفظ النكهة المبدئية
+      dfSaveFlavor(local.flavor);
+ 
+      // تأثير اختيار
+      cards.forEach(c => {
+        const isMatch = c === card;
+        c.classList.toggle("is-selected", isMatch);
+        c.setAttribute("aria-checked", isMatch ? "true" : "false");
+        if (!isMatch) c.classList.add("is-dim");
+      });
+ 
+      // انتقال لـ Phase C
+      setTimeout(() => dfTransitionTo(stage, () => dfRenderPhaseC(stage, ix, local)), 500);
+    });
+  });
+}
+ 
+/* ────────────────────────────────────────────────────────────────────
+   Phase C — شاشة النكهة: شرح + سؤال التحقق
+   ──────────────────────────────────────────────────────────────────── */
+function dfRenderPhaseC(stage, ix, local){
+  stage.dataset.current = "C";
+  const doorName   = DOOR_AR[local.door] || "";
+  const flavorName = FLAVOR_AR[local.flavor] || "";
+  const flavorEcho = ix.q2.flavorEchoes[local.flavor] || "";
+ 
+  stage.innerHTML = `
+    <div class="df-phase is-entering" data-phase="C">
+      <div class="df-breadcrumb">
+        <span>باب ${escapeHtml(doorName)}</span>
+        <span class="df-breadcrumb__sep">•</span>
+        <span class="df-breadcrumb__current">نكهة ${escapeHtml(flavorName)}</span>
+      </div>
+ 
+      <div class="df-flavor-header">
+        <p class="df-flavor-header__eyebrow">طابعك</p>
+        <h2 class="df-flavor-header__name">${escapeHtml(flavorName)}</h2>
+      </div>
+ 
+      <div class="df-flavor-prose">${textToParagraphs(flavorEcho)}</div>
+ 
+      <div class="df-verify">
+        <h3 class="df-verify__q">${escapeHtml(ix.flavorVerifyPrompt || "النكهة دي بتوصفك فعلًا؟")}</h3>
+        <p class="df-verify__note">كن صادقًا — التقييم ده بيساعدنا نتأكّد إن البصمة دقيقة عليك.</p>
+        <div class="df-scale">
+          ${[
+            ["5","بتوصفني تمامًا"],
+            ["4","لحدٍّ كبير"],
+            ["3","لحدٍّ ما"],
+            ["2","مش حاسس بيها قوي"],
+            ["1","مش أنا خالص"]
+          ].map(([v,l]) => `
+            <button type="button" class="df-scale__btn" data-score="${v}">
+              <span class="df-scale__num">${toArabicDigits(v)}</span>
+              <span class="df-scale__label">${escapeHtml(l)}</span>
             </button>
           `).join("")}
         </div>
-        <div class="ix-axis__continue" data-role="continue-1">
-          <button type="button" class="ix-step-btn" data-action="to-phase-2">
-            <span>${escapeHtml(ix.q1.continueLabel || "نكمّل")}</span>
-            <span class="ix-step-btn__arrow" aria-hidden="true">←</span>
-          </button>
+        <p class="df-verify__result" data-role="verify-result"></p>
+      </div>
+    </div>
+  `;
+ 
+  setTimeout(() => smoothScrollTo(stage, 80), 100);
+ 
+  const buttons = stage.querySelectorAll(".df-scale__btn");
+  const resultEl = stage.querySelector("[data-role='verify-result']");
+ 
+  buttons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (local.flavorMatch != null) return;
+      const score = +btn.dataset.score;
+      local.flavorMatch = score;
+ 
+      // حفظ التقييم
+      journeyState.choices.station5_flavorMatch = score;
+      saveJourneyLocal();
+ 
+      // تأثير
+      buttons.forEach(b => {
+        b.disabled = true;
+        if (b !== btn) b.classList.add("is-dim");
+      });
+      btn.classList.add("is-picked");
+ 
+      if (score >= 3){
+        resultEl.textContent = "تمام — نكهتك مؤكّدة.";
+        resultEl.classList.add("is-shown");
+        // مباشرة لـ Phase E
+        setTimeout(() => dfTransitionTo(stage, () => dfRenderPhaseE(stage, ix, local)), 1100);
+      } else {
+        resultEl.textContent = "نتأكّد سوا — هنقارن لك نكهات بابك.";
+        resultEl.classList.add("is-shown");
+        // لـ Phase D للتصحيح
+        setTimeout(() => dfTransitionTo(stage, () => dfRenderPhaseD(stage, ix, local)), 1100);
+      }
+    });
+  });
+}
+ 
+/* ────────────────────────────────────────────────────────────────────
+   Phase D — مقارنة حاسمة بين نكهات الباب الثلاثة
+   ──────────────────────────────────────────────────────────────────── */
+function dfRenderPhaseD(stage, ix, local){
+  stage.dataset.current = "D";
+  const doorName = DOOR_AR[local.door] || "";
+  const flavors  = ix.q2.flavorsByDoor[local.door];
+  const currentFlavor = local.flavor;
+ 
+  stage.innerHTML = `
+    <div class="df-phase is-entering" data-phase="D">
+      <div class="df-compare-intro">
+        <p class="df-compare-intro__eyebrow">المقارنة الحاسمة</p>
+        <h2 class="df-compare-intro__title">نكهات باب ${escapeHtml(doorName)}</h2>
+        <p class="df-compare-intro__sub">اقرأ الالتزام المخفي لكل نكهة — اللي بيشتغل من سنين جوّاك من غير ما تنتبه — واختار اللي بتحسّها بتوصفك فعلًا.</p>
+      </div>
+ 
+      <div class="df-compare-grid">
+        ${flavors.map(f => {
+          const isCurrent = f.id === currentFlavor;
+          const commit = ix.flavorCommit[f.id] || "";
+          return `
+            <div class="df-compare-card ${isCurrent ? 'is-current' : ''}">
+              ${ isCurrent ? `<span class="df-compare-card__badge">نكهتك الحالية</span>` : `` }
+              <h3 class="df-compare-card__name">${escapeHtml(FLAVOR_AR[f.id])}</h3>
+              <p class="df-compare-card__commit">${escapeHtml(commit)}</p>
+              <button type="button" class="df-compare-card__btn" data-flavor="${f.id}">
+                ${ isCurrent ? "أأكّد دي نكهتي" : "دي الأقرب ليّ" }
+              </button>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+ 
+  setTimeout(() => smoothScrollTo(stage, 80), 100);
+ 
+  const buttons = stage.querySelectorAll(".df-compare-card__btn");
+  buttons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const newFlavor = +btn.dataset.flavor;
+      const changed = newFlavor !== currentFlavor;
+ 
+      buttons.forEach(b => {
+        b.disabled = true;
+        if (+b.dataset.flavor !== newFlavor) b.classList.add("is-dim");
+      });
+      btn.classList.add("is-picked");
+ 
+      if (changed){
+        local.flavor = newFlavor;
+        dfSaveFlavor(newFlavor);
+        journeyState.choices.station5_flavorCorrected = true;
+      }
+      saveJourneyLocal();
+ 
+      setTimeout(() => dfTransitionTo(stage, () => dfRenderPhaseE(stage, ix, local)), 900);
+    });
+  });
+}
+ 
+/* ────────────────────────────────────────────────────────────────────
+   Phase E — البصمة + دعوة الاستكشاف
+   ──────────────────────────────────────────────────────────────────── */
+function dfRenderPhaseE(stage, ix, local, opts){
+  opts = opts || {};
+  stage.dataset.current = "E";
+  const stationEl = stage.closest(".station");
+ 
+  stage.innerHTML = `
+    <div class="df-phase is-entering" data-phase="E">
+      <div class="df-fingerprint-stage">
+        ${ renderFingerprintCardHtml(ix) }
+      </div>
+ 
+      <div class="df-explore-invite" data-role="explore-invite">
+        <h3 class="df-explore-invite__title">حابب تستكشف الأبواب التانية؟</h3>
+        <p class="df-explore-invite__sub">بصمتك محفوظة. الاستكشاف اختياري — ممكن تتفرّج على الأبواب التانية بفيديوهاتها ونكهاتها، ولو حسّيت إن باب تاني أقرب ليك، تقدر تجرّبه.</p>
+        <div class="df-explore-invite__actions">
+          <button type="button" class="df-explore-btn" data-action="open-explore">استكشف الأبواب</button>
+          <button type="button" class="df-explore-btn df-explore-btn--primary" data-action="continue">أكمّل بصمتي</button>
         </div>
       </div>
-
-      <!-- المرحلة 2: اختيار النكهة (تتبني ديناميكيًا) -->
-      <div class="ix-phase" data-phase="2" hidden></div>
     </div>
   `;
-
-  const local = { door: null };
-  bindDoorPhase1(mountEl, stationEl, ix, local);
+ 
+  // أنيميشن بطاقة البصمة
+  animateFingerprintCard(stage, true);
+ 
+  // إظهار الدعوة بعد البطاقة
+  const invite = stage.querySelector("[data-role='explore-invite']");
+  setTimeout(() => invite.classList.add("is-shown"), 1400);
+ 
+  // حفظ نهائي + فتح زر التالي
+  completeStation(5);
+  saveJourneyRemote();
+  unlockNext(stationEl);
+ 
+  setTimeout(() => smoothScrollTo(stage.querySelector(".ix-fingerprint-card"), 100), 600);
+ 
+  // ربط أزرار الدعوة
+  stage.querySelector("[data-action='continue']").addEventListener("click", () => {
+    // scroll لزر التالي
+    smoothScrollTo(stationEl.querySelector(".station-nav"), 120);
+  });
+  stage.querySelector("[data-action='open-explore']").addEventListener("click", () => {
+    dfOpenExploreOverlay(ix, local, stage);
+  });
 }
-
-/* ---------- المرحلة ١: اختيار الباب ---------- */
-function bindDoorPhase1(mountEl, stationEl, ix, local){
-  const phaseEl     = mountEl.querySelector(".ix-phase[data-phase='1']");
-  const buttons     = phaseEl.querySelectorAll(".ix-choice__btn");
-  const continueBox = phaseEl.querySelector("[data-role='continue-1']");
-  const continueBtn = continueBox.querySelector(".ix-step-btn");
-
-  buttons.forEach(b => {
-    b.addEventListener("click", () => {
-      if (local.door) return;
-      local.door = b.dataset.door;
-
-      // احفظ الباب فورًا
-      journeyState.choices.station5_door = local.door;
-      journeyState.fingerprint.door      = local.door;
-
-      buttons.forEach(other => {
-        const isMatch = other === b;
-        other.classList.toggle("is-selected", isMatch);
-        other.setAttribute("aria-checked", isMatch ? "true" : "false");
-        if (!isMatch){ other.classList.add("is-disabled"); other.disabled = true; }
+ 
+/* ────────────────────────────────────────────────────────────────────
+   Phase F — overlay الاستكشاف
+   ──────────────────────────────────────────────────────────────────── */
+function dfOpenExploreOverlay(ix, local, stage){
+  // أزل overlay قديم إن وجد
+  const old = document.getElementById("dfExplore");
+  if (old) old.remove();
+ 
+  const allDoors = Object.keys(ix.q1.doorEchoes);
+  const currentDoor = local.door;
+  // التاب الافتراضي: أول باب مش بابه الحالي
+  const defaultTab = allDoors.find(d => d !== currentDoor) || allDoors[0];
+ 
+  const overlay = document.createElement("div");
+  overlay.id = "dfExplore";
+  overlay.className = "df-explore";
+  overlay.setAttribute("aria-hidden", "false");
+  overlay.innerHTML = `
+    <div class="df-explore__header">
+      <div>
+        <h2 class="df-explore__title">استكشاف الأبواب</h2>
+        <p class="df-explore__current">بصمتك الحالية: <b>${escapeHtml(journeyState.fingerprint.name || "—")}</b> — محفوظة</p>
+      </div>
+      <button type="button" class="df-explore__close" data-action="close">
+        <span>إغلاق</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+ 
+    <div class="df-explore__tabs" role="tablist">
+      ${allDoors.map(d => `
+        <button type="button" class="df-explore__tab ${d === defaultTab ? 'is-active' : ''}" data-tab="${d}" role="tab">
+          ${escapeHtml(DOOR_AR[d])}
+          ${ d === currentDoor ? `<span class="df-explore__tab-badge">بابك</span>` : `` }
+        </button>
+      `).join("")}
+    </div>
+ 
+    ${allDoors.map(d => `
+      <div class="df-explore__panel" data-panel="${d}" ${d === defaultTab ? '' : 'hidden'}>
+        ${ dfBuildExplorePanel(ix, d, currentDoor) }
+      </div>
+    `).join("")}
+  `;
+ 
+  document.body.appendChild(overlay);
+  document.body.style.overflow = "hidden";
+ 
+  // فتح بـ animation
+  requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add("is-open")));
+ 
+  // إغلاق
+  const close = () => dfCloseExploreOverlay(overlay);
+  overlay.querySelector("[data-action='close']").addEventListener("click", close);
+ 
+  // Esc
+  overlay.__escHandler = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", overlay.__escHandler);
+ 
+  // تابات
+  overlay.querySelectorAll(".df-explore__tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.tab;
+      overlay.querySelectorAll(".df-explore__tab").forEach(t => t.classList.toggle("is-active", t === tab));
+      overlay.querySelectorAll(".df-explore__panel").forEach(p => {
+        p.hidden = p.dataset.panel !== target;
       });
-
-      // صدى الباب
-      showEcho(stationEl, ix.q1.doorEchoes[local.door], true);
-      setTimeout(() => continueBox.classList.add("is-revealed"), 250);
-      setTimeout(() => smoothScrollTo(stationEl.querySelector("[data-role='echo']")), 380);
+      // scroll panel لأعلى
+      overlay.scrollTop = 0;
     });
   });
-
-  continueBtn.addEventListener("click", () => {
-    if (!local.door) return;
-    clearEcho(stationEl);
-    buildDoorPhase2(mountEl, stationEl, ix, local);
-    switchAxisPhase(mountEl, 2);
+ 
+  // أزرار "جرّب فيه"
+  overlay.querySelectorAll("[data-action='try-door']").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const newDoor = btn.dataset.door;
+      dfHandleTryNewDoor(newDoor, ix, local, stage, overlay);
+    });
   });
 }
-
-/* ---------- المرحلة ٢: اختيار النكهة (٣ خيارات حسب الباب) ---------- */
-function buildDoorPhase2(mountEl, stationEl, ix, local){
-  const phase2El = mountEl.querySelector(".ix-phase[data-phase='2']");
-  const prompt   = ix.q2.promptByDoor[local.door];
-  const flavors  = ix.q2.flavorsByDoor[local.door];
-  const doorVid  = ix.doorVideos ? ix.doorVideos[local.door] : "";
-
-  phase2El.innerHTML = `
-    ${ doorVid ? `<div class="fl-doorvid">${vimeoBlock(doorVid, DOOR_AR[local.door] || "")}</div>` : `` }
-    <h2 class="ix__prompt">${escapeHtml(prompt)}</h2>
-    <div class="ix-choice__list" role="radiogroup" aria-label="${escapeHtml(prompt)}">
+ 
+function dfBuildExplorePanel(ix, doorId, currentDoor){
+  const doorName = DOOR_AR[doorId] || "";
+  const doorEcho = ix.q1.doorEchoes[doorId] || "";
+  const doorVid  = ix.doorVideos ? ix.doorVideos[doorId] : "";
+  const flavors  = ix.q2.flavorsByDoor[doorId];
+  const isCurrent = doorId === currentDoor;
+ 
+  return `
+    <div class="df-explore__panel-head">
+      <p class="df-explore__panel-eyebrow">${isCurrent ? "بابك الحالي" : "اكتشف"}</p>
+      <h2 class="df-explore__panel-name">${escapeHtml(doorName)}</h2>
+    </div>
+ 
+    ${ doorVid ? vimeoBlock(doorVid, doorName, "explore") : "" }
+ 
+    <div class="df-explore__echo">${textToParagraphs(doorEcho)}</div>
+ 
+    <p class="df-explore__flavors-title">نكهات باب ${escapeHtml(doorName)}</p>
+    <div class="df-explore__flavors">
       ${flavors.map(f => `
-        <button type="button" class="ix-choice__btn" data-flavor="${f.id}" role="radio" aria-checked="false">
-          <span class="ix-choice__label">${escapeHtml(f.label)}</span>
-          <span class="ix-choice__mark" aria-hidden="true">✓</span>
-        </button>`).join("")}
+        <div class="df-explore__flavor">
+          <span class="df-explore__flavor-num">${toArabicDigits(f.id)}</span>
+          <div class="df-explore__flavor-body">
+            <p class="df-explore__flavor-name">${escapeHtml(FLAVOR_AR[f.id])}</p>
+            <p class="df-explore__flavor-commit">${escapeHtml(ix.flavorCommit[f.id] || "")}</p>
+          </div>
+        </div>
+      `).join("")}
     </div>
+ 
+    ${ !isCurrent ? `
+      <div class="df-explore__try">
+        <button type="button" class="df-explore__try-btn" data-action="try-door" data-door="${doorId}">
+          حسّيت إن «${escapeHtml(doorName)}» أقرب ليّ — جرّب فيه
+        </button>
+      </div>
+    ` : `` }
   `;
-
-  const buttons = phase2El.querySelectorAll(".ix-choice__btn");
-  let chosen = null;
-
-  buttons.forEach(b => {
-    b.addEventListener("click", () => {
-      if (chosen) return;
-      chosen = +b.dataset.flavor;
-      buttons.forEach(other => {
-        const isMatch = other === b;
-        other.classList.toggle("is-selected", isMatch);
-        other.setAttribute("aria-checked", isMatch ? "true" : "false");
-        if (!isMatch){ other.classList.add("is-disabled"); other.disabled = true; }
-      });
-      saveFlavor(chosen);
-      showEcho(stationEl, ix.q2.flavorEchoes[chosen], true);
-      setTimeout(() => smoothScrollTo(stationEl.querySelector("[data-role='echo']")), 380);
-      setTimeout(() => renderFlavorVerify(stationEl, mountEl, ix, local), 1400);
-    });
-  });
 }
-
+ 
+function dfCloseExploreOverlay(overlay){
+  overlay.classList.remove("is-open");
+  document.body.style.overflow = "";
+  if (overlay.__escHandler){
+    document.removeEventListener("keydown", overlay.__escHandler);
+    delete overlay.__escHandler;
+  }
+  setTimeout(() => overlay.remove(), 500);
+}
+ 
+function dfHandleTryNewDoor(newDoor, ix, local, stage, overlay){
+  // اقفل الـ overlay
+  dfCloseExploreOverlay(overlay);
+ 
+  // علّم إن العميل غيّر الباب
+  journeyState.choices.station5_doorChanged = true;
+ 
+  // امسح النكهة القديمة من الـ state، علشان يبدأ من جديد
+  local.flavor = null;
+  local.flavorMatch = null;
+  journeyState.choices.station5_flavor = null;
+  journeyState.choices.station5_flavorMatch = null;
+  journeyState.choices.station5_flavorCorrected = false;
+ 
+  // عيّن الباب الجديد
+  local.door = newDoor;
+  journeyState.choices.station5_door = newDoor;
+  journeyState.fingerprint.door = newDoor;
+  journeyState.fingerprint.flavor = null;
+  journeyState.fingerprint.name = null;
+ 
+  saveJourneyLocal();
+  saveJourneyRemote();
+ 
+  // ارجع لـ Phase B بالباب الجديد
+  setTimeout(() => {
+    dfTransitionTo(stage, () => dfRenderPhaseB(stage, ix, local));
+  }, 300);
+}
+ 
+/* ────────────────────────────────────────────────────────────────────
+   مساعدات
+   ──────────────────────────────────────────────────────────────────── */
+ 
+/* انتقال بين الـ phases */
+function dfTransitionTo(stage, builderFn){
+  const current = stage.querySelector(".df-phase");
+  if (current){
+    current.style.opacity = "0";
+    current.style.transform = "translateY(-8px)";
+  }
+  setTimeout(() => {
+    builderFn();
+  }, 280);
+}
+ 
 /* حفظ النكهة + اسم البصمة */
-function saveFlavor(flavorId){
+function dfSaveFlavor(flavorId){
   const axis = journeyState.fingerprint.axis;
   journeyState.choices.station5_flavor = flavorId;
-  journeyState.fingerprint.flavor      = flavorId;
-  journeyState.fingerprint.name        = BURNOUT_FINGERPRINTS[`${axis}_${flavorId}`] || "";
+  journeyState.fingerprint.flavor = flavorId;
+  journeyState.fingerprint.name = BURNOUT_FINGERPRINTS[`${axis}_${flavorId}`] || "";
   saveJourneyLocal();
 }
 
-/* سؤال التحقق من النكهة */
-function renderFlavorVerify(stationEl, mountEl, ix, local){
-  injectAxisReportStyles();
-  const host = mountEl.querySelector(".ix-phase[data-phase='2']") || mountEl;
-  const old = host.querySelector(".fl-verify"); if (old) old.remove();
-  const box = document.createElement("div");
-  box.className = "fl-verify";
-  box.innerHTML = `
-    <h3 class="ar-verify-q">${escapeHtml(ix.flavorVerifyPrompt || "النكهة دي بتوصفك؟")}</h3>
-    <p class="ar-verify-note">${escapeHtml(ix.flavorCommit[journeyState.fingerprint.flavor] || "")}</p>
-    <div class="ar-scale">
-      ${[["5","بتوصفني تمامًا"],["4","لحدٍّ كبير"],["3","لحدٍّ ما"],["2","مش حاسس بيها قوي"],["1","مش أنا خالص"]].map(([v,l]) =>
-        `<button type="button" class="ar-scale-btn" data-score="${v}">${escapeHtml(l)}</button>`).join("")}
-    </div>`;
-  host.appendChild(box);
-  setTimeout(() => smoothScrollTo(box, 80), 200);
-
-  box.querySelectorAll(".ar-scale-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const score = +btn.dataset.score;
-      box.querySelectorAll(".ar-scale-btn").forEach(b => { b.disabled = true; if (b!==btn) b.classList.add("ar-dim-out"); });
-      btn.classList.add("ar-picked");
-      journeyState.choices.station5_flavorMatch = score;
-      saveJourneyLocal();
-      if (score >= 3) flavorConfirmed(stationEl, mountEl, ix, local);
-      else renderFlavorCorrection(stationEl, mountEl, ix, local, box);
-    });
-  });
-}
-
-/* تصحيح النكهة جوّه نفس الباب */
-function renderFlavorCorrection(stationEl, mountEl, ix, local, verifyBox){
-  const flavors = ix.q2.flavorsByDoor[local.door];
-  const box = document.createElement("div");
-  box.className = "ar-correct";
-  box.innerHTML = `
-    <h3 class="ar-h3">خلّينا نتأكّد — قارن بين نكهات بابك</h3>
-    <p class="ar-p">اقرا التزام كل نكهة المخفي، واختار اللي بيوصفك فعلًا:</p>
-    <div class="ix-choice__list">
-      ${flavors.map(f => `
-        <button type="button" class="ix-choice__btn" data-flavor="${f.id}">
-          <span class="ix-choice__label"><b>${escapeHtml(FLAVOR_AR[f.id])}</b> — ${escapeHtml(ix.flavorCommit[f.id] || "")}</span>
-          <span class="ix-choice__mark">✓</span>
-        </button>`).join("")}
-    </div>`;
-  verifyBox.appendChild(box);
-  setTimeout(() => smoothScrollTo(box, 80), 200);
-
-  box.querySelectorAll(".ix-choice__btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const newFlavor = +btn.dataset.flavor;
-      box.querySelectorAll(".ix-choice__btn").forEach(b => { b.disabled = true; if (+b.dataset.flavor!==newFlavor) b.classList.add("is-disabled"); });
-      btn.classList.add("is-selected");
-      const changed = newFlavor !== journeyState.fingerprint.flavor;
-      if (changed){ saveFlavor(newFlavor); journeyState.choices.station5_flavorCorrected = true; }
-      const msg = document.createElement("p");
-      msg.className = "ar-confirmed";
-      msg.textContent = changed ? `صحّحنا نكهتك إلى ${FLAVOR_AR[newFlavor]}. نكمّل.` : "أكّدت نكهتك. نكمّل.";
-      box.appendChild(msg);
-      setTimeout(() => flavorConfirmed(stationEl, mountEl, ix, local), 700);
-    });
-  });
-}
-
-/* بعد تأكيد النكهة: بطاقة البصمة + مشاهدة الأبواب التانية + تغيير نهائي */
-function flavorConfirmed(stationEl, mountEl, ix, local){
-  completeStation(5);
-  saveJourneyRemote();
-  mountEl.innerHTML = renderFingerprintCardHtml(ix);
-  animateFingerprintCard(mountEl, true);
-
-  const otherBtn = document.createElement("button");
-  otherBtn.type = "button";
-  otherBtn.className = "fl-otherbtn";
-  otherBtn.textContent = "حابب تتفرّج على الأبواب التانية قبل ما تكمّل؟";
-  mountEl.appendChild(otherBtn);
-  otherBtn.addEventListener("click", () => { otherBtn.remove(); renderOtherDoors(stationEl, mountEl, ix, local); });
-
-  unlockNext(stationEl);
-  setTimeout(() => smoothScrollTo(mountEl.querySelector(".ix-fingerprint-card"), 100), 600);
-}
-
-/* عرض كل الأبواب التانية بفيديوهاتها ونكهاتها + إمكانية تغيير نهائي */
-function renderOtherDoors(stationEl, mountEl, ix, local){
-  const allDoors = Object.keys(ix.q1.doorEchoes);
-  const others = allDoors.filter(d => d !== local.door);
-  const wrap = document.createElement("div");
-  wrap.className = "fl-other";
-  wrap.innerHTML = others.map(door => {
-    const vid = ix.doorVideos ? ix.doorVideos[door] : "";
-    const flavors = ix.q2.flavorsByDoor[door];
-    return `
-      <div class="fl-other__door">
-        <p class="fl-other__name">${escapeHtml(DOOR_AR[door] || "")}</p>
-        ${ vid ? vimeoBlock(vid, DOOR_AR[door] || "") : `` }
-        <div class="fl-other__flavors">
-          ${flavors.map(f => `<div class="fl-other__fl"><b>${escapeHtml(FLAVOR_AR[f.id])}:</b> ${escapeHtml(ix.flavorCommit[f.id] || "")}</div>`).join("")}
-        </div>
-        <button type="button" class="fl-changebtn" data-door="${door}">حسّيت إن «${escapeHtml(DOOR_AR[door])}» أقرب ليّ — غيّر بصمتي</button>
-      </div>`;
-  }).join("");
-  mountEl.appendChild(wrap);
-  setTimeout(() => smoothScrollTo(wrap, 80), 200);
-
-  wrap.querySelectorAll(".fl-changebtn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const newDoor = btn.dataset.door;
-      renderDoorChange(stationEl, mountEl, ix, local, newDoor, wrap);
-    });
-  });
-}
-
-/* تغيير الباب → اختيار نكهة جديدة فيه → إعادة بناء البصمة */
-function renderDoorChange(stationEl, mountEl, ix, local, newDoor, wrap){
-  const flavors = ix.q2.flavorsByDoor[newDoor];
-  const box = document.createElement("div");
-  box.className = "ar-correct";
-  box.innerHTML = `
-    <h3 class="ar-h3">اختار نكهتك في باب ${escapeHtml(DOOR_AR[newDoor])}</h3>
-    <div class="ix-choice__list">
-      ${flavors.map(f => `
-        <button type="button" class="ix-choice__btn" data-flavor="${f.id}">
-          <span class="ix-choice__label"><b>${escapeHtml(FLAVOR_AR[f.id])}</b> — ${escapeHtml(ix.flavorCommit[f.id] || "")}</span>
-          <span class="ix-choice__mark">✓</span>
-        </button>`).join("")}
-    </div>`;
-  wrap.appendChild(box);
-  setTimeout(() => smoothScrollTo(box, 80), 200);
-
-  box.querySelectorAll(".ix-choice__btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const newFlavor = +btn.dataset.flavor;
-      local.door = newDoor;
-      journeyState.choices.station5_door = newDoor;
-      journeyState.fingerprint.door      = newDoor;
-      saveFlavor(newFlavor);
-      journeyState.choices.station5_doorChanged = true;
-      saveJourneyRemote();
-      // أعد بناء البطاقة بالكامل
-      mountEl.innerHTML = renderFingerprintCardHtml(ix);
-      animateFingerprintCard(mountEl, true);
-      unlockNext(stationEl);
-      setTimeout(() => smoothScrollTo(mountEl.querySelector(".ix-fingerprint-card"), 100), 500);
-    });
-  });
-}
 
 /* ---------- بطاقة تركيب البصمة ---------- */
 function renderFingerprintCardHtml(ix){
