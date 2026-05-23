@@ -2158,7 +2158,7 @@ function showFingerprintScreen(){
   // عنوان الصفحة أثناء العرض/الطباعة
   const name = (journeyState.user.name || "").trim();
   document.title = name
-    ? `بصمة ${name} — هندسة العقلية`
+    ? `بصمة ${name} — Reignite`
     : "بصمة هندسة العقلية";
 
   // اظهر بـ fade
