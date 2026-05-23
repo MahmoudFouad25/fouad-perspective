@@ -1189,7 +1189,7 @@ function renderAxisCrossover(station, mountEl){
     .ar-cmp-ax{flex-shrink:0;width:70px;color:var(--cream);font-weight:600;font-size:14px;}
     .ar-cmp-txt{color:var(--muted);font-size:14px;line-height:1.7;}
     .ar-cmp-pick{font-size:16px;color:var(--cream);margin:18px 0 12px;font-weight:600;}
-    @media (max-width:768px){.ar-card{padding:22px 18px;}.ar-cmp-row{flex-direction:column;gap:2px;}.ar-cmp-ax{width:auto;}}`
+    @media (max-width:768px){.ar-card{padding:22px 18px;}.ar-cmp-row{flex-direction:column;gap:2px;}.ar-cmp-ax{width:auto;}}
        .jv-wrap{margin:24px 0;}
     .jv-frame{position:relative;padding-top:56.25%;border-radius:10px;overflow:hidden;border:1px solid rgba(212,175,55,.3);background:#000;}
     .jv-frame iframe{position:absolute;inset:0;width:100%;height:100%;}
