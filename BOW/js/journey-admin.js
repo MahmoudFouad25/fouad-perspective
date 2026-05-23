@@ -181,7 +181,7 @@
     }
     els.list.innerHTML = `
       <table class="table">
-        <thead><tr><th>المشارك</th><th>البصمة</th><th>الاحتراق</th><th>الكود</th><th>اتبعت</th><th></th></tr></thead>
+        <thead><tr><th>المشارك</th><th>البصمة</th><th>الاحتراق</th><th>تطابق المحور</th><th>الكود</th><th>اتبعت</th><th></th></tr></thead>
         <tbody>${rows.map(rowHtml).join('')}</tbody>
       </table>`;
     els.list.querySelectorAll('tr[data-id]').forEach(tr => {
@@ -213,6 +213,7 @@
           <div class="axis-line">${esc(AX()[r.main_axis] || '—')} · ${esc(DR()[r.door] || '—')} · ${esc(FL()[r.flavor] || '—')}</div>
         </td>
         <td data-label="الاحتراق">${esc(BR()[r.burnout_type] || '—')}</td>
+        <td data-label="تطابق المحور">${r.match_score != null ? esc(ar(r.match_score)) + '/٥' : '—'}${r.axis_corrected ? ' <span style="color:#e0894f;font-size:11px;">(صحّح)</span>' : ''}</td>
         <td data-label="الكود"><span class="cell-code">${esc(r.result_code || '—')}</span></td>
         <td data-label="اتبعت"><span style="color:${sent ? '#25D366' : 'var(--muted)'};font-size:13px;">${sent ? '✓ اتبعت' : '·'}</span></td>
         <td data-label="إجراءات">
