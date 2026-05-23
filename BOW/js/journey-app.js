@@ -2224,10 +2224,9 @@ function buildFingerprintDoc(){
   const u  = journeyState.user;
   const c  = journeyState.choices;
   const fp = journeyState.fingerprint;
-
+ 
   const name = (u.name || "").trim() || "—";
-
-  // البيانات المعرّفة
+ 
   const levelText   = LEVEL_AR[c.station2_level] || "—";
   const axisText    = AXIS_AR[fp.axis]            || "—";
   const axisQuest   = AXIS_QUESTION[fp.axis]      || "";
@@ -2238,39 +2237,39 @@ function buildFingerprintDoc(){
   const burnoutText = BURNOUT_AR[burnoutKey]      || "—";
   const burnoutDesc = BURNOUT_DESC[burnoutKey]    || "";
   const paths       = AXIS_PATHS[fp.axis]         || [];
-
-  // الميثاق
+ 
   const cov = c.station7_covenant || { line1: "", line2: "", line3: "" };
   const hasCov = !!(cov.line2 && cov.line3);
-
+ 
+  // زرّ Reignite — يُحقن بشكل آمن
+  const reigniteCTA = (window.PDS && typeof window.PDS.cta === "function")
+    ? window.PDS.cta({ variant: "primary", label: "اعرف أكتر عن Reignite" })
+    : '';
+ 
   return `
-    <!-- ترويسة -->
     <header class="fp-head">
       <h1 class="fp-head__title">بصمة <span class="fp-head__name">${escapeHtml(name)}</span></h1>
-      <p class="fp-head__sub">من رحلة هندسة العقلية — منظور الفؤاد</p>
+      <p class="fp-head__sub">من رحلة هندسة العقلية — Reignite</p>
       <p class="fp-head__date">${escapeHtml(arabicDate())}</p>
     </header>
-
+ 
     <hr class="fp-divider" />
-
-    <!-- (١) المستوى -->
+ 
     <section class="fp-section">
       <h2 class="fp-section__head">مستواك</h2>
       <p class="fp-section__value">${escapeHtml(levelText)}</p>
     </section>
-
+ 
     <hr class="fp-divider" />
-
-    <!-- (٢) المحور الرئيسي -->
+ 
     <section class="fp-section">
       <h2 class="fp-section__head">محورك الرئيسي</h2>
       <p class="fp-section__value">${escapeHtml(axisText)}</p>
       ${ axisQuest ? `<p class="fp-section__sub">سؤالك الجوهري: <q>${escapeHtml(axisQuest)}</q></p>` : "" }
     </section>
-
+ 
     <hr class="fp-divider" />
-
-    <!-- (٣) بابك ونكهتك -->
+ 
     <section class="fp-section">
       <h2 class="fp-section__head">بابك ونكهتك</h2>
       <div class="fp-door-flavor">
@@ -2284,8 +2283,7 @@ function buildFingerprintDoc(){
         </div>
       </div>
     </section>
-
-    <!-- (٤) البصمة الكاملة — الذروة -->
+ 
     <section class="fp-hero">
       <p class="fp-hero__head">البصمة الكاملة</p>
       <h2 class="fp-hero__name">${escapeHtml(fingerName)}</h2>
@@ -2293,17 +2291,15 @@ function buildFingerprintDoc(){
         التركيبة — <b>${escapeHtml(axisText)}</b> · <b>${escapeHtml(doorText)}</b> · <b>${escapeHtml(flavorText)}</b>
       </p>
     </section>
-
-    <!-- (٥) نوع الاحتراق -->
+ 
     <section class="fp-section">
       <h2 class="fp-section__head">نوع احتراقك المُرشّح</h2>
       <p class="fp-section__value">${escapeHtml(burnoutText)}</p>
       ${ burnoutDesc ? `<p class="fp-section__sub">${escapeHtml(burnoutDesc)}</p>` : "" }
     </section>
-
+ 
     <hr class="fp-divider" />
-
-    <!-- (٦) ميثاقك -->
+ 
     <section class="fp-section">
       <h2 class="fp-section__head">ميثاقك</h2>
       ${ hasCov ? `
@@ -2325,38 +2321,35 @@ function buildFingerprintDoc(){
         <p class="fp-covenant__empty">لم تكتب ميثاقك بعد — ارجع للمحطة السابعة لتدوّنه.</p>
       ` }
     </section>
-
+ 
     <hr class="fp-divider" />
-
-    <!-- (٧) المسارات -->
+ 
     <section class="fp-section">
-      <h2 class="fp-section__head">طريقك في الدورة الكاملة</h2>
+      <h2 class="fp-section__head">طريقك في برنامج Reignite</h2>
       <div class="fp-paths">
         ${ paths.map(p => `<span class="fp-paths__chip">${escapeHtml(p)}</span>`).join("") }
       </div>
-      <p class="fp-paths__note">دي المسارات اللي بنشتغل عليها في الدورة الكاملة، بالتفصيل وبالأدوات العملية.</p>
+      <p class="fp-paths__note">دي المسارات اللي بنشتغل عليها في برنامج Reignite الكامل — من الاحتراق إلى الاشتعال، بالتفصيل وبالأدوات العملية.</p>
     </section>
-
+ 
     <hr class="fp-divider" />
-
-    <!-- خاتمة -->
+ 
     <section class="fp-outro">
       <p class="fp-outro__verse">﴿إِنَّ اللَّهَ لَا يُغَيِّرُ مَا بِقَوْمٍ حَتَّى يُغَيِّرُوا مَا بِأَنْفُسِهِمْ﴾</p>
       <p class="fp-outro__verse-src">الرعد — ١١</p>
       <p class="fp-outro__quote">الإنسان مش مخلوق عشان يحترق. هو مخلوق عشان يتزن. والاتزان رحلة، مش لحظة.</p>
-      <p class="fp-outro__sign">— محمود فؤاد · منظور الفؤاد</p>
+      <p class="fp-outro__sign">— مع كوتش محمود فؤاد · Proactive Development Solutions</p>
     </section>
-
+ 
     ${ buildSavedReportBlock() }
-
-    const PATCH_1_REPLACEMENT = `
-    <!-- أزرار الإجراءات -->
+ 
     <div class="fp-actions">
       <button type="button" class="fp-btn" data-action="print">احفظ بصمتك PDF</button>
       <button type="button" class="fp-btn" data-action="share">شارك بصمتك</button>
-      \${ window.PDS ? window.PDS.cta({ variant: "primary", label: "اعرف أكتر عن Reignite" }) : '' }
+      ${ reigniteCTA }
     </div>
-`;
+  `;
+}
 
 
 /* ============================================================
@@ -2368,7 +2361,6 @@ function buildSavedReportBlock(){
  
   const reportUrl = `${JOURNEY_CONFIG.resultPagePath}?c=${encodeURIComponent(code)}`;
  
-  // زرّ واتساب التواصل (اختياري)
   let waBtn = "";
   if (JOURNEY_CONFIG.contactWhatsapp){
     const name   = (journeyState.user.name || "").trim();
@@ -2383,8 +2375,7 @@ function buildSavedReportBlock(){
     waBtn = `<a class="fp-btn" href="${waUrl}" target="_blank" rel="noopener">ابعتلنا بصمتك على واتساب</a>`;
   }
  
-  // زرّ Reignite (اللي اتغيّر)
-  const reigniteBtn = window.PDS
+  const reigniteBtn = (window.PDS && typeof window.PDS.cta === "function")
     ? window.PDS.cta({ variant: "primary", label: "اعرف أكتر عن Reignite" })
     : '';
  
@@ -2401,6 +2392,7 @@ function buildSavedReportBlock(){
       </div>
     </section>`;
 }
+
 
 
 /* ============================================================
