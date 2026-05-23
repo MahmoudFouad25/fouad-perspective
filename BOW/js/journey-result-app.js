@@ -1,25 +1,21 @@
 /* ====================================================================
-   منظور الفؤاد — هندسة العقلية — التقرير الدائم (Controller)
-   يقرأ الكود من الـ URL (?c=XXXX-XXXX)، يجيب البصمة من Firebase،
-   ويبني صفحة التقرير الكاملة بشكل بسيط ونظيف.
-
-   وضع المعاينة للتجربة بدون Firebase:
-     journey-result.html?preview=1&axis=tamasok&door=hemma&flavor=1&level=level_3&burnout=muhtariq&name=محمود
-   يعتمد على: result-codes.js + journey-content.js + journey-data.js
+   منظور الفؤاد — هندسة العقلية — التقرير الدائم (v2)
+   ────────────────────────────────────────────────────────────────────
+   إعادة كتابة كاملة:
+   - يبدأ بـPDS Hero (الشركة + المدرب) — مرة واحدة في الأعلى
+   - قصة متدفقة، مش تكرار للبطاقة
+   - 7 مشاهد متسلسلة بدون مساحات فاضية
+   - CTA Reignite بدل "الدورة الكاملة"
+   - PDF محسّن
    ──────────────────────────────────────────────────────────────────── */
 
 (function () {
   'use strict';
 
-  const CONFIG = {
-    contactWhatsapp: "",            // رقم محمود (كود الدولة بدون +) — لزرّ "تواصل"
-    courseUrl: "#"                  // لينك الدورة لمّا يجهز
-  };
-
   const ACCENT = {
-    tamasok:   { c: "#d4af37", deep: "#b4862e", glow: "rgba(212,175,55,.22)" },
-    hayawiyya: { c: "#e76f51", deep: "#c0492f", glow: "rgba(231,111,81,.22)" },
-    intima:    { c: "#4a90e2", deep: "#2f6fbf", glow: "rgba(74,144,226,.22)" }
+    tamasok:   { c: "#d4af37", deep: "#b4862e", glow: "rgba(212,175,55,.25)", name: "ذهبي" },
+    hayawiyya: { c: "#e76f51", deep: "#c0492f", glow: "rgba(231,111,81,.25)", name: "ناري" },
+    intima:    { c: "#4a90e2", deep: "#2f6fbf", glow: "rgba(74,144,226,.25)", name: "سماوي" }
   };
 
   const app = document.getElementById("app");
@@ -34,7 +30,7 @@
       if (!code) { renderCodeEntry(); return; }
 
       if (window.ResultCodes && !window.ResultCodes.isValid(code)) {
-        return renderError("الكود مش مكتمل", "الكود مكوّن من ٨ خانات (مثال K7M2-P9X4). تأكّد إنك نسخته بالظبط، أو اكتبه تحت.", true);
+        return renderError("الكود مش مكتمل", "الكود مكوّن من ٨ خانات (مثال K7M2-P9X4). تأكّد إنك نسخته بالظبط.", true);
       }
 
       renderLoading();
@@ -44,13 +40,12 @@
     } catch (err) {
       const m = (err && err.message) || "";
       if (m === "INVALID_CODE")      renderError("الكود مش صحيح", "الكود مكوّن من ٨ خانات. تأكّد إنك نسخته بالظبط.", true);
-      else if (m === "NOT_FOUND")    renderError("الكود ده مش موجود عندنا", "يا إمّا مكتوب غلط، يا إمّا التقرير لسه ما اتسجّلش. راجع رسالتك ولو الموضوع مستمرّ كلّمنا.", true);
-      else if (m === "NO_FIREBASE")  renderError("التقرير مش متاح دلوقتي", "الصفحة دي محتاجة اتّصال بقاعدة البيانات. لو إنت بتجرّب محليًّا — استخدم وضع المعاينة (preview).", false);
-      else { console.error(err); renderError("في عطل في الاتّصال", "حدّث الصفحة بعد ثانية. لو استمرّ، كلّمنا.", false); }
+      else if (m === "NOT_FOUND")    renderError("الكود ده مش موجود عندنا", "يا إمّا مكتوب غلط، يا إمّا التقرير لسه ما اتسجّلش.", true);
+      else if (m === "NO_FIREBASE")  renderError("التقرير مش متاح دلوقتي", "حاول مرة تانية بعد قليل.", false);
+      else { console.error(err); renderError("في عطل في الاتّصال", "حدّث الصفحة وحاول تاني.", false); }
     }
   }
 
-  /* ── معاينة (بدون Firebase) ── */
   function buildPreview(p) {
     const axis   = p.get("axis")   || "tamasok";
     const door   = p.get("door")   || "hemma";
@@ -73,53 +68,60 @@
     };
   }
 
-  /* ── حالات ثابتة ── */
-  function brandStrip() {
-    return `
-      <div class="top-strip">
-        <div class="brand">
-          <span class="brand__dot"></span>
-          <span class="brand__name">منظور الفؤاد</span>
-          <span class="brand__tag">· هندسة العقلية</span>
+  /* ════════════════════════════════════════════════════════════
+     حالات
+     ──────────────────────────────────────────────────────────── */
+  function renderLoading() {
+    app.innerHTML = `
+      ${window.PDS.brand({ showProgram: false })}
+      <div class="r-state">
+        <div class="r-state__inner">
+          <div class="r-loader"></div>
+          <p class="r-state__sub">بنحضّر بصمتك…</p>
         </div>
       </div>`;
   }
 
-  function renderLoading() {
-    app.innerHTML = `${brandStrip()}
-      <div class="state-page"><div class="state-inner">
-        <div class="loader"></div>
-        <p class="state-sub">بنحضّر بصمتك…</p>
-      </div></div>`;
-  }
-
   function renderCodeEntry(prefill) {
-    app.innerHTML = `${brandStrip()}
-      <div class="state-page"><div class="state-inner">
-        <h1 class="state-title">تقريرك في انتظارك</h1>
-        <p class="state-sub">اكتب الكود اللي وصلك — ٨ خانات (مثال <b>K7M2-P9X4</b>).</p>
-        <form class="code-form" id="codeForm">
-          <input type="text" id="codeInput" placeholder="X X X X — X X X X" maxlength="9"
-                 autocomplete="off" autocapitalize="characters" spellcheck="false" value="${prefill || ""}">
-          <button type="submit" class="r-btn r-btn--primary">افتح</button>
-        </form>
-      </div></div>`;
+    app.innerHTML = `
+      ${pdsTopBar()}
+      <div class="r-state">
+        <div class="r-state__inner">
+          <h1 class="r-state__title">تقريرك في انتظارك</h1>
+          <p class="r-state__sub">اكتب الكود اللي وصلك — ٨ خانات (مثال <b>K7M2-P9X4</b>).</p>
+          <form class="r-code-form" id="codeForm">
+            <input type="text" id="codeInput" placeholder="X X X X — X X X X" maxlength="9"
+                   autocomplete="off" autocapitalize="characters" spellcheck="false" value="${prefill || ""}">
+            <button type="submit" class="pds-btn pds-btn--primary">افتح</button>
+          </form>
+        </div>
+      </div>`;
     wireCodeForm();
   }
 
   function renderError(title, msg, showForm) {
-    app.innerHTML = `${brandStrip()}
-      <div class="state-page"><div class="state-inner">
-        <h1 class="state-title">${esc(title)}</h1>
-        <p class="state-sub">${esc(msg)}</p>
-        ${showForm ? `
-          <form class="code-form" id="codeForm">
-            <input type="text" id="codeInput" placeholder="X X X X — X X X X" maxlength="9"
-                   autocomplete="off" autocapitalize="characters" spellcheck="false">
-            <button type="submit" class="r-btn r-btn--primary">جرّب تاني</button>
-          </form>` : ``}
-      </div></div>`;
+    app.innerHTML = `
+      ${pdsTopBar()}
+      <div class="r-state">
+        <div class="r-state__inner">
+          <h1 class="r-state__title">${esc(title)}</h1>
+          <p class="r-state__sub">${esc(msg)}</p>
+          ${showForm ? `
+            <form class="r-code-form" id="codeForm">
+              <input type="text" id="codeInput" placeholder="X X X X — X X X X" maxlength="9"
+                     autocomplete="off" autocapitalize="characters" spellcheck="false">
+              <button type="submit" class="pds-btn pds-btn--primary">جرّب تاني</button>
+            </form>` : ``}
+        </div>
+      </div>`;
     if (showForm) wireCodeForm();
+  }
+
+  function pdsTopBar() {
+    return `
+      <div class="r-topbar">
+        ${window.PDS.brand({ showProgram: true })}
+      </div>`;
   }
 
   function wireCodeForm() {
@@ -164,130 +166,212 @@
     const axisProse   = trimJourneyTail(getAxisEcho(axis));
     const flavorProse = trimJourneyTail(getFlavorEcho(d.flavor));
 
-    document.title = `بصمة ${name} — هندسة العقلية`;
+    document.title = `بصمة ${name} — Reignite`;
 
     app.innerHTML = `
-      <div class="progress-rail"><div class="progress-fill" id="progressFill"></div></div>
-      ${brandStrip()}
+      <div class="r-progress-rail"><div class="r-progress-fill" id="rProgressFill"></div></div>
 
-      <!-- HERO -->
-      <section class="scene hero">
-        <div class="hero-ring" aria-hidden="true"></div>
-        <div class="scene-inner hero-inner">
-          <p class="greeting reveal">أهلًا يا <strong>${esc(name)}</strong></p>
-          <p class="hero-eyebrow reveal d2">بصمتك في هندسة العقلية</p>
-          <h1 class="hero-name reveal d3">${esc(fpName)}</h1>
-          ${axisQ ? `<p class="hero-q reveal d4">سؤالك الجوهري: «${esc(axisQ)}»</p>` : ``}
-          <p class="hero-formula reveal d5">${esc(axisName)} · ${esc(doorName)} · ${esc(flavorName)}</p>
-          <p class="greeting reveal d5" style="font-size:14px;margin-top:14px;opacity:.85;">ده تقريرك الدائم من رحلة هندسة العقلية — احتفظ بالرابط، بتفتحه أي وقت.</p>
-        </div>
-        <div class="scroll-cue" aria-hidden="true">انزل</div>
-      </section>
+      ${pdsTopBar()}
 
-      <!-- المستوى -->
-      <section class="scene">
-        <div class="scene-inner">
-          <p class="eyebrow reveal">الطبقة الأولى — مستواك</p>
-          <h2 class="title reveal d2">${esc(levelText)}</h2>
+      <!-- PDS Hero — يظهر مرة واحدة في الأعلى -->
+      <div id="rHeroMount"></div>
+
+      <!-- المشهد ١: الترحيب الشخصي -->
+      <section class="r-scene r-scene--welcome">
+        <div class="r-scene__inner">
+          <p class="r-scene__greeting pds-reveal">أهلًا يا <strong>${esc(name)}</strong></p>
+          <p class="r-scene__eyebrow pds-reveal">بصمتك في برنامج Reignite</p>
+          <div class="r-scene__divider pds-reveal" aria-hidden="true"></div>
+          <p class="r-scene__welcome-text pds-reveal">
+            دي بصمتك الكاملة من رحلة "هندسة العقلية" — مرحلة الأساس قبل البرنامج التحويلي الكامل.
+            احفظ الرابط، وارجعله أي وقت.
+          </p>
         </div>
       </section>
 
-      <!-- المحور -->
-      <section class="scene tint">
-        <div class="scene-inner">
-          <p class="eyebrow reveal">الطبقة الثانية — محورك الرئيسي</p>
-          <h2 class="title reveal d2"><em>${esc(axisName)}</em></h2>
-          <div class="prose reveal d3">${paras(axisProse)}</div>
-        </div>
-      </section>
-
-      <!-- الباب والنكهة -->
-      <section class="scene">
-        <div class="scene-inner">
-          <p class="eyebrow reveal">الطبقة الثالثة — بابك ونكهتك</p>
-          <div class="duo reveal d2">
-            <div class="duo-cell"><span class="duo-k">بابك</span><span class="duo-v">${esc(doorName)}</span></div>
-            <div class="duo-cell"><span class="duo-k">نكهتك (طابعك)</span><span class="duo-v">${esc(flavorName)}</span></div>
+      <!-- المشهد ٢: اسم البصمة — الذروة -->
+      <section class="r-scene r-scene--fingerprint">
+        <div class="r-scene__inner r-center">
+          <div class="r-fp-ring pds-reveal" aria-hidden="true"></div>
+          <p class="r-fp__eyebrow pds-reveal">بصمتك</p>
+          <h1 class="r-fp__name pds-reveal">${esc(fpName)}</h1>
+          ${axisQ ? `<p class="r-fp__question pds-reveal">«${esc(axisQ)}»</p>` : ``}
+          <div class="r-fp__formula pds-reveal">
+            <span class="r-fp__formula-cell">
+              <span class="r-fp__formula-label">المحور</span>
+              <span class="r-fp__formula-value">${esc(axisName)}</span>
+            </span>
+            <span class="r-fp__formula-sep" aria-hidden="true">·</span>
+            <span class="r-fp__formula-cell">
+              <span class="r-fp__formula-label">الباب</span>
+              <span class="r-fp__formula-value">${esc(doorName)}</span>
+            </span>
+            <span class="r-fp__formula-sep" aria-hidden="true">·</span>
+            <span class="r-fp__formula-cell">
+              <span class="r-fp__formula-label">النكهة</span>
+              <span class="r-fp__formula-value">${esc(flavorName)}</span>
+            </span>
           </div>
-          <div class="prose reveal d3">${paras(flavorProse)}</div>
         </div>
       </section>
 
-      <!-- البصمة الكاملة -->
-      <section class="scene hero-mini">
-        <div class="scene-inner center">
-          <p class="eyebrow reveal">بصمتك الكاملة</p>
-          <h2 class="bigname reveal d2">${esc(fpName)}</h2>
-          <p class="formula reveal d3"><b>${esc(axisName)}</b> · <b>${esc(doorName)}</b> · <b>${esc(flavorName)}</b></p>
+      <!-- المشهد ٣: قراءة محورك -->
+      <section class="r-scene r-scene--axis">
+        <div class="r-scene__inner">
+          <div class="r-scene__head pds-reveal">
+            <span class="r-scene__num">٠١</span>
+            <div>
+              <p class="r-scene__kicker">طبقتك الأولى</p>
+              <h2 class="r-scene__title">محور <em>${esc(axisName)}</em></h2>
+            </div>
+          </div>
+          <div class="r-prose pds-reveal">${paras(axisProse)}</div>
         </div>
       </section>
 
-      <!-- نوع الاحتراق -->
-      <section class="scene tint">
-        <div class="scene-inner">
-          <p class="eyebrow reveal">الطبقة الأعمق — نوع احتراقك المُرشّح</p>
-          <h2 class="title reveal d2">${esc(burnName)}</h2>
-          ${burnDesc ? `<p class="prose reveal d3"><span>${esc(burnDesc)}</span></p>` : ``}
+      <!-- المشهد ٤: قراءة بابك ونكهتك -->
+      <section class="r-scene r-scene--flavor">
+        <div class="r-scene__inner">
+          <div class="r-scene__head pds-reveal">
+            <span class="r-scene__num">٠٢</span>
+            <div>
+              <p class="r-scene__kicker">طبقتك الثانية</p>
+              <h2 class="r-scene__title">طابع <em>${esc(flavorName)}</em> — في باب ${esc(doorName)}</h2>
+            </div>
+          </div>
+          <div class="r-prose pds-reveal">${paras(flavorProse)}</div>
+        </div>
+      </section>
+
+      <!-- المشهد ٥: نوع الاحتراق + المستوى -->
+      <section class="r-scene r-scene--burnout">
+        <div class="r-scene__inner">
+          <div class="r-scene__head pds-reveal">
+            <span class="r-scene__num">٠٣</span>
+            <div>
+              <p class="r-scene__kicker">طبقتك الأعمق</p>
+              <h2 class="r-scene__title">${esc(burnName)}</h2>
+            </div>
+          </div>
+          ${burnDesc ? `<p class="r-prose pds-reveal">${esc(burnDesc)}</p>` : ``}
+          <div class="r-level pds-reveal">
+            <span class="r-level__label">مستواك الحالي:</span>
+            <span class="r-level__value">${esc(levelText)}</span>
+          </div>
         </div>
       </section>
 
       ${ hasCov ? `
-      <!-- الميثاق -->
-      <section class="scene">
-        <div class="scene-inner">
-          <p class="eyebrow reveal">ميثاقك</p>
-          <div class="cov reveal d2">
-            <div class="cov-row"><span class="cov-k">السطر الأول</span><p class="cov-t">${esc(cov.line1 || "—")}</p></div>
-            <div class="cov-row"><span class="cov-k">الالتزام المخفي</span><p class="cov-t">«${esc(cov.line2)}»</p></div>
-            <div class="cov-row"><span class="cov-k">خطوتي الأسبوع الجاي</span><p class="cov-t">«${esc(cov.line3)}»</p></div>
+      <!-- المشهد ٦: الميثاق -->
+      <section class="r-scene r-scene--covenant">
+        <div class="r-scene__inner">
+          <div class="r-scene__head pds-reveal">
+            <span class="r-scene__num">٠٤</span>
+            <div>
+              <p class="r-scene__kicker">عهدك مع نفسك</p>
+              <h2 class="r-scene__title">ميثاقك</h2>
+            </div>
+          </div>
+          <div class="r-cov pds-reveal">
+            <div class="r-cov__row">
+              <span class="r-cov__num">١</span>
+              <div class="r-cov__body">
+                <span class="r-cov__label">محورك الرئيسي</span>
+                <p class="r-cov__text">${esc(cov.line1 || "—")}</p>
+              </div>
+            </div>
+            <div class="r-cov__row">
+              <span class="r-cov__num">٢</span>
+              <div class="r-cov__body">
+                <span class="r-cov__label">الالتزام المخفي اللي اكتشفته</span>
+                <p class="r-cov__text">«${esc(cov.line2)}»</p>
+              </div>
+            </div>
+            <div class="r-cov__row">
+              <span class="r-cov__num">٣</span>
+              <div class="r-cov__body">
+                <span class="r-cov__label">خطوتك للأسبوع الجاي</span>
+                <p class="r-cov__text">«${esc(cov.line3)}»</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>` : `` }
 
-      <!-- المسارات -->
-      <section class="scene tint">
-        <div class="scene-inner">
-          <p class="eyebrow reveal">طريقك في الدورة الكاملة</p>
-          <div class="chips reveal d2">
-            ${paths.map(p => `<span class="chip">${esc(p)}</span>`).join("")}
+      <!-- المشهد ٧: الطريق في Reignite -->
+      <section class="r-scene r-scene--paths">
+        <div class="r-scene__inner">
+          <div class="r-scene__head pds-reveal">
+            <span class="r-scene__num">٠٥</span>
+            <div>
+              <p class="r-scene__kicker">في البرنامج الكامل</p>
+              <h2 class="r-scene__title">طريقك في Reignite</h2>
+            </div>
           </div>
-          <p class="prose reveal d3"><span>دي المسارات اللي بنشتغل عليها في الدورة الكاملة — بالتفصيل وبالأدوات العملية. النهارده عرفت بصمتك؛ في الدورة بتدوقها وتتعمّق فيها.</span></p>
+          <p class="r-prose pds-reveal">دي المسارات اللي بنشتغل عليها في برنامج <strong>Reignite</strong> — من الاحتراق إلى الاشتعال، بالتفصيل والأدوات العملية:</p>
+          <div class="r-paths pds-reveal">
+            ${paths.map((p,i) => `
+              <div class="r-path" style="--delay:${i * 0.15}s">
+                <span class="r-path__num">${toArabicDigits(i+1)}</span>
+                <span class="r-path__name">${esc(p)}</span>
+              </div>
+            `).join("")}
+          </div>
         </div>
       </section>
 
-      <!-- الخاتمة -->
-      <section class="scene closing">
-        <div class="scene-inner center">
-          <p class="verse reveal">﴿إِنَّ اللَّهَ لَا يُغَيِّرُ مَا بِقَوْمٍ حَتَّى يُغَيِّرُوا مَا بِأَنْفُسِهِمْ﴾</p>
-          <p class="verse-src reveal d2">الرعد — ١١</p>
-          <p class="closing-quote reveal d3">الإنسان مش مخلوق عشان يحترق. هو مخلوق عشان يتزن. والاتزان رحلة، مش لحظة.</p>
-          <div class="cta reveal d4">
-            <button type="button" class="r-btn" id="pdfBtn">احفظ بصمتك PDF</button>
-            <button type="button" class="r-btn" id="shareBtn">شارك بصمتك</button>
-            <a class="r-btn" href="journey.html?c=${encodeURIComponent(d.result_code || '')}">ارجع للرحلة</a>
-            ${ CONFIG.courseUrl && CONFIG.courseUrl !== "#"
-                ? `<a class="r-btn r-btn--primary" href="${CONFIG.courseUrl}" target="_blank" rel="noopener">الدورة الكاملة</a>`
-                : `<a class="r-btn r-btn--primary" href="#" aria-disabled="true">الدورة الكاملة — قريبًا</a>` }
+      <!-- المشهد الأخير: الدعوة + الآية -->
+      <section class="r-scene r-scene--closing">
+        <div class="r-scene__inner r-center">
+          <p class="r-verse pds-reveal">﴿إِنَّ اللَّهَ لَا يُغَيِّرُ مَا بِقَوْمٍ حَتَّى يُغَيِّرُوا مَا بِأَنْفُسِهِمْ﴾</p>
+          <p class="r-verse-src pds-reveal">الرعد — ١١</p>
+
+          <p class="r-closing-quote pds-reveal">
+            الإنسان مش مخلوق عشان يحترق.<br>
+            هو مخلوق عشان يتزن. والاتزان رحلة، مش لحظة.
+          </p>
+
+          <div class="r-cta-block pds-reveal">
+            <p class="r-cta-block__intro">جاهز للخطوة الجاية؟</p>
+            <p class="r-cta-block__title">برنامج <strong>Reignite</strong> هو رحلة تحويل كاملة، مبنية على بصمتك الفريدة دي.</p>
+            <div class="r-cta-block__actions">
+              ${window.PDS.cta({ variant: "primary", label: "اعرف أكتر عن Reignite" })}
+              <button type="button" class="pds-btn pds-btn--ghost" id="rPdfBtn">احفظ بصمتك PDF</button>
+              <button type="button" class="pds-btn pds-btn--ghost" id="rShareBtn">شارك بصمتك</button>
+            </div>
           </div>
-          <p class="sign reveal d5">— محمود فؤاد · منظور الفؤاد</p>
+
+          <p class="r-sign pds-reveal">
+            مع كوتش <strong>محمود فؤاد</strong>
+            <br>
+            <span class="r-sign-sub">برنامج Reignite من Proactive Development Solutions</span>
+          </p>
         </div>
       </section>
+
+      ${window.PDS.footer()}
     `;
 
-    requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.add("animate-on")));
+    // ركّب الـHero
+    window.PDS.init({ heroMount: "#rHeroMount" });
+
+    // فعّل الـscroll reveal
+    requestAnimationFrame(() => {
+      document.body.classList.add("r-animate-on");
+    });
+
     setupProgress();
     wireActions(d, fpName, name);
   }
 
   /* ── جلب نصوص الأصداء من CONTENT ── */
   function station(id) { return (window.CONTENT.stations || []).find(s => s.id === id); }
- function getAxisEcho(axis) {
+  function getAxisEcho(axis) {
     try { return station(4).interaction.axisDescriptions[axis] || ""; } catch (e) { return ""; }
   }
   function getFlavorEcho(flavor) {
     try { return station(5).interaction.q2.flavorEchoes[flavor] || ""; } catch (e) { return ""; }
   }
-  // نشيل الفقرة الأخيرة اللي بتشاور على "المحطة الجاية" — لأنها سياق رحلة مش تقرير
   function trimJourneyTail(text) {
     if (!text) return "";
     return String(text).split(/\n+/)
@@ -295,49 +379,58 @@
       .join("\n\n");
   }
 
-  /* ── أزرار ── */
   function wireActions(d, fpName, name) {
-    const pdfBtn = document.getElementById("pdfBtn");
-    if (pdfBtn) pdfBtn.addEventListener("click", () => exportPDF(pdfBtn, name));
-
-    const shareBtn = document.getElementById("shareBtn");
-    if (shareBtn) shareBtn.addEventListener("click", () => share(name, fpName));
+    document.getElementById("rPdfBtn")?.addEventListener("click", (e) => exportPDF(e.currentTarget, name));
+    document.getElementById("rShareBtn")?.addEventListener("click", () => share(name, fpName));
   }
 
   async function exportPDF(btn, name) {
     const original = btn.textContent;
     btn.disabled = true; btn.textContent = "بنجهّز بصمتك…";
     try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) {}
-    const navyDeep = "#142338";
+
+    // أضف class للطباعة قبل التصدير
+    document.body.classList.add("r-printing");
+    await new Promise(r => setTimeout(r, 100));
+
     const target = document.getElementById("app");
     const opt = {
-      margin: 0,
-      filename: `بصمة ${name || "بصمتي"} — هندسة العقلية.pdf`,
+      margin: [10, 10, 10, 10],
+      filename: `بصمة ${name || "بصمتي"} — Reignite.pdf`,
       image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, backgroundColor: navyDeep, useCORS: true, logging: false, windowWidth: target.scrollWidth },
+      html2canvas: {
+        scale: 2,
+        backgroundColor: "#142338",
+        useCORS: true,
+        logging: false,
+        windowWidth: 800
+      },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-      pagebreak: { mode: ["css", "legacy"], avoid: [".scene", ".cov", ".duo"] }
+      pagebreak: { mode: ["css", "legacy"], avoid: [".r-scene", ".r-cov", ".r-path"] }
     };
     try {
       if (typeof window.html2pdf === "function") await window.html2pdf().set(opt).from(target).save();
       else window.print();
     } catch (err) { console.error(err); window.print(); }
-    finally { btn.disabled = false; btn.textContent = original; }
+    finally {
+      document.body.classList.remove("r-printing");
+      btn.disabled = false; btn.textContent = original;
+    }
   }
 
   async function share(name, fpName) {
     const url = location.href;
-    const text = `بصمة ${name || "—"} — هندسة العقلية\nالبصمة: ${fpName}\n\n— منظور الفؤاد`;
+    const text = `بصمة ${name || "—"} — Reignite\nالبصمة: ${fpName}\n\nمع كوتش محمود فؤاد\nProactive Development Solutions`;
     if (navigator.share) {
-      try { await navigator.share({ title: "بصمتي — هندسة العقلية", text, url }); return; }
+      try { await navigator.share({ title: "بصمتي — Reignite", text, url }); return; }
       catch (e) { if (e && e.name === "AbortError") return; }
     }
-    try { await navigator.clipboard.writeText(text + " " + url); toast("اتنسخ — ابعته للي تحب"); }
+    try { await navigator.clipboard.writeText(text + "\n\n" + url); toast("اتنسخ — ابعته للي تحب"); }
     catch (e) { prompt("انسخ:", url); }
   }
 
   function setupProgress() {
-    const bar = document.getElementById("progressFill");
+    const bar = document.getElementById("rProgressFill");
     if (!bar) return;
     const update = () => {
       const total = document.documentElement.scrollHeight - window.innerHeight;
@@ -349,7 +442,7 @@
     window.addEventListener("resize", update);
   }
 
-  /* ── helpers ── */
+  /* helpers */
   function esc(s) {
     return String(s ?? "").replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
   }
