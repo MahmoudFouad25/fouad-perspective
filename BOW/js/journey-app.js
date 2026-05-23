@@ -13,6 +13,45 @@ const JOURNEY_CONFIG = {
   contactWhatsapp: ""
 };
 
+/* ===== حفظ تقدّم الرحلة في المتصفّح (يمنع ضياع البيانات عند الـ Refresh) ===== */
+const JOURNEY_SAVE_KEY = "mfp_journey_progress";
+
+function saveJourneyLocal(){
+  try {
+    localStorage.setItem(JOURNEY_SAVE_KEY, JSON.stringify({
+      participantId:     journeyState.participantId,
+      resultCode:        journeyState.resultCode,
+      user:              journeyState.user,
+      currentStation:    journeyState.currentStation,
+      completedStations: journeyState.completedStations,
+      choices:           journeyState.choices,
+      fingerprint:       journeyState.fingerprint,
+      savedAt:           Date.now()
+    }));
+  } catch(e){ console.warn("saveJourneyLocal", e); }
+}
+
+function loadJourneyLocal(){
+  try {
+    const raw = localStorage.getItem(JOURNEY_SAVE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    // تجاهل أي تقدّم أقدم من ٧ أيام
+    if (!d || (Date.now() - (d.savedAt || 0)) > 7*24*60*60*1000){
+      localStorage.removeItem(JOURNEY_SAVE_KEY);
+      return false;
+    }
+    journeyState.participantId     = d.participantId || null;
+    journeyState.resultCode        = d.resultCode || null;
+    journeyState.user              = d.user || journeyState.user;
+    journeyState.currentStation    = d.currentStation || 1;
+    journeyState.completedStations = d.completedStations || [];
+    journeyState.choices           = d.choices || journeyState.choices;
+    journeyState.fingerprint       = d.fingerprint || journeyState.fingerprint;
+    return true;
+  } catch(e){ console.warn("loadJourneyLocal", e); return false; }
+}
+
 /* ===== غلاف آمن لطبقة الحفظ (مايكسرش لو الملف/Firebase ناقص) ===== */
 const Persist = {
   register(user){
@@ -206,6 +245,7 @@ function goToStation(n){
   // ننتظر فترة fade-out قصيرة قبل التبديل
   setTimeout(() => {
     journeyState.currentStation = n;
+         saveJourneyLocal();
     render();
     // scroll لأعلى بسلاسة
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -219,6 +259,7 @@ function completeStation(n){
   if (!journeyState.completedStations.includes(n)){
     journeyState.completedStations.push(n);
   }
+  saveJourneyLocal();
   updateProgress();
 }
 
@@ -1612,6 +1653,7 @@ function refreshParticipant(){
    init
    ============================================================ */
 function init(){
+  loadJourneyLocal();
   buildRail();
   buildStations();
   refreshParticipant();
