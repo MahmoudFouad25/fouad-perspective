@@ -179,6 +179,7 @@
           <h1 class="hero-name reveal d3">${esc(fpName)}</h1>
           ${axisQ ? `<p class="hero-q reveal d4">سؤالك الجوهري: «${esc(axisQ)}»</p>` : ``}
           <p class="hero-formula reveal d5">${esc(axisName)} · ${esc(doorName)} · ${esc(flavorName)}</p>
+          <p class="greeting reveal d5" style="font-size:14px;margin-top:14px;opacity:.85;">ده تقريرك الدائم من رحلة هندسة العقلية — احتفظ بالرابط، بتفتحه أي وقت.</p>
         </div>
         <div class="scroll-cue" aria-hidden="true">انزل</div>
       </section>
@@ -263,6 +264,7 @@
           <div class="cta reveal d4">
             <button type="button" class="r-btn" id="pdfBtn">احفظ بصمتك PDF</button>
             <button type="button" class="r-btn" id="shareBtn">شارك بصمتك</button>
+            <a class="r-btn" href="journey.html?c=${encodeURIComponent(d.result_code || '')}">ارجع للرحلة</a>
             ${ CONFIG.courseUrl && CONFIG.courseUrl !== "#"
                 ? `<a class="r-btn r-btn--primary" href="${CONFIG.courseUrl}" target="_blank" rel="noopener">الدورة الكاملة</a>`
                 : `<a class="r-btn r-btn--primary" href="#" aria-disabled="true">الدورة الكاملة — قريبًا</a>` }
@@ -279,8 +281,8 @@
 
   /* ── جلب نصوص الأصداء من CONTENT ── */
   function station(id) { return (window.CONTENT.stations || []).find(s => s.id === id); }
-  function getAxisEcho(axis) {
-    try { return station(4).interaction.q2.finalEchoes[axis] || ""; } catch (e) { return ""; }
+ function getAxisEcho(axis) {
+    try { return station(4).interaction.axisDescriptions[axis] || ""; } catch (e) { return ""; }
   }
   function getFlavorEcho(flavor) {
     try { return station(5).interaction.q2.flavorEchoes[flavor] || ""; } catch (e) { return ""; }
