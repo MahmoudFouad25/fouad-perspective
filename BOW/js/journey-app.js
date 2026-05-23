@@ -1011,7 +1011,172 @@ function renderAxisCrossover(station, mountEl){
     showEcho(stationEl, echo, true);
     completeStation(4);
     setTimeout(() => smoothScrollTo(stationEl.querySelector("[data-role='echo']")), 380);
-    setTimeout(renderWhatsapp, 1200);
+    setTimeout(() => renderAxisReport(stationEl, mountEl, main), 1200);
+  }
+
+   /* تقرير المحور التفصيلي + سؤال التحقق */
+  function renderAxisReport(stationEl, mountEl, mainAxis){
+    injectAxisReportStyles();
+    const R = (window.JOURNEY_AXIS_REPORT || {})[mainAxis];
+    if (!R){ renderWhatsapp(); return; }
+    const host = mountEl.querySelector(".ix-axis--done") || mountEl;
+    const block = document.createElement("div");
+    block.className = "ar-report";
+    block.innerHTML = `
+      <div class="ar-card">
+        <p class="ar-eyebrow">تقرير محورك التفصيلي</p>
+        <h2 class="ar-title">محور ${escapeHtml(R.name)}</h2>
+        <p class="ar-tagline">${escapeHtml(R.tagline)}</p>
+
+        <h3 class="ar-h3">أبعاد محورك التلاتة</h3>
+        ${R.dimensions.map((d,i) => `<div class="ar-dim"><span class="ar-dim-n">${toArabicDigits(i+1)}</span><div><b>${escapeHtml(d.name)}</b><p>${escapeHtml(d.body)}</p></div></div>`).join("")}
+
+        <h3 class="ar-h3 ar-good">${escapeHtml(R.fitra.title)}</h3>
+        <p class="ar-p">${escapeHtml(R.fitra.body)}</p>
+        <ul class="ar-list">${R.fitra.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join("")}</ul>
+
+        <h3 class="ar-h3 ar-warn">${escapeHtml(R.qina_ifrat.title)}</h3>
+        <p class="ar-p">${escapeHtml(R.qina_ifrat.body)}</p>
+        <ul class="ar-list ar-list--warn">${R.qina_ifrat.signs.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+
+        <h3 class="ar-h3 ar-warn">${escapeHtml(R.qina_tafrit.title)}</h3>
+        <p class="ar-p">${escapeHtml(R.qina_tafrit.body)}</p>
+        <ul class="ar-list ar-list--warn">${R.qina_tafrit.signs.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+
+        <h3 class="ar-h3">${escapeHtml(R.tension.title)}</h3>
+        <div class="ar-tension"><span>${escapeHtml(R.tension.between[0])}</span><span class="ar-vs">↔</span><span>${escapeHtml(R.tension.between[1])}</span></div>
+        <p class="ar-p">${escapeHtml(R.tension.body)}</p>
+
+        <div class="ar-step">
+          <p class="ar-step-eyebrow">${escapeHtml(R.step.eyebrow)}</p>
+          <h4 class="ar-step-title">${escapeHtml(R.step.title)}</h4>
+          <p class="ar-p">${escapeHtml(R.step.body)}</p>
+        </div>
+      </div>
+
+      <div class="ar-verify">
+        <h3 class="ar-verify-q">إلى أي مدى الكلام ده بيوصفك فعلًا؟</h3>
+        <p class="ar-verify-note">كن صادقًا — ده بيحدّد إذا كنّا وصلنا لمحورك الصح ولا محتاجين نراجع.</p>
+        <div class="ar-scale">
+          ${[["5","بيوصفني تمامًا"],["4","لحدٍّ كبير"],["3","لحدٍّ ما"],["2","مش حاسس بيه قوي"],["1","مش أنا خالص"]].map(([v,l]) =>
+            `<button type="button" class="ar-scale-btn" data-score="${v}">${escapeHtml(l)}</button>`).join("")}
+        </div>
+      </div>`;
+    host.appendChild(block);
+    setTimeout(() => smoothScrollTo(block, 80), 200);
+
+    block.querySelectorAll(".ar-scale-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const score = +btn.dataset.score;
+        block.querySelectorAll(".ar-scale-btn").forEach(b => { b.disabled = true; if (b!==btn) b.classList.add("ar-dim-out"); });
+        btn.classList.add("ar-picked");
+        journeyState.choices.station4_matchScore = score;
+        saveJourneyLocal(); saveJourneyRemote();
+        if (score >= 3){
+          const ok = document.createElement("p");
+          ok.className = "ar-confirmed";
+          ok.textContent = "تمام — محورك متأكّد. نكمّل.";
+          block.querySelector(".ar-verify").appendChild(ok);
+          setTimeout(renderWhatsapp, 700);
+        } else {
+          renderAxisCorrection(stationEl, mountEl, block, mainAxis);
+        }
+      });
+    });
+  }
+
+  /* المقارنة الحاسمة على بُعدين عند التقييم المنخفض */
+  function renderAxisCorrection(stationEl, mountEl, reportBlock, currentAxis){
+    const D = (window.AXIS_DISTINCTIONS || {}).dimensions || [];
+    const axes = ["tamasok","hayawiyya","intima"];
+    const block = document.createElement("div");
+    block.className = "ar-correct";
+    block.innerHTML = `
+      <h3 class="ar-h3">طب خلّينا نتأكّد — ده قرار مهم</h3>
+      <p class="ar-p">قارن بنفسك بين المحاور التلاتة في البُعدين دول، واختار اللي بيوصفك فعلًا:</p>
+      ${D.map(dim => `
+        <div class="ar-cmp">
+          <p class="ar-cmp-q">${escapeHtml(dim.q)}</p>
+          ${axes.map(a => `<div class="ar-cmp-row"><span class="ar-cmp-ax">${escapeHtml((window.AXIS_AR||{})[a]||a)}</span><span class="ar-cmp-txt">${escapeHtml(dim.answers[a])}</span></div>`).join("")}
+        </div>`).join("")}
+      <p class="ar-cmp-pick">بعد ما قرأت — أنهي محور أقرب لك فعلًا؟</p>
+      <div class="ix-choice__list">
+        ${axes.map(a => `<button type="button" class="ix-choice__btn" data-axis="${a}"><span class="ix-choice__label">${escapeHtml((window.AXIS_AR||{})[a]||a)}</span><span class="ix-choice__mark">✓</span></button>`).join("")}
+      </div>`;
+    reportBlock.appendChild(block);
+    setTimeout(() => smoothScrollTo(block, 80), 200);
+
+    block.querySelectorAll(".ix-choice__btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const chosen = btn.dataset.axis;
+        block.querySelectorAll(".ix-choice__btn").forEach(b => { b.disabled = true; if (b.dataset.axis!==chosen){ b.classList.add("is-disabled"); } });
+        btn.classList.add("is-selected");
+        const changed = chosen !== currentAxis;
+        if (changed){
+          const sub = journeyState.choices.station4_axisSub;
+          journeyState.choices.station4_axisSub = (sub === chosen) ? currentAxis : sub;
+          journeyState.choices.station4_axisMain = chosen;
+          journeyState.fingerprint.axis = chosen;
+          journeyState.choices.station4_corrected = true;
+        } else {
+          journeyState.choices.station4_corrected = false;
+        }
+        saveJourneyLocal(); saveJourneyRemote();
+        const msg = document.createElement("p");
+        msg.className = "ar-confirmed";
+        msg.textContent = changed ? `صحّحنا محورك إلى ${(window.AXIS_AR||{})[chosen]}. نكمّل على الصح.` : "أكّدت محورك. نكمّل.";
+        block.appendChild(msg);
+        setTimeout(renderWhatsapp, 800);
+      });
+    });
+  }
+
+  function injectAxisReportStyles(){
+    if (document.getElementById("ar-styles")) return;
+    const s = document.createElement("style");
+    s.id = "ar-styles";
+    s.textContent = `
+    .ar-report{margin-top:28px;}
+    .ar-card{background:var(--navy-deep);border:1px solid rgba(212,175,55,.3);border-radius:12px;padding:28px 26px;}
+    .ar-eyebrow{font-size:11px;letter-spacing:3px;color:var(--gold);margin:0 0 8px;}
+    .ar-title{font-size:26px;color:var(--cream);margin:0 0 6px;font-weight:700;}
+    .ar-tagline{color:var(--muted);font-size:15px;margin:0 0 22px;line-height:1.7;}
+    .ar-h3{font-size:17px;color:var(--cream);margin:24px 0 12px;font-weight:600;border-top:1px solid rgba(212,175,55,.14);padding-top:20px;}
+    .ar-h3.ar-good{color:var(--gold);}
+    .ar-h3.ar-warn{color:#e0894f;}
+    .ar-p{font-size:15px;line-height:1.9;color:#e7e3da;margin:0 0 12px;}
+    .ar-dim{display:flex;gap:14px;margin-bottom:14px;}
+    .ar-dim-n{font-family:var(--font-quote);font-size:24px;color:var(--gold);opacity:.7;flex-shrink:0;line-height:1;}
+    .ar-dim b{color:var(--cream);font-size:15px;}
+    .ar-dim p{font-size:14px;color:var(--muted);line-height:1.75;margin:4px 0 0;}
+    .ar-list{margin:0 0 8px;padding-inline-start:20px;}
+    .ar-list li{font-size:14px;color:#e7e3da;line-height:1.7;margin-bottom:6px;}
+    .ar-list--warn li{color:var(--muted);}
+    .ar-tension{display:flex;align-items:center;justify-content:center;gap:16px;margin:16px 0;flex-wrap:wrap;}
+    .ar-tension span{padding:10px 20px;border:1px solid rgba(212,175,55,.4);border-radius:10px;color:var(--cream);font-weight:600;background:rgba(212,175,55,.05);}
+    .ar-tension .ar-vs{border:none;color:var(--muted);font-size:20px;background:none;padding:0;}
+    .ar-step{margin-top:22px;padding:22px;background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.3);border-radius:10px;}
+    .ar-step-eyebrow{font-size:11px;letter-spacing:2px;color:var(--gold);margin:0 0 8px;}
+    .ar-step-title{font-size:18px;color:var(--cream);margin:0 0 12px;}
+    .ar-verify{margin-top:26px;padding:24px;background:var(--navy-raised);border:1px solid rgba(212,175,55,.35);border-radius:12px;}
+    .ar-verify-q{font-size:19px;color:var(--cream);margin:0 0 6px;}
+    .ar-verify-note{font-size:13px;color:var(--muted);margin:0 0 18px;line-height:1.7;}
+    .ar-scale{display:flex;flex-direction:column;gap:10px;}
+    .ar-scale-btn{appearance:none;background:var(--navy);color:var(--cream);border:1px solid var(--sky);border-radius:8px;padding:14px 18px;font:inherit;font-size:15px;cursor:pointer;text-align:right;transition:all .2s;}
+    .ar-scale-btn:hover:not(:disabled){border-color:var(--gold);color:var(--gold);}
+    .ar-scale-btn.ar-picked{border-color:var(--gold);background:rgba(212,175,55,.1);color:var(--gold);font-weight:700;}
+    .ar-scale-btn.ar-dim-out{opacity:.35;}
+    .ar-confirmed{margin-top:16px;color:var(--gold);font-size:15px;font-weight:600;}
+    .ar-correct{margin-top:22px;padding-top:20px;border-top:1px dashed rgba(212,175,55,.3);}
+    .ar-cmp{margin-bottom:18px;background:var(--navy);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:16px 18px;}
+    .ar-cmp-q{font-size:15px;color:var(--gold);margin:0 0 12px;font-weight:600;}
+    .ar-cmp-row{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);}
+    .ar-cmp-row:last-child{border-bottom:0;}
+    .ar-cmp-ax{flex-shrink:0;width:70px;color:var(--cream);font-weight:600;font-size:14px;}
+    .ar-cmp-txt{color:var(--muted);font-size:14px;line-height:1.7;}
+    .ar-cmp-pick{font-size:16px;color:var(--cream);margin:18px 0 12px;font-weight:600;}
+    @media (max-width:768px){.ar-card{padding:22px 18px;}.ar-cmp-row{flex-direction:column;gap:2px;}.ar-cmp-ax{width:auto;}}`;
+    document.head.appendChild(s);
   }
 
   function renderWhatsapp(){
