@@ -2349,25 +2349,26 @@ function buildFingerprintDoc(){
 
     ${ buildSavedReportBlock() }
 
+    const PATCH_1_REPLACEMENT = `
     <!-- أزرار الإجراءات -->
     <div class="fp-actions">
       <button type="button" class="fp-btn" data-action="print">احفظ بصمتك PDF</button>
       <button type="button" class="fp-btn" data-action="share">شارك بصمتك</button>
-      <a class="fp-btn fp-btn--primary" data-action="full-course" href="#" aria-disabled="true">الدورة الكاملة</a>
+      \${ window.PDS ? window.PDS.cta({ variant: "primary", label: "اعرف أكتر عن Reignite" }) : '' }
     </div>
-  `;
-}
+`;
+
 
 /* ============================================================
    قسم "تقريرك المحفوظ" — يظهر فقط لو فيه كود (يعني اتسجّل في Firebase)
    ============================================================ */
 function buildSavedReportBlock(){
   const code = journeyState.resultCode;
-  if (!code) return "";   // وضع التجربة بدون Firebase → مايظهرش
-
+  if (!code) return "";
+ 
   const reportUrl = `${JOURNEY_CONFIG.resultPagePath}?c=${encodeURIComponent(code)}`;
-
-  // زرّ واتساب التواصل (اختياري — يظهر لو فيه رقم في الإعدادات)
+ 
+  // زرّ واتساب التواصل (اختياري)
   let waBtn = "";
   if (JOURNEY_CONFIG.contactWhatsapp){
     const name   = (journeyState.user.name || "").trim();
@@ -2381,7 +2382,12 @@ function buildSavedReportBlock(){
     const waUrl = `https://wa.me/${JOURNEY_CONFIG.contactWhatsapp}?text=${encodeURIComponent(msg)}`;
     waBtn = `<a class="fp-btn" href="${waUrl}" target="_blank" rel="noopener">ابعتلنا بصمتك على واتساب</a>`;
   }
-
+ 
+  // زرّ Reignite (اللي اتغيّر)
+  const reigniteBtn = window.PDS
+    ? window.PDS.cta({ variant: "primary", label: "اعرف أكتر عن Reignite" })
+    : '';
+ 
   return `
     <hr class="fp-divider" />
     <section class="fp-section fp-saved">
@@ -2389,11 +2395,13 @@ function buildSavedReportBlock(){
       <p class="fp-section__sub">تقدر تفتح بصمتك في أي وقت بالكود ده — احتفظ بيه:</p>
       <p class="fp-saved__code">${escapeHtml(code)}</p>
       <div class="fp-saved__actions">
-        <a class="fp-btn fp-btn--primary" href="${reportUrl}" target="_blank" rel="noopener">افتح تقريرك المحفوظ</a>
+        <a class="fp-btn" href="${reportUrl}" target="_blank" rel="noopener">افتح تقريرك المحفوظ</a>
         ${waBtn}
+        ${reigniteBtn}
       </div>
     </section>`;
 }
+
 
 /* ============================================================
    تصدير الوثيقة كـ PDF عبر html2pdf — مطابق للشاشة
