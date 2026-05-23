@@ -50,6 +50,7 @@
       consent_whatsapp: false,
       result_code: code,
       current_station: 1,
+      completed_stations: [],
       completed: false,
       created_at:  now(),
       completed_at: null,
@@ -104,6 +105,7 @@
         completed: true,
         completed_at: now(),
         current_station: 7,
+        completed_stations: p.completedStations || [1,2,3,4,5,6,7],
         choices: ch,
         fingerprint: fp,
         // حقول مُسطّحة لتسهيل عرض الأدمن والتقرير
@@ -153,6 +155,8 @@
       whatsapp:  d.whatsapp || '',
       consent_whatsapp: !!d.consent_whatsapp,
       result_code: d.result_code || null,
+      current_station: d.current_station || null,
+      completed_stations: Array.isArray(d.completed_stations) ? d.completed_stations : [],
       completed:   !!d.completed,
       created_at:   pickDate(d.created_at, d.createdAt),
       completed_at: pickDate(d.completed_at),
@@ -250,9 +254,35 @@
     });
     return '\uFEFF' + lines.join('\n');
   }
+   /* حفظ تقدّم الرحلة (ذكيّ: مرّة لكل محطة جديدة) */
+  async function saveProgress(id, p) {
+    if (!hasFirebase() || !id) return null;
+    const fp = p.fingerprint || {};
+    const ch = p.choices || {};
+    try {
+      await col().doc(id).set({
+        name:     (p.user && p.user.name)     || '',
+        whatsapp: (p.user && p.user.whatsapp) || '',
+        current_station:    p.currentStation || 1,
+        completed_stations: p.completedStations || [],
+        choices:     ch,
+        fingerprint: fp,
+        main_axis:  fp.axis || null,
+        door:       fp.door || null,
+        flavor:     (fp.flavor != null ? fp.flavor : null),
+        fingerprint_name: fp.name || null,
+        burnout_type: fp.burnoutType || null,
+        updated_at: now()
+      }, { merge: true });
+      return true;
+    } catch (err) {
+      console.warn('journey saveProgress failed:', err);
+      return null;
+    }
+  }
 
-  global.MFPJourney = {
-    hasFirebase, register, saveContact, finalize,
+ global.MFPJourney = {
+    hasFirebase, register, saveContact, finalize, saveProgress,
     fetchByCode, listParticipants, setSent, toCSV, shape
   };
 })(window);
