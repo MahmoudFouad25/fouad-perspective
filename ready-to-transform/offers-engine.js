@@ -1,6 +1,10 @@
 /* ============================================================================
-   🧮  محرّك الحاسبة الذكية واستلام الحجوزات — دورة "جاهز للتحوّل"
+   🧮  محرّك الحاسبة + الحجوزات + الكوبونات — دورة "جاهز للتحوّل"
    ============================================================================
+   ✅ العروض والخصومات والأسعار: محلية (offers-config.js) — بدون Firebase
+   ✅ الكوبونات: Firebase أولاً، احتياطي محلي
+   ✅ الحجوزات: Firebase (tempBookings) → تليجرام بوت تلقائياً
+   ✅ المنح والدعم: Firebase (نفس مسار الحجز)
    ⚠️  مش محتاج تعدّل في الملف ده. كل التحكم في offers-config.js
    ============================================================================ */
 
@@ -13,11 +17,54 @@
     return;
   }
 
+  /* ── helpers ── */
   const fmt = (n) => Math.round(n / 10) * 10;
   const arNum = (n) => fmt(n).toLocaleString("ar-EG");
   const cur = CFG.course.currency;
+  const ARABIC_DIGITS = ["٠","١","٢","٣","٤","٥","٦","٧","٨","٩"];
+  function arDigitsToEn(s) { let r = String(s); ARABIC_DIGITS.forEach((a,i)=>{r=r.replace(new RegExp(a,"g"),i);}); return r; }
 
-  /* ── تحديد العرض الزمني النشط ── */
+  /* =========================================================================
+     1) Firebase initialization (مرفوع من النظام الأصلي بنفس الإعداد)
+     ========================================================================= */
+  let db = null;
+  let fbReady = false;
+
+  function initFirebase() {
+    if (!window.firebase) {
+      console.warn("⚠️ Firebase scripts غير متحمّلة — الكوبونات والحجز هيستخدموا الاحتياطي.");
+      return;
+    }
+    if (window._fbSecure) { db = firebase.firestore(); fbReady = true; return; }
+
+    try {
+      const _0xa3f8 = ["QUl6YVN5","REhnMFZy","aXZFM0M5","QTdqdnpS","dTdsUWd1","ZEx2Y0Rf","Rnhr"];
+      const k = _0xa3f8.map((s)=>atob(s)).join("");
+      firebase.initializeApp({
+        apiKey: k,
+        authDomain: "fouad-perspective.firebaseapp.com",
+        projectId: "fouad-perspective",
+        storageBucket: "fouad-perspective.appspot.com",
+        messagingSenderId: "564654107574",
+        appId: "1:564654107574:web:baebb660288b22f16213e6",
+      });
+      window._fbSecure = true;
+      db = firebase.firestore();
+      fbReady = true;
+    } catch (e) {
+      console.error("Firebase init failed:", e);
+    }
+  }
+
+  /* =========================================================================
+     2) حالة الحاسبة
+     ========================================================================= */
+  const state = {
+    payment: "cash",          // cash | full | plan_0 | plan_1 ...
+    coupon: null,             // { id?, code, type, value, isFirebase }
+    lastCalc: null,
+  };
+
   function getActiveTimeOffer() {
     const now = new Date();
     return (CFG.timeOffers || []).find((o) => {
@@ -29,15 +76,9 @@
     }) || null;
   }
 
-  const state = {
-    payment: "cash",      // cash | full | plan_0 | plan_1 ...
-    coupon: null,
-    lastCalc: null,
-  };
-
-  /* ====================================================================
-     عرض بطاقات العروض النشطة (السيكشن الترويجي)
-     ==================================================================== */
+  /* =========================================================================
+     3) عرض بطاقات العروض (السيكشن الترويجي) — نفس النظام السابق
+     ========================================================================= */
   function renderOffers() {
     const container = document.querySelector("#offers-render");
     if (!container) return;
@@ -46,7 +87,6 @@
     const offer = getActiveTimeOffer();
     let html = "";
 
-    /* البطاقة الرئيسية — السعر */
     if (offer) {
       const finalP = fmt(base - base * offer.percentage / 100);
       const savings = fmt(base - finalP);
@@ -84,7 +124,6 @@
       </div>`;
     }
 
-    /* صف ثانٍ — الدفع الكامل + الأقساط */
     const baseAfterOffer = offer ? fmt(base - base * offer.percentage / 100) : base;
     let secondRow = "";
 
@@ -131,7 +170,6 @@
     if (offer && offer.showCountdown) startCountdown(offer.endDate);
   }
 
-  /* ── العدّاد التنازلي ── */
   function startCountdown(endDate) {
     const el = document.getElementById("offerTimer");
     if (!el) return;
@@ -153,9 +191,9 @@
     tick();
   }
 
-  /* ====================================================================
-     الحاسبة الذكية
-     ==================================================================== */
+  /* =========================================================================
+     4) الحاسبة الذكية
+     ========================================================================= */
   function renderPaymentCards() {
     const c = document.getElementById("calcPaymentCards");
     if (!c) return;
@@ -245,7 +283,6 @@
     });
     document.getElementById("calcTotal").textContent = `${arNum(final)} ${cur}`;
 
-    /* تفاصيل التقسيط */
     const det = document.getElementById("calcInstallmentDetails");
     if (state.payment.startsWith("plan_")) {
       const plan = CFG.paymentPlans[parseInt(state.payment.split("_")[1])];
@@ -255,7 +292,6 @@
       }
     } else det.style.display = "none";
 
-    /* التوفير */
     const savings = base - final;
     const sv = document.getElementById("calcSavings");
     if (savings > 0) {
@@ -276,18 +312,53 @@
     return `${inst} أقساط × ${arNum(monthly)} ${cur} شهرياً`;
   }
 
-  /* ── أكواد الخصم ── */
-  function applyCoupon() {
+  /* =========================================================================
+     5) أكواد الخصم — Firebase أولاً، احتياطي محلي
+     ========================================================================= */
+  async function applyCoupon() {
     const input = document.getElementById("calcCoupon");
     const code = input.value.trim().toUpperCase();
     if (!code) { swal("warning", "كود فارغ", "اكتب كود الخصم الأول"); return; }
-    const found = (CFG.coupons || []).find((c) => c.code.toUpperCase() === code);
-    if (!found) { swal("error", "كود غير صحيح", "تأكد من الكود وحاول تاني"); return; }
-    state.coupon = { code: found.code, type: found.type, value: found.value };
+
+    let validCoupon = null;
+
+    // (أ) جرّب Firebase الأول
+    if (fbReady && db) {
+      try {
+        const snap = await db.collection("coupons").where("code", "==", code).limit(1).get();
+        if (!snap.empty) {
+          const doc = snap.docs[0];
+          const data = doc.data();
+          if (data.status === "used")    { swal("error", "كود مستخدم", "الكود ده اتستخدم قبل كده."); return; }
+          if (data.status === "expired") { swal("error", "كود منتهي", "الكود ده انتهت صلاحيته."); return; }
+          validCoupon = {
+            id: doc.id,
+            code: data.code,
+            type: data.type || "fixed",
+            value: data.value || 0,
+            source: data.source || null,
+            isFirebase: true,
+          };
+        }
+      } catch (e) { console.warn("Firebase coupon lookup failed:", e); }
+    }
+
+    // (ب) لو ملقاش، جرّب الاحتياطي المحلي
+    if (!validCoupon) {
+      const local = (CFG.coupons || []).find((c) => c.code.toUpperCase() === code);
+      if (local) validCoupon = { ...local, isFirebase: false };
+    }
+
+    if (!validCoupon) { swal("error", "كود غير صحيح", "تأكد من الكود وحاول تاني."); return; }
+
+    state.coupon = validCoupon;
+    window._appliedCoupon = validCoupon;
+
     input.disabled = true;
     input.style.background = "rgba(74,138,92,.1)";
     input.style.borderColor = "var(--sage)";
     document.getElementById("applyCouponCalc").style.display = "none";
+
     if (!document.querySelector(".coupon-remove-btn")) {
       const btn = document.createElement("button");
       btn.className = "coupon-remove-btn";
@@ -297,13 +368,14 @@
       input.parentElement.appendChild(btn);
     }
     document.getElementById("calcCouponMessage").innerHTML =
-      `<div style="background:rgba(74,138,92,.08);border:1px solid var(--sage);padding:10px;border-radius:8px;color:var(--sage-bright);margin-top:10px;"><i class="fas fa-check-circle"></i> الكود <strong>${found.code}</strong> مُفعّل ${found.type === "percentage" ? `(خصم ${found.value}%)` : `(خصم ${found.value} ${cur})`}</div>`;
+      `<div style="background:rgba(74,138,92,.08);border:1px solid var(--sage);padding:10px;border-radius:8px;color:var(--sage-bright);margin-top:10px;"><i class="fas fa-check-circle"></i> الكود <strong>${validCoupon.code}</strong> مُفعّل ${validCoupon.type === "percentage" ? `(خصم ${validCoupon.value}%)` : `(خصم ${validCoupon.value} ${cur})`}</div>`;
     swal("success", "تم التطبيق!", "", 1600);
     calculate();
   }
 
   function removeCoupon() {
     state.coupon = null;
+    window._appliedCoupon = null;
     const input = document.getElementById("calcCoupon");
     input.value = ""; input.disabled = false; input.style.background = ""; input.style.borderColor = "";
     document.getElementById("applyCouponCalc").style.display = "inline-block";
@@ -312,7 +384,6 @@
     calculate();
   }
 
-  /* helper Swal */
   function swal(icon, title, text, timer) {
     const opts = { icon, title, confirmButtonColor: "#4A8A5C" };
     if (text) opts.text = text;
@@ -320,9 +391,9 @@
     Swal.fire(opts);
   }
 
-  /* ====================================================================
-     جمع بيانات الحجز
-     ==================================================================== */
+  /* =========================================================================
+     6) جمع بيانات الحجز
+     ========================================================================= */
   function collectData() {
     const c = state.lastCalc || { base: CFG.course.basePrice, final: CFG.course.basePrice, discounts: [], payment: "full" };
     let paymentLabel = "دفعة واحدة";
@@ -331,233 +402,597 @@
     if (c.payment.startsWith("plan_")) instText = installmentText(c.final, CFG.paymentPlans[parseInt(c.payment.split("_")[1])]);
     return {
       courseTitle: CFG.course.title,
+      courseId: CFG.course.id,
       basePrice: c.base,
       finalPrice: c.final,
       savings: c.base - c.final,
+      paymentCode: c.payment,
       paymentLabel,
       installmentText: instText,
-      coupon: state.coupon ? state.coupon.code : null,
+      coupon: state.coupon,
       currency: cur,
     };
   }
 
-  /* ====================================================================
-     استمارة الحجز
-     ==================================================================== */
+  /* =========================================================================
+     7) استمارة الحجز الفردي — شاملة، بكل حقول النظام الأصلي
+     ========================================================================= */
   function showBookingForm() {
     const d = collectData();
+    const payLine = d.installmentText ? `${d.paymentLabel} — ${d.installmentText}` : d.paymentLabel;
+
     Swal.fire({
       title: "📋 إتمام الحجز",
-      html: bookingFormHTML(d),
+      html: `<div style="text-align:right;direction:rtl;max-height:500px;overflow-y:auto;padding-left:8px;">
+        <div style="background:linear-gradient(135deg,#4A8A5C,#2E6940);padding:14px;border-radius:10px;margin-bottom:18px;color:#fff;">
+          <h4 style="margin:0;font-family:Amiri,serif;"><i class="fas fa-book"></i> ${d.courseTitle}</h4>
+          <p style="margin:8px 0 2px;">المبلغ المطلوب: <strong style="font-size:1.2rem;">${arNum(d.finalPrice)} ${d.currency}</strong></p>
+          <p style="margin:0;font-size:.85rem;opacity:.9;">${payLine}</p>
+        </div>
+
+        <div style="background:#F9FAFB;padding:18px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#1F2937;margin-bottom:14px;font-family:Amiri,serif;"><i class="fas fa-user"></i> البيانات الشخصية</h4>
+          ${field("customerName", "الاسم الكامل", "اكتب اسمك", true)}
+          ${field("customerWhatsapp", "رقم الواتساب", "01234567890", true, "ltr", "تأكّد من كتابته بالإنجليزية")}
+          ${field("customerEmail", "البريد الإلكتروني", "example@email.com", true, "ltr", "", "email")}
+          ${field("customerTitle", "اللقب المفضّل (اختياري)", "أستاذ، مهندس، دكتور...")}
+          ${field("customerAge", "العمر (اختياري)", "", false, "", "", "number")}
+          ${field("customerCountry", "البلد (اختياري)", "مصر، السعودية...")}
+          ${field("customerCity", "المحافظة/المدينة (اختياري)", "")}
+          ${field("customerJob", "الوظيفة (اختياري)", "")}
+          ${field("customerSource", "كيف عرفت عنّا؟ (اختياري)", "")}
+        </div>
+
+        <div style="background:#F0FDF4;padding:18px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#065F46;margin-bottom:14px;font-family:Amiri,serif;"><i class="fas fa-info-circle"></i> معلومات إضافية</h4>
+          ${textarea("customerExpectations", "توقّعاتك من الدورة (اختياري)")}
+          ${field("customerExperience", "خبرة سابقة في الكوتشينج/تطوير الذات (اختياري)")}
+          ${textarea("customerNotes", "ملاحظات (اختياري)", 2)}
+        </div>
+
+        <div style="background:#FEF3C7;padding:18px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#92400E;margin-bottom:14px;font-family:Amiri,serif;"><i class="fas fa-credit-card"></i> وسيلة الدفع <span style="color:red;">*</span></h4>
+          <div style="display:grid;gap:8px;">
+            ${payOpt("vodafone", "فودافون كاش")}
+            ${payOpt("instapay", "انستاباي")}
+            ${payOpt("bank", "تحويل بنكي")}
+          </div>
+        </div>
+
+        <div style="background:#EFF6FF;padding:13px;border-radius:10px;border-right:3px solid #3B82F6;">
+          <p style="color:#1E40AF;margin:0;text-align:center;font-size:.9rem;"><i class="fas fa-lock"></i> بياناتك آمنة ومحميّة — لن تُشارَك مع أيّ طرف ثالث</p>
+        </div>
+      </div>`,
       showCancelButton: true,
       confirmButtonText: "✅ تأكيد الحجز",
       cancelButtonText: "رجوع",
       confirmButtonColor: "#4A8A5C",
-      width: window.innerWidth <= 768 ? "95%" : "640px",
+      width: window.innerWidth <= 768 ? "95%" : "720px",
       allowOutsideClick: false,
-      didOpen: () => document.getElementById("bkName")?.focus(),
+      didOpen: () => { document.getElementById("customerName")?.focus(); },
       preConfirm: () => {
-        const name = document.getElementById("bkName").value.trim();
-        const wa = document.getElementById("bkWhatsapp").value.trim();
-        const pm = document.querySelectorAll('input[name="bkPay"]:checked');
-        if (!name) { Swal.showValidationMessage("اكتب اسمك"); return false; }
-        if (!wa) { Swal.showValidationMessage("اكتب رقم الواتساب"); return false; }
-        if (!/^(\+?\d{1,4}[\s-]?)?(\(?\d{1,4}\)?[\s-]?)?\d{6,14}$/.test(wa.replace(/[\s\-()]/g, ""))) {
-          Swal.showValidationMessage("رقم الواتساب مش صحيح"); return false;
-        }
-        if (pm.length === 0) { Swal.showValidationMessage("اختر وسيلة الدفع"); return false; }
+        const name = document.getElementById("customerName").value.trim();
+        const wa = document.getElementById("customerWhatsapp").value.trim();
+        const email = document.getElementById("customerEmail").value.trim();
+        const pm = document.querySelectorAll('input[name="paymentMethod"]:checked');
+        if (!name) { Swal.showValidationMessage("أدخل اسمك"); return false; }
+        if (!wa) { Swal.showValidationMessage("أدخل رقم الواتساب"); return false; }
+        const waClean = arDigitsToEn(wa).replace(/[\s\-\(\)]/g, "");
+        if (!/^(\+?\d{1,4})?\d{6,14}$/.test(waClean)) { Swal.showValidationMessage("رقم الواتساب غير صحيح"); return false; }
+        if (!email) { Swal.showValidationMessage("أدخل البريد الإلكتروني"); return false; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { Swal.showValidationMessage("البريد الإلكتروني غير صحيح"); return false; }
+        if (pm.length === 0) { Swal.showValidationMessage("اختر طريقة دفع واحدة على الأقل"); return false; }
         return true;
       },
-    }).then((res) => {
-      if (!res.isConfirmed) return;
-      const pays = [];
-      document.querySelectorAll('input[name="bkPay"]:checked').forEach((c) => pays.push(c.value));
+    }).then(async (result) => {
+      if (!result.isConfirmed) return;
+      const payments = [];
+      document.querySelectorAll('input[name="paymentMethod"]:checked').forEach((c) => payments.push(c.value));
+
       const customer = {
-        name: document.getElementById("bkName").value.trim(),
-        whatsapp: document.getElementById("bkWhatsapp").value.trim(),
-        email: document.getElementById("bkEmail").value.trim(),
-        city: document.getElementById("bkCity").value.trim(),
-        notes: document.getElementById("bkNotes").value.trim(),
-        payMethods: pays,
+        name:         document.getElementById("customerName").value.trim(),
+        whatsapp:     document.getElementById("customerWhatsapp").value.trim(),
+        email:        document.getElementById("customerEmail").value.trim(),
+        title:        document.getElementById("customerTitle").value.trim() || "",
+        age:          document.getElementById("customerAge").value || "",
+        country:      document.getElementById("customerCountry").value.trim() || "",
+        city:         document.getElementById("customerCity").value.trim() || "",
+        job:          document.getElementById("customerJob").value.trim() || "",
+        source:       document.getElementById("customerSource").value.trim() || "",
+        expectations: document.getElementById("customerExpectations").value.trim() || "",
+        experience:   document.getElementById("customerExperience").value.trim() || "",
+        notes:        document.getElementById("customerNotes").value.trim() || "",
+        paymentMethods: payments,
       };
-      submitBooking(d, customer, "booking");
+
+      const booking = {
+        bookingType: "individual",
+        bookingDate: new Date().toISOString(),
+        courseName: d.courseTitle,
+        courseId: d.courseId,
+        customer,
+        pricing: {
+          basePriceNumber: d.basePrice,
+          finalPriceNumber: d.finalPrice,
+          finalPrice: `${arNum(d.finalPrice)} ${d.currency}`,
+        },
+        payment: {
+          method: d.paymentLabel,
+          code: d.paymentCode,
+          installmentDetails: d.installmentText || null,
+        },
+        coupon: d.coupon ? { ...d.coupon, applied: true } : null,
+        totalSavings: d.savings,
+      };
+
+      await saveBookingAndOpenTelegram(booking);
     });
   }
 
-  function bookingFormHTML(d) {
-    const payLine = d.installmentText ? `${d.paymentLabel} — ${d.installmentText}` : d.paymentLabel;
-    return `<div style="text-align:right;direction:rtl;">
-      <div style="background:linear-gradient(135deg,#4A8A5C,#2E6940);padding:14px;border-radius:10px;margin-bottom:16px;color:#fff;">
-        <h4 style="margin:0;font-family:Amiri,serif;">${d.courseTitle}</h4>
-        <p style="margin:8px 0 2px;">المبلغ المطلوب: <strong style="font-size:1.2rem;">${d.finalPrice.toLocaleString("ar-EG")} ${d.currency}</strong></p>
-        <p style="margin:0;font-size:.85rem;opacity:.9;">${payLine}</p>
-      </div>
-      ${field("bkName", "الاسم الكامل", "اكتب اسمك", true)}
-      ${field("bkWhatsapp", "رقم الواتساب", "01xxxxxxxxx", true, "ltr")}
-      ${field("bkEmail", "البريد الإلكتروني (اختياري)", "example@email.com", false, "ltr")}
-      ${field("bkCity", "المدينة (اختياري)", "")}
-      <div style="margin-bottom:12px;"><label style="display:block;margin-bottom:5px;color:#374151;">ملاحظات (اختياري)</label>
-        <textarea id="bkNotes" rows="2" style="width:100%;padding:10px;border:2px solid #E5E7EB;border-radius:8px;resize:none;color:#000;background:#fff;"></textarea></div>
-      <div style="background:#FEF3C7;padding:14px;border-radius:10px;margin-bottom:6px;">
-        <strong style="color:#92400E;display:block;margin-bottom:8px;">وسيلة الدفع *</strong>
-        ${payOpt("vodafone", "فودافون كاش")}
-        ${payOpt("instapay", "انستاباي")}
-        ${payOpt("bank", "تحويل بنكي")}
-      </div>
-    </div>`;
+  /* helpers لبناء الحقول */
+  function field(id, label, ph, req, dir, hint, type) {
+    const t = type || "text";
+    const h = hint ? `<small style="color:#6B7280;display:block;margin-top:3px;">${hint}</small>` : "";
+    return `<div style="margin-bottom:12px;"><label style="display:block;margin-bottom:5px;color:#374151;font-weight:${req ? 600 : 500};">${label}${req ? ' <span style="color:red;">*</span>' : ""}</label>
+      <input type="${t}" id="${id}" placeholder="${ph || ""}" style="width:100%;padding:11px;border:2px solid #E5E7EB;border-radius:8px;font-size:1rem;background:#fff;color:#000;${dir ? "direction:" + dir + ";" : ""}">${h}</div>`;
   }
-
-  function field(id, label, ph, req, dir) {
-    return `<div style="margin-bottom:12px;"><label style="display:block;margin-bottom:5px;color:#374151;font-weight:600;">${label} ${req ? '<span style="color:red;">*</span>' : ""}</label>
-      <input type="text" id="${id}" placeholder="${ph}" style="width:100%;padding:11px;border:2px solid #E5E7EB;border-radius:8px;color:#000;background:#fff;${dir ? "direction:" + dir + ";" : ""}"></div>`;
+  function textarea(id, label, rows) {
+    return `<div style="margin-bottom:12px;"><label style="display:block;margin-bottom:5px;color:#374151;">${label}</label>
+      <textarea id="${id}" rows="${rows || 3}" style="width:100%;padding:11px;border:2px solid #E5E7EB;border-radius:8px;resize:none;background:#fff;color:#000;font-family:Cairo,sans-serif;"></textarea></div>`;
   }
   function payOpt(val, label) {
-    return `<label style="display:flex;align-items:center;padding:10px;background:#fff;border:2px solid #E5E7EB;border-radius:8px;cursor:pointer;margin-bottom:6px;"><input type="checkbox" name="bkPay" value="${val}" style="margin-left:10px;width:17px;height:17px;"><strong style="color:#000;">${label}</strong></label>`;
+    return `<label style="display:flex;align-items:center;padding:11px;background:#fff;border:2px solid #E5E7EB;border-radius:8px;cursor:pointer;"><input type="checkbox" name="paymentMethod" value="${val}" style="margin-left:10px;width:18px;height:18px;"><strong style="color:#000;">${label}</strong></label>`;
   }
 
-  /* ====================================================================
-     استمارة المنحة
-     ==================================================================== */
+  /* =========================================================================
+     8) استمارة طلب الدعم/المنحة — ٣ خيارات بسلايدرز كاملة
+     ========================================================================= */
   function showGrantForm() {
     const d = collectData();
-    const maxP = CFG.grant.maxDiscountPercent || 50;
+    const basePrice = CFG.course.basePrice;
+    const offer = getActiveTimeOffer();
+    let priceAfterOffer = basePrice;
+    if (offer) priceAfterOffer = Math.round(basePrice * (1 - offer.percentage / 100));
+
+    let selectedInstallmentMonths = 3;
+    let selectedPercentage = 50;
+    let selectedPartialMonths = 3;
+    const maxP = (CFG.grant && CFG.grant.maxDiscountPercent) || 90;
+    const minPay = 100 - maxP; // أقل نسبة يدفعها المستفيد
+
+    // helpers يوصلوا للـ scope العام عشان SweetAlert يقدر يستدعيهم
+    window.__rtt_updateInstallment = function () {
+      const m = document.getElementById("installmentMonths").value;
+      document.getElementById("monthsCount").textContent = m;
+      document.getElementById("monthlyAmount").textContent = arNum(Math.ceil(priceAfterOffer / m));
+      selectedInstallmentMonths = m;
+    };
+    window.__rtt_updatePartial = function () {
+      const p = document.getElementById("affordableAmount").value;
+      document.getElementById("percentageAmount").textContent = p;
+      const amt = Math.round(priceAfterOffer * (p / 100));
+      document.getElementById("finalAmount").textContent = arNum(amt);
+      selectedPercentage = p;
+      if (document.getElementById("installPartial")?.checked) window.__rtt_updatePartialInst();
+    };
+    window.__rtt_togglePartialInst = function () {
+      const c = document.getElementById("installPartial").checked;
+      document.getElementById("partialInstallmentDetails").style.display = c ? "block" : "none";
+      if (c) window.__rtt_updatePartialInst();
+    };
+    window.__rtt_updatePartialInst = function () {
+      const amt = Math.round(priceAfterOffer * (document.getElementById("affordableAmount").value / 100));
+      const m = document.getElementById("partialInstallmentMonths").value;
+      document.getElementById("partialMonthsCount").textContent = m;
+      document.getElementById("partialMonthlyAmount").textContent = arNum(Math.ceil(amt / m));
+      selectedPartialMonths = m;
+    };
+    window.__rtt_toggleSupport = function () {
+      const s = document.querySelector('input[name="supportType"]:checked')?.value;
+      const id = document.getElementById("installmentDetails");
+      const pd = document.getElementById("partialDetails");
+      if (id) id.style.display = "none";
+      if (pd) pd.style.display = "none";
+      if (s === "installment" && id) { id.style.display = "block"; window.__rtt_updateInstallment(); }
+      else if (s === "partial" && pd) { pd.style.display = "block"; window.__rtt_updatePartial(); }
+    };
+
     Swal.fire({
-      title: "🤲 طلب دعم مالي",
-      html: `<div style="text-align:right;direction:rtl;max-height:60vh;overflow-y:auto;">
-        <div style="background:rgba(74,138,92,.1);padding:16px;border-radius:10px;margin-bottom:16px;text-align:center;">
-          <i class="fas fa-heart" style="font-size:2rem;color:#4A8A5C;"></i>
-          <h4 style="color:#2E6940;margin:8px 0 0;">المال مش لازم يكون عائق</h4>
+      title: "🤲 طلب منحة دراسية / دعم مالي",
+      html: `<div style="text-align:right;direction:rtl;max-height:500px;overflow-y:auto;padding-left:8px;">
+        <div style="background:linear-gradient(135deg,#10B981,#14B8A6);padding:15px;border-radius:10px;margin-bottom:18px;color:#fff;">
+          <h4 style="margin:0;font-family:Amiri,serif;"><i class="fas fa-graduation-cap"></i> ${d.courseTitle}</h4>
         </div>
-        ${field("grName", "الاسم", "", true)}
-        ${field("grWhatsapp", "الواتساب", "", true, "ltr")}
-        ${field("grEmail", "الإيميل (اختياري)", "", false, "ltr")}
-        <div style="margin-bottom:12px;"><label style="display:block;margin-bottom:5px;color:#374151;font-weight:600;">ليه محتاج الدعم؟ <span style="color:red;">*</span></label>
-          <textarea id="grReason" rows="3" style="width:100%;padding:10px;border:2px solid #E5E7EB;border-radius:8px;resize:none;color:#000;background:#fff;"></textarea></div>
-        <div style="background:#F3E8FF;padding:16px;border-radius:10px;margin-bottom:12px;">
-          <label style="font-weight:600;color:#6B21A8;display:block;margin-bottom:10px;">نوع الدعم المطلوب *</label>
-          ${grantOpt("partial", "منحة جزئية — أقدر أدفع جزء")}
-          ${grantOpt("installment", "تقسيط مُيسّر على شهور أكتر")}
-          ${grantOpt("full", "منحة كاملة — مش قادر أدفع حالياً")}
-          <div id="grPartialBox" style="display:none;margin-top:12px;background:#fff;padding:12px;border-radius:8px;">
-            <label style="color:#6B21A8;font-size:.9rem;">النسبة اللي تقدر تدفعها:</label>
-            <input type="range" id="grSlider" min="${100 - maxP}" max="90" value="50" style="width:100%;margin:8px 0;" oninput="document.getElementById('grSliderVal').textContent=this.value">
-            <div style="text-align:center;color:#2E6940;font-weight:700;">تدفع <span id="grSliderVal">50</span>% من المبلغ</div>
+        <div style="background:rgba(16,185,129,0.1);padding:18px;border-radius:10px;margin-bottom:18px;text-align:center;">
+          <i class="fas fa-heart" style="font-size:2.2rem;color:#10B981;"></i>
+          <h3 style="color:#065F46;margin:10px 0 4px;font-family:Amiri,serif;">المال لا يجب أن يكون عائقاً</h3>
+          <p style="color:#047857;margin:0;font-size:.92rem;">طلبك يُعامَل بسرّية تامّة، وبتفهّم لظروفك.</p>
+        </div>
+
+        <div style="background:#F9FAFB;padding:18px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#1F2937;margin-bottom:14px;font-family:Amiri,serif;"><i class="fas fa-user"></i> البيانات الشخصية</h4>
+          ${field("customerName", "الاسم الكامل", "", true)}
+          ${field("customerWhatsapp", "رقم الواتساب", "01234567890", true, "ltr")}
+          ${field("customerEmail", "البريد الإلكتروني", "example@email.com", true, "ltr", "", "email")}
+          ${field("customerTitle", "اللقب (اختياري)", "")}
+          ${field("customerAge", "العمر (اختياري)", "", false, "", "", "number")}
+          ${field("customerCountry", "البلد (اختياري)", "")}
+          ${field("customerCity", "المدينة (اختياري)", "")}
+          ${field("customerJob", "الوظيفة (اختياري)", "")}
+          ${field("customerSource", "كيف عرفت عنّا (اختياري)", "")}
+        </div>
+
+        <div style="background:#FFF7ED;padding:18px;border-radius:10px;margin-bottom:14px;border-right:4px solid #F59E0B;">
+          <h4 style="color:#7C2D12;margin-bottom:14px;font-family:Amiri,serif;"><i class="fas fa-book-open"></i> قصّتك</h4>
+          ${textarea("whyNeedGrant", "لماذا تحتاج هذا الدعم؟ *", 4)}
+          ${textarea("challenges", "ما التحديات التي تواجهها حالياً؟ *", 4)}
+          ${textarea("communityContribution", "كيف ستساهم في مجتمعك بعد التعلّم؟ (اختياري)", 3)}
+        </div>
+
+        <div style="background:#F3E8FF;padding:18px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#581C87;margin-bottom:14px;font-family:Amiri,serif;"><i class="fas fa-hand-holding-heart"></i> الدعم المطلوب</h4>
+
+          <div style="margin-bottom:14px;">
+            <label style="font-weight:600;color:#6B21A8;display:block;margin-bottom:6px;">الوضع الوظيفي <span style="color:red;">*</span></label>
+            <select id="employmentStatus" style="width:100%;padding:11px;border:2px solid #E9D5FF;border-radius:8px;background:#fff;color:#000;font-family:Cairo,sans-serif;">
+              <option value="">-- اختر --</option>
+              <option value="student">طالب</option>
+              <option value="employed">موظف</option>
+              <option value="freelance">عمل حر</option>
+              <option value="unemployed">بدون عمل</option>
+              <option value="retired">متقاعد</option>
+              <option value="other">أخرى</option>
+            </select>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div>
+              <label style="color:#6B21A8;display:block;margin-bottom:6px;">دخل ثابت؟</label>
+              <select id="hasIncome" style="width:100%;padding:11px;border:2px solid #E9D5FF;border-radius:8px;background:#fff;color:#000;font-family:Cairo,sans-serif;">
+                <option value="">اختياري</option>
+                <option value="yes">نعم</option>
+                <option value="no">لا</option>
+                <option value="irregular">غير منتظم</option>
+              </select>
+            </div>
+            <div>
+              <label style="color:#6B21A8;display:block;margin-bottom:6px;">عدد المعالين</label>
+              <input type="number" id="dependents" min="0" style="width:100%;padding:11px;border:2px solid #E9D5FF;border-radius:8px;background:#fff;color:#000;">
+            </div>
+          </div>
+
+          <label style="font-weight:600;color:#6B21A8;display:block;margin-bottom:10px;">نوع الدعم المطلوب <span style="color:red;">*</span></label>
+
+          <!-- التقسيط المُيسر -->
+          <div style="background:#fff;padding:16px;border-radius:10px;margin-bottom:12px;border:2px solid #E9D5FF;">
+            <label style="display:flex;align-items:flex-start;cursor:pointer;">
+              <input type="radio" name="supportType" value="installment" onchange="__rtt_toggleSupport()" style="margin-left:10px;margin-top:3px;width:18px;height:18px;">
+              <div style="width:100%;">
+                <strong style="color:#581C87;">تقسيط مُيسّر على شهور أكتر</strong>
+                <p style="color:#6B7280;font-size:.88rem;margin:4px 0 0;">قسّط المبلغ كاملاً على عدد الشهور المناسب لك (٢ – ١٨ شهر).</p>
+                <div id="installmentDetails" style="display:none;margin-top:14px;">
+                  <label style="color:#6B21A8;font-size:.88rem;">عدد الأشهر:</label>
+                  <input type="range" id="installmentMonths" min="2" max="18" value="3" oninput="__rtt_updateInstallment()" style="width:100%;margin:8px 0;">
+                  <div style="text-align:center;padding:13px;background:#F3E8FF;border-radius:8px;">
+                    <div style="font-size:1.1rem;color:#581C87;font-weight:700;"><span id="monthsCount">3</span> أشهر</div>
+                    <div style="font-size:1.4rem;color:#10B981;font-weight:700;margin-top:4px;"><span id="monthlyAmount">0</span> ${cur} / شهرياً</div>
+                  </div>
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <!-- المنحة الجزئية -->
+          <div style="background:#fff;padding:16px;border-radius:10px;margin-bottom:12px;border:2px solid #E9D5FF;">
+            <label style="display:flex;align-items:flex-start;cursor:pointer;">
+              <input type="radio" name="supportType" value="partial" onchange="__rtt_toggleSupport()" style="margin-left:10px;margin-top:3px;width:18px;height:18px;">
+              <div style="width:100%;">
+                <strong style="color:#581C87;">منحة جزئية — أقدر أدفع جزء فقط</strong>
+                <p style="color:#6B7280;font-size:.88rem;margin:4px 0 0;">حدّد النسبة اللي تقدر تدفعها من السعر، ونتكفّل بالباقي.</p>
+                <div id="partialDetails" style="display:none;margin-top:14px;">
+                  <label style="color:#6B21A8;font-size:.88rem;">النسبة اللي تقدر تدفعها:</label>
+                  <input type="range" id="affordableAmount" min="${minPay}" max="90" value="50" oninput="__rtt_updatePartial()" style="width:100%;margin:8px 0;">
+                  <div style="text-align:center;padding:13px;background:#F3E8FF;border-radius:8px;">
+                    <div style="color:#581C87;font-size:.95rem;">تدفع <strong><span id="percentageAmount">50</span>%</strong> من المبلغ</div>
+                    <div style="font-size:1.4rem;color:#10B981;font-weight:700;margin-top:4px;"><span id="finalAmount">0</span> ${cur}</div>
+                  </div>
+                  <div style="margin-top:14px;padding:13px;background:#FEF3C7;border-radius:8px;">
+                    <label style="cursor:pointer;display:flex;align-items:center;gap:8px;color:#000;font-size:.92rem;">
+                      <input type="checkbox" id="installPartial" onchange="__rtt_togglePartialInst()" style="width:17px;height:17px;">
+                      أريد تقسيط هذا المبلغ على شهور
+                    </label>
+                    <div id="partialInstallmentDetails" style="display:none;margin-top:12px;">
+                      <input type="range" id="partialInstallmentMonths" min="2" max="12" value="3" oninput="__rtt_updatePartialInst()" style="width:100%;">
+                      <div style="text-align:center;margin-top:8px;padding:10px;background:#fff;border-radius:8px;color:#000;">
+                        <span id="partialMonthsCount">3</span> أشهر × <strong id="partialMonthlyAmount">0</strong> ${cur}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <!-- منحة كاملة -->
+          <div style="background:#fff;padding:16px;border-radius:10px;border:2px solid #E9D5FF;">
+            <label style="display:flex;align-items:flex-start;cursor:pointer;">
+              <input type="radio" name="supportType" value="full" onchange="__rtt_toggleSupport()" style="margin-left:10px;margin-top:3px;width:18px;height:18px;">
+              <div>
+                <strong style="color:#581C87;">منحة كاملة ١٠٠٪</strong>
+                <p style="color:#6B7280;font-size:.88rem;margin:4px 0 0;">لا أستطيع الدفع حالياً، وأطلب منحة كاملة.</p>
+              </div>
+            </label>
           </div>
         </div>
-        <div style="background:#FEF2F2;padding:14px;border-radius:10px;">
-          <label style="cursor:pointer;display:flex;align-items:center;gap:8px;color:#000;"><input type="checkbox" id="grCommit"> أتعهّد بالحضور الكامل والمشاركة الجادّة، والبيانات دي صحيحة.</label>
+
+        <div style="background:#FEF3C7;padding:16px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#92400E;margin-bottom:12px;font-family:Amiri,serif;"><i class="fas fa-credit-card"></i> وسيلة الدفع المتاحة لك (اختياري)</h4>
+          <div style="display:grid;gap:8px;">
+            ${payOpt("vodafone", "فودافون كاش")}
+            ${payOpt("instapay", "انستاباي")}
+            ${payOpt("bank", "تحويل بنكي")}
+          </div>
+        </div>
+
+        <div style="background:#FEF2F2;padding:18px;border-radius:10px;margin-bottom:14px;">
+          <h4 style="color:#991B1B;margin-bottom:12px;font-family:Amiri,serif;"><i class="fas fa-handshake"></i> التعهدات</h4>
+          ${commit("commitment1", "أتعهّد بالحضور الكامل واستثمار المحتوى بجدّية", true)}
+          ${commit("commitment2", "أتعهّد بالمشاركة الفعّالة والتفاعل الجادّ", true)}
+          ${commit("commitment3", "المعلومات التي أدخلتها صحيحة وحقيقية", true)}
+          <div style="margin-top:14px;padding:13px;background:#F0FDF4;border-radius:8px;">
+            ${commit("volunteerCommitment", "أتطوّع بمساعدة ٣ أشخاص من مجتمعي بعد إتمام الدورة (اختياري)", false)}
+          </div>
+        </div>
+
+        <div style="background:#DCFCE7;padding:14px;border-radius:10px;border-right:3px solid #22C55E;">
+          <p style="color:#14532D;margin:0;text-align:center;font-size:.92rem;"><i class="fas fa-clock"></i> سيتم مراجعة طلبك خلال ٢٤–٤٨ ساعة</p>
         </div>
       </div>`,
       showCancelButton: true,
-      confirmButtonText: "إرسال الطلب",
+      confirmButtonText: "✅ إرسال طلب الدعم",
       cancelButtonText: "رجوع",
-      confirmButtonColor: "#4A8A5C",
-      width: window.innerWidth <= 768 ? "95%" : "640px",
+      confirmButtonColor: "#10B981",
+      width: window.innerWidth <= 768 ? "95%" : "780px",
       allowOutsideClick: false,
       didOpen: () => {
-        document.querySelectorAll('input[name="grType"]').forEach((r) => {
-          r.addEventListener("change", () => {
-            document.getElementById("grPartialBox").style.display = r.value === "partial" && r.checked ? "block" : "none";
-          });
-        });
+        document.getElementById("customerName")?.focus();
+        window.__rtt_updateInstallment();
+        window.__rtt_updatePartial();
       },
       preConfirm: () => {
-        if (!document.getElementById("grName").value.trim()) { Swal.showValidationMessage("اكتب اسمك"); return false; }
-        if (!document.getElementById("grWhatsapp").value.trim()) { Swal.showValidationMessage("اكتب الواتساب"); return false; }
-        if (!document.getElementById("grReason").value.trim()) { Swal.showValidationMessage("اشرح سبب الطلب"); return false; }
-        if (!document.querySelector('input[name="grType"]:checked')) { Swal.showValidationMessage("اختر نوع الدعم"); return false; }
-        if (!document.getElementById("grCommit").checked) { Swal.showValidationMessage("لازم توافق على التعهّد"); return false; }
+        if (!document.getElementById("customerName").value.trim()) { Swal.showValidationMessage("أدخل اسمك"); return false; }
+        if (!document.getElementById("customerWhatsapp").value.trim()) { Swal.showValidationMessage("أدخل رقم الواتساب"); return false; }
+        const email = document.getElementById("customerEmail").value.trim();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { Swal.showValidationMessage("البريد الإلكتروني مطلوب وصحيح"); return false; }
+        if (!document.getElementById("whyNeedGrant").value.trim()) { Swal.showValidationMessage("اشرح سبب طلب الدعم"); return false; }
+        if (!document.getElementById("challenges").value.trim()) { Swal.showValidationMessage("اشرح التحديات التي تواجهها"); return false; }
+        if (!document.getElementById("employmentStatus").value) { Swal.showValidationMessage("حدّد الوضع الوظيفي"); return false; }
+        if (!document.querySelector('input[name="supportType"]:checked')) { Swal.showValidationMessage("اختر نوع الدعم المطلوب"); return false; }
+        if (!document.getElementById("commitment1").checked || !document.getElementById("commitment2").checked || !document.getElementById("commitment3").checked) {
+          Swal.showValidationMessage("يجب الموافقة على التعهدات الثلاثة"); return false;
+        }
         return true;
       },
-    }).then((res) => {
-      if (!res.isConfirmed) return;
-      const type = document.querySelector('input[name="grType"]:checked').value;
+    }).then(async (result) => {
+      if (!result.isConfirmed) return;
+
+      const payments = [];
+      document.querySelectorAll('input[name="paymentMethod"]:checked').forEach((c) => payments.push(c.value));
+      const supportType = document.querySelector('input[name="supportType"]:checked').value;
+
+      let finalPriceNumber = 0;
+      let totalSavings = 0;
+      let supportDetails = {};
+
+      if (supportType === "full") {
+        finalPriceNumber = 0;
+        totalSavings = basePrice;
+        supportDetails = { type: "full", discount: 100 };
+      } else if (supportType === "partial") {
+        finalPriceNumber = Math.round(priceAfterOffer * (selectedPercentage / 100));
+        totalSavings = basePrice - finalPriceNumber;
+        supportDetails = {
+          type: "partial",
+          percentage: selectedPercentage,
+          affordableAmount: finalPriceNumber,
+          installmentRequested: document.getElementById("installPartial")?.checked || false,
+          installmentMonths: document.getElementById("installPartial")?.checked ? selectedPartialMonths : null,
+          monthlyAmount: document.getElementById("installPartial")?.checked ? Math.ceil(finalPriceNumber / selectedPartialMonths) : null,
+        };
+      } else {
+        finalPriceNumber = priceAfterOffer;
+        totalSavings = basePrice - priceAfterOffer;
+        supportDetails = {
+          type: "installment",
+          months: selectedInstallmentMonths,
+          monthlyAmount: Math.ceil(priceAfterOffer / selectedInstallmentMonths),
+        };
+      }
+
       const customer = {
-        name: document.getElementById("grName").value.trim(),
-        whatsapp: document.getElementById("grWhatsapp").value.trim(),
-        email: document.getElementById("grEmail").value.trim(),
-        reason: document.getElementById("grReason").value.trim(),
-        grantType: type === "partial" ? `منحة جزئية (يدفع ${document.getElementById("grSlider").value}%)` : type === "installment" ? "تقسيط مُيسّر" : "منحة كاملة",
+        name:    document.getElementById("customerName").value.trim(),
+        whatsapp:document.getElementById("customerWhatsapp").value.trim(),
+        email:   document.getElementById("customerEmail").value.trim(),
+        title:   document.getElementById("customerTitle").value.trim() || "",
+        age:     document.getElementById("customerAge").value || "",
+        country: document.getElementById("customerCountry").value.trim() || "",
+        city:    document.getElementById("customerCity").value.trim() || "",
+        job:     document.getElementById("customerJob").value.trim() || "",
+        source:  document.getElementById("customerSource").value.trim() || "",
+        paymentMethods: payments,
       };
-      submitBooking(d, customer, "grant");
+
+      const grantBooking = {
+        bookingType: "grant_request",
+        bookingDate: new Date().toISOString(),
+        courseName: d.courseTitle,
+        courseId: d.courseId,
+        coursePrice: basePrice,
+        salePrice: priceAfterOffer,
+        customer,
+        pricing: {
+          basePriceNumber: basePrice,
+          finalPriceNumber,
+          finalPrice: `${arNum(finalPriceNumber)} ${cur}`,
+        },
+        totalSavings,
+        grantDetails: {
+          reason: document.getElementById("whyNeedGrant").value.trim(),
+          challenges: document.getElementById("challenges").value.trim(),
+          communityContribution: document.getElementById("communityContribution").value.trim() || "",
+          financial: {
+            employmentStatus: document.getElementById("employmentStatus").value,
+            hasIncome: document.getElementById("hasIncome").value || "",
+            dependents: document.getElementById("dependents").value || "",
+          },
+          supportType,
+          supportDetails,
+          commitments: {
+            fullAttendance: true,
+            activeParticipation: true,
+            truthfulInfo: true,
+            volunteerWork: document.getElementById("volunteerCommitment")?.checked || false,
+          },
+        },
+      };
+
+      await saveBookingAndOpenTelegram(grantBooking);
     });
   }
-  function grantOpt(val, label) {
-    return `<label style="display:flex;align-items:flex-start;padding:10px;background:#fff;border:2px solid #E9D5FF;border-radius:8px;cursor:pointer;margin-bottom:6px;"><input type="radio" name="grType" value="${val}" style="margin-left:10px;margin-top:3px;"><strong style="color:#000;">${label}</strong></label>`;
+
+  function commit(id, label, required) {
+    return `<div style="margin-bottom:8px;"><label style="cursor:pointer;display:flex;align-items:flex-start;gap:8px;color:#000;font-size:.92rem;line-height:1.6;">
+      <input type="checkbox" id="${id}" style="margin-top:3px;width:17px;height:17px;flex-shrink:0;"><span>${label}${required ? '' : ''}</span>
+    </label></div>`;
   }
 
-  /* ====================================================================
-     إرسال الحجز (واتساب / جوجل فورم / الاتنين)
-     ==================================================================== */
-  function submitBooking(d, customer, kind) {
-    const b = CFG.booking;
-    const payNames = { vodafone: "فودافون كاش", instapay: "انستاباي", bank: "تحويل بنكي" };
+  /* =========================================================================
+     9) حفظ الحجز في Firebase + تليجرام تلقائي (بدون نسخ يدوي)
+     ========================================================================= */
+  async function saveBookingAndOpenTelegram(bookingData) {
+    Swal.fire({
+      title: "جاري معالجة طلبك...",
+      html: '<p style="color:#6B7280;">لحظات فقط — بنحفظ بياناتك في النظام</p>',
+      allowOutsideClick: false,
+      didOpen: () => Swal.showLoading(),
+    });
 
-    /* بناء رسالة الواتساب */
-    let msg = "";
-    if (kind === "grant") {
-      msg = `🤲 *طلب دعم مالي — ${d.courseTitle}*\n\n`;
-      msg += `👤 الاسم: ${customer.name}\n📱 واتساب: ${customer.whatsapp}\n`;
-      if (customer.email) msg += `📧 إيميل: ${customer.email}\n`;
-      msg += `\n💬 سبب الطلب: ${customer.reason}\n`;
-      msg += `🎯 نوع الدعم: ${customer.grantType}\n`;
-      msg += `\n💰 السعر الأساسي: ${d.basePrice.toLocaleString("ar-EG")} ${d.currency}`;
-    } else {
-      msg = `🎯 *حجز جديد — ${d.courseTitle}*\n\n`;
-      msg += `👤 الاسم: ${customer.name}\n📱 واتساب: ${customer.whatsapp}\n`;
-      if (customer.email) msg += `📧 إيميل: ${customer.email}\n`;
-      if (customer.city) msg += `🏙️ المدينة: ${customer.city}\n`;
-      msg += `\n💳 طريقة الدفع: ${d.paymentLabel}\n`;
-      if (d.installmentText) msg += `📅 ${d.installmentText}\n`;
-      msg += `\n💰 السعر الأساسي: ${d.basePrice.toLocaleString("ar-EG")} ${d.currency}\n`;
-      if (d.savings > 0) msg += `🎁 التوفير: ${d.savings.toLocaleString("ar-EG")} ${d.currency}\n`;
-      msg += `✅ *المبلغ المطلوب: ${d.finalPrice.toLocaleString("ar-EG")} ${d.currency}*\n`;
-      if (d.coupon) msg += `🏷️ كود الخصم: ${d.coupon}\n`;
-      msg += `\n💵 وسيلة الدفع المختارة: ${customer.payMethods.map((p) => payNames[p] || p).join("، ")}`;
-      if (customer.notes) msg += `\n📝 ملاحظات: ${customer.notes}`;
+    // توليد كود تليجرام فريد
+    const telegramCode = ("BK" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4)).toUpperCase();
+
+    const fullRecord = {
+      ...bookingData,
+      bookingId: "BK_" + Date.now() + "_" + Math.random().toString(36).slice(2, 11),
+      timestamp: new Date().toISOString(),
+      status: "pending",
+      telegramCode,
+      automationEnabled: true,
+    };
+
+    let firebaseSaved = false;
+
+    if (fbReady && db) {
+      try {
+        const docRef = await db.collection("tempBookings").add(fullRecord);
+        firebaseSaved = true;
+
+        // تحديث الكوبون في Firebase لو كان مفعّلاً
+        if (fullRecord.coupon && fullRecord.coupon.isFirebase && fullRecord.coupon.id) {
+          try {
+            await db.collection("coupons").doc(fullRecord.coupon.id).update({
+              used: firebase.firestore.FieldValue.increment(1),
+              status: "used",
+              usedAt: firebase.firestore.FieldValue.serverTimestamp(),
+              bookingId: docRef.id,
+            });
+          } catch (e) { console.warn("Coupon update failed:", e); }
+        }
+      } catch (e) {
+        console.error("Firebase save failed:", e);
+      }
     }
 
-    /* جوجل فورم في الخلفية */
-    if ((b.method === "googleform" || b.method === "both") && b.googleForm && b.googleForm.formId) {
-      sendToGoogleForm(b.googleForm, d, customer);
-    }
+    /* عرض شاشة النجاح — نظيفة، بدون نسخ يدوي */
+    const botUrl = `https://t.me/${CFG.telegram.botUsername}?start=${telegramCode}`;
+    const isGrant = bookingData.bookingType === "grant_request";
 
-    /* واتساب */
-    if (b.method === "whatsapp" || b.method === "both") {
-      const url = `https://wa.me/${b.whatsappNumber}?text=${encodeURIComponent(msg)}`;
-      Swal.fire({
-        icon: "success",
-        title: kind === "grant" ? "🤲 جاهز نراجع طلبك!" : "🎯 أنت على بُعد خطوة!",
-        html: `<p style="line-height:1.9;color:#374151;">${kind === "grant" ? "اضغط الزر لإرسال طلبك عبر الواتساب، وهنراجعه ونتواصل معاك خلال ٢٤–٤٨ ساعة." : "اضغط الزر عشان تبعت تفاصيل حجزك على الواتساب، ونكمّل معاك إجراءات الدفع والوصول للمحتوى فوراً."}</p>`,
-        confirmButtonText: "📲 إرسال عبر الواتساب",
-        confirmButtonColor: "#25D366",
-        allowOutsideClick: false,
-      }).then((r) => { if (r.isConfirmed) window.open(url, "_blank"); });
-    } else {
-      Swal.fire({ icon: "success", title: "تم استلام طلبك ✅", text: "هنتواصل معاك قريباً.", confirmButtonColor: "#4A8A5C" });
-    }
+    await Swal.fire({
+      icon: "success",
+      title: isGrant ? "🤲 تم استلام طلب الدعم" : "🎯 تم تسجيل حجزك",
+      html: `<div style="text-align:right;direction:rtl;">
+        <div style="background:linear-gradient(135deg,#FEF3C7,#FDE68A);padding:18px;border-radius:12px;margin-bottom:18px;">
+          <p style="color:#78350F;font-size:1.05rem;line-height:1.85;margin:0;">
+            ${isGrant
+              ? "وصلنا طلبك، وهنراجعه خلال ٢٤–٤٨ ساعة. خطوتك التالية: أكّد طلبك عبر بوت تليجرام بضغطة واحدة."
+              : "بياناتك مسجّلة في نظامنا. خطوتك الأخيرة: أكّد حجزك واستلم تعليمات الدفع عبر بوت تليجرام."}
+          </p>
+        </div>
+
+        <div style="background:#F0F9FF;border:1px solid #BAE6FD;border-radius:12px;padding:18px;margin-bottom:14px;">
+          <h4 style="color:#075985;margin:0 0 12px;font-family:Amiri,serif;font-size:1.1rem;"><i class="fab fa-telegram"></i> تأكيد عبر تليجرام — تلقائي بضغطة واحدة</h4>
+          <p style="color:#1E293B;margin:0 0 6px;font-size:.95rem;line-height:1.75;">
+            ١. اضغط الزر الأزرق أسفل هذه النافذة.
+          </p>
+          <p style="color:#1E293B;margin:0 0 6px;font-size:.95rem;line-height:1.75;">
+            ٢. في تليجرام، اضغط زر <strong style="color:#0EA5E9;">Start</strong>.
+          </p>
+          <p style="color:#1E293B;margin:0;font-size:.95rem;line-height:1.75;">
+            ٣. هنرسل لك تعليمات الدفع وتفاصيل التأكيد فوراً.
+          </p>
+        </div>
+
+        <div style="background:#F9FAFB;border-radius:10px;padding:12px 14px;text-align:center;border:1px dashed #D1D5DB;">
+          <p style="margin:0 0 4px;color:#6B7280;font-size:.78rem;">رقم الطلب المرجعي (للحفظ فقط — يُنقل تلقائياً):</p>
+          <p style="margin:0;color:#374151;font-family:monospace;letter-spacing:2px;font-size:.95rem;font-weight:700;">${telegramCode}</p>
+        </div>
+
+        ${!firebaseSaved ? `<div style="background:#FEF2F2;border-right:3px solid #E11D48;padding:12px;border-radius:8px;margin-top:14px;color:#991B1B;font-size:.88rem;">
+          <i class="fas fa-exclamation-triangle"></i> ملاحظة: حصلت مشكلة بسيطة في حفظ البيانات. لو ما وصلكش رد من البوت خلال دقائق، تواصل واتساب.
+        </div>` : ""}
+      </div>`,
+      confirmButtonText: '<i class="fab fa-telegram"></i>  إكمال عبر تليجرام',
+      confirmButtonColor: "#0EA5E9",
+      showCancelButton: !firebaseSaved,
+      cancelButtonText: "تواصل واتساب",
+      cancelButtonColor: "#25D366",
+      width: window.innerWidth <= 768 ? "95%" : "560px",
+      allowOutsideClick: false,
+    }).then((res) => {
+      if (res.isConfirmed) {
+        window.open(botUrl, "_blank");
+      } else if (res.dismiss === Swal.DismissReason.cancel) {
+        // فول‌باك واتساب لو فشل Firebase
+        const msg = buildFallbackWhatsAppMessage(fullRecord);
+        window.open(`https://wa.me/${CFG.fallbackWhatsApp}?text=${encodeURIComponent(msg)}`, "_blank");
+      }
+    });
   }
 
-  function sendToGoogleForm(gf, d, customer) {
-    try {
-      const fd = new FormData();
-      const e = gf.entries;
-      if (e.name) fd.append(e.name, customer.name);
-      if (e.whatsapp) fd.append(e.whatsapp, customer.whatsapp);
-      if (e.email) fd.append(e.email, customer.email || "");
-      if (e.payment) fd.append(e.payment, (customer.payMethods || []).join(", ") || customer.grantType || "");
-      if (e.plan) fd.append(e.plan, d.paymentLabel);
-      if (e.amount) fd.append(e.amount, String(d.finalPrice));
-      fetch(`https://docs.google.com/forms/d/e/${gf.formId}/formResponse`, {
-        method: "POST", mode: "no-cors", body: fd,
-      });
-    } catch (err) { console.warn("Google Form submit skipped:", err); }
+  function buildFallbackWhatsAppMessage(record) {
+    const c = record.customer || {};
+    const isGrant = record.bookingType === "grant_request";
+    let m = isGrant ? `🤲 *طلب دعم — ${record.courseName}*\n\n` : `🎯 *حجز جديد — ${record.courseName}*\n\n`;
+    m += `📌 رقم الطلب: ${record.telegramCode}\n`;
+    m += `👤 الاسم: ${c.name}\n📱 واتساب: ${c.whatsapp}\n`;
+    if (c.email) m += `📧 ${c.email}\n`;
+    if (c.city) m += `🏙️ ${c.city}\n`;
+    if (isGrant && record.grantDetails) {
+      m += `\n💬 السبب: ${record.grantDetails.reason}\n`;
+      m += `🎯 نوع الدعم: ${record.grantDetails.supportType}\n`;
+    } else if (record.payment) {
+      m += `\n💳 طريقة الدفع: ${record.payment.method}\n`;
+      if (record.payment.installmentDetails) m += `📅 ${record.payment.installmentDetails}\n`;
+    }
+    m += `\n💰 المبلغ المطلوب: ${record.pricing.finalPrice}`;
+    return m;
   }
 
-  /* ====================================================================
-     التهيئة
-     ==================================================================== */
+  /* =========================================================================
+     10) التهيئة
+     ========================================================================= */
   function init() {
+    initFirebase();
+
     renderOffers();
     renderPaymentCards();
     renderActiveOfferBadge();
@@ -565,6 +1000,7 @@
 
     document.getElementById("applyCouponCalc")?.addEventListener("click", applyCoupon);
     document.getElementById("calcBookBtn")?.addEventListener("click", showBookingForm);
+
     if (CFG.grant && CFG.grant.enabled) {
       const g = document.getElementById("calcGrantBtn");
       const sm = document.getElementById("calcSupportMessage");
@@ -572,15 +1008,18 @@
       if (sm) sm.style.display = "block";
     } else {
       document.getElementById("calcGrantBtn")?.remove();
+      document.getElementById("calcSupportMessage")?.remove();
     }
 
-    /* عدّاد تنازلي في الـ hero لو فيه عرض */
+    /* بادج العرض في الـ Hero */
     const offer = getActiveTimeOffer();
     const heroBadge = document.getElementById("heroOfferBadge");
     if (offer && heroBadge) {
       heroBadge.style.display = "inline-flex";
-      heroBadge.querySelector("[data-offer-name]").textContent = offer.name;
-      heroBadge.querySelector("[data-offer-pct]").textContent = `${offer.percentage}%`;
+      const nameEl = heroBadge.querySelector("[data-offer-name]");
+      const pctEl = heroBadge.querySelector("[data-offer-pct]");
+      if (nameEl) nameEl.textContent = offer.name;
+      if (pctEl) pctEl.textContent = `${offer.percentage}%`;
     }
   }
 
