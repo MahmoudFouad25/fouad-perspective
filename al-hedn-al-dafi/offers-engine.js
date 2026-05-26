@@ -1069,6 +1069,7 @@
       if (e.key === "Enter") { e.preventDefault(); applyCoupon(); }
     });
     document.getElementById("calcBookBtn")?.addEventListener("click", showBookingForm);
+    window.__alHednSetPack = setPack;
 
     if (CFG.grant && CFG.grant.enabled) {
       const g = document.getElementById("calcGrantBtn");
