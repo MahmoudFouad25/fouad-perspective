@@ -54,10 +54,10 @@ window.COURSE_CONFIG = {
   timeOffers: [
     {
       enabled: true,
-      name: "عرض الإطلاق",
-      percentage: 35,              // نسبة الخصم %
-      startDate: "2026-05-01",
-      endDate:   "2026-06-30",
+      name: "عرض عيد الأضحى",
+      percentage: 40,              // نسبة الخصم %
+      startDate: "2026-05-28",
+      endDate:   "2026-06-06",
       showCountdown: true,         // يعرض عدّاد تنازلي؟
     },
     {
