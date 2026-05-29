@@ -217,7 +217,7 @@ function dlog(emoji, msg) {
 }
 
 // ═══════════════════════════════════════
-// CONSTANTS
+// CONSTANTS  (البيانات المخزّنة — لا تُلمس)
 // ═══════════════════════════════════════
 const MODULE_IDS = {
   module1:'vJOTuqHemAOVytfSZ3A0', module2:'of0saBAUgUDnZGZyDR83', module3:'x2Zd9X1fZVKupfXlxWXq',
@@ -229,6 +229,8 @@ const MODULE_IDS = {
   module19:'XT5AH4rRUtg4k2Jw0dNR', module20:'8Db4d3vjC46YDYp5K2b4', module21:'LMrMgwrmu7Ujf2Wl2USG'
 };
 
+// MODULE_MAPPINGS: رقم المودويل في البيانات → الطبائع الثلاث التي يفحصها (لا تُلمس).
+// هذه هي مصدر الحقيقة لربط أيّ مودويل بمرآته ومحوره بالهوية (الطبائع)، لا بالرقم.
 const MODULE_MAPPINGS = {
   module1:{a:'1',b:'8',c:'9'}, module2:{a:'2',b:'3',c:'4'}, module3:{a:'5',b:'6',c:'7'},
   module4:{a:'1',b:'4',c:'5'}, module5:{a:'2',b:'7',c:'8'}, module6:{a:'3',b:'6',c:'9'},
@@ -251,9 +253,19 @@ const TYPE_INFO = {
   '9':{name:'الوسيط الهادئ',icon:'☮️',mot:'agency',essence:'الظهور والحضور الفاعل'}
 };
 
-// ═══ ترتيب العرض الجديد للمرايا السبع ═══
-// تم تغيير ترتيب الظهور فقط. كل كائن مرآة محفوظ بخصائصه كما هي تمامًا
-// (id, name, icon, q, modules) — لم يُمسّ أي اسم أو أيقونة أو سؤال أو موديول.
+// ═══════════════════════════════════════
+// المرايا السبع — ترتيب العرض الجديد (السطح → العمق)
+// ───────────────────────────────────────
+// كل مرآة تحمل في modules مفاتيح المودويلات الفعليّة في البيانات (data keys)
+// المطابقة لطبائعها في الخريطة التشغيليّة بالمرجع — لا الأرقام المتتالية.
+//   السلوك      = module10/11/12  (طبائع 1،2،6 / 3،7،8 / 4،5،9)
+//   الانتباه     = module4/5/6     (1،4،5 / 2،7،8 / 3،6،9)
+//   المشاعر      = module7/8/9     (1،3،5 / 4،6،8 / 2،7،9)
+//   النموذج      = module13/14/15  (1،3،6 / 4،7،8 / 2،5،9)
+//   الدوافع      = module1/2/3     (1،8،9 / 2،3،4 / 5،6،7)
+//   المعتقدات    = module16/17/18  (1،3،7 / 2،6،9 / 4،5،8)
+//   الجروح       = module19/20/21  (2،5،8 / 3،6،9 / 1،4،7)
+// (هذه المفاتيح هي تعيين البيانات الثابت، وقد تحقّقنا من مطابقتها للمرجع عبر MODULE_MAPPINGS.)
 const MIRRORS = [
   {id:'behavior',name:'مرآة السلوك',icon:'⚡',q:'ما ردك تحت الضغط؟',modules:['module10','module11','module12']},
   {id:'attention',name:'مرآة الانتباه',icon:'👁',q:'أين يذهب تركيزك؟',modules:['module4','module5','module6']},
@@ -265,36 +277,47 @@ const MIRRORS = [
 ];
 
 // ═══════════════════════════════════════
-// خرائط الربط بعد إعادة الترتيب — شرح مهم
+// طبقة الربط — كلّها بالهوية لا بالرقم  (الحل الجذريّ)
 // ═══════════════════════════════════════
-// قيمتان مرتبطتان بالترتيب القديم يجب ألّا تتأثرا بتغيير ترتيب العرض:
-//
-//  (1) placement لأقسام الكوتشينج المحفوظة في Firestore
-//      (القيم 'mirror-1' ... 'mirror-7' ثابتة في البيانات ومبنية على الترتيب القديم).
-//  (2) فهرس نتائج المرآة داخل results.mirrorResults — تحسبه دالة calculateResults
-//      من رقم الموديول عبر Math.floor((modNum-1)/3)، وهي دالة ممنوع تعديلها،
-//      فتبقى نتائجها مفهرسة بالترتيب القديم (0 = موديولات 1-3 ... 6 = موديولات 19-21).
-//
-// الحل: نربط "فهرس المرآة في الترتيب الجديد (mi)" بالقيمتين الأصليتين عبر
-// هوية المرآة (id) لا عبر موضعها — فلو أُعيد الترتيب مرة أخرى مستقبلًا تظل
-// الروابط صحيحة تلقائيًا دون أي تعديل آخر. لا نعيد تسمية placement في البيانات إطلاقًا.
 
-// placement الأصلي لكل مرآة حسب الـ id (ثابت مهما تغيّر ترتيب العرض)
+// (1) أيّ مرآة (بفهرس العرض) ينتمي إليها مودويل بيانات معيّن؟
+//     نقرأها من MIRRORS مباشرة، فلا حساب رقميّ (لا Math.floor) ولا افتراض ترتيب.
+//     بهذا يصبح فهرس المرآة في MIRRORS = فهرسها في results.mirrorResults تطابقًا تامًّا.
+function mirrorIndexForDataModule(mk){
+  for(var i=0;i<MIRRORS.length;i++){ if(MIRRORS[i].modules.indexOf(mk)>-1) return i; }
+  return -1;
+}
+
+// (2) ربط placement أقسام الكوتشينج المحفوظة في Firestore.
+//     قيم placement ('mirror-1'..'mirror-7') ثابتة في البيانات ومبنيّة على الترتيب القديم.
+//     نربط فهرس العرض الجديد → رقم placement الأصليّ عبر هويّة المرآة (id) لا موضعها،
+//     فيبقى كلّ قسم كوتشينج تحت مرآته الصحيحة مهما تغيّر ترتيب العرض. (لا نعيد تسمية البيانات.)
 const MIRROR_PLACEMENT_BY_ID = {
   motivation:1, attention:2, emotions:3, behavior:4,
   perception:5, beliefs:6, wounds:7
 };
-// تُرجِع قيمة placement الصحيحة للمرآة المعروضة في الموضع mi (الترتيب الجديد)
-// مثال: mi=0 الآن "السلوك" → MIRROR_PLACEMENT_BY_ID['behavior']=4 → 'mirror-4'
 function mirrorPlacement(mi){ return 'mirror-' + MIRROR_PLACEMENT_BY_ID[MIRRORS[mi].id]; }
 
-// فهرس نتائج المرآة داخل results.mirrorResults، مُشتق من أول موديول في المرآة
-// بنفس معادلة calculateResults — يضمن عرض نتائج المرآة الصحيحة بعد إعادة الترتيب
-// مثال: mi=0 "السلوك" أول موديول module10 → (10-1)/3=3 → results.mirrorResults[3]
-function mirrorResultsIndex(mi){
-  const modNum = parseInt(MIRRORS[mi].modules[0].replace('module',''),10);
-  return Math.floor((modNum-1)/3);
-}
+// (3) جسر الترقيم بين ملفّ الأسئلة والبيانات — السبب الجذريّ للخلل الذي ظهر.
+//     ملفّ spectrum-questions.js مُرقَّم بترتيب العرض الجديد (module1 = السلوك/الامتثال)،
+//     بينما البيانات (MODULE_MAPPINGS) مُرقَّمة بالترتيب القديم (module1 = الدوافع/الهمّة).
+//     لذلك مفتاح مودويل في البيانات ≠ مفتاحه في ملفّ الأسئلة لتسعة مودويلات.
+//     هذه الخريطة تترجم "مفتاح البيانات" → "مفتاح ملفّ الأسئلة" بمطابقة الطبائع داخل المرآة.
+//     مُشتقّة ومُتحقَّق منها: طبائع كلّ مودويل بيانات == طبائع المودويل المقابل في ملفّ الأسئلة.
+//       data module1  (1،8،9 الهمّة)   → spec module13
+//       data module10 (1،2،6 الامتثال) → spec module1   ← هذا ما أصلح ظهور السلوك بأسئلة النموذج
+//       data module13 (1،3،6 تنفيذ)    → spec module10
+//     (الانتباه/المشاعر/المعتقدات/الجروح متطابقة الترقيم في الملفّين، فتترجم إلى نفسها.)
+//     ملاحظة: العلاقة ثابتة بين الملفّين ولا تتأثّر بأيّ تغيير لاحق في ترتيب العرض.
+const DATA_TO_SPECTRUM_KEY = {
+  module1:'module13', module2:'module14', module3:'module15',
+  module4:'module4',  module5:'module5',  module6:'module6',
+  module7:'module7',  module8:'module8',  module9:'module9',
+  module10:'module1', module11:'module2', module12:'module3',
+  module13:'module10',module14:'module11',module15:'module12',
+  module16:'module16',module17:'module17',module18:'module18',
+  module19:'module19',module20:'module20',module21:'module21'
+};
 
 const SECTION_TYPES = {
   portrait:{name:'بورتريه',icon:'🎭',cls:'portrait'},
@@ -313,7 +336,7 @@ let clientName = '';
 let modulesStatus = {};
 let results = null;
 let coachingSections = [];
-let currentView = 'dashboard'; // dashboard | mirror-X | final
+let currentView = 'dashboard'; // dashboard | mirror-X | final | spectrum | spectrum-results
 
 // ═══════════════════════════════════════
 // AUTH & INIT
@@ -440,6 +463,10 @@ async function loadClientData() {
       dlog('⚠️', 'Coaching load error (non-fatal): ' + ce.message);
     }
 
+    // 3b) Pre-load spectrum answers (so state is ready before first render)
+    try { if (typeof loadSpectrum === 'function') { await loadSpectrum(); } }
+    catch(se) { dlog('⚠️', 'Spectrum preload skipped: ' + se.message); }
+
     // 4) Render
     document.getElementById('sClientName').textContent = clientName;
     buildSidebar();
@@ -456,6 +483,10 @@ async function loadClientData() {
 
 // ═══════════════════════════════════════
 // CALCULATE RESULTS
+// ───────────────────────────────────────
+// التغيير الجذريّ: تُوزَّع درجات كلّ مودويل على المرآة التي ينتمي إليها بالهوية
+// (mirrorIndexForDataModule) لا بحساب رقميّ. النتيجة: results.mirrorResults[mi]
+// يطابق MIRRORS[mi] تطابقًا تامًّا، فاختفت الحاجة لأيّ دالّة فهرسة وسيطة.
 // ═══════════════════════════════════════
 function calculateResults(ms) {
   const totalScores = {'1':0,'2':0,'3':0,'4':0,'5':0,'6':0,'7':0,'8':0,'9':0};
@@ -471,8 +502,8 @@ function calculateResults(ms) {
     const scores = {a:0,b:0,c:0};
     for (let i=1;i<=8;i++) { if(status.answers[i]){scores.a+=status.answers[i].a||0;scores.b+=status.answers[i].b||0;scores.c+=status.answers[i].c||0;}}
     totalScores[mapping.a]+=scores.a; totalScores[mapping.b]+=scores.b; totalScores[mapping.c]+=scores.c;
-    const modNum=parseInt(mk.replace('module',''));
-    const mi=Math.floor((modNum-1)/3);
+    const mi = mirrorIndexForDataModule(mk);   // ← ربط بالهوية لا بالرقم
+    if (mi < 0) continue;
     mirrorScores[mi][mapping.a]+=scores.a; mirrorScores[mi][mapping.b]+=scores.b; mirrorScores[mi][mapping.c]+=scores.c;
   }
   if(count===0) return null;
@@ -582,7 +613,7 @@ function showDashboard() {
   h += '<div class="mirrors-grid">';
 
   MIRRORS.forEach((m, mi) => {
-    const mScores = results?.mirrorResults?.[mirrorResultsIndex(mi)] || [];
+    const mScores = results?.mirrorResults?.[mi] || [];   // mi == فهرس المرآة بعد التوحيد
     const topType = mScores[0];
     const topInfo = topType && topType.score > 0 ? TYPE_INFO[topType.type] : null;
     const completedInMirror = m.modules.filter(mk => modulesStatus[mk]?.hasAnswers).length;
@@ -632,7 +663,7 @@ function showMirror(mi) {
   beforeResults.forEach(s => { h += renderCoachingBlock(s); });
 
   // Scores
-  const mScores = results?.mirrorResults?.[mirrorResultsIndex(mi)] || [];
+  const mScores = results?.mirrorResults?.[mi] || [];   // mi == فهرس المرآة بعد التوحيد
   if (mScores.length > 0 && mScores[0].score > 0) {
     const maxScore = mScores[0].score;
     h += '<h3 style="font-size:14px;color:var(--grn);margin:20px 0 12px">📊 نتائجك في هذه المرآة</h3>';
@@ -769,14 +800,10 @@ function closeSide() { document.getElementById('side').classList.remove('open');
 // Auth listener handles init automatically
 </script>
 
-<button onclick="document.getElementById('debugPanel').classList.toggle('show')" style="position:fixed;bottom:10px;left:10px;width:40px;height:40px;border-radius:50%;background:var(--grn);color:#fff;border:none;font-size:16px;cursor:pointer;z-index:999;display:flex;align-items:center;justify-content:center">🔍</button>
-<div id="debugPanel" style="position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,0.9);color:#0f0;font-family:monospace;font-size:11px;padding:12px;border-radius:10px;max-width:400px;max-height:250px;overflow-y:auto;z-index:999;display:none;direction:ltr;text-align:left;line-height:1.6"></div>
-<style>#debugPanel.show{display:block!important}</style>
-
-  <!-- ════════════════════════════════════════════════════════════════
-     وضع الطيف التفاعلي — يُلصق قبل </body> مباشرة في course-view.html
-     (الملفّ spectrum-questions.js لازم يكون بجانب الصفحة)
-     لا يلمس أيّ شيء قائم: TYPE_INFO / MODULE_MAPPINGS / ترتيب المرايا / النتائج
+<!-- ════════════════════════════════════════════════════════════════
+     وضع الطيف التفاعلي — البيانات في ملفّ منفصل (spectrum-questions.js)
+     يقرأ المنطق هنا الأسئلة عبر جسر الترقيم DATA_TO_SPECTRUM_KEY.
+     لا يلمس: TYPE_INFO / MODULE_MAPPINGS / ترتيب المرايا / عرض النتائج / CSS الأساسي
      ════════════════════════════════════════════════════════════════ -->
 <script src="spectrum-questions.js"></script>
 <script>
@@ -797,6 +824,16 @@ function closeSide() { document.getElementById('side').classList.remove('open');
            Object.keys(SPECTRUM_STATEMENTS).length >= 21;
   }
 
+  // ── جسر الترقيم: مفتاح بيانات → عبارات ملفّ الأسئلة الصحيحة ──
+  // كلّ وصول إلى SPECTRUM_STATEMENTS يمرّ من هنا، فلا يظهر مودويل بأسئلة محور آخر.
+  function specKeyFor(dataKey){
+    return (typeof DATA_TO_SPECTRUM_KEY !== 'undefined' && DATA_TO_SPECTRUM_KEY[dataKey]) || dataKey;
+  }
+  function specStatements(dataKey){
+    var k = specKeyFor(dataKey);
+    return (typeof SPECTRUM_STATEMENTS !== 'undefined' && SPECTRUM_STATEMENTS[k]) || [];
+  }
+
   // ── تحميل إجابات الطيف المحفوظة ──
   window.loadSpectrum = function(){
     return db.collection('spectrum_answers').doc(userId).get().then(function(snap){
@@ -815,7 +852,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
   };
 
   // ── ربط المحور بالهوية لا بالرقم ──
-  // أيّ مودويل (محور) داخل المرآة يحمل هذا الطابع؟ — عبر MODULE_MAPPINGS
+  // أيّ مودويل (محور) داخل المرآة يحمل هذا الطابع؟ — عبر MODULE_MAPPINGS (مفاتيح بيانات)
   function moduleForTypeInMirror(mi, typeNum){
     var mods = MIRRORS[mi].modules;
     for(var i=0;i<mods.length;i++){
@@ -827,7 +864,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
 
   // المودويلات المعروضة لمرآة: محور الطابع الأعلى، وعند التقارب محور الثاني أيضًا
   function modulesForMirror(mi){
-    var mScores = (results && results.mirrorResults && results.mirrorResults[mirrorResultsIndex(mi)]) || [];
+    var mScores = (results && results.mirrorResults && results.mirrorResults[mi]) || [];
     if(!mScores.length || !(mScores[0].score>0)) return [];
     var top = mScores[0], second = mScores[1];
     var topMod = moduleForTypeInMirror(mi, top.type);
@@ -846,7 +883,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
     var out = [];
     if(!results || !results.mirrorResults) return out;
     for(var mi=0; mi<MIRRORS.length; mi++){
-      var mScores = results.mirrorResults[mirrorResultsIndex(mi)] || [];
+      var mScores = results.mirrorResults[mi] || [];
       if(!mScores.length || !(mScores[0].score>0)) continue;
       var mods = modulesForMirror(mi);
       if(!mods.length) continue;
@@ -857,7 +894,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
 
   // الطابع الأعلى داخل المرآة المنتمي لمودويل معيّن (للسياق في النتائج)
   function topTypeForModuleInMirror(mi, mk){
-    var mScores = (results && results.mirrorResults && results.mirrorResults[mirrorResultsIndex(mi)]) || [];
+    var mScores = (results && results.mirrorResults && results.mirrorResults[mi]) || [];
     var map = MODULE_MAPPINGS[mk]; if(!map) return null;
     var set = [map.a, map.b, map.c], best=null, bestScore=-1;
     mScores.forEach(function(s){ if(set.indexOf(s.type)>-1 && s.score>bestScore){ bestScore=s.score; best=s.type; } });
@@ -889,8 +926,9 @@ function closeSide() { document.getElementById('side').classList.remove('open');
   }
 
   // ── الحساب لكلّ مودويل (بالتصنيف category لا بالموضع) ──
+  // sts تُقرأ عبر جسر الترقيم، فتطابق العبارات التي قُيّمت فعلًا، وتبقى المواضع متسقة.
   function computeModuleSpectrum(mk, ans){
-    var sts = SPECTRUM_STATEMENTS[mk] || [];
+    var sts = specStatements(mk);
     var balance=0, excess_a=0, excess_b=0, deficit_a=0, deficit_b=0;
     sts.forEach(function(st, j){
       var v = Number(ans[j]) || 0;
@@ -1054,7 +1092,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
     cur.modules.forEach(function(mk){
       if(!firstModule) h += '<div class="spec-div">❖</div>';
       firstModule = false;
-      var sts = SPECTRUM_STATEMENTS[mk] || [];
+      var sts = specStatements(mk);           // ← عبر جسر الترقيم
       var saved = a[mk] || [];
       sts.forEach(function(st, idx){
         var sel = saved[idx];
@@ -1119,7 +1157,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
     var allDone = eligible.every(isSpectrumMirrorAnswered);
     saveSpectrum(allDone).then(function(){
       var next = spectrumResumeStep(eligible);
-      if(allDone || next>=eligible.length){ saveSpectrum(true); showSpectrumResults(); }
+      if(allDone || next>=eligible.length){ showSpectrumResults(); }
       else if(spectrumStep+1 < eligible.length) showSpectrum(spectrumStep+1);
       else showSpectrum(next);
     });
@@ -1176,7 +1214,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
     document.getElementById('pageContent').innerHTML = h;
     closeSide(); window.scrollTo(0,0);
   };
-
+ 
   // ── الالتفاف حول الدوال القائمة (إضافة فقط، بلا تعديل) ──
   function injectSpectrumCard(){
     if(currentView!=='dashboard') return;
@@ -1201,7 +1239,7 @@ function closeSide() { document.getElementById('side').classList.remove('open');
       '<div class="s-nav-item spec-nav-item '+act+'" onclick="goSpectrumEntry()">' +
       '<span class="nav-icon">🌈</span> تشخيص الطيف '+badge+'</div>');
   }
-
+ 
   var _origShowDashboard = showDashboard;
   showDashboard = function(){
     _origShowDashboard.apply(this, arguments);
@@ -1214,13 +1252,13 @@ function closeSide() { document.getElementById('side').classList.remove('open');
       });
     }
   };
-
+ 
   var _origBuildSidebar = buildSidebar;
   buildSidebar = function(){
     _origBuildSidebar.apply(this, arguments);
     injectSpectrumNav();
   };
-
+ 
   // ── حقن أنماط الطيف (CSS) ──
   var css = ''+
   '.spec-card{max-width:500px;margin:0 auto 28px;padding:22px;background:var(--card);border-radius:20px;text-align:center;border:2px solid var(--bdr-gld);box-shadow:0 4px 20px rgba(200,150,62,.08);cursor:pointer;transition:all .2s}'+
@@ -1277,9 +1315,6 @@ function closeSide() { document.getElementById('side').classList.remove('open');
   '.specr-note{font-size:12px;color:var(--txt2);margin-top:8px;line-height:1.8}'+
   '.specr-flag{font-size:12px;padding:8px 12px;border-radius:8px;margin-top:8px;background:rgba(180,64,64,.07);color:var(--red);border:1px solid rgba(180,64,64,.2)}';
   var styleEl = document.createElement('style'); styleEl.textContent = css; document.head.appendChild(styleEl);
-
+ 
 })();
 </script>
-  
-</body>
-</html>
