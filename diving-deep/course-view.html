@@ -217,7 +217,7 @@ function dlog(emoji, msg) {
 }
 
 // ═══════════════════════════════════════
-// CONSTANTS
+// CONSTANTS  (البيانات المخزّنة — لا تُلمس)
 // ═══════════════════════════════════════
 const MODULE_IDS = {
   module1:'vJOTuqHemAOVytfSZ3A0', module2:'of0saBAUgUDnZGZyDR83', module3:'x2Zd9X1fZVKupfXlxWXq',
@@ -229,6 +229,8 @@ const MODULE_IDS = {
   module19:'XT5AH4rRUtg4k2Jw0dNR', module20:'8Db4d3vjC46YDYp5K2b4', module21:'LMrMgwrmu7Ujf2Wl2USG'
 };
 
+// MODULE_MAPPINGS: رقم المودويل في البيانات → الطبائع الثلاث التي يفحصها (لا تُلمس).
+// هذه هي مصدر الحقيقة لربط أيّ مودويل بمرآته ومحوره بالهوية (الطبائع)، لا بالرقم.
 const MODULE_MAPPINGS = {
   module1:{a:'1',b:'8',c:'9'}, module2:{a:'2',b:'3',c:'4'}, module3:{a:'5',b:'6',c:'7'},
   module4:{a:'1',b:'4',c:'5'}, module5:{a:'2',b:'7',c:'8'}, module6:{a:'3',b:'6',c:'9'},
@@ -251,15 +253,71 @@ const TYPE_INFO = {
   '9':{name:'الوسيط الهادئ',icon:'☮️',mot:'agency',essence:'الظهور والحضور الفاعل'}
 };
 
+// ═══════════════════════════════════════
+// المرايا السبع — ترتيب العرض الجديد (السطح → العمق)
+// ───────────────────────────────────────
+// كل مرآة تحمل في modules مفاتيح المودويلات الفعليّة في البيانات (data keys)
+// المطابقة لطبائعها في الخريطة التشغيليّة بالمرجع — لا الأرقام المتتالية.
+//   السلوك      = module10/11/12  (طبائع 1،2،6 / 3،7،8 / 4،5،9)
+//   الانتباه     = module4/5/6     (1،4،5 / 2،7،8 / 3،6،9)
+//   المشاعر      = module7/8/9     (1،3،5 / 4،6،8 / 2،7،9)
+//   النموذج      = module13/14/15  (1،3،6 / 4،7،8 / 2،5،9)
+//   الدوافع      = module1/2/3     (1،8،9 / 2،3،4 / 5،6،7)
+//   المعتقدات    = module16/17/18  (1،3،7 / 2،6،9 / 4،5،8)
+//   الجروح       = module19/20/21  (2،5،8 / 3،6،9 / 1،4،7)
+// (هذه المفاتيح هي تعيين البيانات الثابت، وقد تحقّقنا من مطابقتها للمرجع عبر MODULE_MAPPINGS.)
 const MIRRORS = [
-  {id:'motivation',name:'مرآة الدوافع',icon:'💫',q:'لماذا تفعل ما تفعله؟',modules:['module1','module2','module3']},
+  {id:'behavior',name:'مرآة السلوك',icon:'⚡',q:'ما ردك تحت الضغط؟',modules:['module10','module11','module12']},
   {id:'attention',name:'مرآة الانتباه',icon:'👁',q:'أين يذهب تركيزك؟',modules:['module4','module5','module6']},
   {id:'emotions',name:'مرآة المشاعر',icon:'💗',q:'ما الذي تفعله بمشاعرك؟',modules:['module7','module8','module9']},
-  {id:'behavior',name:'مرآة السلوك',icon:'⚡',q:'ما ردك تحت الضغط؟',modules:['module10','module11','module12']},
   {id:'perception',name:'النموذج الإدراكي',icon:'🧠',q:'كيف ينظم عقلك العالم؟',modules:['module13','module14','module15']},
+  {id:'motivation',name:'مرآة الدوافع',icon:'💫',q:'لماذا تفعل ما تفعله؟',modules:['module1','module2','module3']},
   {id:'beliefs',name:'مرآة المعتقدات',icon:'🔑',q:'من أين تستمد قيمتك؟',modules:['module16','module17','module18']},
   {id:'wounds',name:'مرآة الجروح',icon:'🩹',q:'الجرح لسه شغال؟',modules:['module19','module20','module21']}
 ];
+
+// ═══════════════════════════════════════
+// طبقة الربط — كلّها بالهوية لا بالرقم  (الحل الجذريّ)
+// ═══════════════════════════════════════
+
+// (1) أيّ مرآة (بفهرس العرض) ينتمي إليها مودويل بيانات معيّن؟
+//     نقرأها من MIRRORS مباشرة، فلا حساب رقميّ (لا Math.floor) ولا افتراض ترتيب.
+//     بهذا يصبح فهرس المرآة في MIRRORS = فهرسها في results.mirrorResults تطابقًا تامًّا.
+function mirrorIndexForDataModule(mk){
+  for(var i=0;i<MIRRORS.length;i++){ if(MIRRORS[i].modules.indexOf(mk)>-1) return i; }
+  return -1;
+}
+
+// (2) ربط placement أقسام الكوتشينج المحفوظة في Firestore.
+//     قيم placement ('mirror-1'..'mirror-7') ثابتة في البيانات ومبنيّة على الترتيب القديم.
+//     نربط فهرس العرض الجديد → رقم placement الأصليّ عبر هويّة المرآة (id) لا موضعها،
+//     فيبقى كلّ قسم كوتشينج تحت مرآته الصحيحة مهما تغيّر ترتيب العرض. (لا نعيد تسمية البيانات.)
+const MIRROR_PLACEMENT_BY_ID = {
+  motivation:1, attention:2, emotions:3, behavior:4,
+  perception:5, beliefs:6, wounds:7
+};
+function mirrorPlacement(mi){ return 'mirror-' + MIRROR_PLACEMENT_BY_ID[MIRRORS[mi].id]; }
+
+// (3) جسر الترقيم بين ملفّ الأسئلة والبيانات — السبب الجذريّ للخلل الذي ظهر.
+//     ملفّ spectrum-questions.js مُرقَّم بترتيب العرض الجديد (module1 = السلوك/الامتثال)،
+//     بينما البيانات (MODULE_MAPPINGS) مُرقَّمة بالترتيب القديم (module1 = الدوافع/الهمّة).
+//     لذلك مفتاح مودويل في البيانات ≠ مفتاحه في ملفّ الأسئلة لتسعة مودويلات.
+//     هذه الخريطة تترجم "مفتاح البيانات" → "مفتاح ملفّ الأسئلة" بمطابقة الطبائع داخل المرآة.
+//     مُشتقّة ومُتحقَّق منها: طبائع كلّ مودويل بيانات == طبائع المودويل المقابل في ملفّ الأسئلة.
+//       data module1  (1،8،9 الهمّة)   → spec module13
+//       data module10 (1،2،6 الامتثال) → spec module1   ← هذا ما أصلح ظهور السلوك بأسئلة النموذج
+//       data module13 (1،3،6 تنفيذ)    → spec module10
+//     (الانتباه/المشاعر/المعتقدات/الجروح متطابقة الترقيم في الملفّين، فتترجم إلى نفسها.)
+//     ملاحظة: العلاقة ثابتة بين الملفّين ولا تتأثّر بأيّ تغيير لاحق في ترتيب العرض.
+const DATA_TO_SPECTRUM_KEY = {
+  module1:'module13', module2:'module14', module3:'module15',
+  module4:'module4',  module5:'module5',  module6:'module6',
+  module7:'module7',  module8:'module8',  module9:'module9',
+  module10:'module1', module11:'module2', module12:'module3',
+  module13:'module10',module14:'module11',module15:'module12',
+  module16:'module16',module17:'module17',module18:'module18',
+  module19:'module19',module20:'module20',module21:'module21'
+};
 
 const SECTION_TYPES = {
   portrait:{name:'بورتريه',icon:'🎭',cls:'portrait'},
@@ -278,7 +336,7 @@ let clientName = '';
 let modulesStatus = {};
 let results = null;
 let coachingSections = [];
-let currentView = 'dashboard'; // dashboard | mirror-X | final
+let currentView = 'dashboard'; // dashboard | mirror-X | final | spectrum | spectrum-results
 
 // ═══════════════════════════════════════
 // AUTH & INIT
@@ -405,6 +463,10 @@ async function loadClientData() {
       dlog('⚠️', 'Coaching load error (non-fatal): ' + ce.message);
     }
 
+    // 3b) Pre-load spectrum answers (so state is ready before first render)
+    try { if (typeof loadSpectrum === 'function') { await loadSpectrum(); } }
+    catch(se) { dlog('⚠️', 'Spectrum preload skipped: ' + se.message); }
+
     // 4) Render
     document.getElementById('sClientName').textContent = clientName;
     buildSidebar();
@@ -421,6 +483,10 @@ async function loadClientData() {
 
 // ═══════════════════════════════════════
 // CALCULATE RESULTS
+// ───────────────────────────────────────
+// التغيير الجذريّ: تُوزَّع درجات كلّ مودويل على المرآة التي ينتمي إليها بالهوية
+// (mirrorIndexForDataModule) لا بحساب رقميّ. النتيجة: results.mirrorResults[mi]
+// يطابق MIRRORS[mi] تطابقًا تامًّا، فاختفت الحاجة لأيّ دالّة فهرسة وسيطة.
 // ═══════════════════════════════════════
 function calculateResults(ms) {
   const totalScores = {'1':0,'2':0,'3':0,'4':0,'5':0,'6':0,'7':0,'8':0,'9':0};
@@ -436,8 +502,8 @@ function calculateResults(ms) {
     const scores = {a:0,b:0,c:0};
     for (let i=1;i<=8;i++) { if(status.answers[i]){scores.a+=status.answers[i].a||0;scores.b+=status.answers[i].b||0;scores.c+=status.answers[i].c||0;}}
     totalScores[mapping.a]+=scores.a; totalScores[mapping.b]+=scores.b; totalScores[mapping.c]+=scores.c;
-    const modNum=parseInt(mk.replace('module',''));
-    const mi=Math.floor((modNum-1)/3);
+    const mi = mirrorIndexForDataModule(mk);   // ← ربط بالهوية لا بالرقم
+    if (mi < 0) continue;
     mirrorScores[mi][mapping.a]+=scores.a; mirrorScores[mi][mapping.b]+=scores.b; mirrorScores[mi][mapping.c]+=scores.c;
   }
   if(count===0) return null;
@@ -478,7 +544,7 @@ function buildSidebar() {
   h += '<div class="s-sec">المرايا السبع</div>';
   MIRRORS.forEach((m,mi) => {
     const completedInMirror = m.modules.filter(mk=>modulesStatus[mk]?.hasAnswers).length;
-    const coachingCount = coachingSections.filter(s=>s.placement==='mirror-'+(mi+1)).length;
+    const coachingCount = coachingSections.filter(s=>s.placement===mirrorPlacement(mi)).length;
     const isAct = currentView === 'mirror-'+mi;
 
     h += `<div class="s-nav-item ${isAct?'act':''}" onclick="showMirror(${mi})">
@@ -547,12 +613,12 @@ function showDashboard() {
   h += '<div class="mirrors-grid">';
 
   MIRRORS.forEach((m, mi) => {
-    const mScores = results?.mirrorResults?.[mi] || [];
+    const mScores = results?.mirrorResults?.[mi] || [];   // mi == فهرس المرآة بعد التوحيد
     const topType = mScores[0];
     const topInfo = topType && topType.score > 0 ? TYPE_INFO[topType.type] : null;
     const completedInMirror = m.modules.filter(mk => modulesStatus[mk]?.hasAnswers).length;
     const pct = Math.round((completedInMirror/3)*100);
-    const coachingCount = coachingSections.filter(s => s.placement === 'mirror-'+(mi+1)).length;
+    const coachingCount = coachingSections.filter(s => s.placement === mirrorPlacement(mi)).length;
 
     h += `<div class="mirror-dash-card" onclick="showMirror(${mi})">
       <div class="mdc-hd">
@@ -592,12 +658,12 @@ function showMirror(mi) {
   </div>`;
 
   // Mirror coaching content (before results)
-  const mirrorCoaching = coachingSections.filter(s => s.placement === 'mirror-'+(mi+1));
+  const mirrorCoaching = coachingSections.filter(s => s.placement === mirrorPlacement(mi));
   const beforeResults = mirrorCoaching.filter(s => ['portrait','insight','text'].includes(s.type));
   beforeResults.forEach(s => { h += renderCoachingBlock(s); });
 
   // Scores
-  const mScores = results?.mirrorResults?.[mi] || [];
+  const mScores = results?.mirrorResults?.[mi] || [];   // mi == فهرس المرآة بعد التوحيد
   if (mScores.length > 0 && mScores[0].score > 0) {
     const maxScore = mScores[0].score;
     h += '<h3 style="font-size:14px;color:var(--grn);margin:20px 0 12px">📊 نتائجك في هذه المرآة</h3>';
@@ -734,8 +800,520 @@ function closeSide() { document.getElementById('side').classList.remove('open');
 // Auth listener handles init automatically
 </script>
 
-<button onclick="document.getElementById('debugPanel').classList.toggle('show')" style="position:fixed;bottom:10px;left:10px;width:40px;height:40px;border-radius:50%;background:var(--grn);color:#fff;border:none;font-size:16px;cursor:pointer;z-index:999;display:flex;align-items:center;justify-content:center">🔍</button>
-<div id="debugPanel" style="position:fixed;bottom:60px;left:10px;background:rgba(0,0,0,0.9);color:#0f0;font-family:monospace;font-size:11px;padding:12px;border-radius:10px;max-width:400px;max-height:250px;overflow-y:auto;z-index:999;display:none;direction:ltr;text-align:left;line-height:1.6"></div>
-<style>#debugPanel.show{display:block!important}</style>
-</body>
-</html>
+<!-- ════════════════════════════════════════════════════════════════
+     وضع الطيف التفاعلي — البيانات في ملفّ منفصل (spectrum-questions.js)
+     يقرأ المنطق هنا الأسئلة عبر جسر الترقيم DATA_TO_SPECTRUM_KEY.
+     لا يلمس: TYPE_INFO / MODULE_MAPPINGS / ترتيب المرايا / عرض النتائج / CSS الأساسي
+     ════════════════════════════════════════════════════════════════ -->
+<script src="spectrum-questions.js"></script>
+<script>
+(function(){
+
+  // ── إعدادات ──
+  var SPEC_AMBIGUOUS_GAP = 3;     // فرق < 3 بين الأعلى والذي يليه ⇒ الموقع ملتبس
+  var SPEC_CONVERGE = 0.10;       // فرق < 10% بين الطابع الأول والثاني ⇒ عرض المحورين معًا
+  var SPEC_SUSPICIOUS = 10;       // اتزان ≥ 10 و تفريط ≥ 10 معًا ⇒ "اتزان مشكوك فيه"
+
+  // ── حالة الطيف ──
+  window.spectrumState = { answers:{}, savedResults:{}, completedFlag:false, loaded:false, _loading:false };
+  window.spectrumStep = 0;
+  window._specCur = null;
+
+  function spectrumLoaded(){
+    return typeof SPECTRUM_STATEMENTS !== 'undefined' && SPECTRUM_STATEMENTS &&
+           Object.keys(SPECTRUM_STATEMENTS).length >= 21;
+  }
+
+  // ── جسر الترقيم: مفتاح بيانات → عبارات ملفّ الأسئلة الصحيحة ──
+  // كلّ وصول إلى SPECTRUM_STATEMENTS يمرّ من هنا، فلا يظهر مودويل بأسئلة محور آخر.
+  function specKeyFor(dataKey){
+    return (typeof DATA_TO_SPECTRUM_KEY !== 'undefined' && DATA_TO_SPECTRUM_KEY[dataKey]) || dataKey;
+  }
+  function specStatements(dataKey){
+    var k = specKeyFor(dataKey);
+    return (typeof SPECTRUM_STATEMENTS !== 'undefined' && SPECTRUM_STATEMENTS[k]) || [];
+  }
+
+  // ── تحميل إجابات الطيف المحفوظة ──
+  window.loadSpectrum = function(){
+    return db.collection('spectrum_answers').doc(userId).get().then(function(snap){
+      if(snap.exists){
+        var d = snap.data();
+        spectrumState.answers = d.answers || {};
+        spectrumState.savedResults = d.results || {};
+        spectrumState.completedFlag = !!d.completed;
+        if(typeof dlog==='function') dlog('🌈','Spectrum loaded: mirrors='+Object.keys(spectrumState.answers).length);
+      } else if(typeof dlog==='function'){ dlog('🌈','No spectrum answers yet'); }
+      spectrumState.loaded = true;
+    }).catch(function(e){
+      if(typeof dlog==='function') dlog('⚠️','Spectrum load error (non-fatal): '+e.message);
+      spectrumState.loaded = true;
+    });
+  };
+
+  // ── ربط المحور بالهوية لا بالرقم ──
+  // أيّ مودويل (محور) داخل المرآة يحمل هذا الطابع؟ — عبر MODULE_MAPPINGS (مفاتيح بيانات)
+  function moduleForTypeInMirror(mi, typeNum){
+    var mods = MIRRORS[mi].modules;
+    for(var i=0;i<mods.length;i++){
+      var map = MODULE_MAPPINGS[mods[i]];
+      if(map && (map.a===typeNum || map.b===typeNum || map.c===typeNum)) return mods[i];
+    }
+    return null;
+  }
+
+  // المودويلات المعروضة لمرآة: محور الطابع الأعلى، وعند التقارب محور الثاني أيضًا
+  function modulesForMirror(mi){
+    var mScores = (results && results.mirrorResults && results.mirrorResults[mi]) || [];
+    if(!mScores.length || !(mScores[0].score>0)) return [];
+    var top = mScores[0], second = mScores[1];
+    var topMod = moduleForTypeInMirror(mi, top.type);
+    if(!topMod) return [];
+    var mods = [topMod];
+    if(second && second.score>0 && top.score>0){
+      var gap = (top.score - second.score)/top.score;
+      var secMod = moduleForTypeInMirror(mi, second.type);
+      if(gap < SPEC_CONVERGE && secMod && secMod !== topMod) mods.push(secMod);
+    }
+    return mods;
+  }
+
+  // المرايا المؤهّلة للطيف (لها طابع أعلى محسوب) — بترتيب العرض الحالي
+  function eligibleSpectrumMirrors(){
+    var out = [];
+    if(!results || !results.mirrorResults) return out;
+    for(var mi=0; mi<MIRRORS.length; mi++){
+      var mScores = results.mirrorResults[mi] || [];
+      if(!mScores.length || !(mScores[0].score>0)) continue;
+      var mods = modulesForMirror(mi);
+      if(!mods.length) continue;
+      out.push({ mi:mi, id:MIRRORS[mi].id, name:MIRRORS[mi].name, icon:MIRRORS[mi].icon, modules:mods });
+    }
+    return out;
+  }
+
+  // الطابع الأعلى داخل المرآة المنتمي لمودويل معيّن (للسياق في النتائج)
+  function topTypeForModuleInMirror(mi, mk){
+    var mScores = (results && results.mirrorResults && results.mirrorResults[mi]) || [];
+    var map = MODULE_MAPPINGS[mk]; if(!map) return null;
+    var set = [map.a, map.b, map.c], best=null, bestScore=-1;
+    mScores.forEach(function(s){ if(set.indexOf(s.type)>-1 && s.score>bestScore){ bestScore=s.score; best=s.type; } });
+    return best;
+  }
+
+  // هل أُجيبت كلّ مودويلات المرآة (6 تقييمات صالحة لكلّ مودويل)؟
+  function isSpectrumMirrorAnswered(m){
+    var a = spectrumState.answers[m.id];
+    if(!a) return false;
+    return m.modules.every(function(mk){
+      var arr = a[mk];
+      return Array.isArray(arr) && arr.length===6 && arr.every(function(v){ return v>=1 && v<=7; });
+    });
+  }
+
+  function spectrumResumeStep(eligible){
+    for(var i=0;i<eligible.length;i++){ if(!isSpectrumMirrorAnswered(eligible[i])) return i; }
+    return eligible.length;
+  }
+
+  function spectrumStatus(){
+    var eligible = eligibleSpectrumMirrors();
+    if(eligible.length===0) return { state:'nodata', answered:0, total:0 };
+    var answered = eligible.filter(isSpectrumMirrorAnswered).length;
+    if(answered===0) return { state:'none', answered:answered, total:eligible.length };
+    if(answered<eligible.length) return { state:'partial', answered:answered, total:eligible.length };
+    return { state:'done', answered:answered, total:eligible.length };
+  }
+
+  // ── الحساب لكلّ مودويل (بالتصنيف category لا بالموضع) ──
+  // sts تُقرأ عبر جسر الترقيم، فتطابق العبارات التي قُيّمت فعلًا، وتبقى المواضع متسقة.
+  function computeModuleSpectrum(mk, ans){
+    var sts = specStatements(mk);
+    var balance=0, excess_a=0, excess_b=0, deficit_a=0, deficit_b=0;
+    sts.forEach(function(st, j){
+      var v = Number(ans[j]) || 0;
+      switch(st.category){
+        case 'balance':   balance += v; break;
+        case 'excess_a':  excess_a = v; break;
+        case 'excess_b':  excess_b = v; break;
+        case 'deficit_a': deficit_a = v; break;
+        case 'deficit_b': deficit_b = v; break;
+      }
+    });
+    var excess = excess_a + excess_b, deficit = deficit_a + deficit_b;
+    var three = [
+      { k:'balance', label:'اتزان', v:balance },
+      { k:'excess',  label:'إفراط', v:excess },
+      { k:'deficit', label:'تفريط', v:deficit }
+    ].sort(function(x,y){ return y.v - x.v; });
+
+    var position, ambiguous=false, positionLabel;
+    if(three[0].v - three[1].v < SPEC_AMBIGUOUS_GAP){ position='ملتبس'; ambiguous=true; positionLabel='ملتبس'; }
+    else { position = three[0].k; positionLabel = three[0].label; }
+
+    var image=null, imageKey=null;
+    if(position==='excess'){
+      if(excess_a>excess_b){ image='الصورة الأولى (أ)'; imageKey='a'; }
+      else if(excess_b>excess_a){ image='الصورة الثانية (ب)'; imageKey='b'; }
+      else { image='بصورتيه'; imageKey='both'; }
+    } else if(position==='deficit'){
+      if(deficit_a>deficit_b){ image='الصورة الأولى (أ)'; imageKey='a'; }
+      else if(deficit_b>deficit_a){ image='الصورة الثانية (ب)'; imageKey='b'; }
+      else { image='بصورتيه'; imageKey='both'; }
+    }
+    var suspiciousBalance = (balance >= SPEC_SUSPICIOUS && deficit >= SPEC_SUSPICIOUS);
+    return { balance:balance, excess:excess, deficit:deficit,
+             excess_a:excess_a, excess_b:excess_b, deficit_a:deficit_a, deficit_b:deficit_b,
+             position:position, positionLabel:positionLabel, image:image, imageKey:imageKey,
+             ambiguous:ambiguous, suspiciousBalance:suspiciousBalance };
+  }
+
+  function computeSpectrumResults(){
+    var out = {};
+    eligibleSpectrumMirrors().forEach(function(m){
+      var a = spectrumState.answers[m.id]; if(!a) return;
+      m.modules.forEach(function(mk){
+        var ans = a[mk];
+        if(!Array.isArray(ans) || ans.length<6 || ans.some(function(v){ return !(v>=1&&v<=7); })) return;
+        out[m.id] = out[m.id] || {};
+        out[m.id][mk] = computeModuleSpectrum(mk, ans);
+      });
+    });
+    return out;
+  }
+
+  // ── الحفظ ──
+  window.saveSpectrum = function(completed){
+    var res = computeSpectrumResults();
+    spectrumState.savedResults = res;
+    spectrumState.completedFlag = !!completed;
+    return db.collection('spectrum_answers').doc(userId).set({
+      answers: spectrumState.answers,
+      results: res,
+      courseId: courseId || null,
+      completed: !!completed,
+      lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(function(){
+      if(typeof dlog==='function') dlog('💾','Spectrum saved. completed='+completed);
+    }).catch(function(e){
+      if(typeof dlog==='function') dlog('❌','Spectrum save error: '+e.message);
+      alert('تعذّر حفظ إجابات الطيف: '+e.message);
+    });
+  };
+
+  // ── إعادة التقييم ──
+  window.resetSpectrum = function(){
+    if(!confirm('إعادة تقييم الطيف ستحذف كلّ إجاباتك السابقة في الطيف. هل تريد المتابعة؟')) return;
+    spectrumState.answers = {}; spectrumState.savedResults = {}; spectrumState.completedFlag = false;
+    db.collection('spectrum_answers').doc(userId).set({
+      answers:{}, results:{}, courseId:courseId||null, completed:false,
+      lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(function(){
+      if(typeof dlog==='function') dlog('🔄','Spectrum reset');
+      showSpectrum(0);
+    }).catch(function(e){ alert('تعذّر إعادة التعيين: '+e.message); });
+  };
+
+  // ── التوجيه عند الدخول ──
+  window.goSpectrumEntry = function(){
+    if(!spectrumLoaded()){ alert('ملفّ أسئلة الطيف لم يُحمّل. تأكّد من وجود spectrum-questions.js بجانب الصفحة.'); return; }
+    if(!spectrumState.loaded){
+      loadSpectrum().then(function(){ goSpectrumEntry(); }); return;
+    }
+    var st = spectrumStatus();
+    if(st.state==='nodata'){ currentView='spectrum'; buildSidebar(); renderSpectrumNoData(); return; }
+    if(st.state==='done'){ showSpectrumResults(); return; }
+    showSpectrum();
+  };
+
+  // ── شاشات مساعدة ──
+  function renderSpectrumNoData(){
+    document.getElementById('tbarTitle').innerHTML = '<b>🌈 تشخيص الطيف</b>';
+    document.getElementById('pageContent').innerHTML =
+      '<div class="spec-wrap"><button class="back-btn" onclick="showDashboard()">→ الرئيسية</button>' +
+      '<div class="mirror-header"><div class="m-icon">🌈</div><h2>تشخيص الطيف</h2>' +
+      '<p>أكمل محطات التقييم أوّلًا حتى نُحدّد محورك في كلّ مرآة.</p></div></div>';
+    closeSide();
+  }
+  function renderSpectrumError(){
+    document.getElementById('pageContent').innerHTML =
+      '<div class="spec-wrap"><div class="specr-flag" style="text-align:center">⚠️ تعذّر تحميل ملفّ أسئلة الطيف (spectrum-questions.js). ضع الملفّ بجانب الصفحة وأعد التحميل.</div></div>';
+  }
+
+  // ── بطاقة الطيف في الرئيسية ──
+  function renderSpectrumCard(){
+    if(!spectrumLoaded())
+      return '<div class="spec-card err"><div class="spec-card-icon">⚠️</div><div class="spec-card-t">تشخيص الطيف</div>' +
+             '<div class="spec-card-d">ملفّ الأسئلة spectrum-questions.js غير محمّل.</div></div>';
+    if(!spectrumState.loaded)
+      return '<div class="spec-card"><div class="spec-card-icon">🌈</div><div class="spec-card-t">تشخيص الطيف التفاعلي</div>' +
+             '<div class="spec-card-d">جاري التحميل…</div></div>';
+    var st = spectrumStatus();
+    if(st.state==='nodata')
+      return '<div class="spec-card"><div class="spec-card-icon">🌈</div><div class="spec-card-t">تشخيص الطيف التفاعلي</div>' +
+             '<div class="spec-card-d">أكمل محطات التقييم أوّلًا حتى نُحدّد محورك في كلّ مرآة.</div></div>';
+    var cta, sub;
+    if(st.state==='none'){ cta='ابدأ تشخيص الطيف'; sub='قيّم موقعك الحاليّ على طيف الاتزان في كلّ مرآة.'; }
+    else if(st.state==='partial'){ cta='أكمل من حيث وقفت'; sub='أكملت '+st.answered+' من '+st.total+' مرايا.'; }
+    else { cta='عرض نتيجة الطيف'; sub='اكتمل تشخيص الطيف.'; }
+    var pct = st.total ? Math.round(st.answered/st.total*100) : 0;
+    return '<div class="spec-card" onclick="goSpectrumEntry()">' +
+      '<div class="spec-card-icon">🌈</div><div class="spec-card-t">تشخيص الطيف التفاعلي</div>' +
+      '<div class="spec-card-d">'+sub+'</div>' +
+      '<div class="spec-card-bar"><div class="spec-card-fill" style="width:'+pct+'%"></div></div>' +
+      '<button class="spec-card-btn">'+cta+'</button></div>';
+  }
+
+  // ── شاشة الأسئلة ──
+  window.showSpectrum = function(step){
+    if(!spectrumLoaded()){ renderSpectrumError(); return; }
+    var eligible = eligibleSpectrumMirrors();
+    currentView = 'spectrum';
+    if(eligible.length===0){ buildSidebar(); renderSpectrumNoData(); return; }
+    if(step==null) step = spectrumResumeStep(eligible);
+    if(step>=eligible.length){ showSpectrumResults(); return; }
+    if(step<0) step = 0;
+    spectrumStep = step;
+    var cur = eligible[step]; _specCur = cur;
+    buildSidebar();
+    document.getElementById('tbarTitle').innerHTML = '<b>🌈 تشخيص الطيف</b>';
+    var a = spectrumState.answers[cur.id] || {};
+
+    var h = '<div class="spec-wrap">';
+    h += '<button class="back-btn" onclick="showDashboard()">→ الرئيسية</button>';
+    h += '<div class="mirror-header"><div class="m-icon">'+cur.icon+'</div><h2>'+cur.name+'</h2>'+
+         '<p>المرآة '+(step+1)+' من '+eligible.length+'</p></div>';
+    var pct = Math.round((step/eligible.length)*100);
+    h += '<div class="spec-progress"><div class="spec-progress-fill" style="width:'+pct+'%"></div></div>';
+    h += '<div class="spec-progress-txt">'+step+' من '+eligible.length+' مرايا مكتملة</div>';
+    h += '<div class="spec-intro">قيّم كلّ عبارة بصدق من واقع حالك في الفترة الأخيرة، لا من صورتك عن نفسك. لا توجد إجابة صحيحة.</div>';
+
+    var firstModule = true;
+    cur.modules.forEach(function(mk){
+      if(!firstModule) h += '<div class="spec-div">❖</div>';
+      firstModule = false;
+      var sts = specStatements(mk);           // ← عبر جسر الترقيم
+      var saved = a[mk] || [];
+      sts.forEach(function(st, idx){
+        var sel = saved[idx];
+        h += '<div class="spec-stmt"><div class="spec-stmt-txt">'+escH(st.text)+'</div>';
+        h += '<div class="spec-scale"><span class="spec-scale-end">لا تنطبق</span><div class="spec-dots" id="grp-'+mk+'-'+idx+'">';
+        for(var v=1; v<=7; v++){
+          h += '<button class="spec-dot '+(sel===v?'sel':'')+'" data-v="'+v+'" onclick="rateSpectrum(\''+mk+'\','+idx+','+v+')">'+v+'</button>';
+        }
+        h += '</div><span class="spec-scale-end r">تنطبق تمامًا</span></div></div>';
+      });
+    });
+
+    var isLast = (step >= eligible.length-1);
+    h += '<div class="spec-foot"><span class="spec-count" id="specCount"></span><div class="spec-nav-btns">';
+    h += '<button class="spec-btn ghost" onclick="spectrumPrev()">'+(step>0?'→ السابقة':'إلغاء')+'</button>';
+    h += '<button class="spec-btn primary" id="specNextBtn" onclick="spectrumNext()">'+(isLast?'إنهاء وعرض النتيجة':'المرآة التالية ←')+'</button>';
+    h += '</div></div></div>';
+
+    document.getElementById('pageContent').innerHTML = h;
+    updateSpecNext();
+    closeSide(); window.scrollTo(0,0);
+  };
+
+  window.rateSpectrum = function(mk, idx, val){
+    var m = _specCur; if(!m) return;
+    spectrumState.answers[m.id] = spectrumState.answers[m.id] || {};
+    if(!Array.isArray(spectrumState.answers[m.id][mk])) spectrumState.answers[m.id][mk] = [null,null,null,null,null,null];
+    spectrumState.answers[m.id][mk][idx] = val;
+    var grp = document.getElementById('grp-'+mk+'-'+idx);
+    if(grp){
+      var btns = grp.querySelectorAll('.spec-dot');
+      for(var i=0;i<btns.length;i++){ btns[i].classList.toggle('sel', Number(btns[i].getAttribute('data-v'))===val); }
+    }
+    updateSpecNext();
+  };
+
+  function currentSpecComplete(){
+    var m = _specCur; if(!m) return false;
+    var a = spectrumState.answers[m.id] || {};
+    return m.modules.every(function(mk){
+      var arr = a[mk];
+      return Array.isArray(arr) && arr.length===6 && arr.every(function(v){ return v>=1&&v<=7; });
+    });
+  }
+
+  function updateSpecNext(){
+    var btn = document.getElementById('specNextBtn'); if(!btn) return;
+    var ok = currentSpecComplete();
+    btn.disabled = !ok; btn.classList.toggle('disabled', !ok);
+    var m = _specCur, a = (m && spectrumState.answers[m.id]) || {};
+    var rated=0, total=0;
+    if(m) m.modules.forEach(function(mk){
+      var arr = a[mk] || [];
+      for(var j=0;j<6;j++){ total++; if(arr[j]>=1&&arr[j]<=7) rated++; }
+    });
+    var c = document.getElementById('specCount'); if(c) c.textContent = rated+' / '+total+' عبارة';
+  }
+
+  window.spectrumNext = function(){
+    if(!currentSpecComplete()) return;
+    var eligible = eligibleSpectrumMirrors();
+    var allDone = eligible.every(isSpectrumMirrorAnswered);
+    saveSpectrum(allDone).then(function(){
+      var next = spectrumResumeStep(eligible);
+      if(allDone || next>=eligible.length){ showSpectrumResults(); }
+      else if(spectrumStep+1 < eligible.length) showSpectrum(spectrumStep+1);
+      else showSpectrum(next);
+    });
+  };
+
+  window.spectrumPrev = function(){
+    if(spectrumStep>0) showSpectrum(spectrumStep-1); else showDashboard();
+  };
+
+  // ── شاشة النتائج ──
+  window.showSpectrumResults = function(){
+    currentView = 'spectrum-results';
+    buildSidebar();
+    document.getElementById('tbarTitle').innerHTML = '<b>🌈 نتيجة تشخيص الطيف</b>';
+    var res = computeSpectrumResults();
+    var eligible = eligibleSpectrumMirrors();
+    var h = '<div class="spec-wrap">';
+    h += '<button class="back-btn" onclick="showDashboard()">→ الرئيسية</button>';
+    h += '<div class="mirror-header"><div class="m-icon">🌈</div><h2>نتيجة تشخيص الطيف</h2>'+
+         '<p>موقعك الحاليّ على طيف الاتزان في كلّ مرآة</p></div>';
+    var any = false;
+    eligible.forEach(function(m){
+      var mr = res[m.id]; if(!mr) return;
+      m.modules.forEach(function(mk){
+        var r = mr[mk]; if(!r) return; any = true;
+        var ctxType = topTypeForModuleInMirror(m.mi, mk);
+        var ti = ctxType ? TYPE_INFO[ctxType] : null;
+        var posClass = r.ambiguous ? 'amb' : r.position;
+        var maxBar = 14;
+        h += '<div class="specr-card"><div class="specr-hd"><span class="ic">'+m.icon+'</span>'+
+             '<span class="nm">'+m.name+(ti?(' — '+ti.icon+' '+ctxType+' '+ti.name):'')+'</span></div>';
+        h += '<span class="specr-pos '+posClass+'">'+(r.ambiguous?'ملتبس (يُفرز في الجلسة)':r.positionLabel)+
+             (r.image?(' — '+r.image):'')+'</span>';
+        h += '<div class="specr-bars">';
+        [['balance','اتزان',r.balance],['excess','إفراط',r.excess],['deficit','تفريط',r.deficit]].forEach(function(row){
+          var w = Math.round(row[2]/maxBar*100);
+          h += '<div class="specr-bar-row"><span class="lbl">'+row[1]+'</span>'+
+               '<div class="bar"><div class="fill '+row[0]+'" style="width:'+w+'%"></div></div>'+
+               '<span class="v">'+row[2]+'</span></div>';
+        });
+        h += '</div>';
+        
+        if(r.suspiciousBalance)
+          h += '<div class="specr-flag">⚑ اتزان مشكوك فيه (الاتزان والتفريط مرتفعان معًا) — يُفرز في الجلسة.</div>';
+        if(r.ambiguous)
+          h += '<div class="specr-flag">⚑ الموقع ملتبس (الفارق بين الأعلى والذي يليه أقلّ من '+SPEC_AMBIGUOUS_GAP+' نقاط) — لا يُحسم آليًّا، يُفرز في الجلسة.</div>';
+        h += '</div>';
+      });
+    });
+    if(!any) h += '<div style="text-align:center;padding:30px;color:var(--mu)">لا توجد نتائج طيف بعد.</div>';
+    
+    h += '</div>';
+    document.getElementById('pageContent').innerHTML = h;
+    closeSide(); window.scrollTo(0,0);
+  };
+ 
+  // ── الالتفاف حول الدوال القائمة (إضافة فقط، بلا تعديل) ──
+  function injectSpectrumCard(){
+    if(currentView!=='dashboard') return;
+    var pc = document.getElementById('pageContent'); if(!pc) return;
+    if(pc.querySelector('.spec-card')) return; // مرّة واحدة
+    var anchor = pc.querySelector('.tritype-row') || pc.querySelector('.primary-card') || pc.querySelector('.dash-hd');
+    if(anchor) anchor.insertAdjacentHTML('afterend', renderSpectrumCard());
+    else pc.insertAdjacentHTML('afterbegin', renderSpectrumCard());
+  }
+  function injectSpectrumNav(){
+    var nav = document.getElementById('sNav'); if(!nav) return;
+    if(nav.querySelector('.spec-nav-item')) return;
+    var act = (currentView==='spectrum' || currentView==='spectrum-results') ? 'act' : '';
+    var badge = '';
+    if(spectrumLoaded() && spectrumState.loaded){
+      var st = spectrumStatus();
+      if(st.state==='done') badge = '<span class="nav-badge done">✅</span>';
+      else if(st.state==='partial') badge = '<span class="nav-badge has">'+st.answered+'/'+st.total+'</span>';
+    }
+    nav.insertAdjacentHTML('beforeend',
+      '<div class="s-sec spec-nav-sec">تشخيص الطيف</div>' +
+      '<div class="s-nav-item spec-nav-item '+act+'" onclick="goSpectrumEntry()">' +
+      '<span class="nav-icon">🌈</span> تشخيص الطيف '+badge+'</div>');
+  }
+ 
+  var _origShowDashboard = showDashboard;
+  showDashboard = function(){
+    _origShowDashboard.apply(this, arguments);
+    injectSpectrumCard();
+    if(spectrumLoaded() && !spectrumState.loaded && !spectrumState._loading){
+      spectrumState._loading = true;
+      loadSpectrum().then(function(){
+        spectrumState._loading = false;
+        if(currentView==='dashboard'){ buildSidebar(); showDashboard(); }
+      });
+    }
+  };
+ 
+  var _origBuildSidebar = buildSidebar;
+  buildSidebar = function(){
+    _origBuildSidebar.apply(this, arguments);
+    injectSpectrumNav();
+  };
+ 
+  // ── حقن أنماط الطيف (CSS) ──
+  var css = ''+
+  '.spec-card{max-width:500px;margin:0 auto 28px;padding:22px;background:var(--card);border-radius:20px;text-align:center;border:2px solid var(--bdr-gld);box-shadow:0 4px 20px rgba(200,150,62,.08);cursor:pointer;transition:all .2s}'+
+  '.spec-card:hover{transform:translateY(-2px);box-shadow:0 8px 26px rgba(200,150,62,.14)}'+
+  '.spec-card.err{border-color:rgba(180,64,64,.4);cursor:default}'+
+  '.spec-card-icon{font-size:34px;margin-bottom:6px}'+
+  '.spec-card-t{font-family:var(--fd);font-size:1.3em;font-weight:700;color:var(--grn);margin-bottom:4px}'+
+  '.spec-card-d{font-size:13px;color:var(--txt2);margin-bottom:12px}'+
+  '.spec-card-bar{height:8px;background:var(--bg2);border-radius:6px;overflow:hidden;margin-bottom:14px}'+
+  '.spec-card-fill{height:100%;background:linear-gradient(90deg,var(--grn),var(--gld));border-radius:6px;transition:width .6s}'+
+  '.spec-card-btn{font-family:var(--fb);font-size:13px;font-weight:600;color:#fff;background:var(--grn);border:none;border-radius:10px;padding:10px 24px;cursor:pointer;transition:all .2s}'+
+  '.spec-card-btn:hover{background:var(--grn2)}'+
+  '.spec-wrap{max-width:680px;margin:0 auto}'+
+  '.spec-progress{background:var(--bg2);height:8px;border-radius:6px;overflow:hidden;margin:6px 0 4px}'+
+  '.spec-progress-fill{height:100%;background:linear-gradient(90deg,var(--grn),var(--gld));border-radius:6px;transition:width .5s}'+
+  '.spec-progress-txt{font-size:11px;color:var(--mu);text-align:center;margin-bottom:18px}'+
+  '.spec-intro{background:var(--gld-bg);border:1px solid var(--bdr-gld);border-radius:12px;padding:14px 18px;font-size:13px;color:var(--txt2);line-height:1.9;margin-bottom:22px;text-align:center}'+
+  '.spec-stmt{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:18px 18px 14px;margin-bottom:14px;border-right:3px solid var(--gld2)}'+
+  '.spec-stmt-txt{font-size:14.5px;line-height:2;color:var(--txt);margin-bottom:14px}'+
+  '.spec-scale{display:flex;align-items:center;gap:6px;justify-content:space-between}'+
+  '.spec-scale-end{font-size:10px;color:var(--mu);min-width:46px}'+
+  '.spec-scale-end.r{text-align:left}'+
+  '.spec-dots{display:flex;gap:6px;flex:1;justify-content:center;flex-wrap:wrap}'+
+  '.spec-dot{width:36px;height:36px;border-radius:50%;border:1.5px solid var(--bdr);background:var(--card2);color:var(--txt2);font-family:var(--fc);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center}'+
+  '.spec-dot:hover{border-color:var(--gld);color:var(--gld)}'+
+  '.spec-dot.sel{background:var(--grn);border-color:var(--grn);color:#fff;transform:scale(1.08)}'+
+  '.spec-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px;padding-top:18px;border-top:1px solid var(--bdr);flex-wrap:wrap}'+
+  '.spec-count{font-size:12px;color:var(--mu)}'+
+  '.spec-nav-btns{display:flex;gap:10px}'+
+  '.spec-btn{font-family:var(--fb);font-size:13px;font-weight:600;border-radius:10px;padding:10px 22px;cursor:pointer;transition:all .2s;border:1px solid var(--bdr)}'+
+  '.spec-btn.ghost{background:var(--card);color:var(--txt2)}'+
+  '.spec-btn.ghost:hover{background:var(--bg2)}'+
+  '.spec-btn.primary{background:var(--grn);color:#fff;border-color:var(--grn)}'+
+  '.spec-btn.primary:hover{background:var(--grn2)}'+
+  '.spec-btn.disabled,.spec-btn:disabled{opacity:.45;cursor:not-allowed}'+
+  '.spec-div{text-align:center;color:var(--gld);opacity:.4;letter-spacing:4px;margin:10px 0 16px;font-size:12px}'+
+  '.specr-card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:18px;margin-bottom:14px;border-right:4px solid var(--gld)}'+
+  '.specr-hd{display:flex;align-items:center;gap:8px;margin-bottom:12px}'+
+  '.specr-hd .ic{font-size:20px}.specr-hd .nm{font-size:14px;font-weight:600;color:var(--grn)}'+
+  '.specr-pos{display:inline-block;font-size:12px;font-weight:700;padding:4px 12px;border-radius:10px;margin-bottom:10px}'+
+  '.specr-pos.balance{background:rgba(45,106,79,.1);color:var(--grn2)}'+
+  '.specr-pos.excess{background:rgba(200,150,62,.12);color:var(--gld)}'+
+  '.specr-pos.deficit{background:rgba(37,99,235,.1);color:var(--blue)}'+
+  '.specr-pos.amb{background:rgba(124,58,237,.1);color:var(--purple)}'+
+  '.specr-bars{margin:8px 0}'+
+  '.specr-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12px}'+
+  '.specr-bar-row .lbl{min-width:46px;color:var(--txt2)}'+
+  '.specr-bar-row .bar{flex:1;height:8px;background:var(--bg2);border-radius:4px;overflow:hidden}'+
+  '.specr-bar-row .fill{height:100%;border-radius:4px}'+
+  '.specr-bar-row .fill.balance{background:var(--grn2)}'+
+  '.specr-bar-row .fill.excess{background:var(--gld)}'+
+  '.specr-bar-row .fill.deficit{background:var(--blue)}'+
+  '.specr-bar-row .v{min-width:30px;text-align:left;font-weight:600;color:var(--txt)}'+
+  '.specr-note{font-size:12px;color:var(--txt2);margin-top:8px;line-height:1.8}'+
+  '.specr-flag{font-size:12px;padding:8px 12px;border-radius:8px;margin-top:8px;background:rgba(180,64,64,.07);color:var(--red);border:1px solid rgba(180,64,64,.2)}';
+  var styleEl = document.createElement('style'); styleEl.textContent = css; document.head.appendChild(styleEl);
+ 
+})();
+</script>
