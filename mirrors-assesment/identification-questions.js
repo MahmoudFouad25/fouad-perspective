@@ -1412,4 +1412,3 @@ if (typeof module !== "undefined" && module.exports) { module.exports = IDENTIFI
 
 };
 
-if (typeof module !== "undefined" && module.exports) { module.exports = IDENTIFICATION_QUESTIONS; }
