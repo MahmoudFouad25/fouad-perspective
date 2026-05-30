@@ -230,3 +230,4 @@ const SPECTRUM_STATEMENTS = {
 
 // إتاحة المتغيّر كـ global ليقرأه course-view.html
 if (typeof window !== 'undefined') { window.SPECTRUM_STATEMENTS = SPECTRUM_STATEMENTS; }
+if (typeof module !== "undefined" && module.exports) { module.exports = SPECTRUM_STATEMENTS; }
