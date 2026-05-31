@@ -109,16 +109,48 @@
 
     const dominantAxis = ranking[0] ? ranking[0].axisId : null;
 
-    // استثناء التقارب: الأوّل والثاني في محورين مختلفين و(خام1 − خام2) ≤ 1
+    const first  = ranking[0] || null;
+    const second = ranking[1] || null;
+    const third  = ranking[2] || null;
+
+    /* ── علم الإشارة الضعيفة [سيناريو د] — يُلغي ما عداه ──
+       حالتان: الأوّل منخفض (خام < 3)، أو تعادلٌ ثلاثيّ عبر ثلاثة محاور
+       مختلفة والفارق بين الأوّل والثالث ≤ 1. */
+    let weakSignal = false;
+    if (first) {
+      const lowTop = first.raw < 3;
+      let tripleTie = false;
+      if (first && second && third) {
+        const threeAxes = (first.axisId !== second.axisId) &&
+                          (first.axisId !== third.axisId)  &&
+                          (second.axisId !== third.axisId);
+        tripleTie = threeAxes && ((first.raw - third.raw) <= 1);
+      }
+      weakSignal = lowTop || tripleTie;
+    }
+
+    /* ── التقارب المُحكم [سيناريو ب/ج] — لا يُحسب إن كانت الإشارة ضعيفة ──
+       الشرط: (الأوّل − الثاني) ≤ 1  و  (الثاني − الثالث) ≥ 2.
+         محوران مختلفان → dualAxis (بابان).  المحور نفسه → sameAxisCloseness (باب الأوّل). */
     let dualAxis = null;
-    if (ranking.length >= 2) {
-      const a = ranking[0], b = ranking[1];
-      if (a.axisId !== b.axisId && (a.raw - b.raw) <= 1) {
-        dualAxis = [a.axisId, b.axisId];
+    let sameAxisCloseness = false;
+    if (!weakSignal && first && second) {
+      const topClose    = (first.raw - second.raw) <= 1;
+      const thirdBehind = third ? ((second.raw - third.raw) >= 2) : true;
+      if (topClose && thirdBehind) {
+        if (first.axisId !== second.axisId) dualAxis = [first.axisId, second.axisId];
+        else sameAxisCloseness = true;
       }
     }
 
-    return { mirrorId: mirrorId, ranking: ranking, dominantAxis: dominantAxis, dualAxis: dualAxis };
+    return {
+      mirrorId: mirrorId,
+      ranking: ranking,
+      dominantAxis: dominantAxis,
+      dualAxis: dualAxis,
+      sameAxisCloseness: sameAxisCloseness,
+      weakSignal: weakSignal
+    };
   }
 
   /* ════════════════════ الدالّة الثانية — حساب الطيف لمحور ════════════════════
@@ -177,11 +209,11 @@
       if (position === "excess") {
         if (excessA > excessB) image = "excess_a";
         else if (excessA < excessB) image = "excess_b";
-        else image = "بصورتيه";              // التساوي
+        else image = "excess_both";          // التساوي — يطابق مفتاح المحتوى
       } else if (position === "deficit") {
         if (deficitA > deficitB) image = "deficit_a";
         else if (deficitA < deficitB) image = "deficit_b";
-        else image = "بصورتيه";              // التساوي
+        else image = "deficit_both";         // التساوي — يطابق مفتاح المحتوى
       }
     }
 
