@@ -226,7 +226,7 @@
     </div>
   </div>
 </div>
-
+<input type="file" id="importFileInput" accept=".json,application/json" style="display:none" onchange="handleImportFile(event)">
 <div class="toast" id="toast"></div>
 <div class="saving" id="saving">جاري الحفظ...</div>
 
@@ -597,6 +597,7 @@ function renderClientView() {
     <h1>${pInfo ? pInfo.icon : '👤'} ${c.displayName}</h1>
     <div class="top-a">
       <button class="btn" onclick="exportClientJSON()">📤 تصدير JSON</button>
+      <button class="btn btn-p" onclick="triggerImport()">📥 استيراد تقرير</button>
       <button class="btn btn-g" onclick="copyClientLink()">🔗 رابط العميل</button>
     </div>
   </div>
@@ -1065,6 +1066,66 @@ function exportClientJSON() {
   a.click();
   URL.revokeObjectURL(a.href);
   toast('✅ تم التصدير');
+}
+
+   // ═══════════════════════════════════════
+// IMPORT REPORT (ملف JSON → الفايرستور بضغطة واحدة)
+// ═══════════════════════════════════════
+function triggerImport() {
+  if (!selectedClient) { toast('⚠️ اختر عميلاً أولاً'); return; }
+  const inp = document.getElementById('importFileInput');
+  inp.value = '';
+  inp.click();
+}
+
+async function handleImportFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!selectedClient || !clientCoaching) { toast('⚠️ اختر عميلاً أولاً'); return; }
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (e) {
+    toast('⚠️ تعذّر قراءة الملف: ' + e.message);
+    return;
+  }
+
+  const incoming = Array.isArray(data) ? data : (data.sections || []);
+  if (!incoming.length) { toast('⚠️ لا أقسام في الملف'); return; }
+
+  const fileUserId = data.client && data.client.userId;
+  if (fileUserId && fileUserId !== selectedClient.userId) {
+    if (!confirm('⚠️ هذا الملف يخصّ عميلاً آخر:\n' + fileUserId + '\n\nاستيراده للعميل الحالي (' + selectedClient.userId + ') رغم ذلك؟')) return;
+  }
+
+  const existing = (clientCoaching.sections || []).length;
+  let mode = 'replace';
+  if (existing > 0) {
+    mode = confirm('يوجد ' + existing + ' قسمًا محفوظًا.\n\nموافق = استبدال الكلّ بالملف الجديد.\nإلغاء = إضافة أقسام الملف فوق الموجود.') ? 'replace' : 'append';
+  }
+
+  const base = (mode === 'replace') ? [] : (clientCoaching.sections || []).slice();
+  const startOrder = base.length;
+  const today = new Date().toISOString().split('T')[0];
+
+  incoming.forEach((s, i) => {
+    base.push({
+      id: 'sec_' + Date.now() + '_' + i,
+      type: s.type || 'text',
+      title: s.title || '',
+      content: s.content || '',
+      placement: s.placement || 'general',
+      date: s.date || today,
+      visible: s.visible !== false,
+      order: startOrder + i
+    });
+  });
+
+  clientCoaching.sections = base;
+  await saveCoaching();
+  refreshCoachingTab();
+  toast('✅ تمّ استيراد ' + incoming.length + ' قسمًا');
 }
 
 function copyClientLink() {
