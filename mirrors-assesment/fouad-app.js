@@ -1,0 +1,493 @@
+/* ════════════════════════════════════════════════════════════════════════
+   fouad-app.js — منطق وآلة حالة وعرض مقياس الفؤاد v2 (تطبيق صفحة واحدة)
+   ────────────────────────────────────────────────────────────────────────
+   • كل حساب عبر FOUAD_ENGINE، كل ترجمة عبر FOUAD_BRIDGE، كل Firestore عبر
+     FOUAD_STORE حصرًا. هذا الملف لا يلمس Firestore مباشرة إطلاقًا.
+   • يقرأ المحتوى من ملفّات البيانات (config/identification/spectrum/educational).
+   • يحرّك العميل عبر مراحل المرآة السبع داخل صفحة واحدة.
+   ════════════════════════════════════════════════════════════════════════ */
+
+(function () {
+  "use strict";
+
+  // ── الإطلاق المرحليّ: عدّل هذه المصفوفة فقط لفتح بقيّة المرايا لاحقًا ──
+  const ACTIVE_MIRRORS = ['mirror1'];
+
+  // عدد المجموعات البصريّة لأسئلة التحديد (الوقفات بينها = العدد − 1)
+  const ID_GROUPS = 4;
+
+  // ألوان القراءات (تطابق هويّة المشروع)
+  const COLOR = { green: '#10b981', gold: '#fbbf24', blue: '#3b82f6', purple: '#a78bfa' };
+
+  // ── الحالة الجاريّة في الذاكرة ──
+  const state = {
+    user: null, assessment: null,
+    mirrorId: null, mirror: null,
+    stage: 'intro',
+    questions: [], answers: {}, qIndex: 0,
+    pauseBeforeIndex: [], pausesShown: {},
+    identificationResult: null, scenario: null, dominantAxis: null,
+    spectrumAxes: [], spectrumStatements: [], ratings: {}, sIndex: 0,
+    spectrumResults: {}
+  };
+
+  // ── مراجع الطبقات (تُقرأ من window بعد تحميل السكربتات بالترتيب) ──
+  const CFG    = () => window.FOUAD_CONFIG;
+  const IDQ    = () => window.IDENTIFICATION_QUESTIONS;
+  const SPC    = () => window.SPECTRUM_STATEMENTS;
+  const EDU    = () => window.EDUCATIONAL_CONTENT;
+  const ENG    = () => window.FOUAD_ENGINE;
+  const BR     = () => window.FOUAD_BRIDGE;
+  const STORE  = () => window.FOUAD_STORE;
+  const PAUSES = () => (window.REFLECTION_PAUSES && window.REFLECTION_PAUSES.length) ? window.REFLECTION_PAUSES : null;
+
+  // ── أدوات صغيرة ──
+  const ORDINALS = {1:'الأولى',2:'الثانية',3:'الثالثة',4:'الرابعة',5:'الخامسة',6:'السادسة',7:'السابعة'};
+  function arabicNum(n){ const m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,d=>m[+d]); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  const $app = () => document.getElementById('app');
+  function setHTML(html){ const a=$app(); if(!a) return; a.innerHTML = html; window.scrollTo(0,0); }
+  function errorCard(msg){ setHTML(`<div class="card centered"><div class="saving">${esc(msg)}</div></div>`); }
+
+  // ── جمع أسئلة المرآة بترتيب الـconfig (لا بترتيب مفاتيح الكائن) ──
+  function flattenIdentificationQuestions(mirrorId){
+    const mirror = CFG().mirrors.find(m=>m.id===mirrorId);
+    const all = [];
+    mirror.axes.forEach(ax=>{
+      const qs = IDQ()[mirrorId] && IDQ()[mirrorId][ax.id];
+      if(Array.isArray(qs)) qs.forEach(q=>all.push(q));   // تباعًا q1..q6 لكل محور
+    });
+    return all;
+  }
+
+  // مواضع الوقفات: مؤشّرات (0-based) تظهر الوقفة قبل السؤال عندها
+  function computePauseBoundaries(total, groups){
+    groups = Math.min(groups, total);
+    if(groups <= 1) return [];
+    const base = Math.floor(total/groups), rem = total % groups, bounds = [];
+    let acc = 0;
+    for(let i=0;i<groups-1;i++){ acc += base + (i<rem?1:0); bounds.push(acc); }
+    return bounds; // مثال 18/4 → [5,10,14]
+  }
+
+  // المراجع المكتملة من وثيقة Firestore المحمّلة
+  function getCompletedMirrors(){
+    const a = state.assessment;
+    return (a && a.progress && Array.isArray(a.progress.completedMirrors)) ? a.progress.completedMirrors : [];
+  }
+  function orderedActiveMirrors(){
+    return CFG().mirrors.filter(m => ACTIVE_MIRRORS.indexOf(m.id)!==-1).map(m=>m.id);
+  }
+
+  // حفظ التقدّم الجاري محلّيًّا فقط (صفر كتابة Firestore)
+  function cache(){
+    try{ STORE().cacheMirrorProgress(state.mirrorId, {
+      stage: state.stage, answers: state.answers, ratings: state.ratings
+    }); }catch(e){ /* تجاهُل */ }
+  }
+
+  /* ════════════════════ الحساب عبر المحرّك والجسر ════════════════════ */
+
+  function computeIdentification(){
+    state.identificationResult = ENG().computeMirrorIdentification(state.mirrorId, state.answers);
+    state.scenario             = BR().resolveDisplayScenario(state.identificationResult);
+    state.dominantAxis         = BR().resolveDominantAxis(state.identificationResult, state.mirrorId);
+
+    // محاور الطيف: dual → المحوران، غير ذلك → المحور الدومينانت وحده
+    if(state.scenario.scenario === 'dual'){
+      state.spectrumAxes = (state.scenario.doors || []).slice(0, 2);
+    } else {
+      state.spectrumAxes = state.dominantAxis ? [state.dominantAxis] : [];
+    }
+
+    // بناء قائمة عبارات الطيف المسطّحة بترتيب الملف + تهيئة مصفوفات التقييم
+    state.spectrumStatements = [];
+    state.spectrumAxes.forEach(ax=>{
+      const sts = SPC()[ax] || [];
+      if(!Array.isArray(state.ratings[ax])) state.ratings[ax] = [];
+      sts.forEach((st, idx)=> state.spectrumStatements.push({ axisId: ax, idx: idx, text: st.text }));
+    });
+  }
+
+  function computeSpectrumResults(){
+    state.spectrumResults = {};
+    state.spectrumAxes.forEach(ax=>{
+      const result = ENG().computeAxisSpectrum(ax, state.ratings[ax]);   // الحساب بالتصنيف داخليًّا
+      const key    = BR().resolveSpectrumKey(result);                    // أحد المفاتيح التسعة
+      const text   = (EDU()[state.mirrorId].axes[ax].spectrum || {})[key] || '';
+      state.spectrumResults[ax] = { result: result, key: key, text: text };
+    });
+  }
+
+  // تركيبة الشرح حسب السيناريو (الوصول دائمًا بالهويّة)
+  function buildEducationBlocks(){
+    const mc = EDU()[state.mirrorId];
+    const sc = state.scenario.scenario;
+    const ranking = state.identificationResult.ranking;
+    const blocks = [];
+
+    if(sc === 'weak'){                       // (د) إشارة ضعيفة — لا باب
+      blocks.push({ type:'weak', text: mc.weakSignal || '' });
+      return blocks;
+    }
+    if(sc === 'dual'){                        // (ب) بابان — لكل محور topType الخاصّ به
+      (state.scenario.doors || []).forEach(axisId=>{
+        const ac = mc.axes[axisId]; if(!ac) return;
+        const topItem = ranking.find(x=>x.axisId===axisId);
+        const topType = topItem ? topItem.type : null;
+        blocks.push({
+          type:'door', axisId: axisId,
+          axisIntro: ac.axisIntro,
+          afterRanking: (topType && ac.doors[topType]) ? ac.doors[topType].afterRanking : ''
+        });
+      });
+      return blocks;
+    }
+    // (أ) clear / (ج) closeness — باب الطابع الأوّل
+    const domAxis = state.dominantAxis;
+    const ac = mc.axes[domAxis] || {};
+    const topType = ranking[0] ? ranking[0].type : null;
+    const block = {
+      type:'door', axisId: domAxis,
+      axisIntro: ac.axisIntro,
+      afterRanking: (topType && ac.doors && ac.doors[topType]) ? ac.doors[topType].afterRanking : ''
+    };
+    if(sc === 'clear') block.rooting = ac.rooting;   // التأصيل في الحالة الواضحة فقط
+    blocks.push(block);
+    return blocks;
+  }
+
+  function firstUnratedIndex(){
+    for(let i=0;i<state.spectrumStatements.length;i++){
+      const s = state.spectrumStatements[i], arr = state.ratings[s.axisId];
+      if(!arr || typeof arr[s.idx] !== 'number') return i;
+    }
+    return state.spectrumStatements.length;
+  }
+
+  /* ════════════════════ شاشات الرحلة السبع ════════════════════ */
+
+  // المرحلة ١ — تهيئة خفيفة: سؤال المرآة الجوهريّ فقط (لا طبائع، لا محاور، لا أطياف)
+  function renderIntro(){
+    state.stage='intro'; cache();
+    const m = state.mirror, ord = ORDINALS[m.order] || arabicNum(m.order);
+    setHTML(`
+      <div class="card intro">
+        <div class="mirror-tag">المرآة ${ord} — ${esc(m.name)}</div>
+        <div class="core-question">${esc(m.coreQuestion)}</div>
+        <div class="reminder">ستجيب من تجربتك الحقيقيّة. لا توجد إجابة صحيحة. أصدق إجاباتك أنفعها لك.</div>
+        <button class="btn primary" id="startBtn">ابدأ</button>
+      </div>`);
+    document.getElementById('startBtn').addEventListener('click', ()=>{
+      state.stage='identification'; state.qIndex=0; renderIdentification();
+    });
+  }
+
+  // المرحلة ٢ — أسئلة التحديد (مع وقفات تأمّليّة بين المجموعات)
+  function renderIdentification(){
+    state.stage='identification';
+    const N = state.questions.length;
+    if(state.qIndex >= N){ goToRanking(); return; }
+
+    // وقفة تأمّليّة قبل هذه الفئة؟ (تُتخطّى بأمان لو غاب ملفّ الوقفات)
+    const pauses = PAUSES();
+    if(pauses && state.pauseBeforeIndex.indexOf(state.qIndex)!==-1 && !state.pausesShown[state.qIndex] && state.qIndex < N){
+      renderPause(state.qIndex); return;
+    }
+
+    const q = state.questions[state.qIndex];
+    const pos = state.qIndex + 1;
+    const pct = Math.round((state.qIndex / N) * 100);
+    const opts = ['أ','ب','ج'].map(L=>{
+      const o = q.options[L]; if(!o) return '';
+      return `<button class="option" data-letter="${L}">
+                <span class="opt-letter">${L}</span><span class="opt-text">${esc(o.text)}</span>
+              </button>`;   // نعرض النصّ فقط — لا type ولا تصنيف
+    }).join('');
+
+    setHTML(`
+      <div class="card">
+        <div class="progress-row">
+          <span class="progress-label">أنت في ${arabicNum(pos)} من ${arabicNum(N)}</span>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>
+        <div class="question-text">${esc(q.text)}</div>
+        <div class="options">${opts}</div>
+      </div>`);
+
+    Array.prototype.forEach.call(document.querySelectorAll('.option'), btn=>{
+      btn.addEventListener('click', ()=> answerIdentification(q, btn.getAttribute('data-letter')));
+    });
+  }
+
+  function answerIdentification(q, letter){
+    state.answers[q.id] = letter;   // نخزّن الحرف فقط ("أ"|"ب"|"ج") كما يتوقّعه المحرّك
+    state.qIndex += 1; cache();
+    renderIdentification();
+  }
+
+  function renderPause(beforeIndex){
+    const pauses = PAUSES();
+    const p = pauses[Object.keys(state.pausesShown).length % pauses.length]; // تناوب
+    setHTML(`
+      <div class="card pause">
+        <div class="pause-verse">${esc(p.verse)}</div>
+        <div class="pause-note">${esc(p.note)}</div>
+        <button class="btn ghost" id="pauseBtn">أكمل</button>
+      </div>`);
+    document.getElementById('pauseBtn').addEventListener('click', ()=>{
+      state.pausesShown[beforeIndex] = true; renderIdentification();
+    });
+  }
+
+  // المرحلة ٣ — شاشة نتيجة الترتيب (بلا شرح للطبائع بعد)
+  function goToRanking(){
+    try{ computeIdentification(); }catch(e){ errorCard('تعذّر حساب الترتيب: '+e.message); return; }
+    state.stage='ranking'; cache(); renderRanking();
+  }
+
+  function renderRanking(){
+    const r = state.identificationResult, mirror = state.mirror;
+    const axisName = id => { const a = mirror.axes.find(x=>x.id===id); return a?a.name:id; };
+    const rows = r.ranking.map((item,i)=>`
+      <div class="rank-row ${i===0?'top':''}">
+        <span class="rank-axis">${esc(axisName(item.axisId))}<span class="type-badge">${arabicNum(item.type.replace('type',''))}</span></span>
+        <div class="rank-bar"><div class="rank-fill" style="width:${item.percent}%"></div></div>
+        <span class="rank-pct">${arabicNum(item.percent)}٪</span>
+      </div>`).join('');
+    setHTML(`
+      <div class="card">
+        <div class="section-title">صورة هذه المرآة</div>
+        <div class="dominant">المحور الأظهر: <strong>${esc(axisName(state.dominantAxis))}</strong></div>
+        <div class="ranking">${rows}</div>
+        <button class="btn primary" id="toEdu">تابِع</button>
+      </div>`);
+    document.getElementById('toEdu').addEventListener('click', ()=>{ state.stage='education'; cache(); renderEducation(); });
+  }
+
+  // المرحلة ٤ — الشرح التعليميّ (لحظة afterRanking)
+  function renderEducation(){
+    const blocks = buildEducationBlocks();
+    let inner = '';
+    blocks.forEach(b=>{
+      if(b.type==='weak'){ inner += `<div class="edu-block weak"><p>${esc(b.text)}</p></div>`; }
+      else {
+        inner += `<div class="edu-block door">`;
+        if(b.axisIntro)    inner += `<p class="edu-intro">${esc(b.axisIntro)}</p>`;
+        if(b.afterRanking) inner += `<p class="edu-after">${esc(b.afterRanking)}</p>`;
+        if(b.rooting)      inner += `<p class="edu-rooting">${esc(b.rooting)}</p>`;
+        inner += `</div>`;
+      }
+    });
+    setHTML(`<div class="card edu">${inner}<button class="btn primary" id="toSpectrum">تابِع</button></div>`);
+    document.getElementById('toSpectrum').addEventListener('click', ()=>{
+      state.stage='spectrum'; state.sIndex = firstUnratedIndex(); cache(); renderSpectrum();
+    });
+  }
+
+  // المرحلة ٥ — أسئلة الطيف (تقييم أعمى على ليكرت ١–٧، بترتيب الملف، بلا تصنيف)
+  function renderSpectrum(){
+    const total = state.spectrumStatements.length;
+    if(total === 0 || state.sIndex >= total){ goToSpectrumResult(); return; }
+    const s = state.spectrumStatements[state.sIndex];
+    const pos = state.sIndex + 1, pct = Math.round((state.sIndex/total)*100);
+    const scale = [1,2,3,4,5,6,7].map(v=>`<button class="likert" data-val="${v}">${arabicNum(v)}</button>`).join('');
+    setHTML(`
+      <div class="card">
+        <div class="progress-row">
+          <span class="progress-label">أنت في ${arabicNum(pos)} من ${arabicNum(total)}</span>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>
+        <div class="statement-text">${esc(s.text)}</div>
+        <div class="likert-scale">${scale}</div>
+        <div class="likert-labels"><span>لا يشبهني إطلاقًا</span><span>يشبهني تمامًا</span></div>
+      </div>`);
+    Array.prototype.forEach.call(document.querySelectorAll('.likert'), btn=>{
+      btn.addEventListener('click', ()=> rateSpectrum(s, parseInt(btn.getAttribute('data-val'),10)));
+    });
+  }
+
+  function rateSpectrum(s, val){
+    if(!Array.isArray(state.ratings[s.axisId])) state.ratings[s.axisId] = [];
+    state.ratings[s.axisId][s.idx] = val;   // نفس ترتيب العرض = ترتيب الملف
+    state.sIndex += 1; cache();
+    renderSpectrum();
+  }
+
+  // المرحلة ٦ — نتيجة الطيف
+  function goToSpectrumResult(){
+    try{ computeSpectrumResults(); }catch(e){ errorCard('تعذّر حساب الطيف: '+e.message); return; }
+    state.stage='spectrumResult'; cache(); renderSpectrumResult();
+  }
+
+  function spectrumColor(key){
+    if(key === 'balance') return COLOR.green;
+    if(key.indexOf('excess')===0)  return COLOR.gold;
+    if(key.indexOf('deficit')===0) return COLOR.blue;
+    return COLOR.purple;   // ambiguous + suspicious_balance
+  }
+
+  function renderSpectrumResult(){
+    const mirror = state.mirror;
+    const axisName = id => { const a=mirror.axes.find(x=>x.id===id); return a?a.name:id; };
+    let inner = '';
+    state.spectrumAxes.forEach(ax=>{
+      const sr = state.spectrumResults[ax], color = spectrumColor(sr.key);
+      inner += `
+        <div class="spectrum-result" style="border-inline-start-color:${color}">
+          <div class="sr-axis" style="color:${color}">${esc(axisName(ax))} — ${esc(sr.result.positionLabel||'')}</div>
+          <p class="sr-text">${esc(sr.text)}</p>
+        </div>`;
+    });
+    setHTML(`
+      <div class="card">
+        <div class="section-title">قراءة الطيف</div>
+        ${inner}
+        <button class="btn primary" id="finishMirror">أنهِ المرآة</button>
+      </div>`);
+    document.getElementById('finishMirror').addEventListener('click', finishMirror);
+  }
+
+  // المرحلة ٧ — استراحة-استئناف: هنا تتمّ كتابة Firestore الوحيدة لهذه المرآة
+  async function finishMirror(){
+    state.stage='rest';
+    setHTML(`<div class="card centered"><div class="spinner"></div><div class="saving">نحفظ تقدّمك…</div></div>`);
+
+    const idr = state.identificationResult;
+    const results = {
+      ranking: idr.ranking,
+      dominantAxis: state.dominantAxis,
+      scenario: state.scenario.scenario,
+      flags: { weakSignal: idr.weakSignal, dualAxis: idr.dualAxis, sameAxisCloseness: idr.sameAxisCloseness },
+      spectrum: {}
+    };
+    state.spectrumAxes.forEach(ax=>{
+      const sr = state.spectrumResults[ax];
+      results.spectrum[ax] = Object.assign({}, sr.result, { key: sr.key });
+    });
+
+    let ok = false;
+    try{
+      ok = await STORE().saveMirror(state.user.id, state.mirrorId, {
+        identification: state.answers,   // { questionId: حرف }
+        spectrum: state.ratings,         // { axisId: [r1..r6] }
+        results: results
+      });
+    }catch(e){ ok = false; }
+    renderRest(ok);
+  }
+
+  function renderRest(saved){
+    const completed = getCompletedMirrors().slice();
+    if(saved && completed.indexOf(state.mirrorId)===-1) completed.push(state.mirrorId);
+    const next = orderedActiveMirrors().find(id => completed.indexOf(id)===-1);
+
+    const savedNote = saved
+      ? `<div class="rest-line">أتممتَ المرآة. تقدّمك محفوظ.</div>`
+      : `<div class="rest-line warn">أتممتَ المرآة، لكن تعذّر الحفظ الآن.</div>`;
+    const retry   = saved ? '' : `<button class="btn ghost" id="retrySave">حاول الحفظ ثانيةً</button>`;
+    const actions = next
+      ? `<button class="btn primary" id="nextMirror">تابِع إلى المرآة التالية</button>`
+      : `<div class="done-note">هذا ما أُتيح في هذا الإصدار. سيُفتح ما بعده قريبًا بإذن الله.</div>`;
+
+    setHTML(`<div class="card centered rest"><div class="rest-check">${saved?'✓':'…'}</div>${savedNote}${retry}${actions}</div>`);
+
+    if(!saved){ const rb=document.getElementById('retrySave'); if(rb) rb.addEventListener('click', finishMirror); }
+    const nb=document.getElementById('nextMirror');
+    if(nb) nb.addEventListener('click', ()=>{
+      // حدّث النسخة المحلّيّة من المكتمل ثمّ ابدأ التالي
+      state.assessment = state.assessment || {};
+      state.assessment.progress = state.assessment.progress || {};
+      if(!Array.isArray(state.assessment.progress.completedMirrors)) state.assessment.progress.completedMirrors = [];
+      if(state.assessment.progress.completedMirrors.indexOf(state.mirrorId)===-1)
+        state.assessment.progress.completedMirrors.push(state.mirrorId);
+      startMirror(next);
+    });
+  }
+
+  function renderAllActiveDone(){
+    setHTML(`
+      <div class="card centered">
+        <div class="rest-check">✓</div>
+        <div class="rest-line">لقد أتممتَ ما هو متاح في هذا الإصدار.</div>
+        <div class="done-note">سيُفتح ما بعد هذه المرآة قريبًا بإذن الله.</div>
+      </div>`);
+  }
+
+  /* ════════════════════ الاستئناف من الـcache المحلّي ════════════════════ */
+  function resumeMirror(c){
+    state.answers = c.answers || {};
+    state.ratings = c.ratings || {};
+    state.questions       = flattenIdentificationQuestions(state.mirrorId);
+    state.pauseBeforeIndex = computePauseBoundaries(state.questions.length, ID_GROUPS);
+
+    // ما زلنا في التحديد؟ استأنف من أوّل سؤال غير مُجاب
+    let firstUn = state.questions.findIndex(q=> !(q.id in state.answers));
+    if(firstUn === -1) firstUn = state.questions.length;
+    if(firstUn < state.questions.length){
+      state.stage='identification'; state.qIndex = firstUn;
+      state.pausesShown = {};
+      state.pauseBeforeIndex.forEach(b=>{ if(b < firstUn) state.pausesShown[b]=true; });
+      renderIdentification(); return;
+    }
+
+    // التحديد مكتمل — احسب ثمّ حدّد موضع الطيف
+    try{ computeIdentification(); }catch(e){ errorCard('تعذّر استئناف المرآة: '+e.message); return; }
+    const total = state.spectrumStatements.length;
+    let rated = 0, firstUnrated = total;
+    for(let i=0;i<total;i++){
+      const s = state.spectrumStatements[i], arr = state.ratings[s.axisId];
+      if(arr && typeof arr[s.idx]==='number') rated++;
+      else if(firstUnrated===total) firstUnrated = i;
+    }
+    if(total === 0){ goToSpectrumResult(); return; }
+    if(rated === 0){ state.stage='education';  renderEducation(); return; }      // لم يبدأ الطيف بعد
+    if(rated < total){ state.stage='spectrum'; state.sIndex=firstUnrated; renderSpectrum(); return; }
+    goToSpectrumResult();                                                         // الطيف مكتمل
+  }
+
+  function startMirror(mirrorId){
+    state.mirrorId = mirrorId;
+    state.mirror   = CFG().mirrors.find(m=>m.id===mirrorId);
+    // إعادة تهيئة كاملة
+    state.answers={}; state.ratings={}; state.qIndex=0; state.sIndex=0; state.pausesShown={};
+    state.identificationResult=null; state.scenario=null; state.dominantAxis=null;
+    state.spectrumAxes=[]; state.spectrumStatements=[]; state.spectrumResults={};
+    state.questions        = flattenIdentificationQuestions(mirrorId);
+    state.pauseBeforeIndex = computePauseBoundaries(state.questions.length, ID_GROUPS);
+
+    // استئناف من الـcache المحلّي إن وُجد تقدّم
+    let c = null; try{ c = STORE().readMirrorCache(mirrorId); }catch(e){ c=null; }
+    const hasCache = c && (
+      (c.answers && Object.keys(c.answers).length) ||
+      (c.ratings && Object.keys(c.ratings).length)
+    );
+    if(hasCache) resumeMirror(c); else renderIntro();
+  }
+
+  /* ════════════════════ الإقلاع ════════════════════ */
+  async function init(){
+    if(!$app()){ console.error('عنصر #app غير موجود'); return; }
+    if(!CFG()||!IDQ()||!SPC()||!EDU()||!ENG()||!BR()||!STORE()){
+      errorCard('تعذّر تحميل ملفّات المقياس — تحقّق من ترتيب السكربتات.'); return;
+    }
+    // ١) المصادقة (تحويل لصفحة الدخول إن لزم — المقياس في مجلّد فرعيّ)
+    const user = STORE().requireAuth({ loginPath: '../login.html' });
+    if(!user) return;                     // أُعيد التوجيه
+    state.user = user;
+
+    // ٢) تحميل الوثيقة مرّة واحدة لمعرفة أين وصل العميل
+    setHTML(`<div class="card centered"><div class="spinner"></div><div class="saving">نحمّل تقدّمك…</div></div>`);
+    let assessment = null;
+    try{ assessment = await STORE().loadAssessment(user.id); }catch(e){ assessment=null; }
+    state.assessment = assessment;        // null = عميل جديد
+
+    // ٣) أوّل مرآة فعّالة غير مكتملة
+    const completed = getCompletedMirrors();
+    const next = orderedActiveMirrors().find(id => completed.indexOf(id)===-1);
+    if(!next){ renderAllActiveDone(); return; }
+    startMirror(next);
+  }
+
+  window.FOUAD_APP = { init: init };
+})();
