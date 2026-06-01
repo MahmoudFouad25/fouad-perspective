@@ -32,14 +32,21 @@
   };
 
   // ── مراجع الطبقات (تُقرأ من window بعد تحميل السكربتات بالترتيب) ──
-  const CFG    = () => window.FOUAD_CONFIG;
-  const IDQ    = () => window.IDENTIFICATION_QUESTIONS;
-  const SPC    = () => window.SPECTRUM_STATEMENTS;
-  const EDU    = () => window.EDUCATIONAL_CONTENT;
-  const ENG    = () => window.FOUAD_ENGINE;
-  const BR     = () => window.FOUAD_BRIDGE;
-  const STORE  = () => window.FOUAD_STORE;
-  const PAUSES = () => (window.REFLECTION_PAUSES && window.REFLECTION_PAUSES.length) ? window.REFLECTION_PAUSES : null;
+  // ── مراجع الطبقات ──
+  // محلّل آمن: يقرأ الاسم المجرّد (const عامّ من سكربت سابق) أوّلًا، ثمّ window احتياطًا.
+  // السبب: mirrors-config.js يعرّف "const FOUAD_CONFIG" فقط، و const لا تُعلَّق على
+  // window في المتصفّح — لكنّها مرئيّة كاسمٍ عامّ عبر typeof الآمن (لا يرمي خطأً).
+  function CFG(){   return (typeof FOUAD_CONFIG             !== 'undefined') ? FOUAD_CONFIG             : window.FOUAD_CONFIG; }
+  function IDQ(){   return (typeof IDENTIFICATION_QUESTIONS !== 'undefined') ? IDENTIFICATION_QUESTIONS : window.IDENTIFICATION_QUESTIONS; }
+  function SPC(){   return (typeof SPECTRUM_STATEMENTS      !== 'undefined') ? SPECTRUM_STATEMENTS      : window.SPECTRUM_STATEMENTS; }
+  function EDU(){   return (typeof EDUCATIONAL_CONTENT      !== 'undefined') ? EDUCATIONAL_CONTENT      : window.EDUCATIONAL_CONTENT; }
+  function ENG(){   return (typeof FOUAD_ENGINE            !== 'undefined') ? FOUAD_ENGINE            : window.FOUAD_ENGINE; }
+  function BR(){    return (typeof FOUAD_BRIDGE            !== 'undefined') ? FOUAD_BRIDGE            : window.FOUAD_BRIDGE; }
+  function STORE(){ return window.FOUAD_STORE; }
+  function PAUSES(){
+    var p = (typeof REFLECTION_PAUSES !== 'undefined') ? REFLECTION_PAUSES : window.REFLECTION_PAUSES;
+    return (p && p.length) ? p : null;
+  }
 
   // ── أدوات صغيرة ──
   const ORDINALS = {1:'الأولى',2:'الثانية',3:'الثالثة',4:'الرابعة',5:'الخامسة',6:'السادسة',7:'السابعة'};
