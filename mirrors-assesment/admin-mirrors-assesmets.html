@@ -158,6 +158,20 @@
   .axis-row.top .axis-fill { background:linear-gradient(90deg,var(--gold),#f59e0b); }
   .axis-row .axis-pct { width:42px; text-align:end; font-size:12.5px; font-weight:800; color:var(--muted); }
 
+  /* كتلة المحور: تجمع رأس المحور + طبائعه + طيفه */
+  .axis-block { border:1px solid var(--border-soft); border-radius:12px; padding:10px 11px; margin-bottom:11px; background:var(--bg-0); }
+  .axis-block.top { border-color:rgba(251,191,36,.3); }
+  .axis-block .axis-row { border:none; background:transparent; padding:2px 0 8px; margin-bottom:6px; border-bottom:1px solid var(--border-soft); }
+
+  /* قائمة الطبائع الثلاثة داخل المحور */
+  .type-list { margin:8px 2px 4px; }
+  .type-row { display:flex; align-items:center; gap:8px; padding:4px 0; }
+  .type-ic { width:20px; text-align:center; font-size:14px; flex-shrink:0; }
+  .type-nm { flex:1; font-size:12.5px; color:var(--text); font-weight:500; }
+  .type-bar { width:74px; height:6px; background:var(--bg-2); border-radius:999px; overflow:hidden; flex-shrink:0; }
+  .type-fill { height:100%; background:linear-gradient(90deg,var(--green),var(--blue)); border-radius:999px; }
+  .type-val { width:58px; text-align:end; font-size:11px; font-weight:700; color:var(--muted); flex-shrink:0; }
+
   .spectrum-axis { border:1px solid var(--border); border-radius:12px; padding:12px 13px; margin-bottom:10px; background:var(--bg-0); }
   .sa-head { display:flex; align-items:center; justify-content:space-between; gap:9px; flex-wrap:wrap; margin-bottom:9px; }
   .sa-name { font-size:13.5px; font-weight:800; }
@@ -257,6 +271,28 @@
   var db = null;
   var $ = function (id) { return document.getElementById(id); };
   var AVATAR_COLORS = ['#3b82f6','#a78bfa','#10b981','#fbbf24','#ef4444','#ec4899','#06b6d4','#f97316','#6366f1','#14b8a6'];
+
+  // أسماء الطبائع التسعة وأيقوناتها ومركز دافعها (منقولة من لوحة الكوتشينج القديمة).
+  // المفاتيح هنا برقم الطبع "1".."9"؛ نحوّل من "type8" → "8" عند القراءة.
+  var TYPE_INFO = {
+    '1': { name:'المُحسِّن المُتقِن',  icon:'⚖️', center:'agency'    },
+    '2': { name:'العطوف المُعطي',    icon:'💚', center:'bonding'   },
+    '3': { name:'الناجح المُنجِز',    icon:'🏆', center:'bonding'   },
+    '4': { name:'الحالم العميق',      icon:'🎨', center:'bonding'   },
+    '5': { name:'المُفكّر المُتأمّل',  icon:'🧠', center:'certainty' },
+    '6': { name:'الحذِر المُستعِدّ',  icon:'🛡️', center:'certainty' },
+    '7': { name:'المُتفائل المُتحمّس',icon:'✨', center:'certainty' },
+    '8': { name:'القويّ المؤثّر',     icon:'🔴', center:'agency'    },
+    '9': { name:'الوسيط الهادئ',      icon:'☮️', center:'agency'    }
+  };
+  // رقم الطبع من "type8" أو 8 أو "8"
+  function typeNum(t) {
+    if (t == null) return null;
+    var s = String(t).replace(/[^0-9]/g, '');
+    return s || null;
+  }
+  function typeName(t) { var n = typeNum(t); return (n && TYPE_INFO[n]) ? TYPE_INFO[n].name : ('طبع ' + (n || '?')); }
+  function typeIcon(t) { var n = typeNum(t); return (n && TYPE_INFO[n]) ? TYPE_INFO[n].icon : '•'; }
 
   var CLIENTS = [];
   var SELECTED = null;
@@ -447,27 +483,61 @@
     var scenario = asText(mr.scenario);
     if (scenario) s += '<div class="mc-scenario">السيناريو: <b>' + esc(scenarioLabel(scenario)) + '</b></div>';
 
+    // ترتيب المحاور (٣) مع طبائعها، ونجهّز خريطة الطيف للربط بكل محور
     var ranking = rankAxes(mr, mirror);
+    var specByAxis = {};
+    readSpectrum(mr, mirror).forEach(function (sp) { specByAxis[sp.axisId] = sp; });
+
     if (ranking.length) {
-      var maxPct = ranking[0].percent || 1;
-      s += '<div class="mini-label">ترتيب المحاور الثلاثة</div>';
+      // أقصى نسبة بين المحاور لتطبيع عرض الأشرطة بصدق (لا نجعل الأعلى 100% قسرًا)
+      var maxPct = Math.max.apply(null, ranking.map(function (r) { return r.percent || 0; }).concat([1]));
+
       ranking.forEach(function (r, i) {
         var pct = (r.percent == null) ? 0 : r.percent;
-        var w = Math.max(0, Math.min(100, Math.round((pct / (maxPct || 1)) * 100)));
-        s += '<div class="axis-row' + (i === 0 ? ' top' : '') + '">' +
+        var w = Math.max(2, Math.min(100, Math.round((pct / maxPct) * 100)));
+        var isTop = (i === 0);
+
+        // ── رأس المحور ──
+        s += '<div class="axis-block' + (isTop ? ' top' : '') + '">';
+        s += '<div class="axis-row' + (isTop ? ' top' : '') + '">' +
             '<span class="rank-no">' + (i + 1) + '</span>' +
             '<span class="axis-name">' + esc(r.name) + '</span>' +
             '<span class="axis-bar"><span class="axis-fill" style="width:' + w + '%"></span></span>' +
             '<span class="axis-pct">' + Math.round(pct) + '%</span>' +
           '</div>';
+
+        // ── طبائع المحور الثلاثة بأسمائها ونقاطها ──
+        if (r.types && r.types.length) {
+          var maxTypeRaw = Math.max.apply(null, r.types.map(function (t) { return (t.raw != null ? t.raw : (t.percent || 0)); }).concat([1]));
+          s += '<div class="type-list">';
+          r.types.forEach(function (t) {
+            var tv = (t.raw != null) ? t.raw : (t.percent || 0);
+            var tw = Math.max(3, Math.min(100, Math.round((tv / maxTypeRaw) * 100)));
+            var rawTxt = (t.raw != null) ? (t.raw + ' نقطة') : ((t.percent != null) ? (t.percent + '%') : '');
+            s += '<div class="type-row">' +
+                '<span class="type-ic">' + t.icon + '</span>' +
+                '<span class="type-nm">' + esc(t.name) + '</span>' +
+                '<span class="type-bar"><span class="type-fill" style="width:' + tw + '%"></span></span>' +
+                '<span class="type-val">' + esc(rawTxt) + '</span>' +
+              '</div>';
+          });
+          s += '</div>';
+        }
+
+        // ── طيف هذا المحور (إن وُجد) ──
+        if (specByAxis[r.axisId]) {
+          s += renderSpectrumAxis(specByAxis[r.axisId]);
+        }
+
+        s += '</div>'; // .axis-block
       });
     }
 
-    var spectrum = readSpectrum(mr, mirror);
-    if (spectrum.length) {
-      s += '<div class="mini-label">الطيف لكل محور</div>';
-      spectrum.forEach(function (sp) { s += renderSpectrumAxis(sp); });
-    }
+    // طيف لمحاور لم تظهر في الترتيب (احتياط)
+    Object.keys(specByAxis).forEach(function (axisId) {
+      var seen = ranking.some(function (r) { return r.axisId === axisId; });
+      if (!seen) s += renderSpectrumAxis(specByAxis[axisId]);
+    });
 
     var mf = mr.flags || {};
     var mflags = '';
@@ -533,7 +603,12 @@
         scenario: asText(mr.scenario) || null,
         flags: mr.flags || {},
         ranking: rankAxes(mr, mirror).map(function (r) {
-          return { axisId: r.axisId, axisName: r.name, percent: r.percent, raw: r.raw };
+          return {
+            axisId: r.axisId, axisName: r.name, percent: r.percent, raw: r.raw,
+            types: (r.types || []).map(function (t) {
+              return { type: t.type, typeName: t.name, raw: t.raw, percent: t.percent };
+            })
+          };
         }),
         spectrum: readSpectrum(mr, mirror).map(function (sp) {
           return {
@@ -605,34 +680,54 @@
     return axisId;
   }
 
-  // جوهر الإصلاح: تجميع الترتيب على المحاور الثلاثة بدل الطبائع التسعة
+  // تجميع الترتيب على المحاور الثلاثة، مع الاحتفاظ بطبائع كل محور بنقاطها.
+  // المُخرَج: [{ axisId, name, raw, percent, types:[{type,num,name,icon,raw,percent}] }]
   function rankAxes(mr, mirror) {
     var raw = mr.ranking;
-    var byAxis = {};
-    function add(axisId, rawVal, pctVal) {
-      if (!axisId) return;
-      if (!byAxis[axisId]) byAxis[axisId] = { axisId: axisId, raw: 0, percent: 0, hasRaw: false, hasPct: false };
-      if (rawVal != null && isFinite(rawVal)) { byAxis[axisId].raw += Number(rawVal); byAxis[axisId].hasRaw = true; }
-      if (pctVal != null && isFinite(pctVal)) { byAxis[axisId].percent += Number(pctVal); byAxis[axisId].hasPct = true; }
+    var byAxis = {}; // axisId -> { raw, percent, hasRaw, hasPct, types:[] }
+
+    function ensure(axisId) {
+      if (!byAxis[axisId]) byAxis[axisId] = { axisId: axisId, raw: 0, percent: 0, hasRaw: false, hasPct: false, types: [] };
+      return byAxis[axisId];
     }
+    function add(axisId, typeKey, rawVal, pctVal) {
+      if (!axisId) return;
+      var b = ensure(axisId);
+      var rv = numOrNull(rawVal), pv = numOrNull(pctVal);
+      if (rv != null) { b.raw += rv; b.hasRaw = true; }
+      if (pv != null) { b.percent += pv; b.hasPct = true; }
+      if (typeKey != null) {
+        var num = typeNum(typeKey);
+        b.types.push({ type: typeKey, num: num, name: typeName(typeKey), icon: typeIcon(typeKey), raw: rv, percent: pv });
+      }
+    }
+
     if (Array.isArray(raw)) {
       raw.forEach(function (item) {
         if (!item || typeof item !== 'object') return;
         var axisId = item.axisId || item.module || item.axis || null;
-        add(axisId, item.raw, numOrNull(item.percent != null ? item.percent : item.percentage));
+        add(axisId, item.type, item.raw, item.percent != null ? item.percent : item.percentage);
       });
     } else if (raw && typeof raw === 'object') {
-      Object.keys(raw).forEach(function (k) { add(k, null, numOrNull(raw[k])); });
+      Object.keys(raw).forEach(function (k) { add(k, null, null, raw[k]); });
     }
+
     var rows = Object.keys(byAxis).map(function (k) {
       var b = byAxis[k];
-      return { axisId: k, raw: b.hasRaw ? b.raw : null, percent: b.hasPct ? b.percent : null, name: axisName(mirror, k) };
+      // ترتيب طبائع المحور تنازليًّا بالنقطة الخام ثمّ النسبة
+      b.types.sort(function (x, y) {
+        return ((y.raw != null ? y.raw : (y.percent || 0)) - (x.raw != null ? x.raw : (x.percent || 0)));
+      });
+      return { axisId: k, raw: b.hasRaw ? b.raw : null, percent: b.hasPct ? b.percent : null, name: axisName(mirror, k), types: b.types };
     });
+
+    // النسبة المعروضة للمحور: لو لم تتوفّر، نشتقّها كحصّة من مجموع المحاور
     var anyPct = rows.some(function (r) { return r.percent != null; });
     if (!anyPct) {
       var sum = rows.reduce(function (a, r) { return a + (r.raw || 0); }, 0) || 1;
       rows.forEach(function (r) { r.percent = Math.round(((r.raw || 0) / sum) * 100); });
     }
+
     rows.sort(function (a, b) {
       var av = (a.percent != null) ? a.percent : (a.raw || 0);
       var bv = (b.percent != null) ? b.percent : (b.raw || 0);
