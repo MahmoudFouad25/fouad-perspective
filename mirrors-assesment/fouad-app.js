@@ -256,17 +256,29 @@
   function renderRanking(){
     const r = state.identificationResult, mirror = state.mirror;
     const axisName = id => { const a = mirror.axes.find(x=>x.id===id); return a?a.name:id; };
-    const rows = r.ranking.map((item,i)=>`
-      <div class="rank-row ${i===0?'top':''}">
-        <span class="rank-axis">${esc(axisName(item.axisId))}<span class="type-badge">${arabicNum(item.type.replace('type',''))}</span></span>
-        <div class="rank-bar"><div class="rank-fill" style="width:${item.percent}%"></div></div>
-        <span class="rank-pct">${arabicNum(item.percent)}٪</span>
+
+    // أعلى نسبة لكل محور (تتّسق مع تحديد "المحور الأظهر" = محور الطابع الأقوى)
+    const axisScore = {};
+    r.ranking.forEach(item=>{
+      if(axisScore[item.axisId]===undefined || item.percent > axisScore[item.axisId])
+        axisScore[item.axisId] = item.percent;
+    });
+    const axes = mirror.axes.map(a=>({ id:a.id, name:a.name, percent: axisScore[a.id]||0 }));
+    axes.sort((a,b)=> (b.percent - a.percent) || (a.id===state.dominantAxis ? -1 : 1));
+
+    const rows = axes.map(ax=>`
+      <div class="rank-row ${ax.id===state.dominantAxis?'top':''}">
+        <span class="rank-axis">${esc(ax.name)}</span>
+        <div class="rank-bar"><div class="rank-fill" style="width:${ax.percent}%"></div></div>
+        <span class="rank-pct">${arabicNum(ax.percent)}٪</span>
       </div>`).join('');
+
     setHTML(`
       <div class="card">
         <div class="section-title">صورة هذه المرآة</div>
-        <div class="dominant">المحور الأظهر: <strong>${esc(axisName(state.dominantAxis))}</strong></div>
+        <p class="lead">يميل سلوكك في هذه المرآة إلى محورٍ أظهر من غيره. هذه نسبة حضور كلّ محورٍ في إجاباتك:</p>
         <div class="ranking">${rows}</div>
+        <div class="dominant">المحور الأظهر: <strong>${esc(axisName(state.dominantAxis))}</strong></div>
         <button class="btn primary" id="toEdu">تابِع</button>
       </div>`);
     document.getElementById('toEdu').addEventListener('click', ()=>{ state.stage='education'; cache(); renderEducation(); });
@@ -275,19 +287,49 @@
   // المرحلة ٤ — الشرح التعليميّ (لحظة afterRanking)
   function renderEducation(){
     const blocks = buildEducationBlocks();
+    const mirror = state.mirror;
+    const axisName = id => { const a=mirror.axes.find(x=>x.id===id); return a?a.name:id; };
+    const sc = state.scenario.scenario;
+    const title = (sc==='weak') ? 'إشارة هذه المرآة'
+                : (sc==='dual') ? 'بابان متقاربان' : 'باب المحور الأظهر';
+
     let inner = '';
     blocks.forEach(b=>{
       if(b.type==='weak'){ inner += `<div class="edu-block weak"><p>${esc(b.text)}</p></div>`; }
       else {
         inner += `<div class="edu-block door">`;
+        inner += `<div class="edu-axis-name">${esc(axisName(b.axisId))}</div>`;
         if(b.axisIntro)    inner += `<p class="edu-intro">${esc(b.axisIntro)}</p>`;
         if(b.afterRanking) inner += `<p class="edu-after">${esc(b.afterRanking)}</p>`;
-        if(b.rooting)      inner += `<p class="edu-rooting">${esc(b.rooting)}</p>`;
+        if(b.rooting)      inner += `<div class="edu-rooting"><div class="edu-rooting-tag">في الأصل</div><p>${esc(b.rooting)}</p></div>`;
         inner += `</div>`;
       }
     });
-    setHTML(`<div class="card edu">${inner}<button class="btn primary" id="toSpectrum">تابِع</button></div>`);
+
+    setHTML(`<div class="card edu"><div class="section-title">${esc(title)}</div>${inner}<button class="btn primary" id="toSpectrum">تابِع</button></div>`);
     document.getElementById('toSpectrum').addEventListener('click', ()=>{
+      state.stage='spectrumIntro'; cache(); renderSpectrumIntro();
+    });
+  }
+
+  // المرحلة ٥ (تمهيد) — شاشة تُعرّف العميل بما سيفعله قبل عبارات الطيف (بلا أيّ تصنيف)
+  function renderSpectrumIntro(){
+    state.stage='spectrumIntro';
+    const mirror = state.mirror;
+    const axisName = id => { const a=mirror.axes.find(x=>x.id===id); return a?a.name:id; };
+    const names = state.spectrumAxes.map(axisName);
+    const namesText = names.length>1 ? `محوريْ ${names[0]} و${names[1]}` : `محور ${names[0]||''}`;
+    const count = state.spectrumStatements.length;
+
+    setHTML(`
+      <div class="card">
+        <div class="section-title">تعميق القراءة</div>
+        <p class="lead">عرفتَ المحور الأظهر. الآن نتعمّق فيه قليلًا.</p>
+        <p class="edu-intro">ستقرأ ${arabicNum(count)} عباراتٍ تخصّ ${esc(namesText)}، وتقيّم كلّ عبارةٍ على مقياسٍ من ١ إلى ٧ بحسب ما تراه أقرب إلى حقيقتك — لا إلى ما تتمنّاه.</p>
+        <p class="reminder">قيّم على سجيّتك. لا توجد إجابة صحيحة، والقراءة تكتمل بعد أن تنتهي.</p>
+        <button class="btn primary" id="startSpectrum">ابدأ التقييم</button>
+      </div>`);
+    document.getElementById('startSpectrum').addEventListener('click', ()=>{
       state.stage='spectrum'; state.sIndex = firstUnratedIndex(); cache(); renderSpectrum();
     });
   }
