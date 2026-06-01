@@ -47,11 +47,26 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     var p = (typeof REFLECTION_PAUSES !== 'undefined') ? REFLECTION_PAUSES : window.REFLECTION_PAUSES;
     return (p && p.length) ? p : null;
   }
+  // محرّك التقرير الذاتيّ (report-engine.js) — يُحمَّل بعد mirrors-config.js
+  function REP(){ return (typeof FOUAD_REPORT_ENGINE !== 'undefined') ? FOUAD_REPORT_ENGINE : window.FOUAD_REPORT_ENGINE; }
 
   // ── أدوات صغيرة ──
   const ORDINALS = {1:'الأولى',2:'الثانية',3:'الثالثة',4:'الرابعة',5:'الخامسة',6:'السادسة',7:'السابعة'};
   function arabicNum(n){ const m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,d=>m[+d]); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // ── النصوص الثابتة الوحيدة في التقرير: نبرة «مرآة لا محكمة» (لا أرقام) ──
+  const REPORT_TEXT = {
+    openingTitle: 'قبل أن تقرأ',
+    opening: `قبل أيّ كلمةٍ تقرؤها هنا، نضع شيئًا في موضعه: قيمتك ثابتةٌ قبل هذا التقرير وبعده، لا يرفعها سطرٌ فيه ولا يخفضها. ما بين يديك مرآةٌ لا محكمة — تعيد عليك ما رأيته في رحلتك عبر المرايا، مرتّبًا في صورةٍ واحدة، لا لتحكم عليك بل لتراك. وما من نتيجةٍ هنا تُعرِّفك تعريفًا نهائيًّا؛ هي قراءةٌ لِلَحظتك التي أجبتَ فيها، تتحرّك معك حين تتحرّك. اقرأها بالهدوء الذي تُقرأ به مرآة: تنظر، وتتأمّل، ثمّ تمضي.`,
+    closingTitle: 'بعد أن قرأت',
+    closing: `ما قرأته صورةٌ لِما هو حاضرٌ فيك الآن، لا حكمًا على ما ستكونه. المواضع التي بدت متّزنةً نعمةٌ تُشكَر، والتي بدت مائلةً ليست عيبًا تُدان عليه، هي أبوابٌ تعرف الآن أين تقف منها. وأصدق ما يُفعَل بمرآةٍ كهذه أن تُترَك تعمل بهدوء: تعود إليها حين تنضج، أو تأخذ ما استوقفك منها إلى جلسةٍ هادئةٍ مع مَن يُحسن أن يصغي ويسأل. قيمتك — كما بدأنا — ثابتةٌ، والطريق مفتوح.`,
+    partialNote: `هذه صورةٌ جزئيّةٌ بُنيت على ما أتممتَه من المرايا حتى الآن؛ تكتمل حين تكتمل بقيّتها.`
+  };
+
+  // أسماء عرض مواقع الطيف (بالهويّة، لا حسم لأيّ تعادل)
+  const POS_LABEL = { balance:'اتزان', excess:'إفراط', deficit:'تفريط', ambiguous:'التباس' };
+
   const $app = () => document.getElementById('app');
   function setHTML(html){ const a=$app(); if(!a) return; a.innerHTML = html; window.scrollTo(0,0); }
   function errorCard(msg){ setHTML(`<div class="card centered"><div class="saving">${esc(msg)}</div></div>`); }
@@ -170,6 +185,45 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       if(!arr || typeof arr[s.idx] !== 'number') return i;
     }
     return state.spectrumStatements.length;
+  }
+
+  /* ════════════════════ تجميع نتائج التقرير (صفر لمس Firestore) ════════════════════ */
+
+  // يجمع نتائج المرايا المكتملة: المحمّلة من Firestore + الجلسة الحاليّة في الذاكرة.
+  function collectResultsForReport(){
+    const out = {};
+    // ١) المحمّلة أصلًا عند الدخول (إن وُجدت)
+    const loaded = (state.assessment && state.assessment.results) ? state.assessment.results : null;
+    if(loaded && typeof loaded === 'object'){
+      Object.keys(loaded).forEach(function(mid){
+        if(loaded[mid] && loaded[mid].results) out[mid] = loaded[mid].results; // الشكل المحفوظ: {identification, spectrum, results}
+        else if(loaded[mid] && loaded[mid].ranking) out[mid] = loaded[mid];    // أو نتيجة جاهزة مباشرة
+      });
+    }
+    // ٢) المرآة الحاليّة المنتهية للتوّ في الذاكرة (إن لم تُحمَّل بعد)
+    if(state.mirrorId && state.identificationResult && !out[state.mirrorId]){
+      const idr = state.identificationResult, results = {
+        ranking: idr.ranking,
+        dominantAxis: state.dominantAxis,
+        scenario: state.scenario ? state.scenario.scenario : null,
+        flags: { weakSignal: idr.weakSignal, dualAxis: idr.dualAxis, sameAxisCloseness: idr.sameAxisCloseness },
+        spectrum: {}
+      };
+      (state.spectrumAxes||[]).forEach(function(ax){
+        const sr = state.spectrumResults[ax];
+        if(sr) results.spectrum[ax] = Object.assign({}, sr.result, { key: sr.key });
+      });
+      out[state.mirrorId] = results;
+    }
+    return out;
+  }
+
+  // هل اكتملت كل المرايا الفعّالة؟ (لتقرير كليّ، لا جزئيّ)
+  function allActiveMirrorsComplete(){
+    const completed = getCompletedMirrors().slice();
+    if(state.mirrorId && completed.indexOf(state.mirrorId)===-1) completed.push(state.mirrorId);
+    const active = orderedActiveMirrors();
+    return active.every(function(id){ return completed.indexOf(id)!==-1; });
   }
 
   /* ════════════════════ شاشات الرحلة السبع ════════════════════ */
@@ -435,9 +489,14 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       ? `<div class="rest-line">أتممتَ المرآة. تقدّمك محفوظ.</div>`
       : `<div class="rest-line warn">أتممتَ المرآة، لكن تعذّر الحفظ الآن.</div>`;
     const retry   = saved ? '' : `<button class="btn ghost" id="retrySave">حاول الحفظ ثانيةً</button>`;
+    // لو بقيت مرايا فعّالة → زرّ المتابعة كما هو.
+    // لو اكتملت كلّ المرايا الفعّالة → زرّ «اعرض صورتك المتكاملة».
+    const allDone = !next && allActiveMirrorsComplete();
     const actions = next
       ? `<button class="btn primary" id="nextMirror">تابِع إلى المرآة التالية</button>`
-      : `<div class="done-note">هذا ما أُتيح في هذا الإصدار. سيُفتح ما بعده قريبًا بإذن الله.</div>`;
+      : (allDone
+          ? `<button class="btn primary" id="showReportBtn">اعرض صورتك المتكاملة</button>`
+          : `<div class="done-note">هذا ما أُتيح في هذا الإصدار. سيُفتح ما بعده قريبًا بإذن الله.</div>`);
 
     setHTML(`<div class="card centered rest"><div class="rest-check">${saved?'✓':'…'}</div>${savedNote}${retry}${actions}</div>`);
 
@@ -452,6 +511,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         state.assessment.progress.completedMirrors.push(state.mirrorId);
       startMirror(next);
     });
+    const sb = document.getElementById('showReportBtn');
+    if(sb) sb.addEventListener('click', renderReport);
   }
 
   function renderAllActiveDone(){
@@ -461,6 +522,183 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         <div class="rest-line">لقد أتممتَ ما هو متاح في هذا الإصدار.</div>
         <div class="done-note">سيُفتح ما بعد هذه المرآة قريبًا بإذن الله.</div>
       </div>`);
+  }
+
+  /* ════════════════════ شاشة التقرير الذاتيّ المتكامل ════════════════════ */
+
+  // اسم عرض النمط (الطبائع بلا أسماء في config → «النمط الأوّل/الثاني» أو رقم الطابع)
+  function typeDisplay(typeId, ordinalIdx){
+    const n = String(typeId||'').replace(/\D/g,'');           // "type1" → "1"
+    const ord = { 1:'الأوّل', 2:'الثاني', 3:'الثالث' }[ordinalIdx] || '';
+    return ord ? ('النمط ' + ord + (n ? (' (الطابع ' + arabicNum(n) + ')') : ''))
+               : (n ? ('الطابع ' + arabicNum(n)) : '—');
+  }
+
+  function reportSpectrumColor(key, position){
+    if(key === 'balance' || position === 'balance') return COLOR.green;
+    if((key||'').indexOf('excess')===0  || position==='excess')  return COLOR.gold;
+    if((key||'').indexOf('deficit')===0 || position==='deficit') return COLOR.blue;
+    return COLOR.purple; // ambiguous + suspicious_balance
+  }
+
+  // يبني شاشة التقرير من التجميع + مخرجات المحرّك (تجميع لا توليد)
+  function renderReport(){
+    state.stage = 'report'; cache();
+    const cfg = CFG();
+
+    // ١) اجمع النتائج ومرّرها للمحرّك
+    let results, rep;
+    try{
+      results = collectResultsForReport();
+      rep = REP().computeReport(results);
+    }catch(e){ errorCard('تعذّر تركيب التقرير: ' + e.message); return; }
+
+    const partial = !allActiveMirrorsComplete();
+    const axisInfo = function(axisId){
+      for(let i=0;i<cfg.mirrors.length;i++){
+        const ax = cfg.mirrors[i].axes.find(function(a){ return a.id===axisId; });
+        if(ax) return { axisName: ax.name, mirrorName: cfg.mirrors[i].name };
+      }
+      return { axisName: axisId, mirrorName: '' };
+    };
+
+    let html = '';
+
+    // ── (١) افتتاحيّة الأرض ──
+    html += `<div class="report-section report-ground">
+               <div class="report-ground-title">${esc(REPORT_TEXT.openingTitle)}</div>
+               <p>${esc(REPORT_TEXT.opening)}</p>
+               ${partial ? `<p class="report-partial">${esc(REPORT_TEXT.partialNote)}</p>` : ''}
+             </div>`;
+
+    // ── (٢) النمط الإجماليّ (typesPattern.dominant، مع رصد التعادل) ──
+    const tp = rep.typesPattern;
+    let typesBody = '';
+    if(tp.tie && tp.dominant.length > 1){
+      const names = tp.dominant.map(function(t,i){ return typeDisplay(t, i+1); });
+      typesBody = `<p class="report-p">ظهر أكثر من نمطٍ بقوّةٍ متقاربة، فلا نحسم لك نمطًا واحدًا — ظهر معك: ${esc(names.join('، و'))}. هذا تعدّدٌ نعرضه كما هو، لا تردّدٌ يُصحَّح.</p>`;
+    } else if(tp.dominant.length === 1){
+      typesBody = `<p class="report-p">النمط الأبرز عبر مراياك: <strong style="color:var(--gold)">${esc(typeDisplay(tp.dominant[0], 1))}</strong>. ظهر متصدّرًا في أكثر من مرآة، فكان أقوى ما تكرّر في حركتك.</p>`;
+    } else {
+      typesBody = `<p class="report-p">لم يتقدّم نمطٌ واحدٌ تقدّمًا بيّنًا في هذه الصورة.</p>`;
+    }
+    html += `<div class="report-section">
+               <div class="report-h">النمط الإجماليّ</div>
+               ${typesBody}
+             </div>`;
+
+    // ── (٣) صورة كل مرآة (إعادة عرض القراءة التي رآها العميل حرفيًّا) ──
+    let mirrorsHtml = '';
+    cfg.mirrors.forEach(function(m){
+      const res = results[m.id];
+      if(!res || !res.spectrum) return;                          // مرآة غير مكتملة → تُتخطّى
+      const domAxis = res.dominantAxis || (res.ranking && res.ranking[0] ? res.ranking[0].axisId : null);
+
+      let axesHtml = '';
+      // نعرض محاور الطيف الفعليّة لهذه المرآة (قد تكون محورًا أو محورين في dual)
+      Object.keys(res.spectrum).forEach(function(axisId){
+        const sp = res.spectrum[axisId];
+        if(!sp) return;
+        const key = sp.key;
+        const text = ((EDU()[m.id] && EDU()[m.id].axes[axisId] && EDU()[m.id].axes[axisId].spectrum) || {})[key] || '';
+        const info = axisInfo(axisId);
+        const color = reportSpectrumColor(key, sp.position);
+        const isDom = (axisId === domAxis);
+        axesHtml += `<div class="report-axis" style="border-inline-start-color:${color}">
+                       <div class="report-axis-name" style="color:${color}">
+                         ${esc(info.axisName)}${isDom ? ' <span class="report-dom-tag">المحور الأظهر</span>' : ''}
+                         ${sp.positionLabel ? ` — ${esc(sp.positionLabel)}` : ''}
+                       </div>
+                       <p class="report-axis-text">${esc(text)}</p>
+                     </div>`;
+      });
+
+      mirrorsHtml += `<div class="report-mirror">
+                        <div class="report-mirror-name">المرآة ${esc(m.name)}</div>
+                        ${axesHtml}
+                      </div>`;
+    });
+    html += `<div class="report-section">
+               <div class="report-h">صورتك في كلّ مرآة</div>
+               ${mirrorsHtml || '<p class="report-p">لا قراءات طيفٍ متاحة بعد.</p>'}
+             </div>`;
+
+    // ── (٤) خريطة التحرّك (spectrumMap، مع احترام التعادل) ──
+    const sm = rep.spectrumMap, c = sm.counts;
+    const fmtList = function(arr){
+      return (arr||[]).map(function(e){ const i = axisInfo(e.axisId); return esc(i.mirrorName + ' · ' + i.axisName); }).join('، ');
+    };
+    let mapBody = `<p class="report-p">عبر المرايا المكتملة: 
+        <span style="color:var(--green)">اتزان ${arabicNum(c.balance)}</span>،
+        <span style="color:var(--gold)">إفراط ${arabicNum(c.excess)}</span>،
+        <span style="color:var(--blue)">تفريط ${arabicNum(c.deficit)}</span>،
+        <span style="color:var(--purple)">التباس ${arabicNum(c.ambiguous)}</span>.</p>`;
+    if(c.balance)  mapBody += `<p class="report-map-line"><span style="color:var(--green)">اتزان:</span> ${fmtList(sm.byPosition.balance)}</p>`;
+    if(c.excess)   mapBody += `<p class="report-map-line"><span style="color:var(--gold)">إفراط:</span> ${fmtList(sm.byPosition.excess)}</p>`;
+    if(c.deficit)  mapBody += `<p class="report-map-line"><span style="color:var(--blue)">تفريط:</span> ${fmtList(sm.byPosition.deficit)}</p>`;
+    if(c.ambiguous)mapBody += `<p class="report-map-line"><span style="color:var(--purple)">التباس:</span> ${fmtList(sm.byPosition.ambiguous)}</p>`;
+    // الميل العامّ — لا حسم عند التعادل
+    if(sm.lean){
+      mapBody += `<p class="report-p">الميل العامّ في هذه الصورة إلى <strong>${esc(POS_LABEL[sm.lean]||sm.lean)}</strong>.</p>`;
+    } else if(sm.leanTie && sm.leanCandidates && sm.leanCandidates.length){
+      const cands = sm.leanCandidates.map(function(p){ return POS_LABEL[p]||p; });
+      mapBody += `<p class="report-p">لم يترجّح ميلٌ عامٌّ واحد — تقاربت: ${esc(cands.join('، و'))}، فنعرضها كما هي دون حسم.</p>`;
+    }
+    html += `<div class="report-section">
+               <div class="report-h">خريطة تحرّكك</div>
+               ${mapBody}
+             </div>`;
+
+    // ── (٥) مواضع تُفرَز لاحقًا (flags.items، بنبرة دعوة لا حكم) ──
+    if(rep.flags && rep.flags.items && rep.flags.items.length){
+      let flagsHtml = '';
+      rep.flags.items.forEach(function(f){
+        const info = axisInfo(f.axisId);
+        const note = f.suspiciousBalance ? 'اتزانٌ يستحقّ نظرةً أعمق' : 'موضعٌ لم يستقرّ بعد';
+        flagsHtml += `<div class="report-flag">
+                        <span class="report-flag-axis">${esc(info.mirrorName + ' · ' + info.axisName)}</span>
+                        <span class="report-flag-note">${esc(note)}</span>
+                      </div>`;
+      });
+      html += `<div class="report-section report-flags">
+                 <div class="report-h">مواضع تستحقّ وقفةً أعمق</div>
+                 <p class="report-p">هذه مواضع لم تُحسَم في الأرقام وحدها — نعرضها دعوةً إلى تأمّلٍ أصدق، أو إلى جلسةٍ هادئة، لا حكمًا عليك:</p>
+                 ${flagsHtml}
+               </div>`;
+    }
+
+    // ── (٦) خاتمة الأرض ──
+    html += `<div class="report-section report-ground">
+               <div class="report-ground-title">${esc(REPORT_TEXT.closingTitle)}</div>
+               <p>${esc(REPORT_TEXT.closing)}</p>
+             </div>`;
+
+    // أزرار: طباعة + رجوع
+    html += `<div class="report-actions">
+               <button class="btn ghost" id="printReport">احفظ نسخةً (طباعة)</button>
+               <button class="btn ghost" id="backFromReport">رجوع</button>
+             </div>`;
+
+    setHTML(`<div class="card report">${html}</div>`);
+
+    const pb = document.getElementById('printReport');
+    if(pb) pb.addEventListener('click', function(){ window.print(); });
+    const bb = document.getElementById('backFromReport');
+    if(bb) bb.addEventListener('click', function(){
+      if(allActiveMirrorsComplete()) renderReportGate(); else renderRest(true);
+    });
+  }
+
+  // بوّابة بعد الاكتمال: زرّ «اعرض صورتك المتكاملة»
+  function renderReportGate(){
+    setHTML(`
+      <div class="card centered">
+        <div class="rest-check">✓</div>
+        <div class="rest-line">أتممتَ كلّ المرايا المتاحة.</div>
+        <div class="done-note">صورتك المتكاملة جاهزة — تجمع ما رأيته عبر المرايا في مكانٍ واحد.</div>
+        <button class="btn primary" id="showReport">اعرض صورتك المتكاملة</button>
+      </div>`);
+    document.getElementById('showReport').addEventListener('click', renderReport);
   }
 
   /* ════════════════════ الاستئناف من الـcache المحلّي ════════════════════ */
@@ -543,7 +781,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     // ٣) أوّل مرآة فعّالة غير مكتملة
     const completed = getCompletedMirrors();
     const next = orderedActiveMirrors().find(id => completed.indexOf(id)===-1);
-    if(!next){ renderAllActiveDone(); return; }
+    // اكتملت كلّ المرايا الفعّالة → اعرض بوّابة التقرير (قابلة لإعادة العرض في أيّ زيارة لاحقة)
+    if(!next){ if(REP()) renderReportGate(); else renderAllActiveDone(); return; }
     startMirror(next);
   }
 
