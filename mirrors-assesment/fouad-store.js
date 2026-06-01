@@ -226,6 +226,17 @@
                 version: 'v2',
                 lastUpdated: FV.serverTimestamp()
             };
+
+            // ── جديد: اسم العميل وإيميله من المستخدم الحاليّ (بلا أيّ قراءة إضافيّة من Firestore) ──
+            // الهدف: أن تحمل كل وثيقة في fouad_v2_results هويّة صاحبها، فتقرأها صفحة الأدمن
+            //        من هذه المجموعة وحدها دون join ولا قراءة مجموعة users.
+            // نكتب الحقل فقط إن كانت له قيمة (Firestore يرفض undefined).
+            var _cu = getCurrentUser();
+            if (_cu) {
+                if (_cu.name)  meta.name  = _cu.name;
+                if (_cu.email) meta.email = _cu.email;
+            }
+
             var courseId = mirrorData.courseId || _config.courseId;
             if (courseId) meta.courseId = courseId;
             if (!exists) {
