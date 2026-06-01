@@ -475,8 +475,17 @@
   /* ════════════════════ الإقلاع ════════════════════ */
   async function init(){
     if(!$app()){ console.error('عنصر #app غير موجود'); return; }
-    if(!CFG()||!IDQ()||!SPC()||!EDU()||!ENG()||!BR()||!STORE()){
-      errorCard('تعذّر تحميل ملفّات المقياس — تحقّق من ترتيب السكربتات.'); return;
+    var _missing = [];
+    if(!CFG())   _missing.push('FOUAD_CONFIG');
+    if(!IDQ())   _missing.push('IDENTIFICATION_QUESTIONS');
+    if(!SPC())   _missing.push('SPECTRUM_STATEMENTS');
+    if(!EDU())   _missing.push('EDUCATIONAL_CONTENT');
+    if(!ENG())   _missing.push('FOUAD_ENGINE');
+    if(!BR())    _missing.push('FOUAD_BRIDGE');
+    if(!STORE()) _missing.push('FOUAD_STORE');
+    if(_missing.length){
+      console.error('[FOUAD_APP] طبقات غائبة:', _missing.join(', '));
+      errorCard('تعذّر تحميل ملفّات المقياس — الغائب: ' + _missing.join('، ')); return;
     }
     // ١) المصادقة (تحويل لصفحة الدخول إن لزم — المقياس في مجلّد فرعيّ)
     const user = STORE().requireAuth({ loginPath: '../login.html' });
