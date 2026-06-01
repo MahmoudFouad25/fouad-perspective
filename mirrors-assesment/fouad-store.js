@@ -1,0 +1,391 @@
+// ═══════════════════════════════════════════════════════════
+// 📦 fouad-store.js — طبقة الوصول الوحيدة إلى Firestore (مقياس الفؤاد v2)
+// كل ملفّات المقياس تمرّ عبر هذا الملف. يُصدَّر للمتصفّح عبر window.FOUAD_STORE
+//
+// المتطلّبات البيئيّة (مأخوذة من ملفّات المشروع):
+//   • Firebase نمط compat/namespaced 8.10.1 (firebase.firestore(), FieldValue, ...)
+//   • window.db و window.auth متوفّران عامّيًّا بعد التهيئة في صفحة الـ HTML
+//   • لا تهيئة هنا إطلاقًا — التهيئة تتمّ قبل تحميل هذا الملف
+// ═══════════════════════════════════════════════════════════
+
+(function (global) {
+    'use strict';
+
+    // ── ثوابت المخزن ──────────────────────────────────────────
+    var COLLECTION = 'fouad_v2_results';   // مجموعة النتائج: وثيقة واحدة لكل عميل بمعرّفه
+    var CACHE_PREFIX = 'fouad_v2_cache_';  // بادئة الـ cache المحلّي أثناء حلّ المرآة
+
+    // إعدادات قابلة للضبط من الصفحة (مثل courseId الخاصّ بالمقياس)
+    var _config = {
+        courseId: null,        // يُضبط عبر FOUAD_STORE.setConfig({ courseId: '...' })
+        readyTimeoutMs: 10000  // أقصى انتظار لجاهزيّة Firebase
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔐 SecureStorage مصغّر للقراءة (نفس منطق فكّ التشفير في المشروع)
+    //    إن وُجد window.SecureStorage مسبقًا نستعمله بدل تعريف نسخة جديدة
+    // ═══════════════════════════════════════════════════════════
+    var _ss = null;
+    function _getSecureStorage() {
+        if (_ss) return _ss;
+
+        // استعمل النسخة الموجودة في الصفحة إن كانت معرّفة بالفعل
+        if (global.SecureStorage && typeof global.SecureStorage.getItem === 'function') {
+            _ss = global.SecureStorage;
+            return _ss;
+        }
+
+        // نسخة مصغّرة للقراءة فقط: عكس النصّ ← atob ← decodeURIComponent ← JSON.parse
+        _ss = {
+            _key: 'f0u4d_P3r5p3ct1v3_2025',
+            decrypt: function (encrypted) {
+                try {
+                    var unshuffled = encrypted.split('').reverse().join('');
+                    var decoded = decodeURIComponent(atob(unshuffled));
+                    return JSON.parse(decoded);
+                } catch (e) {
+                    return null;
+                }
+            },
+            getItem: function (key) {
+                var encrypted = localStorage.getItem('_enc_' + key);
+                if (encrypted) return this.decrypt(encrypted);
+                return null;
+            }
+        };
+        return _ss;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ⏳ انتظار جاهزيّة Firebase قبل أيّ عمليّة على Firestore
+    //    نعتمد أساسًا على توفّر window.db، مع الاستماع لحدث firebaseReady
+    // ═══════════════════════════════════════════════════════════
+    function _ready() {
+        return new Promise(function (resolve) {
+            // جاهز بالفعل
+            if (global.db) return resolve(true);
+
+            var done = false;
+            function finish(ok) {
+                if (done) return;
+                done = true;
+                resolve(!!ok);
+            }
+
+            // استماع لحدث الجاهزيّة (كما في firebase-config.js)
+            function onReady() {
+                if (global.db) finish(true);
+            }
+            document.addEventListener('firebaseReady', onReady);
+
+            if (global.firebaseReady && global.db) return finish(true);
+
+            // احتياطيّ: فحص دوريّ لتوفّر window.db (لو لم يُطلق الحدث)
+            var elapsed = 0;
+            var step = 100;
+            var iv = setInterval(function () {
+                elapsed += step;
+                if (global.db) {
+                    clearInterval(iv);
+                    finish(true);
+                } else if (elapsed >= _config.readyTimeoutMs) {
+                    clearInterval(iv);
+                    console.error('[FOUAD_STORE] انتهت مهلة انتظار جاهزيّة Firebase (window.db غير متوفّر)');
+                    finish(false);
+                }
+            }, step);
+        });
+    }
+
+    // اختصار: تأكّد من الجاهزيّة وأرجع مرجع الوثيقة، أو null عند الفشل
+    async function _docRef(userId) {
+        var ok = await _ready();
+        if (!ok || !global.db) {
+            console.error('[FOUAD_STORE] Firestore غير جاهز');
+            return null;
+        }
+        if (!userId) {
+            console.error('[FOUAD_STORE] userId مفقود');
+            return null;
+        }
+        return global.db.collection(COLLECTION).doc(userId);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 1) getCurrentUser — هويّة العميل من SecureStorage أو fallback لـ localStorage
+    // ═══════════════════════════════════════════════════════════
+    function getCurrentUser() {
+        try {
+            var SS = _getSecureStorage();
+            var user = (SS && SS.getItem) ? SS.getItem('user') : null;
+
+            // المصدر الأساسيّ: النسخة المشفّرة
+            if (user && user.id) {
+                return user; // { id, name, email, level, status, ... }
+            }
+
+            // fallback: المفاتيح غير المشفّرة (مستخدم سجّل قبل التحديث مثلًا)
+            var uid = localStorage.getItem('userId');
+            if (uid) {
+                return {
+                    id: uid,
+                    name: localStorage.getItem('userName') || null,
+                    email: localStorage.getItem('userEmail') || null,
+                    level: localStorage.getItem('userLevel') || null,
+                    status: localStorage.getItem('userStatus') || null
+                };
+            }
+
+            // لا يوجد مستخدم مسجّل
+            return null;
+        } catch (e) {
+            console.error('[FOUAD_STORE] getCurrentUser error:', e);
+            return null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 2) requireAuth — تتأكّد من وجود مستخدم، وإلّا تحوّل لصفحة الدخول
+    //    options.loginPath لتمرير مسار مختلف (مثل ../login.html من مجلّد فرعيّ)
+    // ═══════════════════════════════════════════════════════════
+    function requireAuth(options) {
+        options = options || {};
+        var loginPath = options.loginPath || './login.html';
+
+        var user = getCurrentUser();
+        if (!user || !user.id) {
+            // لا يوجد مستخدم — تحويل المتصفّح لصفحة الدخول
+            try { window.location.href = loginPath; } catch (e) {}
+            return null;
+        }
+        return user;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 3) loadAssessment — قراءة وثيقة العميل مرّة واحدة
+    //    تُرجع البيانات، أو null لو الوثيقة غير موجودة (عميل جديد) أو عند فشل القراءة
+    // ═══════════════════════════════════════════════════════════
+    async function loadAssessment(userId) {
+        try {
+            var ref = await _docRef(userId);
+            if (!ref) return null;
+
+            var doc = await ref.get();
+            if (doc.exists) return doc.data();
+
+            return null; // عميل جديد — لا توجد وثيقة بعد
+        } catch (e) {
+            // فشل القراءة لا يعطّل التطبيق
+            console.error('[FOUAD_STORE] loadAssessment error:', e);
+            return null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 4) saveMirror — أهمّ دالّة: كتابة واحدة عند اكتمال كل مرآة
+    //    mirrorData المتوقّع:
+    //      { identification: {...}, spectrum: {...}, results: {...}, courseId? }
+    //    أو بصيغة: { answers: { identification, spectrum }, results: {...} }
+    //    تُحدّث: answers[mirrorId] + results[mirrorId]
+    //            + إضافة mirrorId إلى progress.completedMirrors + meta.lastUpdated
+    // ═══════════════════════════════════════════════════════════
+    async function saveMirror(userId, mirrorId, mirrorData) {
+        try {
+            if (!mirrorId) {
+                console.error('[FOUAD_STORE] saveMirror: mirrorId مفقود');
+                return false;
+            }
+            var ref = await _docRef(userId);
+            if (!ref) return false;
+
+            mirrorData = mirrorData || {};
+            var FV = firebase.firestore.FieldValue;
+
+            // فحص وجود الوثيقة لضبط createdAt مرّة واحدة فقط
+            // (هذه قراءة وليست كتابة — لا تُحتسب ضمن كتابات Firestore)
+            var exists = false;
+            try {
+                var snap = await ref.get();
+                exists = snap.exists;
+            } catch (re) {
+                console.warn('[FOUAD_STORE] تعذّر فحص وجود الوثيقة (سنكمل بافتراض جديدة):', re);
+            }
+
+            // استخراج الإجابات الخام والنتائج المحسوبة بمرونة
+            var identification =
+                mirrorData.identification ||
+                (mirrorData.answers && mirrorData.answers.identification) || {};
+            var spectrum =
+                mirrorData.spectrum ||
+                (mirrorData.answers && mirrorData.answers.spectrum) || {};
+            var results = mirrorData.results || {};
+
+            // بناء كائن meta — createdAt و completed فقط عند إنشاء الوثيقة لأوّل مرّة
+            var meta = {
+                userId: userId,
+                version: 'v2',
+                lastUpdated: FV.serverTimestamp()
+            };
+            var courseId = mirrorData.courseId || _config.courseId;
+            if (courseId) meta.courseId = courseId;
+            if (!exists) {
+                meta.createdAt = FV.serverTimestamp(); // أوّل مرآة تنشئ الوثيقة
+                meta.completed = false;
+            }
+
+            // الحمولة — مفاتيح متداخلة بمعرّف المرآة (merge يدمج الخرائط دون مسح المرايا الأخرى)
+            var payload = {
+                meta: meta,
+                progress: {
+                    completedMirrors: FV.arrayUnion(mirrorId) // إضافة دون تكرار
+                },
+                answers: {},
+                results: {}
+            };
+            payload.answers[mirrorId] = { identification: identification, spectrum: spectrum };
+            payload.results[mirrorId] = results;
+
+            // كتابة واحدة: merge ليعمل سواء كانت الوثيقة جديدة أو موجودة
+            await ref.set(payload, { merge: true });
+
+            // بعد نجاح الكتابة، امسح الـ cache المحلّي لهذه المرآة
+            clearMirrorCache(mirrorId);
+
+            return true;
+        } catch (e) {
+            // خطأ Firestore يُسجَّل ولا يُسقِط التطبيق
+            console.error('[FOUAD_STORE] saveMirror error:', e);
+            return false;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 5) saveProgress — تحديث حقل progress فقط (الموضع الحاليّ للاستئناف)
+    //    خفيفة، تُستعمل عند نقاط الاستراحة. merge لا يمسّ مفاتيح progress الأخرى
+    //    (مرّر مثلًا { currentMirrorOrder, currentStage } دون completedMirrors)
+    // ═══════════════════════════════════════════════════════════
+    async function saveProgress(userId, progress) {
+        try {
+            var ref = await _docRef(userId);
+            if (!ref) return false;
+
+            var FV = firebase.firestore.FieldValue;
+            await ref.set({
+                progress: progress || {},
+                meta: { lastUpdated: FV.serverTimestamp() }
+            }, { merge: true });
+
+            return true;
+        } catch (e) {
+            console.error('[FOUAD_STORE] saveProgress error:', e);
+            return false;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 6) saveFinalReport — كتابة التقرير الختاميّ وضبط meta.completed = true
+    // ═══════════════════════════════════════════════════════════
+    async function saveFinalReport(userId, finalReport) {
+        try {
+            var ref = await _docRef(userId);
+            if (!ref) return false;
+
+            var FV = firebase.firestore.FieldValue;
+            await ref.set({
+                finalReport: finalReport || {},
+                meta: { completed: true, lastUpdated: FV.serverTimestamp() }
+            }, { merge: true });
+
+            return true;
+        } catch (e) {
+            console.error('[FOUAD_STORE] saveFinalReport error:', e);
+            return false;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 7) cache محلّي أثناء حلّ المرآة (دون أيّ كتابة في Firestore)
+    //    المفتاح: fouad_v2_cache_<userId>_<mirrorId>
+    // ═══════════════════════════════════════════════════════════
+    function _cacheKey(mirrorId) {
+        var u = getCurrentUser();
+        var uid = (u && u.id) ? u.id : 'anon';
+        return CACHE_PREFIX + uid + '_' + mirrorId;
+    }
+
+    // حفظ تقدّم المرآة الجاري محلّيًّا (يُستدعى أثناء الحلّ — لا يلمس Firestore)
+    function cacheMirrorProgress(mirrorId, partialData) {
+        try {
+            if (!mirrorId) return false;
+            localStorage.setItem(_cacheKey(mirrorId), JSON.stringify({
+                mirrorId: mirrorId,
+                data: partialData,
+                savedAt: Date.now()
+            }));
+            return true;
+        } catch (e) {
+            console.error('[FOUAD_STORE] cacheMirrorProgress error:', e);
+            return false;
+        }
+    }
+
+    // قراءة التقدّم المحلّي للمرآة (للاستئناف لو أُغلقت الصفحة في المنتصف)
+    function readMirrorCache(mirrorId) {
+        try {
+            if (!mirrorId) return null;
+            var raw = localStorage.getItem(_cacheKey(mirrorId));
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            // نُرجع data المخزّنة، ومع التوافق لو حُفظت بصيغة قديمة
+            return (parsed && typeof parsed === 'object' && 'data' in parsed) ? parsed.data : parsed;
+        } catch (e) {
+            console.error('[FOUAD_STORE] readMirrorCache error:', e);
+            return null;
+        }
+    }
+
+    // مسح cache المرآة (يُستدعى تلقائيًّا بعد saveMirror الناجحة)
+    function clearMirrorCache(mirrorId) {
+        try {
+            if (!mirrorId) return false;
+            localStorage.removeItem(_cacheKey(mirrorId));
+            return true;
+        } catch (e) {
+            console.error('[FOUAD_STORE] clearMirrorCache error:', e);
+            return false;
+        }
+    }
+
+    // ضبط إعدادات اختياريّة (مثل courseId)
+    function setConfig(cfg) {
+        if (cfg && typeof cfg === 'object') {
+            if (cfg.courseId !== undefined) _config.courseId = cfg.courseId;
+            if (cfg.readyTimeoutMs !== undefined) _config.readyTimeoutMs = cfg.readyTimeoutMs;
+        }
+        return _config;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // التصدير العامّ
+    // ═══════════════════════════════════════════════════════════
+    global.FOUAD_STORE = {
+        // الهويّة
+        getCurrentUser: getCurrentUser,
+        requireAuth: requireAuth,
+        // Firestore (المصدر الوحيد للحقيقة)
+        loadAssessment: loadAssessment,
+        saveMirror: saveMirror,
+        saveProgress: saveProgress,
+        saveFinalReport: saveFinalReport,
+        // الـ cache المحلّي أثناء المرآة
+        cacheMirrorProgress: cacheMirrorProgress,
+        readMirrorCache: readMirrorCache,
+        clearMirrorCache: clearMirrorCache,
+        // إعدادات + ثوابت مكشوفة للقراءة
+        setConfig: setConfig,
+        COLLECTION: COLLECTION
+    };
+
+    console.log('✅ FOUAD_STORE جاهز — مجموعة:', COLLECTION);
+
+})(window);
