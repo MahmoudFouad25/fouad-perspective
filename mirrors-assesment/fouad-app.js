@@ -5,6 +5,9 @@
      FOUAD_STORE حصرًا. هذا الملف لا يلمس Firestore مباشرة إطلاقًا.
    • يقرأ المحتوى من ملفّات البيانات (config/identification/spectrum/educational).
    • يحرّك العميل عبر مراحل المرآة السبع داخل صفحة واحدة.
+   • طبقة العرض المطوّرة (النخلة/البيت/المراجعة/الاكتمال/خريطة التحرّك) في
+     fouad-render.js (window.FOUAD_RENDER) — تُحمَّل قبل هذا الملف ويُنادى منه.
+     آلة الحالة ونقاط الحفظ ونداءات المحرّك/الجسر/المخزن لم تتغيّر حرفيًّا.
    ════════════════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -43,6 +46,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
   function ENG(){   return (typeof FOUAD_ENGINE            !== 'undefined') ? FOUAD_ENGINE            : window.FOUAD_ENGINE; }
   function BR(){    return (typeof FOUAD_BRIDGE            !== 'undefined') ? FOUAD_BRIDGE            : window.FOUAD_BRIDGE; }
   function STORE(){ return window.FOUAD_STORE; }
+  // طبقة العرض المطوّرة (fouad-render.js) — بنّاؤون أنقياء، لا حالة فيها
+  function RND(){   return (typeof FOUAD_RENDER !== 'undefined') ? FOUAD_RENDER : window.FOUAD_RENDER; }
   function PAUSES(){
     var p = (typeof REFLECTION_PAUSES !== 'undefined') ? REFLECTION_PAUSES : window.REFLECTION_PAUSES;
     return (p && p.length) ? p : null;
@@ -99,6 +104,36 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
   }
   function orderedActiveMirrors(){
     return CFG().mirrors.filter(m => ACTIVE_MIRRORS.indexOf(m.id)!==-1).map(m=>m.id);
+  }
+
+  // ── أدوات البيت (عرض صرف يعتمد على الهويّة) ──
+  // هل في المرآة تقدّمٌ محلّيّ غير مكتمل؟ (لتمييز عقدة «جاريّة»)
+  function mirrorHasCache(id){
+    try{
+      const c = STORE().readMirrorCache(id);
+      return !!(c && ((c.answers && Object.keys(c.answers).length) || (c.ratings && Object.keys(c.ratings).length)));
+    }catch(e){ return false; }
+  }
+  function hasAnyCachedProgress(){
+    return orderedActiveMirrors().some(function(id){ return mirrorHasCache(id); });
+  }
+  // لون عقدة المرآة من موقع طيف محورها الأظهر (الوصول بالهويّة لا بالموضع)
+  function mirrorNodeColor(mirrorId, results){
+    const res = results && results[mirrorId];
+    if(!res || !res.spectrum) return null;
+    const domAxis = res.dominantAxis || (res.ranking && res.ranking[0] ? res.ranking[0].axisId : null);
+    let sp = domAxis ? res.spectrum[domAxis] : null;
+    if(!sp){                                   // احتياط: أوّل محور طيفٍ متاح
+      const keys = Object.keys(res.spectrum);
+      if(keys.length) sp = res.spectrum[keys[0]];
+    }
+    if(!sp) return null;
+    return RND().posColor(sp.position, sp.key);
+  }
+  // اسم العميل من بيانات المصادقة (بأمان، بلا افتراض شكلٍ واحد)
+  function clientName(){
+    const u = state.user || {};
+    return u.name || u.displayName || u.fullName || '';
   }
 
   // حفظ التقدّم الجاري محلّيًّا فقط (صفر كتابة Firestore)
@@ -436,9 +471,13 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     let inner = '';
     state.spectrumAxes.forEach(ax=>{
       const sr = state.spectrumResults[ax], color = spectrumColor(sr.key);
+      // شريط الطيف التوقيعيّ يُعرَض مع كلّ قراءة (عرض صرف من fouad-render.js)
+      const sp  = Object.assign({}, sr.result, { key: sr.key });
+      const bar = RND() ? RND().spectrumBar(sp) : '';
       inner += `
         <div class="spectrum-result" style="border-inline-start-color:${color}">
           <div class="sr-axis" style="color:${color}">${esc(axisName(ax))} — ${esc(sr.result.positionLabel||'')}</div>
+          ${bar}
           <p class="sr-text">${esc(sr.text)}</p>
         </div>`;
     });
@@ -480,41 +519,54 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     renderRest(ok);
   }
 
+  // بعد الحفظ: تُعرَض «رجوع للبيت» (البيت هو مَن يقرّر المرآة التالية / التقرير).
+  // نحدّث النسخة المحلّيّة (المكتمل + نتيجة المرآة) كي يلوّن البيت العقدة بلا قراءة Firestore.
   function renderRest(saved){
-    const completed = getCompletedMirrors().slice();
-    if(saved && completed.indexOf(state.mirrorId)===-1) completed.push(state.mirrorId);
-    const next = orderedActiveMirrors().find(id => completed.indexOf(id)===-1);
+    state.stage = 'rest';
+
+    state.assessment = state.assessment || {};
+    state.assessment.progress = state.assessment.progress || {};
+    if(!Array.isArray(state.assessment.progress.completedMirrors)) state.assessment.progress.completedMirrors = [];
+    if(saved && state.assessment.progress.completedMirrors.indexOf(state.mirrorId)===-1)
+      state.assessment.progress.completedMirrors.push(state.mirrorId);
+
+    // مرآةٌ مكتملة → خزّن نتيجتها محلّيًّا بنفس الشكل المحفوظ ({results:{…}}) (لا Firestore)
+    if(saved && state.identificationResult){
+      const idr = state.identificationResult;
+      const rr = {
+        ranking: idr.ranking,
+        dominantAxis: state.dominantAxis,
+        scenario: state.scenario ? state.scenario.scenario : null,
+        flags: { weakSignal: idr.weakSignal, dualAxis: idr.dualAxis, sameAxisCloseness: idr.sameAxisCloseness },
+        spectrum: {}
+      };
+      (state.spectrumAxes||[]).forEach(function(ax){
+        const sr = state.spectrumResults[ax];
+        if(sr) rr.spectrum[ax] = Object.assign({}, sr.result, { key: sr.key });
+      });
+      state.assessment.results = state.assessment.results || {};
+      state.assessment.results[state.mirrorId] = { results: rr };
+    }
 
     const savedNote = saved
       ? `<div class="rest-line">أتممتَ المرآة. تقدّمك محفوظ.</div>`
       : `<div class="rest-line warn">أتممتَ المرآة، لكن تعذّر الحفظ الآن.</div>`;
-    const retry   = saved ? '' : `<button class="btn ghost" id="retrySave">حاول الحفظ ثانيةً</button>`;
-    // لو بقيت مرايا فعّالة → زرّ المتابعة كما هو.
-    // لو اكتملت كلّ المرايا الفعّالة → زرّ «اعرض صورتك المتكاملة».
-    const allDone = !next && allActiveMirrorsComplete();
-    const actions = next
-      ? `<button class="btn primary" id="nextMirror">تابِع إلى المرآة التالية</button>`
-      : (allDone
-          ? `<button class="btn primary" id="showReportBtn">اعرض صورتك المتكاملة</button>`
-          : `<div class="done-note">هذا ما أُتيح في هذا الإصدار. سيُفتح ما بعده قريبًا بإذن الله.</div>`);
+    const retry = saved ? '' : `<button class="btn ghost" id="retrySave">حاول الحفظ ثانيةً</button>`;
 
-    setHTML(`<div class="card centered rest"><div class="rest-check">${saved?'✓':'…'}</div>${savedNote}${retry}${actions}</div>`);
+    setHTML(`
+      <div class="card centered rest">
+        <div class="rest-check">${saved?'✓':'…'}</div>
+        ${savedNote}
+        ${retry}
+        <div class="home-actions"><button class="btn primary" id="backHome">رجوع للبيت</button></div>
+      </div>`);
 
     if(!saved){ const rb=document.getElementById('retrySave'); if(rb) rb.addEventListener('click', finishMirror); }
-    const nb=document.getElementById('nextMirror');
-    if(nb) nb.addEventListener('click', ()=>{
-      // حدّث النسخة المحلّيّة من المكتمل ثمّ ابدأ التالي
-      state.assessment = state.assessment || {};
-      state.assessment.progress = state.assessment.progress || {};
-      if(!Array.isArray(state.assessment.progress.completedMirrors)) state.assessment.progress.completedMirrors = [];
-      if(state.assessment.progress.completedMirrors.indexOf(state.mirrorId)===-1)
-        state.assessment.progress.completedMirrors.push(state.mirrorId);
-      startMirror(next);
-    });
-    const sb = document.getElementById('showReportBtn');
-    if(sb) sb.addEventListener('click', renderReport);
+    const hb = document.getElementById('backHome');
+    if(hb) hb.addEventListener('click', renderHome);
   }
 
+  // (تبقى مُعرّفة احتياطًا — لم تعد جزءًا من المسار بعد اعتماد البيت)
   function renderAllActiveDone(){
     setHTML(`
       <div class="card centered">
@@ -522,6 +574,128 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         <div class="rest-line">لقد أتممتَ ما هو متاح في هذا الإصدار.</div>
         <div class="done-note">سيُفتح ما بعد هذه المرآة قريبًا بإذن الله.</div>
       </div>`);
+  }
+
+  /* ════════════════════ (١) شاشة البيت / خريطة الرحلة ════════════════════
+     البيت نقطة الدخول حين يوجد تقدّم، وما يُعرَض «رجوع للبيت» بعد كلّ مرآة.
+     يعيد عرض ما تمّ من المحفوظ + المحتوى (لا توليد). الوصول دائمًا بالهويّة. */
+  function renderHome(){
+    state.stage = 'home';
+    const cfg = CFG();
+    const order = orderedActiveMirrors();
+    const completed = getCompletedMirrors();
+    const results = collectResultsForReport();
+    const mirrorById = {}; cfg.mirrors.forEach(function(m){ mirrorById[m.id]=m; });
+
+    const next = order.find(function(id){ return completed.indexOf(id)===-1; });
+    const allDone = order.length>0 && order.every(function(id){ return completed.indexOf(id)!==-1; });
+
+    // العقد بترتيب القوس من الـconfig (السلوك قاعدةً، الجروح قمّةً — يرتّبها fouad-render)
+    const nodes = order.map(function(id){
+      let status = 'todo';
+      if(completed.indexOf(id)!==-1)      status = 'done';
+      else if(id===next && mirrorHasCache(id)) status = 'active';   // مرآةٌ جاريّة (تقدّمٌ غير مكتمل)
+      return {
+        id: id,
+        name: (mirrorById[id] ? mirrorById[id].name : id),
+        status: status,
+        color: (status==='done') ? mirrorNodeColor(id, results) : null
+      };
+    });
+
+    const doneCount = order.filter(function(id){ return completed.indexOf(id)!==-1; }).length;
+    const totalCount = order.length;
+    const progressPct = totalCount ? Math.round((doneCount/totalCount)*100) : 0;
+
+    const palmSVG = RND().palmTree(nodes, { allDone: allDone });
+    const card = RND().homeCard({
+      name: clientName(), palmSVG: palmSVG,
+      doneCount: doneCount, totalCount: totalCount, progressPct: progressPct,
+      hasNext: !!next, allDone: allDone
+    });
+    setHTML(`<div class="card home">${card}</div>`);
+
+    // «تابِع» → المرآة التالية غير المكتملة (تستأنف الجاريّة إن وُجد تقدّم)
+    const cont = document.getElementById('homeContinue');
+    if(cont) cont.addEventListener('click', function(){
+      const nx = orderedActiveMirrors().find(function(id){ return getCompletedMirrors().indexOf(id)===-1; });
+      if(nx) startMirror(nx);
+    });
+    // «صورتك المتكاملة» → بوّابة الاكتمال (شاشة النخلة) ثمّ التقرير
+    const rep = document.getElementById('homeReport');
+    if(rep) rep.addEventListener('click', function(){ if(REP()) renderReportGate(); else renderReport(); });
+
+    // نقر عقدةٍ تمّت → مراجعة تلك المرآة (لا قفز داخل مرآةٍ جاريّة)
+    Array.prototype.forEach.call(document.querySelectorAll('.palm-hit'), function(hit){
+      hit.addEventListener('click', function(){
+        const id = hit.getAttribute('data-node');
+        if(id) renderMirrorReview(id);
+      });
+    });
+  }
+
+  /* شاشة المراجعة — تعيد بناء ما رآه العميل من المحفوظ + المحتوى (لا توليد) */
+  function renderMirrorReview(mirrorId){
+    state.stage = 'review';
+    const cfg = CFG();
+    const mirror = cfg.mirrors.find(function(m){ return m.id===mirrorId; });
+    if(!mirror){ renderHome(); return; }
+    const results = collectResultsForReport();
+    const res = results[mirrorId];
+    const edu = EDU()[mirrorId] || {};
+    const axisName = function(id){ const a=mirror.axes.find(function(x){return x.id===id;}); return a?a.name:id; };
+    const ord = ORDINALS[mirror.order] || arabicNum(mirror.order);
+
+    const model = { mirrorName: mirror.name, mirrorOrdinal: ord };
+
+    // إشارة ضعيفة أو غياب طيف → نصّ المرآة الضعيف (كما رآه العميل)
+    const hasSpectrum = res && res.spectrum && Object.keys(res.spectrum).length;
+    const isWeak = res && (res.scenario === 'weak' || (res.flags && res.flags.weakSignal));
+    if(isWeak || !hasSpectrum){
+      model.weakText = edu.weakSignal || '';
+      setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
+      wireReviewBack(); return;
+    }
+
+    // الطابع الأعلى لكلّ محورٍ من ranking (أوّل ظهورٍ = الأعلى لأنّه تنازليّ)
+    const ranking = res.ranking || [];
+    const topByAxis = {};
+    ranking.forEach(function(row){
+      if(!row || !row.axisId) return;
+      if(topByAxis[row.axisId]===undefined) topByAxis[row.axisId] = row.type;
+    });
+    const domAxis = res.dominantAxis || (ranking[0] ? ranking[0].axisId : null);
+
+    const blocks = [], spectra = [];
+    Object.keys(res.spectrum).forEach(function(axisId){
+      const ac = (edu.axes && edu.axes[axisId]) || {};
+      const topType = topByAxis[axisId];
+      blocks.push({
+        axisName: axisName(axisId),
+        axisIntro: ac.axisIntro || '',
+        afterRanking: (topType && ac.doors && ac.doors[topType]) ? ac.doors[topType].afterRanking : '',
+        // التأصيل عُرِض في الحالة الواضحة فقط (مطابقةً لـ buildEducationBlocks)
+        rooting: (res.scenario === 'clear' && axisId===domAxis) ? (ac.rooting || '') : ''
+      });
+      const sp = res.spectrum[axisId];
+      const text = (ac.spectrum || {})[sp.key] || '';
+      spectra.push({
+        axisName: axisName(axisId),
+        positionLabel: sp.positionLabel || '',
+        barHTML: RND().spectrumBar(sp),
+        text: text
+      });
+    });
+    model.blocks = blocks;
+    model.spectra = spectra;
+
+    setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
+    wireReviewBack();
+  }
+
+  function wireReviewBack(){
+    const b = document.getElementById('reviewBack');
+    if(b) b.addEventListener('click', renderHome);
   }
 
   /* ════════════════════ شاشة التقرير الذاتيّ المتكامل ════════════════════ */
@@ -552,6 +726,25 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       results = collectResultsForReport();
       rep = REP().computeReport(results);
     }catch(e){ errorCard('تعذّر تركيب التقرير: ' + e.message); return; }
+
+    // خلايا خريطة التحرّك البصريّة (محور كلّ مرآة الأظهر بموقعه ولونه) — عرض صرف
+    const mmCells = orderedActiveMirrors().map(function(id){
+      const mm = cfg.mirrors.find(function(x){ return x.id===id; });
+      const r2 = results[id];
+      const nm = mm ? mm.name : id;
+      if(!r2 || !r2.spectrum){ return { name: nm, present: false }; }
+      const domAxis = r2.dominantAxis || (r2.ranking && r2.ranking[0] ? r2.ranking[0].axisId : null);
+      let sp = domAxis ? r2.spectrum[domAxis] : null;
+      if(!sp){ const ks = Object.keys(r2.spectrum); if(ks.length) sp = r2.spectrum[ks[0]]; }
+      if(!sp){ return { name: nm, present: false }; }
+      return {
+        name: nm, present: true,
+        position: sp.position,
+        color: RND().posColor(sp.position, sp.key),
+        ambiguous: (sp.ambiguous===true || sp.position==='ambiguous'),
+        suspicious: (sp.suspiciousBalance===true)
+      };
+    });
 
     const partial = !allActiveMirrorsComplete();
     const axisInfo = function(axisId){
@@ -623,7 +816,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
                ${mirrorsHtml || '<p class="report-p">لا قراءات طيفٍ متاحة بعد.</p>'}
              </div>`;
 
-    // ── (٤) خريطة التحرّك (spectrumMap، مع احترام التعادل) ──
+    // ── (٤) خريطة التحرّك (تمثيلٌ بصريّ أوّلًا، ثمّ الأرقام النصّيّة كملحق) ──
     const sm = rep.spectrumMap, c = sm.counts;
     const fmtList = function(arr){
       return (arr||[]).map(function(e){ const i = axisInfo(e.axisId); return esc(i.mirrorName + ' · ' + i.axisName); }).join('، ');
@@ -646,7 +839,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     }
     html += `<div class="report-section">
                <div class="report-h">خريطة تحرّكك</div>
-               ${mapBody}
+               ${RND().movementMap({ cells: mmCells })}
+               <div class="movemap-appendix">${mapBody}</div>
              </div>`;
 
     // ── (٥) مواضع تُفرَز لاحقًا (flags.items، بنبرة دعوة لا حكم) ──
@@ -673,10 +867,10 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
                <p>${esc(REPORT_TEXT.closing)}</p>
              </div>`;
 
-    // أزرار: طباعة + رجوع
+    // أزرار: طباعة + رجوع للبيت
     html += `<div class="report-actions">
                <button class="btn ghost" id="printReport">احفظ نسخةً (طباعة)</button>
-               <button class="btn ghost" id="backFromReport">رجوع</button>
+               <button class="btn ghost" id="backFromReport">رجوع للبيت</button>
              </div>`;
 
     setHTML(`<div class="card report">${html}</div>`);
@@ -684,21 +878,33 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const pb = document.getElementById('printReport');
     if(pb) pb.addEventListener('click', function(){ window.print(); });
     const bb = document.getElementById('backFromReport');
-    if(bb) bb.addEventListener('click', function(){
-      if(allActiveMirrorsComplete()) renderReportGate(); else renderRest(true);
-    });
+    if(bb) bb.addEventListener('click', renderHome);
   }
 
-  // بوّابة بعد الاكتمال: زرّ «اعرض صورتك المتكاملة»
+  /* (٣) بوّابة الاكتمال — شاشة النخلة المكتملة ثمّ زرّ «اعرض صورتك المتكاملة» */
   function renderReportGate(){
-    setHTML(`
-      <div class="card centered">
-        <div class="rest-check">✓</div>
-        <div class="rest-line">أتممتَ كلّ المرايا المتاحة.</div>
-        <div class="done-note">صورتك المتكاملة جاهزة — تجمع ما رأيته عبر المرايا في مكانٍ واحد.</div>
-        <button class="btn primary" id="showReport">اعرض صورتك المتكاملة</button>
-      </div>`);
-    document.getElementById('showReport').addEventListener('click', renderReport);
+    state.stage = 'completion';
+    const cfg = CFG();
+    const order = orderedActiveMirrors();
+    const results = collectResultsForReport();
+    const mirrorById = {}; cfg.mirrors.forEach(function(m){ mirrorById[m.id]=m; });
+
+    // كلّ العقد مكتملة، ملوّنة بمواقع طيفها
+    const nodes = order.map(function(id){
+      return {
+        id: id,
+        name: (mirrorById[id] ? mirrorById[id].name : id),
+        status: 'done',
+        color: mirrorNodeColor(id, results)
+      };
+    });
+
+    const palmSVG = RND().palmTree(nodes, { allDone: true });
+    const card = RND().completionCard({ palmSVG: palmSVG, name: clientName() });
+    setHTML(`<div class="card completion-card centered">${card}</div>`);
+
+    const sb = document.getElementById('completionShow');
+    if(sb) sb.addEventListener('click', renderReport);
   }
 
   /* ════════════════════ الاستئناف من الـcache المحلّي ════════════════════ */
@@ -763,6 +969,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     if(!ENG())   _missing.push('FOUAD_ENGINE');
     if(!BR())    _missing.push('FOUAD_BRIDGE');
     if(!STORE()) _missing.push('FOUAD_STORE');
+    if(!RND())   _missing.push('FOUAD_RENDER');
     if(_missing.length){
       console.error('[FOUAD_APP] طبقات غائبة:', _missing.join(', '));
       errorCard('تعذّر تحميل ملفّات المقياس — الغائب: ' + _missing.join('، ')); return;
@@ -778,11 +985,14 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     try{ assessment = await STORE().loadAssessment(user.id); }catch(e){ assessment=null; }
     state.assessment = assessment;        // null = عميل جديد
 
-    // ٣) أوّل مرآة فعّالة غير مكتملة
+    // ٣) توجيه نقطة الدخول:
+    //    • يوجد تقدّم سابق (مرآة مكتملة أو تقدّم محلّيّ) → اهبط على البيت.
+    //    • عميل جديد بلا تقدّم → ابدأ أوّل مرآة فعّالة مباشرةً (تدفّق نقيّ).
     const completed = getCompletedMirrors();
     const next = orderedActiveMirrors().find(id => completed.indexOf(id)===-1);
-    // اكتملت كلّ المرايا الفعّالة → اعرض بوّابة التقرير (قابلة لإعادة العرض في أيّ زيارة لاحقة)
-    if(!next){ if(REP()) renderReportGate(); else renderAllActiveDone(); return; }
+    const hasProgress = completed.length>0 || hasAnyCachedProgress();
+    if(hasProgress){ renderHome(); return; }
+    if(!next){ renderHome(); return; }    // (نادر) لا تالٍ ولا تقدّم
     startMirror(next);
   }
 
