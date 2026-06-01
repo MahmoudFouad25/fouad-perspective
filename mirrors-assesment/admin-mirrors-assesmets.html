@@ -289,9 +289,14 @@
   // عناصر DOM
   var $ = function (id) { return document.getElementById(id); };
 
+  // مسار صفحة دخول الأدمن (موجودة في مجلّد admin/ بجذر المشروع).
+  // من mirrors-assesment/ نصعد للجذر ثمّ ندخل admin/ — عدّله لو نقلت login.html.
+  var ADMIN_EMAIL = 'admin@fouad-academy.com';
+  var LOGIN_PATH  = '../admin/login.html';
+
   // ═══════════════════════════════════════════════════════════
-  // 🔐 حماية الصفحة عبر تكوين المشروع — أدمن فقط (مع تشخيص دقيق)
-  //    نفحص الطبقات بالترتيب لنعرف أيّها سقط بالضبط بدل رسالة عامّة.
+  // 🔐 حماية الصفحة — أدمن فقط (مع تشخيص دقيق لجاهزيّة Firebase)
+  //    نتحكّم بوجهة التحويل بأنفسنا، فلا نعتمد على ./login.html في firebase-config.
   // ═══════════════════════════════════════════════════════════
   var problem = null;
   if (typeof firebase === 'undefined')
@@ -300,12 +305,8 @@
     problem = 'حزمة firebase-auth-compat لم تُحمّل (وسم auth-compat ناقص أو فشل تحميله).';
   else if (typeof firebase.firestore !== 'function')
     problem = 'حزمة firebase-firestore-compat لم تُحمّل (وسم firestore-compat ناقص أو فشل تحميله).';
-  else if (!window.firebaseAuth)
-    problem = 'js/firebase-config.js لم يُنفَّذ لآخره — على الأغلب خطأ بداخله، راجع تبويب Console لرؤية الخطأ الأحمر.';
-  else if (typeof window.firebaseAuth.checkAdminAuth !== 'function')
-    problem = 'js/firebase-config.js حُمّل لكنّه لا يُصدّر checkAdminAuth — تأكّد أنّه النسخة الصحيحة.';
-  else if (!window.db)
-    problem = 'window.db غير معرّف بعد تحميل التكوين.';
+  else if (!window.auth || !window.db)
+    problem = 'js/firebase-config.js لم يُنفَّذ لآخره — راجع تبويب Console لرؤية الخطأ الأحمر، أو تأكّد من مساره.';
 
   if (problem) {
     console.error('[ADMIN] سبب التوقّف:', problem);
@@ -315,19 +316,21 @@
   }
   db = window.db;
 
-  // checkAdminAuth: يقبل فقط admin@fouad-academy.com، ويحوّل لصفحة الدخول عند الرفض
-  window.firebaseAuth.checkAdminAuth()
-    .then(function (user) {
-      // أدمن مؤكَّد: أظهر الواجهة وحمّل البيانات (قراءة واحدة)
-      $('gate').style.display = 'none';
-      $('app').style.display  = 'block';
-      $('adminEmail').textContent = user.email;
-      wireEvents();
-      loadClients();
-    })
-    .catch(function () {
-      // غير مصرّح — checkAdminAuth حوّل بالفعل إلى صفحة الدخول، لا حاجة لإجراء آخر
-    });
+  // نراقب حالة الدخول بأنفسنا: لو مش الأدمن نحوّل لمسار الدخول الصحيح.
+  // (الدخول يكون عبر admin/login.html؛ وبعده تبقى الجلسة سارية فيُسمح بالعرض هنا.)
+  window.auth.onAuthStateChanged(function (user) {
+    var email = (user && user.email) ? user.email.toLowerCase() : '';
+    if (!user || email !== ADMIN_EMAIL.toLowerCase()) {
+      window.location.href = LOGIN_PATH;   // غير مصرّح — تحويل لصفحة الدخول
+      return;
+    }
+    // أدمن مؤكَّد: أظهر الواجهة وحمّل البيانات (قراءة واحدة)
+    $('gate').style.display = 'none';
+    $('app').style.display  = 'block';
+    $('adminEmail').textContent = user.email;
+    wireEvents();
+    loadClients();
+  });
 
   // ═══════════════════════════════════════════════════════════
   // ربط الأحداث (مرّة واحدة بعد تأكيد الأدمن)
@@ -335,7 +338,7 @@
   function wireEvents() {
     $('btnRefresh').addEventListener('click', loadClients);
     $('btnLogout').addEventListener('click', function () {
-      window.firebaseAuth.signOut();   // تسجيل خروج المشروع (يحوّل إلى ../index.html)
+      window.auth.signOut().then(function () { window.location.href = LOGIN_PATH; });
     });
     // بحث محلّيّ — يفلتر القائمة المحمّلة فقط، بلا أيّ قراءة جديدة
     $('searchInput').addEventListener('input', function (e) {
