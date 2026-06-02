@@ -24,7 +24,7 @@ window.COURSE_CONFIG = {
   course: {
     id: "mehrab",                  // ← المعرّف الفريد للريتريت
     title: "المحراب — من الاحتراق إلى الانبعاث",
-    basePrice: 2400,               // السعر الأساسي قبل أي خصم (بالجنيه)
+    basePrice: 2900,               // السعر الأساسي قبل أي خصم (بالجنيه)
     currency: "ج.م",
   },
 
@@ -52,10 +52,10 @@ window.COURSE_CONFIG = {
   timeOffers: [
     {
       enabled: true,
-      name: "عرض الإطلاق",
-      percentage: 35,              // نسبة الخصم %
-      startDate: "2026-05-01",
-      endDate:   "2026-07-31",
+      name: "عرض عيد الأضحى",
+      percentage: 40,              // نسبة الخصم %
+      startDate: "2026-05-28",
+      endDate:   "2026-06-06",
       showCountdown: true,         // يعرض عدّاد تنازلي؟
     },
     {
