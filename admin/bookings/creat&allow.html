@@ -4722,140 +4722,114 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
     }
 }
 
+        // تحديد المودويلات المطلوبة: باقة متعددة أو دورة واحدة
+function getStudentModules(student) {
+    if (Array.isArray(student.courseModules) && student.courseModules.length > 0) {
+        return student.courseModules.filter(Boolean);
+    }
+    return student.courseName ? [student.courseName] : [];
+}
+window.getStudentModules = getStudentModules;
+        
 // دالة تخصيص الدورة التلقائي
 async function autoAssignCourse(studentId, userId) {
     try {
-        console.log('📚 بدء تخصيص الدورة التلقائي...');
-        
-        // جلب بيانات الطالب
+        console.log('📚 بدء تخصيص الدورة/الباقة التلقائي...');
+
         const studentDoc = await db.collection('individualStudents').doc(studentId).get();
-        if (!studentDoc.exists) {
-            throw new Error('لم يتم العثور على بيانات الطالب');
-        }
-        
-        const student = {
-            id: studentDoc.id,
-            ...studentDoc.data()
-        };
-        
-        if (!student.courseName) {
-            console.log('⚠️ لا توجد دورة محددة للتخصيص');
-            return;
+        if (!studentDoc.exists) throw new Error('لم يتم العثور على بيانات الطالب');
+        const student = { id: studentDoc.id, ...studentDoc.data() };
+
+        const modules = getStudentModules(student);
+        if (modules.length === 0) { console.log('⚠️ لا توجد دورة محددة للتخصيص'); return; }
+
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) throw new Error('لم يتم العثور على حساب المستخدم');
+        const userData = userDoc.data();
+        let workingEnrollments = [...(userData.enrollments || [])];
+
+        const startDate = new Date().toISOString().split('T')[0];
+        const endDate = (() => { const e = new Date(); e.setMonth(e.getMonth() + 6); return e.toISOString().split('T')[0]; })();
+
+        const assignedIds = [];
+        let assignedCount = 0;
+
+        for (let i = 0; i < modules.length; i++) {
+            const moduleName = modules[i];
+
+            // تخطّي المودويل لو موجود ونشط بالفعل
+            const exists = workingEnrollments.find(e =>
+                e.title === moduleName && e.dates?.endDate && new Date(e.dates.endDate) > new Date());
+            if (exists) { console.log('⚠️ المودويل مخصص ونشط بالفعل:', moduleName); continue; }
+
+            const moduleCourseId = await EnrollmentManager.getCourseIdByName(moduleName);
+            if (!moduleCourseId) console.warn('⚠️ لم يتم العثور على المودويل في courses:', moduleName);
+
+            // المودويل الأول يحمل السعر كامل، الباقي مشمول بالباقة (صفر) لمنع ازدواج المحاسبة
+            const isPrimary = (assignedCount === 0);
+            const moduleStudent = { ...student, courseName: moduleName, actualCourseId: moduleCourseId };
+            if (!isPrimary) {
+                moduleStudent.pricing = { ...(student.pricing || {}), basePriceNumber: 0, finalPriceNumber: 0, basePrice: '0', finalPrice: '0 ج.م' };
+                moduleStudent.paymentInfo = { ...(student.paymentInfo || {}), isInstallment: false, paidAmount: 0, remainingAmount: 0, totalAmount: 0 };
+            }
+
+            const enrollmentData = {
+                enrollmentType: 'new', startDate, endDate, duration: '6 شهر',
+                usePoints: false, pointsToUse: 0,
+                notes: 'تخصيص تلقائي عبر نظام الأتمتة' + (isPrimary ? '' : ' — مشمول ضمن الباقة'),
+                isRenewal: false, automatedAssignment: true
+            };
+
+            const newEnrollment = EnrollmentManager.createEnrollment(moduleStudent, enrollmentData);
+            if (!isPrimary) newEnrollment.includedInPackage = true;
+            workingEnrollments.push(newEnrollment);
+            if (moduleCourseId) assignedIds.push(moduleCourseId);
+            assignedCount++;
         }
 
-        // جلب courseId الحقيقي
-const actualCourseId = await EnrollmentManager.getCourseIdByName(student.courseName);
-if (!actualCourseId) {
-    console.error('❌ فشل في جلب معرف الدورة من courses collection');
-}
-        
-        // جلب بيانات المستخدم
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (!userDoc.exists) {
-            throw new Error('لم يتم العثور على حساب المستخدم');
-        }
-        
-        const userData = userDoc.data();
-        const existingEnrollments = userData.enrollments || [];
-        
-        // التحقق من عدم وجود نفس الدورة
-        const courseExists = existingEnrollments.find(e => 
-            e.title === student.courseName && 
-            new Date(e.dates.endDate) > new Date()
-        );
-        
-        if (courseExists) {
-            console.log('⚠️ الدورة مخصصة بالفعل وما زالت نشطة');
-            return;
-        }
-        
-        // إنشاء enrollment
-        const enrollmentData = {
-            enrollmentType: 'new',
-            startDate: new Date().toISOString().split('T')[0],
-            endDate: (() => {
-                const end = new Date();
-                end.setMonth(end.getMonth() + 6);
-                return end.toISOString().split('T')[0];
-            })(),
-            duration: '6 شهر',
-            usePoints: false,
-            pointsToUse: 0,
-            notes: 'تخصيص تلقائي عبر نظام الأتمتة الذكي',
-            isRenewal: false,
-            automatedAssignment: true
-        };
-        
-        const newEnrollment = EnrollmentManager.createEnrollment({
-    ...student,
-    actualCourseId: actualCourseId
-}, enrollmentData);
-        const updatedEnrollments = [...existingEnrollments, newEnrollment];
-        
-        // حساب الإجماليات المالية
-        const financialTotals = EnrollmentManager.calculateFinancialTotals(updatedEnrollments);
-        
-        // حساب النقاط من المبلغ المدفوع
-        let actualPaidAmount = 0;
-        let paymentDescription = '';
-        
+        if (assignedCount === 0) { console.log('✅ كل المودويلات مخصصة بالفعل'); return; }
+
+        const financialTotals = EnrollmentManager.calculateFinancialTotals(workingEnrollments);
+
+        // النقاط: تُحسب مرة واحدة على مستوى الباقة كلها
+        let actualPaidAmount = 0, paymentDescription = '';
         if (student.paymentInfo?.isInstallment) {
             actualPaidAmount = student.paymentInfo.paidAmount || 0;
-            const installmentNumber = student.paymentInfo.paidInstallments || 1;
-            paymentDescription = `القسط ${installmentNumber} = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
+            paymentDescription = `القسط ${student.paymentInfo.paidInstallments || 1} = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
         } else if (student.paymentConfirmed) {
-            actualPaidAmount = newEnrollment.pricing.finalPrice;
+            actualPaidAmount = student.pricing?.finalPriceNumber || 0;
             paymentDescription = `دفعة كاملة = ${actualPaidAmount.toLocaleString('ar-EG')} ج.م`;
         }
-        
         const coursePoints = Math.floor(actualPaidAmount / 10);
 
-        // نقاط ثابتة للتخصيص
-await addDualPoints(
-    userId,
-    50,
-    'تخصيص دورة جديدة (أتمتة)',
-    `تم تخصيص دورة: ${student.courseName}`
-);
-console.log('✅ تم إضافة 50 نقطة ثابتة للتخصيص (أتمتة)');
+        await addDualPoints(userId, 50, 'تخصيص دورة/باقة (أتمتة)', `تم تخصيص: ${modules.join('، ')}`);
 
-// النقاط من المبلغ المدفوع
-        
-        // تحديث بيانات المستخدم في Firebase
         await db.collection('users').doc(userId).update({
-            enrollments: updatedEnrollments,
+            enrollments: workingEnrollments,
             'financial.totalPaid': financialTotals.totalPaid,
             'financial.totalDue': financialTotals.totalDue,
             'financial.totalSavings': financialTotals.totalSavings,
             'financial.totalOriginalPrice': financialTotals.totalOriginalPrice,
             'timestamps.updatedAt': new Date().toISOString()
         });
-        
-        // تحديث individualStudents
+
         await db.collection('individualStudents').doc(studentId).update({
             courseAssigned: true,
             courseAssignedAt: new Date().toISOString(),
-           assignedCourseId: actualCourseId || newEnrollment.courseId,
+            assignedCourseId: assignedIds[0] || null,
+            assignedCourseIds: assignedIds,
             'automationCompleted.courseAssignment': true,
             'progress.courseAssignment': 100,
             'progress.totalProgress': 100
         });
-        
-        // إضافة النقاط باستخدام دالة النقاط الموحدة
+
         if (coursePoints > 0) {
-            await addDualPoints(
-                userId,
-                coursePoints,
-                `تخصيص دورة - ${student.courseName} (أتمتة)`,
-                paymentDescription
-            );
-            console.log(`✅ تم إضافة ${coursePoints} نقطة للدورة عبر الأتمتة`);
+            await addDualPoints(userId, coursePoints, `تخصيص باقة - ${modules.join('، ')} (أتمتة)`, paymentDescription);
         }
-        
-        console.log('✅ تم تخصيص الدورة تلقائياً بنجاح');
-        
+
+        console.log(`✅ تم تخصيص ${assignedCount} مودويل بنجاح`);
     } catch (error) {
-        console.error('❌ خطأ في تخصيص الدورة التلقائي:', error);
+        console.error('❌ خطأ في التخصيص التلقائي:', error);
     }
 }
 
