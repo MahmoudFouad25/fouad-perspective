@@ -640,8 +640,8 @@
         </div>
     </div>
     
-    <!-- شريط الإحصائيات -->
-    <div class="stats-container">
+    <!-- شريط الإحصائيات (مخفي — يتطلب تحميل كامل) -->
+    <div class="stats-container" style="display:none;">
         <div class="stat-card">
             <div class="stat-icon blue">
                 <i class="fas fa-users"></i>
@@ -774,8 +774,37 @@
         <i class="fas fa-list-check"></i> تصنيف العملاء
     </button>
 </div>
-    <!-- التبويبات -->
-    <div class="tabs-container">
+    <!-- شريط الأوضاع الذكي -->
+    <style>
+    .view-btn{flex:1;background:#F3F4F6;border:none;padding:14px;border-radius:10px;cursor:pointer;font-family:inherit;font-weight:700;color:#6B7280;font-size:1rem;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
+    .view-btn:hover{background:#E5E7EB}
+    .view-btn.active{background:linear-gradient(135deg,#3B82F6,#2563EB);color:#fff;box-shadow:0 4px 12px rgba(59,130,246,.3)}
+    .browse-card{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:all .2s}
+    .browse-card:hover{border-color:#3B82F6;transform:translateX(-3px);box-shadow:0 4px 14px rgba(0,0,0,.08)}
+    .browse-card-icon{width:48px;height:48px;border-radius:12px;background:#EDE9FE;color:#6D28D9;display:grid;place-items:center;font-size:1.2rem;flex-shrink:0}
+    .browse-card-body{flex:1;text-align:right;min-width:0}
+    .browse-card-title{font-weight:700;color:#1F2937;font-size:1.05rem}
+    .browse-card-meta{color:#6B7280;font-size:.88rem;margin-top:3px}
+    .browse-card-sub{color:#9CA3AF;font-size:.8rem;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .browse-card-arrow{color:#9CA3AF;flex-shrink:0}
+    .browse-back{color:#fff;background:rgba(255,255,255,.15);display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;cursor:pointer;margin-bottom:14px;font-weight:600}
+    .browse-group-head{color:#fff;font-size:1.2rem;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+    .browse-group-head span{color:rgba(255,255,255,.7);font-size:.9rem}
+    </style>
+    <div class="view-bar-container" style="max-width:1400px;margin:20px auto 14px;padding:0 20px;">
+      <div class="view-bar" style="background:#fff;border-radius:15px;padding:10px;display:flex;gap:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);flex-wrap:wrap;">
+        <button class="view-btn active" data-view="pending" onclick="switchView('pending')"><i class="fas fa-clock"></i> الطلبات المعلقة</button>
+        <button class="view-btn" data-view="courses" onclick="switchView('courses')"><i class="fas fa-book-open"></i> تصفّح بالدورات</button>
+        <button class="view-btn" data-view="customers" onclick="switchView('customers')"><i class="fas fa-users"></i> تصفّح بالعملاء</button>
+      </div>
+    </div>
+    <div id="viewSubBar" style="display:none; max-width:1400px; margin:0 auto 10px; padding:0 20px; gap:10px; align-items:center;">
+      <input id="viewSearchInput" onkeyup="onViewSearch()" placeholder="🔍 بحث بالاسم أو الدورة..." style="flex:1; padding:10px 14px; border:2px solid #E5E7EB; border-radius:10px; font-family:inherit;">
+      <button onclick="refreshCurrentView()" style="background:#10B981;color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:700"><i class="fas fa-sync-alt"></i> تحديث</button>
+    </div>
+
+    <!-- التبويبات (قديمة — مخفية) -->
+    <div class="tabs-container" style="display:none;">
         <div class="tabs">
             <button class="tab active" onclick="filterByTab('all')">
                 <i class="fas fa-list"></i>
@@ -1081,6 +1110,8 @@
         let filteredStudents = [];
         let currentFilter = 'all';
         let viewMode = 'pending';
+        let browseCache = null;        // كل الحجوزات (خفيف) — يُحمّل مرة واحدة للتصفّح
+        let currentCourseGroup = null; // اسم الدورة المفتوحة حالياً في وضع الدورات
 let activeOffers = {};
 // ==================== 🗂️ البنية الجديدة المتكاملة للمستخدم ====================
 
@@ -3545,8 +3576,7 @@ await sendWelcomeMessage(student);
         }
         
         // تحديث العرض
-        filterByTab(currentFilter || 'all');
-        updateStatistics();
+        await refreshCurrentView();
         
     } catch (error) {
         console.error('خطأ في إنشاء الحساب:', error);
@@ -4205,7 +4235,7 @@ if (coursePoints > 0) {
       
 
 Swal.fire('نجح!', 'تم تخصيص الدورة بنجاح', 'success');
-await loadStudents();
+await refreshCurrentView();
 
                
         // رسالة النجاح المفصلة
@@ -4250,7 +4280,7 @@ await loadStudents();
         });
        
         // تحديث العرض
-        await loadStudents();
+        await refreshCurrentView();
         
     } catch (error) {
         console.error('خطأ في تخصيص الدورة:', error);
@@ -4772,6 +4802,228 @@ window.getStudentModules = getStudentModules;
   return null;
 }
 window.getChoiceLabel = getChoiceLabel;
+
+        // ============================================================
+//   منظومة التصفّح الذكي — تحميل عند الطلب + تخزين في الذاكرة
+// ============================================================
+
+// تحميل بيانات التصفّح (خفيفة) مرة واحدة وتخزينها — بدون لمس users
+async function loadBrowseData(force = false) {
+    if (browseCache && !force) return browseCache;
+    const snap = await db.collection('individualStudents').get();
+    const arr = [];
+    snap.forEach(doc => {
+        const d = doc.data();
+        if (d && d.customer && d.customer.name && d.customer.name !== 'غير محدد') {
+            arr.push({
+                id: doc.id,
+                userId: d.userId || null,
+                customer: d.customer,
+                courseName: d.courseName || 'غير محدد',
+                courseModules: Array.isArray(d.courseModules) ? d.courseModules.filter(Boolean) : [],
+                package: d.package || null,
+                accountCreated: d.accountCreated === true,
+                courseAssigned: d.courseAssigned === true,
+                paymentConfirmed: d.paymentConfirmed === true
+            });
+        }
+    });
+    browseCache = arr;
+    console.log('📦 كاش التصفّح:', arr.length, 'حجز — قراءة واحدة مخزّنة');
+    return arr;
+}
+
+// تبديل الوضع
+async function switchView(mode) {
+    viewMode = mode;
+    currentCourseGroup = null;
+    document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+    const sub = document.getElementById('viewSubBar');
+    const grid = document.getElementById('studentsGrid');
+    const searchInput = document.getElementById('viewSearchInput');
+    if (searchInput) searchInput.value = '';
+
+    if (mode === 'pending') {
+        if (sub) sub.style.display = 'none';
+        await loadPendingOnly();
+        return;
+    }
+
+    grid.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p style="margin-top:20px;color:white;">جاري تحميل بيانات التصفّح...</p></div>';
+    await loadBrowseData();
+    if (sub) sub.style.display = 'flex';
+    if (mode === 'courses') renderByCourses();
+    else if (mode === 'customers') renderByCustomers();
+}
+window.switchView = switchView;
+
+// تجميع بالدورات
+function renderByCourses(searchTerm = '') {
+    currentCourseGroup = null;
+    const grid = document.getElementById('studentsGrid');
+    const groups = {};
+    browseCache.forEach(s => {
+        const mods = s.courseModules.length ? s.courseModules : [s.courseName];
+        mods.forEach(m => { (groups[m] = groups[m] || []).push(s); });
+    });
+    let entries = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+    if (searchTerm) {
+        const t = searchTerm.toLowerCase();
+        entries = entries.filter(([name]) => name.toLowerCase().includes(t));
+    }
+    if (entries.length === 0) { grid.innerHTML = '<div class="no-data"><i class="fas fa-book"></i><h3>لا توجد دورات</h3></div>'; return; }
+    grid.innerHTML = entries.map(([name, list]) => {
+        const assigned = list.filter(s => s.courseAssigned).length;
+        const pending = list.length - assigned;
+        const safe = name.replace(/'/g, "\\'");
+        return `<div class="browse-card" onclick="openCourseGroup('${safe}')">
+            <div class="browse-card-icon"><i class="fas fa-book-open"></i></div>
+            <div class="browse-card-body">
+              <div class="browse-card-title">${name}</div>
+              <div class="browse-card-meta">${list.length} عميل · <span style="color:#10B981">${assigned} مخصّص</span>${pending ? ` · <span style="color:#F59E0B">${pending} معلّق</span>` : ''}</div>
+            </div>
+            <i class="fas fa-chevron-left browse-card-arrow"></i>
+          </div>`;
+    }).join('');
+}
+window.renderByCourses = renderByCourses;
+
+// فتح دورة بعينها — عرض عملائها
+function openCourseGroup(courseName) {
+    currentCourseGroup = courseName;
+    const grid = document.getElementById('studentsGrid');
+    const list = browseCache.filter(s => (s.courseModules.length ? s.courseModules : [s.courseName]).includes(courseName));
+    grid.innerHTML = `<div class="browse-back" onclick="renderByCourses()"><i class="fas fa-arrow-right"></i> رجوع لكل الدورات</div>
+        <div class="browse-group-head"><i class="fas fa-book-open"></i> ${courseName} <span>(${list.length} عميل)</span></div>`
+        + list.map(s => customerRowHTML(s)).join('');
+}
+window.openCourseGroup = openCourseGroup;
+
+// تجميع بالعملاء (دمج حسب userId)
+function renderByCustomers(searchTerm = '') {
+    const grid = document.getElementById('studentsGrid');
+    const map = new Map();
+    browseCache.forEach(s => {
+        const key = s.userId || ('noacc_' + s.id);
+        if (!map.has(key)) {
+            map.set(key, { userId: s.userId, refId: s.userId || s.id, refType: s.userId ? 'uid' : 'sid',
+                name: s.customer.name, whatsapp: s.customer.whatsapp || '', email: s.customer.email || '',
+                modules: new Set(), accountCreated: s.accountCreated });
+        }
+        const e = map.get(key);
+        (s.courseModules.length ? s.courseModules : [s.courseName]).forEach(m => e.modules.add(m));
+    });
+    let arr = [...map.values()];
+    if (searchTerm) {
+        const t = searchTerm.toLowerCase();
+        arr = arr.filter(e => (e.name || '').toLowerCase().includes(t) || (e.email || '').toLowerCase().includes(t) || (e.whatsapp || '').includes(t));
+    }
+    arr.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+    if (arr.length === 0) { grid.innerHTML = '<div class="no-data"><i class="fas fa-users"></i><h3>لا يوجد عملاء</h3></div>'; return; }
+    grid.innerHTML = arr.map(e => {
+        const mods = [...e.modules];
+        return `<div class="browse-card" onclick="openCustomerDetail('${e.refId.replace(/'/g, "\\'")}','${e.refType}')">
+            <div class="browse-card-icon" style="background:#DBEAFE;color:#2563EB"><i class="fas fa-user"></i></div>
+            <div class="browse-card-body">
+              <div class="browse-card-title">${e.name}</div>
+              <div class="browse-card-meta">${mods.length} دورة · ${e.accountCreated ? '<span style="color:#10B981">حساب نشط</span>' : '<span style="color:#F59E0B">بدون حساب</span>'}</div>
+              <div class="browse-card-sub">${mods.join(' · ')}</div>
+            </div>
+            <i class="fas fa-chevron-left browse-card-arrow"></i>
+          </div>`;
+    }).join('');
+}
+window.renderByCustomers = renderByCustomers;
+
+// صف عميل (يُستخدم داخل مجموعة دورة)
+function customerRowHTML(s) {
+    const choice = getChoiceLabel(s);
+    return `<div class="browse-card" onclick="openCustomerDetail('${(s.userId || s.id).replace(/'/g, "\\'")}','${s.userId ? 'uid' : 'sid'}')">
+        <div class="browse-card-icon" style="background:#DBEAFE;color:#2563EB"><i class="fas fa-user"></i></div>
+        <div class="browse-card-body">
+          <div class="browse-card-title">${s.customer.name}</div>
+          <div class="browse-card-meta">${s.courseAssigned ? '<span style="color:#10B981">مخصّص</span>' : '<span style="color:#F59E0B">معلّق</span>'}${choice ? ' · ' + choice : ''}</div>
+        </div>
+        <i class="fas fa-chevron-left browse-card-arrow"></i>
+      </div>`;
+}
+
+// تفاصيل العميل — تُحمّل عند الطلب فقط (نقاط + enrollments)
+async function openCustomerDetail(id, type) {
+    Swal.fire({ title: 'جاري تحميل تفاصيل العميل...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+        let userData = null, userId = null, studentRecord = null;
+        if (type === 'uid') {
+            userId = id;
+            const ud = await db.collection('users').doc(userId).get();
+            if (ud.exists) userData = ud.data();
+            studentRecord = (browseCache || []).find(s => s.userId === userId) || null;
+        } else {
+            studentRecord = (browseCache || []).find(s => s.id === id) || null;
+        }
+
+        const name = userData?.personalInfo?.name || studentRecord?.customer?.name || 'غير محدد';
+        const journeyPts = userData?.journeyPoints?.balance ?? 0;
+        const walletPts = userData?.walletPoints?.balance ?? 0;
+        const enrollments = userData?.enrollments || [];
+
+        const enrHtml = enrollments.length
+            ? enrollments.map(e => `<div style="background:#F9FAFB;padding:12px;border-radius:8px;margin-bottom:8px;border-right:3px solid ${e.status?.current === 'active' ? '#10B981' : '#9CA3AF'};text-align:right">
+                  <strong>${e.title || 'دورة'}</strong>
+                  <div style="color:#6B7280;font-size:0.85rem;margin-top:3px">
+                    ${e.dates?.startDate ? new Date(e.dates.startDate).toLocaleDateString('ar-EG') : '—'}${e.dates?.endDate ? ' → ' + new Date(e.dates.endDate).toLocaleDateString('ar-EG') : ''} · ${e.status?.current === 'active' ? 'نشط' : 'منتهٍ'}
+                  </div>
+                </div>`).join('')
+            : '<p style="color:#9CA3AF">لا توجد دورات مخصّصة على الحساب</p>';
+
+        Swal.close();
+        await Swal.fire({
+            title: name,
+            html: `<div style="text-align:right;direction:rtl">
+                ${userId ? `<div style="display:flex;gap:10px;margin-bottom:14px">
+                  <div style="flex:1;background:#ECFDF5;padding:12px;border-radius:10px;text-align:center"><div style="font-size:0.8rem;color:#6B7280">نقاط الارتواء</div><div style="font-weight:800;color:#10B981;font-size:1.3rem">${journeyPts}</div></div>
+                  <div style="flex:1;background:#FEF3C7;padding:12px;border-radius:10px;text-align:center"><div style="font-size:0.8rem;color:#6B7280">نقاط المحفظة</div><div style="font-weight:800;color:#F59E0B;font-size:1.3rem">${walletPts}</div></div>
+                </div>` : '<div style="background:#FEF3C7;padding:10px;border-radius:8px;margin-bottom:12px;color:#92400E"><i class="fas fa-exclamation-triangle"></i> عميل بدون حساب بعد</div>'}
+                <div style="background:#fff;border:1px solid #E5E7EB;padding:12px;border-radius:10px;margin-bottom:12px">
+                  ${studentRecord?.customer?.whatsapp ? `<div style="margin:4px 0"><i class="fab fa-whatsapp" style="color:#25D366"></i> ${studentRecord.customer.whatsapp}</div>` : ''}
+                  ${studentRecord?.customer?.email ? `<div style="margin:4px 0"><i class="fas fa-envelope" style="color:#3B82F6"></i> ${studentRecord.customer.email}</div>` : ''}
+                </div>
+                <h4 style="margin-bottom:8px;color:#374151"><i class="fas fa-graduation-cap"></i> الدورات (${enrollments.length})</h4>
+                ${enrHtml}
+                ${userId ? `<a href="https://mahmoudfouad25.github.io/fouad-perspective/admin/edite-user.html?id=${userId}" target="_blank" style="display:inline-block;margin-top:14px;background:linear-gradient(135deg,#8B5CF6,#7C3AED);color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600"><i class="fas fa-external-link-alt"></i> فتح صفحة التعديل الكاملة</a>` : ''}
+              </div>`,
+            width: '600px',
+            confirmButtonText: 'إغلاق',
+            confirmButtonColor: '#3B82F6'
+        });
+    } catch (e) {
+        Swal.close();
+        Swal.fire('خطأ', e.message, 'error');
+    }
+}
+window.openCustomerDetail = openCustomerDetail;
+
+// بحث داخل الوضع الحالي
+function onViewSearch() {
+    const term = document.getElementById('viewSearchInput').value.trim();
+    if (viewMode === 'courses') renderByCourses(term);
+    else if (viewMode === 'customers') renderByCustomers(term);
+}
+window.onViewSearch = onViewSearch;
+
+// تحديث الوضع الحالي (يُبطل الكاش ويعيد التحميل)
+async function refreshCurrentView() {
+    browseCache = null;
+    if (viewMode === 'pending') { await loadPendingOnly(); return; }
+    await loadBrowseData(true);
+    if (viewMode === 'courses') {
+        currentCourseGroup ? openCourseGroup(currentCourseGroup) : renderByCourses();
+    } else if (viewMode === 'customers') {
+        renderByCustomers();
+    }
+}
+window.refreshCurrentView = refreshCurrentView;
+        
         // ============ مصدر الحقيقة الوحيد: هل الطلب محتاج معالجة؟ ============
 function bookingNeedsProcessing(data) {
     if (data.paymentConfirmed !== true) return false;
@@ -5131,7 +5383,7 @@ async function fixOldEnrollments() {
         });
         
         // إعادة تحميل البيانات
-        await loadStudents();
+        await refreshCurrentView();
         
     } catch (error) {
         console.error('خطأ في الإصلاح:', error);
@@ -5626,7 +5878,7 @@ const processResult = await autoCreateAccountAndAssignCourse(bookingId, fromTele
             
             // إعادة تحميل البيانات
             if (typeof loadStudents === 'function') {
-                await loadStudents();
+                await refreshCurrentView();
             }
             
         } else {
@@ -5757,7 +6009,7 @@ async function processSelectedBookings(selectedBookings) {
     });
     
     if (typeof loadStudents === 'function') {
-        await loadStudents();
+        await refreshCurrentView();
     }
 }
 // دالة معالجة كل الطلبات المعلقة
@@ -5927,7 +6179,7 @@ async function processAllPendingBookings() {
         
         // تحديث الصفحة
         if (typeof loadStudents === 'function') {
-            await loadStudents();
+            await refreshCurrentView();
         }
         
     } catch (error) {
@@ -7172,7 +7424,7 @@ async function reassignCorrectCourse(student) {
         });
 
         // تحديث العرض
-        await loadStudents();
+        await refreshCurrentView();
 
     } catch (error) {
         console.error('خطأ:', error);
@@ -7270,7 +7522,7 @@ async function deleteAllEnrollments(userId) {
             confirmButtonColor: '#10B981'
         });
 
-        await loadStudents();
+        await refreshCurrentView();
 
     } catch (error) {
         console.error('خطأ:', error);
