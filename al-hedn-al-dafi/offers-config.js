@@ -37,24 +37,27 @@ window.COURSE_CONFIG = {
      ────────────────────────────────────────────────────────────────────── */
   packages: {
     "part1": {
-      name: "الجزء الأول · اكتشاف المعجزة",
-      shortName: "الجزء الأول",
-      sub: "اعرف مين طفلك حقيقي",
-      basePrice: 2400,
-    },
-    "full": {
-      name: "الباقة الكاملة · اكتشاف + احتضان",
-      shortName: "الباقة الكاملة",
-      sub: "الرحلة كاملة من الاكتشاف للاحتضان",
-      basePrice: 4200,
-      featured: true,
-    },
-    "part2-alumni": {
-      name: "الجزء الثاني · للمجموعة السابقة",
-      shortName: "الجزء الثاني (مجموعة سابقة)",
-      sub: "احتضان المعجزة — سعر تكريمي",
-      basePrice: 2800,
-    },
+  name: "الجزء الأول · اكتشاف المعجزة",
+  shortName: "الجزء الأول",
+  sub: "اعرف مين طفلك حقيقي",
+  basePrice: 2400,
+  modules: ["al-hedn-al-dafi-discovery"],
+},
+"full": {
+  name: "الباقة الكاملة · اكتشاف + احتضان",
+  shortName: "الباقة الكاملة",
+  sub: "الرحلة كاملة من الاكتشاف للاحتضان",
+  basePrice: 4200,
+  featured: true,
+  modules: ["al-hedn-al-dafi-discovery", "al-hedn-al-dafi-embrace"],
+},
+"part2-alumni": {
+  name: "الجزء الثاني · للمجموعة السابقة",
+  shortName: "الجزء الثاني (مجموعة سابقة)",
+  sub: "احتضان المعجزة — سعر تكريمي",
+  basePrice: 2800,
+  modules: ["al-hedn-al-dafi-embrace"],
+},
   },
 
   // الباقة اللي بتظهر مختارة افتراضياً أول ما الصفحة تفتح
