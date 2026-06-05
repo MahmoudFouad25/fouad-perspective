@@ -1080,6 +1080,7 @@
         let allStudents = [];
         let filteredStudents = [];
         let currentFilter = 'all';
+        let viewMode = 'pending';
 let activeOffers = {};
 // ==================== 🗂️ البنية الجديدة المتكاملة للمستخدم ====================
 
@@ -2026,7 +2027,38 @@ async function useWalletPoints(userId, amount, reason, description) {
             }, 5000);
         }
 
-       
+       // تحميل الطلبات المعلقة فقط — أول ما الصفحة تفتح (قراءات أقل بكثير)
+async function loadPendingOnly() {
+    try {
+        const grid = document.getElementById('studentsGrid');
+        if (grid) grid.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p style="margin-top:20px;color:white;">جاري تحميل الطلبات المعلقة...</p></div>';
+
+        const snap = await db.collection('individualStudents')
+            .where('paymentConfirmed', '==', true).get();
+
+        allStudents = [];
+        snap.forEach(doc => {
+            const d = doc.data();
+            if (bookingNeedsProcessing(d) && d.customer && d.customer.name) {
+                allStudents.push({ id: doc.id, ...d });
+            }
+        });
+
+        viewMode = 'pending';
+        filteredStudents = [...allStudents];
+
+        if (filteredStudents.length === 0 && grid) {
+            grid.innerHTML = '<div class="no-data"><i class="fas fa-check-circle" style="color:#10B981;"></i><h3>لا توجد طلبات معلقة</h3><p>كل الطلبات المدفوعة تمت معالجتها 🎉</p></div>';
+        } else {
+            displayStudents();
+        }
+        console.log('✅ معلقة فقط:', allStudents.length, '— بدون استدعاء باقي الحجوزات');
+    } catch (e) {
+        console.error('❌ خطأ في تحميل المعلقة:', e);
+    }
+}
+window.loadPendingOnly = loadPendingOnly;
+        
 // تحميل البيانات المطورة - استقبال كل التفاصيل
 async function loadStudents() {
     try {
@@ -2127,7 +2159,7 @@ paymentReference: data.paymentReference || data.paymentInfo?.paymentReference ||
         filterByTab(currentFilter);
         // بعد: filterByTab(currentFilter);
 // أضف:
-await loadStudentPoints();
+
         checkForNewTransfer();
         populateCourseFilter();
         
@@ -2400,7 +2432,7 @@ function createStudentCard(student) {
         .toUpperCase();
     
     // جلب النقاط إذا كان له حساب
-    if (student.userId) {
+    if (student.userId && viewMode !== 'pending') {
         setTimeout(async () => {
             try {
                 const userDoc = await db.collection('users').doc(student.userId).get();
@@ -2938,7 +2970,7 @@ window.sendMessage = sendMessage;
             });
         }
                 
-        // تحميل البيانات عند فتح الصفحة
+// loadStudents();  ← اتلغى: بنحمّل المعلقة بس من المعالج التاني
         document.addEventListener('DOMContentLoaded', () => {
     // تعيين قيمة افتراضية للفلتر
     currentFilter = 'all';
@@ -5238,9 +5270,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     // تحميل البيانات العادي
-    if (typeof loadStudents === 'function') {
-        await loadStudents();
-    }
+    await loadPendingOnly();
 });
 
 // دالة مساعدة لتحديث حالة الأتمتة في الوقت الفعلي
