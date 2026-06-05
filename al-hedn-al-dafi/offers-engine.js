@@ -463,6 +463,7 @@
       packageId: state.pack,
       packageName: pk.name,
       packageSub: pk.sub,
+       modules: pk.modules || null,        // ← أضف ده
       basePrice: c.base,
       finalPrice: c.final,
       savings: c.base - c.final,
@@ -569,6 +570,7 @@
         bookingDate: new Date().toISOString(),
         courseName: d.courseTitle,
         courseId: d.courseId,
+         courseModules: d.modules || null,   // ← أضف ده
         package: { id: d.packageId, name: d.packageName, sub: d.packageSub },
         customer,
         pricing: {
@@ -861,6 +863,8 @@
         bookingDate: new Date().toISOString(),
         courseName: d.courseTitle,
         courseId: d.courseId,
+         courseModules: d.modules || null,   // ← أضف ده
+
         package: { id: d.packageId, name: d.packageName, sub: d.packageSub },
         coursePrice: basePrice,
         salePrice: priceAfterOffer,
