@@ -41,7 +41,7 @@ window.COURSE_CONFIG = {
   shortName: "الجزء الأول",
   sub: "اعرف مين طفلك حقيقي",
   basePrice: 2400,
-  modules: ["al-hedn-al-dafi-discovery"],
+  modules: ["al-hedn-al-dafi"],
 },
 "full": {
   name: "الباقة الكاملة · اكتشاف + احتضان",
@@ -49,7 +49,7 @@ window.COURSE_CONFIG = {
   sub: "الرحلة كاملة من الاكتشاف للاحتضان",
   basePrice: 4200,
   featured: true,
-  modules: ["al-hedn-al-dafi-discovery", "al-hedn-al-dafi-embrace"],
+  modules: ["al-hedn-al-dafi", "al-hedn-al-dafi-embrace"],
 },
 "part2-alumni": {
   name: "الجزء الثاني · للمجموعة السابقة",
