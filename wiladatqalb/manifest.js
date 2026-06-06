@@ -27,7 +27,7 @@ window.WQ_BOOK = {
   author: 'كوتش محمود فؤاد',
 
   /* رقم نسخة الفهرس كله — زوّده (+1) عند أي تعديل لأي شيء هنا */
-  version: 1,
+  version: 2,
 
   /* مجلّد ملفات الفصول على الجيت هوب (نسبةً لمكان course-view.html) */
   contentPath: 'content/',
@@ -41,7 +41,7 @@ window.WQ_BOOK = {
       gate: 'هنا يُسمّى الوجع الذي لم تجد له اسمًا، ويُفتح السؤال الذي لا يسكت.',
       chapters: [
         { id:'ch-1', number:1, title:'الفراغ الساكن',        file:'ch-1.js', v:1, status:'published' },
-        { id:'ch-2', number:2, title:'السؤال الذي لا يسكت',  file:'ch-2.js', v:1, status:'draft' },
+        { id:'ch-2', number:2, title:'السؤال الذي لا يسكت',  file:'ch-2.js', v:1, status:'published' },
         { id:'ch-3', number:3, title:'ما لا يُمحى',           file:'ch-3.js', v:1, status:'draft' }
       ]
     },
