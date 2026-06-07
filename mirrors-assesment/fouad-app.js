@@ -279,13 +279,12 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     });
   }
 
-  // المرحلة ٢ — أسئلة التحديد (مع وقفات تأمّليّة بين المجموعات)
+  // المرحلة ٢ — أسئلة التحديد (تقييم مستقل ١..٧ لكلّ خيار، لا اختيار واحد)
   function renderIdentification(){
     state.stage='identification';
     const N = state.questions.length;
     if(state.qIndex >= N){ goToRanking(); return; }
 
-    // وقفة تأمّليّة قبل هذه الفئة؟ (تُتخطّى بأمان لو غاب ملفّ الوقفات)
     const pauses = PAUSES();
     if(pauses && state.pauseBeforeIndex.indexOf(state.qIndex)!==-1 && !state.pausesShown[state.qIndex] && state.qIndex < N){
       renderPause(state.qIndex); return;
@@ -294,11 +293,19 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const q = state.questions[state.qIndex];
     const pos = state.qIndex + 1;
     const pct = Math.round((state.qIndex / N) * 100);
-    const opts = ['أ','ب','ج'].map(L=>{
+    const saved = (state.answers[q.id] && typeof state.answers[q.id]==='object') ? state.answers[q.id] : {};
+
+    const opts = ['أ','ب','ج'].map(function(L){
       const o = q.options[L]; if(!o) return '';
-      return `<button class="option" data-letter="${L}">
-                <span class="opt-letter">${L}</span><span class="opt-text">${esc(o.text)}</span>
-              </button>`;   // نعرض النصّ فقط — لا type ولا تصنيف
+      const scale = [1,2,3,4,5,6,7].map(function(v){
+        const sel = (saved[L] === v) ? ' selected' : '';
+        return `<button class="likert id-likert${sel}" data-letter="${L}" data-val="${v}">${arabicNum(v)}</button>`;
+      }).join('');
+      return `<div class="id-option">
+                <div class="id-option-text"><span class="opt-letter">${L}</span><span>${esc(o.text)}</span></div>
+                <div class="likert-scale">${scale}</div>
+                <div class="likert-labels"><span>لا يشبهني إطلاقًا</span><span>يشبهني تمامًا</span></div>
+              </div>`;   // نعرض النصّ فقط — لا type ولا تصنيف
     }).join('');
 
     setHTML(`
@@ -308,18 +315,45 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
         </div>
         <div class="question-text">${esc(q.text)}</div>
-        <div class="options">${opts}</div>
+        <div class="reminder">قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا — لا تختر واحدًا، فقد تشبهك أكثر من زاوية.</div>
+        <div class="id-options">${opts}</div>
+        <button class="btn primary" id="idNext" ${idQuestionComplete(q)?'':'disabled'}>تابِع</button>
       </div>`);
 
-    Array.prototype.forEach.call(document.querySelectorAll('.option'), btn=>{
-      btn.addEventListener('click', ()=> answerIdentification(q, btn.getAttribute('data-letter')));
+    Array.prototype.forEach.call(document.querySelectorAll('.id-likert'), function(btn){
+      btn.addEventListener('click', function(){
+        const L = btn.getAttribute('data-letter');
+        const v = parseInt(btn.getAttribute('data-val'),10);
+        rateIdentificationOption(q, L, v);
+        const group = btn.parentElement;
+        Array.prototype.forEach.call(group.querySelectorAll('.id-likert'), function(b){ b.classList.remove('selected'); });
+        btn.classList.add('selected');
+        const nb = document.getElementById('idNext');
+        if(nb && idQuestionComplete(q)) nb.removeAttribute('disabled');
+      });
+    });
+
+    const nb = document.getElementById('idNext');
+    if(nb) nb.addEventListener('click', function(){
+      if(!idQuestionComplete(q)) return;
+      state.qIndex += 1; cache(); renderIdentification();
     });
   }
 
-  function answerIdentification(q, letter){
-    state.answers[q.id] = letter;   // نخزّن الحرف فقط ("أ"|"ب"|"ج") كما يتوقّعه المحرّك
-    state.qIndex += 1; cache();
-    renderIdentification();
+  // تخزين درجة خيارٍ واحد (١..٧) — الشكل: answers[qId] = { "أ":n, "ب":n, "ج":n }
+  function rateIdentificationOption(q, L, v){
+    if(!state.answers[q.id] || typeof state.answers[q.id] !== 'object') state.answers[q.id] = {};
+    state.answers[q.id][L] = v;
+    cache();
+  }
+
+  // هل قُيّمت الخيارات الثلاثة كلّها لهذا السؤال؟
+  function idQuestionComplete(q){
+    const a = state.answers[q.id];
+    if(!a || typeof a !== 'object') return false;
+    return ['أ','ب','ج'].every(function(L){
+      return !q.options[L] || typeof a[L] === 'number';
+    });
   }
 
   function renderPause(beforeIndex){
@@ -914,8 +948,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     state.questions       = flattenIdentificationQuestions(state.mirrorId);
     state.pauseBeforeIndex = computePauseBoundaries(state.questions.length, ID_GROUPS);
 
-    // ما زلنا في التحديد؟ استأنف من أوّل سؤال غير مُجاب
-    let firstUn = state.questions.findIndex(q=> !(q.id in state.answers));
+   // ما زلنا في التحديد؟ استأنف من أوّل سؤالٍ لم تكتمل خياراته الثلاثة
+    let firstUn = state.questions.findIndex(function(q){ return !idQuestionComplete(q); });
     if(firstUn === -1) firstUn = state.questions.length;
     if(firstUn < state.questions.length){
       state.stage='identification'; state.qIndex = firstUn;
