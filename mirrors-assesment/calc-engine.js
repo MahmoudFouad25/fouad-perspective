@@ -61,10 +61,7 @@
   }
 
   /* ════════════════════ الدالّة الأولى — حساب التحديد لمرآة ════════════════════
-     computeMirrorIdentification(mirrorId, answers)
-       answers = { [questionId]: "أ" | "ب" | "ج" }
-     يُرجع: { mirrorId, ranking:[{type,axisId,raw,percent}], dominantAxis, dualAxis } */
-  function computeMirrorIdentification(mirrorId, answers) {
+    function computeMirrorIdentification(mirrorId, answers) {
     answers = answers || {};
     const cfg = _cfg();
     const Q = _questions();
@@ -76,31 +73,37 @@
 
     const maps = _mirrorMaps(mirror);
 
-    // تهيئة الدرجات الخام لكلّ نوع
+    // الدرجات الخام لكلّ نوع (تبدأ صفرًا، تتراكم بجمع درجات likert)
     const raw = {};
     maps.order.forEach(function (t) { raw[t] = 0; });
 
-    // العدّ: لكلّ سؤال مُجاب +1 لنوع الخيار المختار. السؤال غير المُجاب يُتجاهَل.
+    // ── التقييم المستقل: كلّ خيار في كلّ سؤال يضيف درجته (١..٧) لطابعه ──
+    //    (بدل forced-choice القديم: +1 للمختار وصفر للباقي)
+    //    شكل الإجابة الجديد: answers[qId] = { "أ":n, "ب":n, "ج":n }
     mirror.axes.forEach(function (ax) {
       const qs = mq[ax.id];
       if (!Array.isArray(qs)) return;
       qs.forEach(function (q) {
-        const choice = answers[q.id];
-        if (choice === undefined || choice === null) return;          // غير مُجاب → تجاهُل
-        const opt = q.options && q.options[choice];
-        if (!opt || !opt.type) return;                                // خيار غير صالح → تجاهُل
-        if (Object.prototype.hasOwnProperty.call(raw, opt.type)) raw[opt.type] += 1;
+        const ans = answers[q.id];
+        if (!ans || typeof ans !== "object") return;            // سؤال غير مُجاب → تجاهُل
+        CHOICES.forEach(function (L) {
+          const opt = q.options && q.options[L];
+          if (!opt || !opt.type) return;
+          const score = ans[L];
+          if (typeof score !== "number" || isNaN(score)) return; // خيار غير مُقيّم → تجاهُل
+          if (Object.prototype.hasOwnProperty.call(raw, opt.type)) raw[opt.type] += score;
+        });
       });
     });
 
-    // الترتيب: كلّ نوع خام 0..6 (يظهر في 6 أسئلة محوره)، نسبة = round(خام/6*100)
+    // ── النسبة المعايرة على المدى الحقيقيّ: خام ٦..٤٢ → ٠..١٠٠٪ ──
+    //    (raw−6)/36×100 ، مع clamp للأمان لو بقي سؤالٌ غير مُجاب
     const ranking = maps.order.map(function (t) {
-      return {
-        type: t,
-        axisId: maps.typeToAxis[t] || null,
-        raw: raw[t] || 0,
-        percent: Math.round(((raw[t] || 0) / 6) * 100)
-      };
+      const r = raw[t] || 0;
+      let pct = Math.round(((r - 6) / 36) * 100);
+      if (pct < 0) pct = 0;
+      if (pct > 100) pct = 100;
+      return { type: t, axisId: maps.typeToAxis[t] || null, raw: r, percent: pct };
     });
     // تنازليًّا بالخام، وعند التساوي ترتيب ثابت (ترتيب الـconfig)
     ranking.sort(function (a, b) {
@@ -113,33 +116,29 @@
     const second = ranking[1] || null;
     const third  = ranking[2] || null;
 
-    /* ── علم الإشارة الضعيفة [سيناريو د] — يُلغي ما عداه ──
-       حالتان: الأوّل منخفض (خام < 3)، أو تعادلٌ ثلاثيّ عبر ثلاثة محاور
-       مختلفة والفارق بين الأوّل والثالث ≤ 1. */
-    let weakSignal = false;
-    if (first) {
-      const lowTop = first.raw < 3;
-      let tripleTie = false;
-      if (first && second && third) {
-        const threeAxes = (first.axisId !== second.axisId) &&
-                          (first.axisId !== third.axisId)  &&
-                          (second.axisId !== third.axisId);
-        tripleTie = threeAxes && ((first.raw - third.raw) <= 1);
-      }
-      weakSignal = lowTop || tripleTie;
-    }
+    // ── العتبتان الوحيدتان (مؤسَّستان على بنية likert، لا على تكرارات) ──
+    const PRESENCE = 24;  // متوسط ٤×٦ = نقطة الحياد = نصف المدى (٦..٤٢)
+    const DIFF     = 3;   // فرق متوسط ٠٫٥×٦ = أصغر فرقٍ ذي دلالة عمليّة
 
-    /* ── التقارب المُحكم [سيناريو ب/ج] — لا يُحسب إن كانت الإشارة ضعيفة ──
-       الشرط: (الأوّل − الثاني) ≤ 1  و  (الثاني − الثالث) ≥ 2.
-         محوران مختلفان → dualAxis (بابان).  المحور نفسه → sameAxisCloseness (باب الأوّل). */
-    let dualAxis = null;
-    let sameAxisCloseness = false;
-    if (!weakSignal && first && second) {
-      const topClose    = (first.raw - second.raw) <= 1;
-      const thirdBehind = third ? ((second.raw - third.raw) >= 2) : true;
-      if (topClose && thirdBehind) {
-        if (first.axisId !== second.axisId) dualAxis = [first.axisId, second.axisId];
-        else sameAxisCloseness = true;
+    let absent           = false; // (أ) عدم الحضور — حتى الأبرز تحت الحياد
+    let undifferentiated = false; // (ب) عدم التمييز — الأعلون متّصلون بلا فجوة
+    let dualAxis         = null;  // (ج) بابان — محوران متمايزان متقاربان
+    let sameAxisCloseness= false; // (د) تقارب داخل المحور الواحد
+
+    if (first) {
+      const gap12 = second ? (first.raw  - second.raw) : Infinity;
+      const gap23 = third  ? (second.raw - third.raw)  : Infinity;
+
+      if (first.raw <= PRESENCE) {
+        absent = true;                                              // (أ)
+      } else if (gap12 >= DIFF) {
+        /* (هـ) واضح — الأوّل متمايزٌ بفجوةٍ معنويّة: لا علم */
+      } else if (gap23 >= DIFF) {
+        // الأوّل والثاني مجموعةٌ متمايزةٌ عمّا تحتها
+        if (first.axisId !== second.axisId) dualAxis = [first.axisId, second.axisId]; // (ج)
+        else sameAxisCloseness = true;                                                // (د)
+      } else {
+        undifferentiated = true;                                    // (ب)
       }
     }
 
@@ -149,7 +148,10 @@
       dominantAxis: dominantAxis,
       dualAxis: dualAxis,
       sameAxisCloseness: sameAxisCloseness,
-      weakSignal: weakSignal
+      absent: absent,
+      undifferentiated: undifferentiated,
+      // توافق خلفيّ: أيّ من الحالتين = إشارةٌ ضعيفة، للطبقات التي لم تُحدَّث بعد
+      weakSignal: absent || undifferentiated
     };
   }
 
