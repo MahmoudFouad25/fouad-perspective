@@ -60,7 +60,7 @@
     return { typeToAxis: typeToAxis, order: order, orderIndex: orderIndex };
   }
 
-  /* ════════════════════ الدالّة الأولى — حساب التحديد لمرآة ════════════════════
+  /* ════════════════════ الدالّة الأولى — حساب التحديد لمرآة ════════════════════*/
     function computeMirrorIdentification(mirrorId, answers) {
     answers = answers || {};
     const cfg = _cfg();
