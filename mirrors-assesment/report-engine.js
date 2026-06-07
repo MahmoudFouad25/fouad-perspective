@@ -79,16 +79,16 @@
     /* مجمّعات الطبائع — مهيّأة من الـconfig (الطبائع التسع كلّها تبدأ من صفر). */
     const typeAgg = {};
     Object.keys(cfg.types || {}).forEach(function (t) {
-      typeAgg[t] = { type: t, firstCount: 0, percentSum: 0, appearances: 0, firstInMirrors: [] };
-    });
+  typeAgg[t] = { type: t, firstCount: 0, rawSum: 0, percentSum: 0, appearances: 0, firstInMirrors: [] };
+});
     /* طابع ظهر في البيانات وليس في الـconfig — يُضاف بأمان دون تعطّل. */
     function _ensureType(t) {
-      if (!typeAgg[t]) {
-        typeAgg[t] = { type: t, firstCount: 0, percentSum: 0, appearances: 0, firstInMirrors: [] };
-        if (!(t in maps.typeOrder)) maps.typeOrder[t] = Object.keys(maps.typeOrder).length;
-      }
-      return typeAgg[t];
-    }
+  if (!typeAgg[t]) {
+    typeAgg[t] = { type: t, firstCount: 0, rawSum: 0, percentSum: 0, appearances: 0, firstInMirrors: [] };
+    if (!(t in maps.typeOrder)) maps.typeOrder[t] = Object.keys(maps.typeOrder).length;
+  }
+  return typeAgg[t];
+}
 
     /* مجمّع المحاور الدومينانت (يُملأ عند الظهور فقط). */
     const axisAgg = {};
@@ -127,12 +127,14 @@
 
         // مجموع النسب لكلّ طابع عبر هذه المرآة (تجاوز الصفوف الناقصة بأمان).
         ranking.forEach(function (row) {
-          if (!row || !row.type) return;
-          const a = _ensureType(row.type);
-          a.appearances += 1;
-          const p = _num(row.percent);
-          if (p !== null) a.percentSum += p;
-        });
+  if (!row || !row.type) return;
+  const a = _ensureType(row.type);
+  a.appearances += 1;
+  const r = _num(row.raw);
+  if (r !== null) a.rawSum += r;              // ← جديد: مجموع الخام المطلق
+  const p = _num(row.percent);
+  if (p !== null) a.percentSum += p;
+});
 
         // المحور الدومينانت بالهويّة — من الحقل المخصّص أو من أعلى الترتيب.
         const domAxis = res.dominantAxis || (top ? top.axisId : null);
@@ -202,33 +204,34 @@
 
     /* ── (١) ترتيب الطبائع تنازليًّا: firstCount ← مجموع النسب ← المتوسّط ← ترتيب الـconfig ── */
     const typesRanking = Object.keys(typeAgg).map(function (t) {
-      const a = typeAgg[t];
-      return {
-        type: a.type,
-        firstCount: a.firstCount,
-        percentSum: a.percentSum,
-        appearances: a.appearances,
-        percentAvg: a.appearances ? Math.round((a.percentSum / a.appearances) * 10) / 10 : 0,
-        firstInMirrors: a.firstInMirrors
-      };
-    }).sort(function (x, y) {
-      return (y.firstCount - x.firstCount) ||
-             (y.percentSum - x.percentSum) ||
-             (y.percentAvg - x.percentAvg) ||
-             ((maps.typeOrder[x.type] || 0) - (maps.typeOrder[y.type] || 0));
-    });
+  const a = typeAgg[t];
+  return {
+    type: a.type,
+    firstCount: a.firstCount,
+    rawSum: a.rawSum,                          // ← جديد
+    percentSum: a.percentSum,
+    appearances: a.appearances,
+    percentAvg: a.appearances ? Math.round((a.percentSum / a.appearances) * 10) / 10 : 0,
+    firstInMirrors: a.firstInMirrors
+  };
+}).sort(function (x, y) {
+  return (y.rawSum - x.rawSum) ||             // ← الأساس: الخام المطلق (normative، يقتل الـipsative)
+         (y.firstCount - x.firstCount) ||      // ثمّ عدد التصدّر
+         (y.percentSum - x.percentSum) ||
+         ((maps.typeOrder[x.type] || 0) - (maps.typeOrder[y.type] || 0));
+});
 
     // الطابع/الطبائع الأبرز: المتصدّر في (firstCount ثمّ percentSum) — مع رصد التعادل بلا حسمٍ آليّ.
     let dominantTypes = [];
     let typesTie = false;
     const withData = typesRanking.filter(function (r) { return r.appearances > 0; });
-    if (withData.length) {
-      const lead = withData[0];
-      dominantTypes = withData.filter(function (r) {
-        return r.firstCount === lead.firstCount && r.percentSum === lead.percentSum;
-      }).map(function (r) { return r.type; });
-      typesTie = dominantTypes.length > 1;
-    }
+if (withData.length) {
+  const lead = withData[0];
+  dominantTypes = withData.filter(function (r) {
+    return r.rawSum === lead.rawSum;           // ← التعادل على الخام المطلق
+  }).map(function (r) { return r.type; });
+  typesTie = dominantTypes.length > 1;
+}
 
     /* ── (٢) ترتيب المحاور الدومينانت تنازليًّا (ثمّ بترتيب المرآة) ──
        ملاحظة بنيويّة: كلّ محور يخصّ مرآةً واحدة، فلا يتكرّر معرّفه عبر المرايا؛
