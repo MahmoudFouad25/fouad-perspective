@@ -317,7 +317,10 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         <div class="question-text">${esc(q.text)}</div>
         <div class="reminder">قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا — لا تختر واحدًا، فقد تشبهك أكثر من زاوية.</div>
         <div class="id-options">${opts}</div>
-        <button class="btn primary" id="idNext" ${idQuestionComplete(q)?'':'disabled'}>تابِع</button>
+        <div class="id-nav" style="display:flex; gap:12px; margin-top:8px;">
+          ${state.qIndex>0 ? '<button class="btn ghost" id="idPrev">السابق</button>' : ''}
+          <button class="btn primary" id="idNext" ${idQuestionComplete(q)?'':'disabled'}>تابِع</button>
+        </div>
       </div>`);
 
     Array.prototype.forEach.call(document.querySelectorAll('.id-likert'), function(btn){
@@ -328,11 +331,16 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         const group = btn.parentElement;
         Array.prototype.forEach.call(group.querySelectorAll('.id-likert'), function(b){ b.classList.remove('selected'); });
         btn.classList.add('selected');
+         
         const nb = document.getElementById('idNext');
         if(nb && idQuestionComplete(q)) nb.removeAttribute('disabled');
       });
     });
 
+     const pb = document.getElementById('idPrev');
+    if(pb) pb.addEventListener('click', function(){
+      if(state.qIndex>0){ state.qIndex -= 1; cache(); renderIdentification(); }
+    });
     const nb = document.getElementById('idNext');
     if(nb) nb.addEventListener('click', function(){
       if(!idQuestionComplete(q)) return;
