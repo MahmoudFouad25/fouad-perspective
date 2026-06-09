@@ -109,6 +109,15 @@
   function closing() { return _content().closing || {}; }
   function positionLabel(pos) { return (_content().positionLabels || {})[pos] || pos; }
 
+  function recoveryPractice(axisId, dimId, shape) {
+    const C = _content();
+    if (!dimId || shape === "balance" || shape === null) return C.practiceBalanced || "";
+    const dimBlock = ((C.practices || {})[axisId] || {})[dimId] || {};
+    if (shape === "ambiguous") return dimBlock.both || dimBlock.deficit || C.practiceBalanced || "";
+    return dimBlock[shape] || "";
+  }
+  function practiceIntro() { return _content().practiceIntro || ""; }
+
   return {
     primaryParagraph: primaryParagraph,
     secondaryParagraph: secondaryParagraph,
@@ -121,6 +130,8 @@
     burnoutNarrative: burnoutNarrative,
     opening: opening,
     closing: closing,
-    positionLabel: positionLabel
+    positionLabel: positionLabel,
+    recoveryPractice: recoveryPractice,
+    practiceIntro: practiceIntro,
   };
 });
