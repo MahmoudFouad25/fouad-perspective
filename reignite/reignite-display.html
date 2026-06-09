@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>شاشة العرض — Reignite</title>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0f172a; --bg2:#1a2332; --gold:#fbbf24; --green:#10b981; --blue:#3b82f6;
+      --purple:#a78bfa; --red:#ef4444; --text:#f8fafc; --muted:#94a3b8; --line:#2a3850;
+    }
+    *{box-sizing:border-box} html,body{margin:0;padding:0;height:100%}
+    body{
+      background:radial-gradient(1400px 760px at 50% -10%, #1a2332 0%, #0f172a 64%);
+      color:var(--text); font-family:'Tajawal',sans-serif; height:100vh; overflow:hidden;
+      display:flex; flex-direction:column; -webkit-font-smoothing:antialiased;
+    }
+    /* المؤقّت الضخم أعلى الشاشة */
+    .d-timer{
+      align-self:center; margin-top:26px; font-size:clamp(40px,9vw,120px); font-weight:800;
+      font-variant-numeric:tabular-nums; letter-spacing:2px; color:var(--text);
+      transition:color .3s;
+    }
+    .d-timer.hidden{ display:none; }
+    .d-timer.warn{ color:var(--gold); }
+    .d-timer.danger{ color:var(--red); animation:pulse 1s infinite; }
+    @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.55} }
+
+    .d-stage{
+      flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      text-align:center; padding:24px 6vw 60px;
+    }
+    .d-kicker{ color:var(--gold); font-family:'Amiri',serif; font-size:clamp(16px,2.4vw,26px); margin-bottom:22px; letter-spacing:1px; }
+    .d-title{ font-family:'Amiri',serif; font-weight:700; font-size:clamp(34px,6.4vw,84px); line-height:1.25; margin:0 0 26px;
+      background:linear-gradient(120deg,#fde68a,var(--gold)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    .d-note{ color:#cbd5e1; font-size:clamp(18px,3vw,34px); line-height:1.7; max-width:18ch; }
+    .d-counter{ margin-top:40px; display:flex; gap:48px; align-items:center; }
+    .d-counter .num{ font-size:clamp(40px,7vw,90px); font-weight:800; color:var(--green); }
+    .d-counter .num.gold{ color:var(--gold); }
+    .d-counter .lbl{ color:var(--muted); font-size:clamp(14px,1.8vw,22px); }
+    .d-aya{ font-family:'Amiri',serif; font-size:clamp(26px,4.6vw,56px); color:var(--gold); margin-top:30px; }
+    .d-hint{ position:fixed; bottom:14px; inset-inline-start:0; width:100%; text-align:center; color:var(--muted); font-size:13px; opacity:.5; }
+
+    /* خلفية نجوم خفيفة */
+    .stars{ position:fixed; inset:0; z-index:-1; overflow:hidden; }
+    .star{ position:absolute; background:#fff; border-radius:50%; opacity:.5; animation:tw 4s infinite; }
+    @keyframes tw{ 0%,100%{opacity:.2} 50%{opacity:.7} }
+  </style>
+</head>
+<body>
+  <div class="stars" id="stars"></div>
+  <div class="d-timer hidden" id="dTimer">٠٠:٠٠</div>
+  <div class="d-stage" id="dStage"></div>
+  <div class="d-hint">انقر مرّة لملء الشاشة</div>
+
+  <!-- ١) Firebase 8.10.1 -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <!-- ٢) تهيئة Firebase -->
+  <script src="../js/firebase-config.js"></script>
+  <!-- ٣) أسماء المحاور + طبقة الجلسة -->
+  <script src="axes-config.js"></script>
+  <script src="axes-session.js"></script>
+
+  <script>
+  (function(){
+    "use strict";
+    var S = window.AXES_SESSION;
+
+    function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
+    function fmtTime(sec){ var m=Math.floor(sec/60), s=sec%60; return arabicNum(('0'+m).slice(-2))+':'+arabicNum(('0'+s).slice(-2)); }
+    function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    /* نجوم */
+    (function(){
+      var box=document.getElementById('stars');
+      for(var i=0;i<120;i++){
+        var s=document.createElement('div'); s.className='star';
+        var sz=Math.random()<0.85?1.4:2.4;
+        s.style.width=s.style.height=sz+'px';
+        s.style.left=(Math.random()*100)+'%'; s.style.top=(Math.random()*100)+'%';
+        s.style.animationDelay=(Math.random()*4)+'s';
+        box.appendChild(s);
+      }
+    })();
+
+    /* ملء الشاشة عند أول نقرة */
+    document.addEventListener('click', function(){
+      if(document.fullscreenEnabled && !document.fullscreenElement){
+        document.documentElement.requestFullscreen().catch(function(){});
+      }
+    }, { once:true });
+
+    var clients=[], results=[], curPhase='waiting';
+    var timerInt=null, localTimer=0;
+
+    function presentCount(){ return clients.filter(function(c){
+      try{ var t=(c.lastSeen&&c.lastSeen.toMillis)?c.lastSeen.toMillis():0; if(t) return (Date.now()-t)<60000; }catch(e){}
+      return c.status==='online';
+    }).length; }
+    function doneCount(){ return results.filter(function(r){return r&&r.results&&r.results.ranking;}).length; }
+
+    /* ── المؤقّت ── */
+    function updTimer(){
+      var el=document.getElementById('dTimer');
+      el.textContent=fmtTime(Math.max(0,localTimer));
+      el.classList.remove('warn','danger');
+      if(localTimer<=30 && localTimer>0) el.classList.add('danger');
+      else if(localTimer<=60 && localTimer>0) el.classList.add('warn');
+    }
+    function stopLocal(){ if(timerInt){ clearInterval(timerInt); timerInt=null; } }
+    function startLocal(){ stopLocal(); updTimer(); timerInt=setInterval(function(){ if(localTimer>0){localTimer--; updTimer();} else stopLocal(); },1000); }
+    function syncTimer(s){
+      var el=document.getElementById('dTimer');
+      if(s.timerRunning && s.timerSeconds>0){
+        var elapsed=s.timerStartedAt?Math.floor((Date.now()-s.timerStartedAt)/1000):0;
+        localTimer=Math.max(0,s.timerSeconds-elapsed); el.classList.remove('hidden'); startLocal();
+      } else if(s.timerSeconds>0){
+        localTimer=s.timerSeconds; el.classList.remove('hidden'); stopLocal(); updTimer();
+      } else {
+        el.classList.add('hidden'); stopLocal();
+      }
+    }
+
+    /* ── عرض المرحلة ── */
+    function renderPhase(){
+      var p=S.PHASES[curPhase]||{title:curPhase,clientNote:'',kind:'content'};
+      var box=document.getElementById('dStage');
+      var h='';
+
+      if(curPhase==='scale'){
+        h =  '<div class="d-kicker">مقياس المحاور</div>'
+           + '<div class="d-title">افتح المقياس على هاتفك</div>'
+           + '<div class="d-note">'+esc(p.clientNote||'')+'</div>'
+           + '<div class="d-counter">'
+           +   '<div><div class="num gold">'+arabicNum(doneCount())+'</div><div class="lbl">أتمّوا</div></div>'
+           +   '<div><div class="num">'+arabicNum(presentCount())+'</div><div class="lbl">حاضرون الآن</div></div>'
+           + '</div>';
+      } else if(curPhase==='closing'){
+        h =  '<div class="d-kicker">الإغلاق</div>'
+           + '<div class="d-title">'+esc(p.title)+'</div>'
+           + '<div class="d-note">'+esc(p.clientNote||'')+'</div>'
+           + '<div class="d-aya">﴿أَلَمْ نَشْرَحْ لَكَ صَدْرَكَ﴾</div>';
+      } else if(curPhase==='waiting'){
+        h =  '<div class="d-kicker">Reignite</div>'
+           + '<div class="d-title">في انتظار البدء</div>'
+           + '<div class="d-note">'+esc(p.clientNote||'استعدّ… سنبدأ بعد قليل.')+'</div>'
+           + '<div class="d-counter"><div><div class="num">'+arabicNum(presentCount())+'</div><div class="lbl">حاضرون الآن</div></div></div>';
+      } else {
+        h =  '<div class="d-kicker">'+esc(curPhase==='welcome'?'الافتتاح':'Reignite')+'</div>'
+           + '<div class="d-title">'+esc(p.title)+'</div>'
+           + '<div class="d-note">'+esc(p.clientNote||'')+'</div>';
+      }
+      box.innerHTML=h;
+    }
+
+    function applySession(s){ curPhase=(s&&s.currentPhase)||'waiting'; renderPhase(); syncTimer(s); }
+
+    S.ensureSession({ cohort:'Reignite' });
+    S.onSessionChange(applySession);
+    S.onClientsChange(function(arr){ clients=arr; if(curPhase==='scale'||curPhase==='waiting') renderPhase(); });
+    S.onResultsChange(function(arr){ results=arr; if(curPhase==='scale') renderPhase(); });
+  })();
+  </script>
+</body>
+</html>
