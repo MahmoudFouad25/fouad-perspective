@@ -322,7 +322,9 @@
       bridge:       br.buildBridge(primaryAxis, burnedDim, burnedShape, matched),
       burnoutNarrative: br.burnoutNarrative(worstLevel),
       wellnessHTML: rnd.wellnessLine(points),
-      closingBody:  br.closing().body
+      closingBody:  br.closing().body,
+      practice:      burnedDim ? br.recoveryPractice(primaryAxis, burnedDim, burnedShape) : br.recoveryPractice(primaryAxis, null, null),
+      practiceIntro: br.practiceIntro()
     };
 
     var r = root();
