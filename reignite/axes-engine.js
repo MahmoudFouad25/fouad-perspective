@@ -46,6 +46,7 @@
 
   /* عتبة الفرق المعنويّ على مقياس ليكرت (٠٫٥×عددٍ تقريبيّ) — تُستعمل في التمييز */
   const DIFF_GAP = 3;
+  const DIM_GAP = 2;
 
   /* ════════════════════ الدالّة الأولى — ترتيب المحاور ════════════════════
      answers = { action:{qId:{أ,ب,ج}}, longing:{...}, critique:{...} }
@@ -172,11 +173,10 @@
       ].sort(function (a, b) { return b.val - a.val; });
 
       let position, positionLabel;
-      // تذبذب: القطبان (إفراط+تفريط) عاليان معًا والاتزان منخفض
-      const both = (excess >= DIFF_GAP * 2) && (deficit >= DIFF_GAP * 2) && (balance < excess) && (balance < deficit);
+      const both = (excess >= 5) && (deficit >= 5) && (balance < excess) && (balance < deficit);
       if (both) {
         position = "both"; positionLabel = "تذبذب";
-      } else if ((trio[0].val - trio[1].val) < DIFF_GAP) {
+      } else if ((trio[0].val - trio[1].val) < DIM_GAP) {
         position = "ambiguous"; positionLabel = "التباس";
       } else {
         position = trio[0].key; positionLabel = trio[0].label;
@@ -197,7 +197,8 @@
       };
 
       // البُعد الأشدّ احتراقًا (الأبعد عن الاتزان، والاتزان نفسه لا يُحسَب هدفًا)
-      if (position !== "balance" && (worst === null || distance > worst.distance)) {
+      if ((position === "excess" || position === "deficit" || position === "both") &&
+          (worst === null || distance > worst.distance)) {
         worst = { dimId: dimId, distance: distance, position: position };
       }
     });
