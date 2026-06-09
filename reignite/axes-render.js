@@ -108,6 +108,7 @@
          primaryName, primaryPara, secondaryPara, repressedSeed,
          burnedDimName, burnedShapeLabel, burnedPara, spectrumBarHTML,
          bridge, burnoutNarrative, wellnessHTML,
+         practiceIntro, practice,
          closingBody } */
   function resultScreen(m){
     m = m || {};
@@ -155,6 +156,15 @@
        +   '<p class="ax-p">' + esc(m.burnoutNarrative || '') + '</p>'
        +   (m.wellnessHTML || '')
        + '</div>';
+
+    // ممارسة التعافي
+    if(m.practice){
+      h += '<div class="ax-section ax-practice">'
+         +   '<div class="ax-h">ممارستك لهذا الأسبوع</div>'
+         +   (m.practiceIntro ? '<p class="ax-p">' + esc(m.practiceIntro) + '</p>' : '')
+         +   '<div class="ax-practice-card">' + esc(m.practice) + '</div>'
+         + '</div>';
+    }
 
     // القسم السابع — الخاتمة
     h += '<div class="ax-section ax-ground">'
