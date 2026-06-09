@@ -159,7 +159,8 @@
     "use strict";
     var AX = window.AXES_CONFIG, S = window.AXES_SESSION;
     var SHAPE_AR = { excess:'إفراط', deficit:'تفريط', both:'تذبذب', ambiguous:'التباس', balance:'اتزان' };
-    function axisName(id){ var a=(AX.axes||[]).find(function(x){return x.id===id;}); return a?a.name:(id||'—'); }
+
+    function axisName(id){ var a=((AX&&AX.axes)||[]).find(function(x){return x.id===id;}); return a?a.name:(id||'—'); }
     function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
     function fmtTime(sec){ var m=Math.floor(sec/60), s=sec%60; return arabicNum(('0'+m).slice(-2))+':'+arabicNum(('0'+s).slice(-2)); }
@@ -193,6 +194,7 @@
       var p=S.PHASES[curPhase]||{title:curPhase,clientNote:''};
       document.getElementById('phaseNow').textContent=p.title;
       document.getElementById('phaseNote').textContent=p.clientNote||'';
+      document.getElementById('sessBadge').textContent='جلسة: '+S.getSessionId()+' · المرحلة الحالية: '+p.title;
       buildPhaseList();
     }
     document.getElementById('btnPrev').addEventListener('click', function(){
@@ -220,6 +222,7 @@
     function stopLocal(){ if(timerInt){ clearInterval(timerInt); timerInt=null; } }
     function startLocal(){ stopLocal(); updTimer(); timerInt=setInterval(function(){ if(localTimer>0){localTimer--; updTimer();} else stopLocal(); },1000); }
     function syncTimer(s){
+      if(!s) return;
       if(s.timerRunning && s.timerSeconds>0){
         var elapsed=s.timerStartedAt?Math.floor((Date.now()-s.timerStartedAt)/1000):0;
         localTimer=Math.max(0,s.timerSeconds-elapsed); startLocal();
@@ -227,19 +230,95 @@
     }
 
     /* ── المتابعة ── */
-    function isOnline(c){
-      try{ var t=c.lastSeen&&c.lastSeen.toMillis?c.lastSeen.toMillis():0; return t && (Date.now()-t)<60000; }catch(e){ return c.status==='online'; }
+    function doneSet(){
+      var s={}; results.forEach(function(r){ if(r&&r.results&&r.results.ranking) s[r.id]=true; }); return s;
     }
-    function isDone(r){ return !!(r && r.results && r.results.ranking); }
-    function stageLabel(c){
-      var map={ waiting:'لم يبدأ', l1:'تحديد المحور', axisReveal:'كشف المحور', l2:'احتراق الأبعاد', l3:'نبضة الإحساس', result:'انتهى', saving:'يُحفَظ' };
+    function isOnline(c){
+      try{ var t=(c.lastSeen&&c.lastSeen.toMillis)?c.lastSeen.toMillis():0; if(t) return (Date.now()-t)<60000; }catch(e){}
+      return c.status==='online';
+    }
+    function stageLabel(c, done){
+      if(done) return 'أتمّ المقياس';
+      var map={ waiting:'لم يبدأ', scale:'داخل المقياس', l1:'تحديد المحور', axisReveal:'كشف المحور',
+                l2:'احتراق الأبعاد', l3:'نبضة الإحساس', result:'أتمّ المقياس', saving:'يُحفَظ' };
       return map[c.stage]||'—';
     }
     function renderStageCounts(){
       var box=document.getElementById('stageCounts');
       if(!clients.length){ box.innerHTML='<div class="empty">لا حضور بعد.</div>'; return; }
-      var online=clients.filter(isOnline).length, doing=clients.filter(function(c){return c.stage&&c.stage!=='waiting'&&c.stage!=='result';}).length, done=clients.filter(function(c){return c.stage==='result';}).length;
+      var done=doneSet(), online=0, doing=0, finished=0;
+      clients.forEach(function(c){
+        if(isOnline(c)) online++;
+        var d=done[c.id]||c.stage==='result';
+        if(d) finished++;
+        else if(c.stage && c.stage!=='waiting') doing++;
+      });
       box.innerHTML=
         '<div class="stat"><div class="num">'+arabicNum(online)+'</div><div class="lbl">متّصل الآن</div></div>'+
         '<div class="stat"><div class="num">'+arabicNum(doing)+'</div><div class="lbl">داخل المقياس</div></div>'+
-        '<div class="stat"><div class="num">'+arabicNum(done)+'</div><div class
+        '<div class="stat"><div class="num">'+arabicNum(finished)+'</div><div class="lbl">أتمّوا</div></div>';
+    }
+    function renderTrack(){
+      var done=doneSet();
+
+      // نظرة مجمّعة
+      var present=clients.filter(isOnline).length;
+      var doneCount=results.filter(function(r){return r&&r.results&&r.results.ranking;}).length;
+      document.getElementById('stPresent').textContent=arabicNum(present);
+      document.getElementById('stDone').textContent=arabicNum(doneCount);
+
+      var vals=[];
+      results.forEach(function(r){
+        var wp=r&&r.results&&r.results.wellness&&r.results.wellness.wellnessPoint;
+        if(wp){ ['tawaqud','hudur','imtila'].forEach(function(k){ if(typeof wp[k]==='number') vals.push(wp[k]); }); }
+      });
+      var avg=vals.length?(vals.reduce(function(a,b){return a+b;},0)/vals.length):null;
+      document.getElementById('stWellness').textContent=avg!=null?arabicNum(Math.round(avg*10)/10):'—';
+
+      // توزيع المحاور
+      var dist={}, total=0;
+      results.forEach(function(r){
+        var ax=r&&r.results&&(r.results.primaryAxis||(r.results.ranking&&r.results.ranking.primaryAxis));
+        if(ax){ dist[ax]=(dist[ax]||0)+1; total++; }
+      });
+      var distBox=document.getElementById('axisDist');
+      if(!total){ distBox.innerHTML='<div class="empty">لا نتائج بعد.</div>'; }
+      else{
+        distBox.innerHTML=Object.keys(dist).map(function(ax){
+          var pct=Math.round((dist[ax]/total)*100);
+          return '<div class="dist-row">'+
+                   '<span class="dist-name">'+esc(axisName(ax))+'</span>'+
+                   '<div class="dist-bar"><div class="dist-fill" style="width:'+pct+'%"></div></div>'+
+                   '<span class="dist-val">'+arabicNum(dist[ax])+'</span>'+
+                 '</div>';
+        }).join('');
+      }
+
+      // الحضور والتقدّم
+      var body=document.getElementById('presenceBody');
+      if(!clients.length){ body.innerHTML='<tr><td colspan="3" class="empty">في انتظار دخول العملاء…</td></tr>'; return; }
+      var sorted=clients.slice().sort(function(a,b){ return (isOnline(b)?1:0)-(isOnline(a)?1:0); });
+      body.innerHTML=sorted.map(function(c){
+        var on=isOnline(c), d=done[c.id]||c.stage==='result';
+        return '<tr>'+
+          '<td>'+esc(c.name||'—')+'</td>'+
+          '<td><span class="dot '+(on?'on':'idle')+'"></span>'+(on?'متّصل':'غائب')+'</td>'+
+          '<td>'+esc(stageLabel(c,d))+'</td>'+
+        '</tr>';
+      }).join('');
+    }
+
+    /* ── الجلسة والمستمعون ── */
+    function applySession(s){
+      session=s; curPhase=(s&&s.currentPhase)||'waiting';
+      renderControl(); syncTimer(s);
+    }
+
+    S.ensureSession({ cohort:'Reignite' }).then(function(){ renderControl(); });
+    S.onSessionChange(applySession);
+    S.onClientsChange(function(arr){ clients=arr; renderStageCounts(); renderTrack(); });
+    S.onResultsChange(function(arr){ results=arr; renderStageCounts(); renderTrack(); });
+  })();
+  </script>
+</body>
+</html>
