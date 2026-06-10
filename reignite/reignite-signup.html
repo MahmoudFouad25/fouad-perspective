@@ -134,6 +134,11 @@ body{
       </div>
 
       <div class="field">
+        <label><i class="fab fa-whatsapp" style="color:#25D366"></i> رقم الواتساب</label>
+        <input type="tel" id="whatsapp" class="in" placeholder="مثال: 201001234567" autocomplete="tel" dir="ltr">
+      </div>
+
+      <div class="field">
         <label><i class="fas fa-lock"></i> كلمة السر</label>
         <div class="pass-row">
           <input type="password" id="pass" class="in" placeholder="٦ حروف على الأقل (إنجليزي وأرقام)" autocomplete="new-password" dir="ltr">
@@ -153,11 +158,18 @@ body{
     <div class="success" id="successView">
       <div class="check"><i class="fas fa-circle-check"></i></div>
       <h2 id="successName">أهلًا بك 🌟</h2>
-      <p>اتعمل حسابك واتخصصت لك دورة <b>Reignite</b>.<br>جاري إدخالك تلقائيًا…</p>
+      <p>اتعمل حسابك واتخصصت لك دورة <b>Reignite</b>.<br>احفظ رابط الدخول السريع ده — تقدر تدخل بيه في أي وقت.</p>
       <a class="go" id="enterBtn" href="#"><i class="fas fa-right-to-bracket"></i> ادخل لرحلتك الآن</a>
-      <div class="link-box" id="linkBox"></div>
+      <div class="link-box" id="linkBox" style="margin-top:16px"></div>
       <button class="gen" id="copyLink" style="margin:0 auto;display:block"><i class="fas fa-copy"></i> انسخ رابط الدخول السريع</button>
-      <div class="dots"><span></span><span></span><span></span></div>
+    </div>
+
+    <!-- شاشة: عندك حساب بالفعل -->
+    <div class="success" id="existingView">
+      <div class="check" style="color:var(--gold)"><i class="fas fa-circle-info"></i></div>
+      <h2>الإيميل ده مسجّل قبل كده</h2>
+      <p>عندك حساب بالفعل بنفس البريد.<br>سجّل دخولك بكلمة سرك من صفحة الدخول.</p>
+      <a class="go" href="login.html"><i class="fas fa-right-to-bracket"></i> روح لصفحة تسجيل الدخول</a>
     </div>
   </div>
 </div>
@@ -178,10 +190,7 @@ const CONFIG = {
   accessMonths: 12,
 
   // مسار صفحة الدخول (نسبي لو في نفس الفولدر مع هذه الصفحة)
-  loginUrl: 'login.html',
-
-  // بعد كام ميلي ثانية يروح تلقائيًا لرابط الدخول السريع
-  redirectDelayMs: 2400
+  loginUrl: 'login.html'
 };
 
 /* ════════════════════════════════════════════════════════════
@@ -383,10 +392,12 @@ async function createAndStart(){
   clearErr();
   const name  = $('name').value.trim();
   const email = $('email').value.trim().toLowerCase();
+  const whatsapp = $('whatsapp').value.trim().replace(/[^0-9]/g, '');
   const pass  = $('pass').value;
 
   // تحققات
   if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showErr('اكتب بريد إلكتروني صحيح'); return; }
+  if(!whatsapp || whatsapp.length < 8){ showErr('اكتب رقم واتساب صحيح'); return; }
   if(!pass || pass.length < 6){ showErr('كلمة السر لازم تكون ٦ حروف على الأقل'); return; }
   // الباسورد لازم يكون ASCII عشان يشتغل مع نظام الدخول (btoa/atob)
   if(!/^[\x20-\x7E]+$/.test(pass)){ showErr('استخدم حروف وأرقام ورموز إنجليزية في كلمة السر'); return; }
@@ -395,17 +406,11 @@ async function createAndStart(){
   btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري التجهيز…';
 
   try{
-    // ١) فحص التكرار — لو الإيميل موجود، نوجّهه للدخول العادي (أأمن من سرقة الحسابات)
+    // ١) فحص التكرار — لو الإيميل موجود، نعرض شاشة فيها زرار للدخول العادي (بدون تحويل تلقائي)
     const dup = await db.collection('users').where('personalInfo.email','==',email).limit(1).get();
     if(!dup.empty){
       btn.disabled=false; btn.innerHTML=orig;
-      await Swal.fire({
-        icon:'info', title:'الإيميل ده مسجّل قبل كده',
-        html:'عندك حساب بالفعل بنفس البريد.<br>سجّل دخولك بكلمة سرك من صفحة الدخول.',
-        confirmButtonText:'روح لصفحة الدخول', confirmButtonColor:'#3b82f6',
-        background:'#16202e', color:'#e2e8f0'
-      });
-      window.location.href = CONFIG.loginUrl;
+      showExisting();
       return;
     }
 
@@ -422,7 +427,7 @@ async function createAndStart(){
     const finalName = name || email.split('@')[0];
     const studentData = {
       id: 'self-' + Date.now(),
-      customer: { name: finalName, email: email, whatsapp:'', phone:'' },
+      customer: { name: finalName, email: email, whatsapp: whatsapp, phone: whatsapp },
       courseName: CONFIG.courseName,
       actualCourseId: courseId,
       pricing: { basePriceNumber:0, finalPriceNumber:0, basePrice:'0', finalPrice:'مجانًا' },
@@ -486,7 +491,7 @@ function showSuccess(name, url){
   const v = $('successView'); v.style.display = 'block';
   $('successName').textContent = 'أهلًا، ' + name + ' 🌟';
   $('enterBtn').href = url;
-  // الرابط الكامل (لو حابب يحفظه أو يشاركه — زي اللي بيتبعت على التليجرام)
+  // الرابط الكامل (لحفظه أو إرساله على الواتساب)
   const full = (url.indexOf('http') === 0) ? url : (window.location.origin + window.location.pathname.replace(/[^/]*$/, '') + url);
   $('linkBox').textContent = full;
   $('copyLink').addEventListener('click', ()=>{
@@ -494,8 +499,13 @@ function showSuccess(name, url){
       Swal.fire({ toast:true, position:'top', icon:'success', title:'اتنسخ الرابط', showConfirmButton:false, timer:1600, background:'#16202e', color:'#e2e8f0' });
     });
   });
-  // تحويل تلقائي
-  setTimeout(()=>{ window.location.href = url; }, CONFIG.redirectDelayMs);
+  // ⚠️ مفيش تحويل تلقائي — العميل ميتنقلش غير لما يدوس الزرار بنفسه
+}
+
+// شاشة "عندك حساب بالفعل" — زرار للدخول العادي (بدون تحويل تلقائي)
+function showExisting(){
+  $('formView').style.display = 'none';
+  const v = $('existingView'); v.style.display = 'block';
 }
 </script>
 </body>
