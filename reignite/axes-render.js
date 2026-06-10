@@ -4,6 +4,12 @@
    عرضٌ صرف: لا حالة، لا حساب، لا Firestore، لا نداء محرّك/جسر/مخزن.
    دوالٌّ نقيّة تأخذ بياناتٍ جاهزة وتُعيد HTML/SVG كنصّ. النبرة: مرآة لا محكمة،
    على أرض الكرامة.
+
+   ☆ جديد: استقبال الشرح العاميّ (hint):
+     • likertOption  : يطبع opt.hint تحت نصّ الخيار إن وُجد.
+     • likertStatement: يطبع s.hint تحت العبارة إن وُجد.
+     • questionHint  : دالّةٌ تطبع شرح السؤال (يستدعيها app بعد نصّ السؤال).
+     • introBlock    : دالّةٌ تطبع مقدّمة كتلة/طبقة (يستدعيها app عند الانتقال).
    ════════════════════════════════════════════════════════════════════════ */
 (function () {
   "use strict";
@@ -11,6 +17,7 @@
   var COLOR = { green: '#10b981', gold: '#fbbf24', blue: '#3b82f6', purple: '#a78bfa' };
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function nl2br(s){ return String(s==null?'':s).replace(/\n/g,'<br>'); }
   function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
 
   // لون الموقع على الطيف
@@ -22,28 +29,43 @@
     return COLOR.purple; // ambiguous
   }
 
+  /* ───────────────── شرح السؤال (عاميّ) — يُستدعى بعد نصّ السؤال ─────────────────
+     يطبع لا شيء إن لم يوجد شرح. */
+  function questionHint(text){
+    return text ? '<div class="ax-question-hint">' + nl2br(esc(text)) + '</div>' : '';
+  }
+
+  /* ───────────────── مقدّمة كتلة/طبقة (عاميّ) — تُستدعى عند الانتقال ───────────────── */
+  function introBlock(text){
+    return text ? '<div class="ax-intro">' + nl2br(esc(text)) + '</div>' : '';
+  }
+
   /* ───────────────── بلوك ليكرت لخيارٍ واحد (الطبقة الأولى) ─────────────────
-     opt: { letter, text, saved } — saved قيمةٌ محفوظة أو null */
+     opt: { letter, text, hint, saved } — hint شرحٌ عاميّ اختياريّ، saved قيمةٌ محفوظة أو null */
   function likertOption(opt){
     var scale = [1,2,3,4,5,6,7].map(function(v){
       var sel = (opt.saved === v) ? ' selected' : '';
       return '<button class="ax-likert' + sel + '" data-letter="' + esc(opt.letter) + '" data-val="' + v + '">' + arabicNum(v) + '</button>';
     }).join('');
+    var hintHTML = opt.hint ? '<div class="ax-option-hint">' + nl2br(esc(opt.hint)) + '</div>' : '';
     return '<div class="ax-option">'
          +   '<div class="ax-option-text"><span class="ax-letter">' + esc(opt.letter) + '</span><span>' + esc(opt.text) + '</span></div>'
+         +   hintHTML
          +   '<div class="ax-scale">' + scale + '</div>'
          +   '<div class="ax-scale-labels"><span>لا يشبهني إطلاقًا</span><span>يشبهني تمامًا</span></div>'
          + '</div>';
   }
 
   /* ───────────────── بلوك عبارة ليكرت مفردة (الطبقة الثانية/الثالثة) ─────────────────
-     s: { text, saved } */
+     s: { text, hint, saved } — hint اختياريّ */
   function likertStatement(s){
     var scale = [1,2,3,4,5,6,7].map(function(v){
       var sel = (s.saved === v) ? ' selected' : '';
       return '<button class="ax-likert' + sel + '" data-val="' + v + '">' + arabicNum(v) + '</button>';
     }).join('');
+    var hintHTML = s.hint ? '<div class="ax-statement-hint">' + nl2br(esc(s.hint)) + '</div>' : '';
     return '<div class="ax-statement-text">' + esc(s.text) + '</div>'
+         + hintHTML
          + '<div class="ax-scale">' + scale + '</div>'
          + '<div class="ax-scale-labels"><span>لا يشبهني إطلاقًا</span><span>يشبهني تمامًا</span></div>';
   }
@@ -182,7 +204,8 @@
   }
 
   window.AXES_RENDER = {
-    COLOR: COLOR, esc: esc, arabicNum: arabicNum, posColor: posColor,
+    COLOR: COLOR, esc: esc, nl2br: nl2br, arabicNum: arabicNum, posColor: posColor,
+    questionHint: questionHint, introBlock: introBlock,
     likertOption: likertOption, likertStatement: likertStatement,
     spectrumBar: spectrumBar, wellnessLine: wellnessLine,
     resultScreen: resultScreen
