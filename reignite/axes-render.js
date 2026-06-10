@@ -1,557 +1,218 @@
 /* ════════════════════════════════════════════════════════════════════════
-   axes-app.js — منطق وآلة حالة مقياس المحاور (Reignite)
+   axes-render.js — طبقة العرض لمقياس المحاور (Reignite)
    ────────────────────────────────────────────────────────────────────────
-   • كل حساب عبر AXES_ENGINE، كل ترجمة عبر AXES_BRIDGE، كل Firestore عبر
-     AXES_STORE حصرًا. كل عرض عبر AXES_RENDER.
-   • مصمّم كمودويل قابل للتضمين: يأخذ حاوية (افتراضيًّا #reignite-axes-root)
-     لا الصفحة كلها، كي تضمّه صفحة reignite ويتحكّم به الأدمن.
-   • التدفّق (الكشف قبل التسمية محفوظ):
-       تمهيد → ط١ تحديد المحور → كشف المحور الرئيسيّ → ط٢ احتراق أبعاده →
-       ط٣ نبضة الإحساس → شاشة النتيجة (كتابة Firestore واحدة).
-   • تحديث: زرّ «السابق» متاحٌ في كل مراحل المقياس (ط١/ط٢/ط٣) — العميل
-     يقدر يرجع لو غلط أو جاوب بسرعة. وإعادة التمرين تُحترَم من الـ roster.
+   عرضٌ صرف: لا حالة، لا حساب، لا Firestore. دوالٌّ نقيّة تأخذ بياناتٍ جاهزة
+   وتُعيد HTML كنصّ. النبرة: مرآة لا محكمة، على أرض الكرامة.
 
-   ☆ جديد: توصيل الشرح العاميّ (يشرح المقياس نفسه بنفسه دون مرافقة المدرّب):
-     • مقدّمة الافتتاح (intros.opening) في شاشة التمهيد.
-     • شرح كل سؤال (q.hint) تحت نصّه، وشرح كل خيار (o.hint) تحت الخيار.
-     • مقدّمة كل كتلة (intros.longing / intros.critique / intros.action)
-       تظهر مرّةً عند أوّل بندٍ من الكتلة.
-     • مقدّمة الطبقة الثانية (intros.L2) والثالثة (intros.L3) تظهر مرّةً
-       عند أوّل عبارةٍ فيهما.
+   ☆ تحديث:
+     • استقبال الشرح العاميّ (hint) في الخيار والعبارة، ودالّتا questionHint
+       و introBlock.
+     • شاشة النتيجة (resultScreen) أُعيد تصميمها بتنسيقٍ أعمق وأبرز:
+        - بطاقاتٌ بأرقام خطوات وأكسنت لونيّ لكل قسم.
+        - سطرٌ تمهيديٌّ بارز (ax-lead-line) أعلى فقرة المحور.
+        - شارةٌ مرئيّة للبُعد المحترق وشكله فوق شريط الطيف.
+        - الجسر كبطاقةٍ مميّزة.
+        - النصوص متعدّدة الفقرات تُقسَّم على سطرين فارغين.
+     • المعرّفات (axPrint / axDone) وعقد الموديل (الحقول) كما هي — لا تغيير
+       في axes-app.js مطلوب.
    ════════════════════════════════════════════════════════════════════════ */
-
 (function () {
   "use strict";
 
-  function CFG()   { return (typeof AXES_CONFIG    !== 'undefined') ? AXES_CONFIG    : window.AXES_CONFIG; }
-  function Q()     { return (typeof AXES_QUESTIONS !== 'undefined') ? AXES_QUESTIONS : window.AXES_QUESTIONS; }
-  function ENG()   { return (typeof AXES_ENGINE    !== 'undefined') ? AXES_ENGINE    : window.AXES_ENGINE; }
-  function BR()    { return (typeof AXES_BRIDGE    !== 'undefined') ? AXES_BRIDGE    : window.AXES_BRIDGE; }
-  function STORE() { return window.AXES_STORE; }
-  function RND()   { return (typeof AXES_RENDER    !== 'undefined') ? AXES_RENDER    : window.AXES_RENDER; }
-  function ROSTER(){ return window.REIGNITE_ROSTER; }
+  var COLOR = { green: '#10b981', gold: '#fbbf24', blue: '#3b82f6', purple: '#a78bfa' };
 
-  function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function nl2br(s){ return String(s==null?'':s).replace(/\n/g,'<br>'); }
+  function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
 
-  // وصول آمن للمقدّمات (intros) من ملفّ الأسئلة
-  function INTROS(){ var q = Q(); return (q && q.intros) ? q.intros : {}; }
-
-  // مجموعة بنود الطبقة الأولى مسطّحة (action ثمّ longing ثمّ critique)
-  function flattenL1(){
-    var q = Q().L1, out = [];
-    ['action','longing','critique'].forEach(function(block){
-      (q[block]||[]).forEach(function(item){ out.push({ block: block, item: item }); });
-    });
-    return out;
-  }
-
-  // ── الحالة ──
-  var state = {
-    rootId: 'reignite-axes-root',
-    user: null,
-    stage: 'intro',
-    l1: [],            // البنود المسطّحة
-    l1Index: 0,
-    l1Answers: { action:{}, longing:{}, critique:{} },
-    ranking: null,
-    primaryAxis: null,
-    l2Dims: [],        // أبعاد المحور الرئيسيّ (مسطّحة بعباراتها)
-    l2Index: 0,
-    l2Ratings: {},     // { dimId: [r,r,r] }
-    l3: [],            // عبارات الإحساس المسطّحة
-    l3Index: 0,
-    l3Answers: { tawaqud:[], hudur:[], imtila:[] },
-    burnout: null,
-    wellness: null,
-    lean: null,
-    forceRetake: false  // أمر إعادة التمرين من الأدمن
-  };
-
-  function root(){ return document.getElementById(state.rootId); }
-  function setHTML(html){ var r = root(); if(!r) return; r.innerHTML = '<div class="ax-card">' + html + '</div>'; try{ window.scrollTo(0,0); }catch(e){} }
-  function errorCard(msg){ setHTML('<div class="ax-centered"><div class="ax-saving">' + esc(msg) + '</div></div>'); }
-
-  function cache(){
-    try{ STORE().cacheProgress({
-      stage: state.stage, l1Answers: state.l1Answers,
-      l2Ratings: state.l2Ratings, l3Answers: state.l3Answers,
-      primaryAxis: state.primaryAxis
-    }); }catch(e){}
-  }
-
-  /* ════════════════════ التمهيد ════════════════════ */
-  function renderIntro(){
-    state.stage = 'intro'; cache();
-    setHTML(
-        '<div class="ax-tag">مقياس المحاور — اتجاه طاقتك</div>'
-      + '<div class="ax-core">قبل أن نعرف أين تحترق، نعرف أين تتّجه طاقتك. أجب من تجربتك الحقيقيّة, لا ممّا تتمنّاه — أصدق إجاباتك أنفعها لك.</div>'
-      + RND().introBlock(INTROS().opening)
-      + '<div class="ax-reminder">لا توجد إجابة صحيحة. قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا. وتقدر ترجع للسؤال السابق في أيّ وقت.</div>'
-      + '<button class="ax-btn primary" id="axStart">ابدأ</button>'
-    );
-    document.getElementById('axStart').addEventListener('click', function(){
-      state.stage = 'l1'; state.l1Index = 0; renderL1();
-    });
-  }
-
-  /* ════════════════════ الطبقة الأولى — تحديد المحور ════════════════════ */
-  function renderL1(){
-    state.stage = 'l1';
-    var N = state.l1.length;
-    if(state.l1Index >= N){ computeRanking(); return; }
-
-    var entry = state.l1[state.l1Index];
-    var block = entry.block, q = entry.item;
-    var pos = state.l1Index + 1;
-    var pct = Math.round((state.l1Index / N) * 100);
-    var saved = state.l1Answers[block][q.id] || {};
-
-    var blockHint = (block === 'critique')
-      ? 'قيّم بمقدار ما يستفزّك فعلًا.'
-      : 'قيّم كلّ وصفٍ بمقدار ما يشبهك — لا تختر واحدًا، فقد تشبهك أكثر من زاوية.';
-
-    // مقدّمة الكتلة: تظهر مرّةً واحدةً عند أوّل بندٍ من الكتلة
-    var firstInBlock = (state.l1Index === 0) || (state.l1[state.l1Index-1].block !== block);
-    var blockIntroHTML = firstInBlock ? RND().introBlock(INTROS()[block]) : '';
-
-    var opts = ['أ','ب','ج'].map(function(L){
-      var o = q.options[L]; if(!o) return '';
-      return RND().likertOption({ letter: L, text: o.text, hint: o.hint, saved: (typeof saved[L]==='number' ? saved[L] : null) });
+  // يقسّم نصًّا على الأسطر المزدوجة إلى فقرات. leadFirst → الفقرة الأولى بارزة.
+  function paras(text, leadFirst){
+    var parts = String(text==null?'':text).split(/\n{2,}/).map(function(s){ return s.trim(); }).filter(Boolean);
+    if(!parts.length) return '';
+    return parts.map(function(p, i){
+      var cls = (leadFirst && i===0) ? 'ax-p ax-lead-line' : 'ax-p';
+      return '<p class="' + cls + '">' + esc(p) + '</p>';
     }).join('');
-
-    setHTML(
-        '<div class="ax-progress-row">'
-      +   '<span class="ax-progress-label">أنت في ' + arabicNum(pos) + ' من ' + arabicNum(N) + '</span>'
-      +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
-      + '</div>'
-      + blockIntroHTML
-      + '<div class="ax-question">' + esc(q.text) + '</div>'
-      + RND().questionHint(q.hint)
-      + '<div class="ax-reminder">' + blockHint + '</div>'
-      + '<div class="ax-options">' + opts + '</div>'
-      + '<div class="ax-nav">'
-      +   (state.l1Index>0 ? '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>' : '')
-      +   '<button class="ax-btn primary" id="axNext" ' + (l1Complete(block,q)?'':'disabled') + '>تابِع ►</button>'
-      + '</div>'
-    );
-
-    Array.prototype.forEach.call(document.querySelectorAll('.ax-likert'), function(btn){
-      btn.addEventListener('click', function(){
-        var L = btn.getAttribute('data-letter');
-        var v = parseInt(btn.getAttribute('data-val'),10);
-        if(!state.l1Answers[block][q.id]) state.l1Answers[block][q.id] = {};
-        state.l1Answers[block][q.id][L] = v;
-        cache();
-        var group = btn.parentElement;
-        Array.prototype.forEach.call(group.querySelectorAll('.ax-likert'), function(b){ b.classList.remove('selected'); });
-        btn.classList.add('selected');
-        var nb = document.getElementById('axNext');
-        if(nb && l1Complete(block,q)) nb.removeAttribute('disabled');
-      });
-    });
-
-    var pb = document.getElementById('axPrev');
-    if(pb) pb.addEventListener('click', function(){ if(state.l1Index>0){ state.l1Index--; cache(); renderL1(); } });
-    var nb = document.getElementById('axNext');
-    if(nb) nb.addEventListener('click', function(){ if(!l1Complete(block,q)) return; state.l1Index++; cache(); renderL1(); });
   }
 
-  function l1Complete(block, q){
-    var a = state.l1Answers[block][q.id];
-    if(!a || typeof a !== 'object') return false;
-    return ['أ','ب','ج'].every(function(L){ return !q.options[L] || typeof a[L] === 'number'; });
+  function posColor(position){
+    if(position==='balance') return COLOR.green;
+    if(position==='excess')  return COLOR.gold;
+    if(position==='deficit') return COLOR.blue;
+    if(position==='both')    return COLOR.gold;
+    return COLOR.purple;
   }
 
-  function computeRanking(){
-    try{ state.ranking = ENG().computeAxisRanking(state.l1Answers); }
-    catch(e){ errorCard('تعذّر حساب الترتيب: ' + e.message); return; }
-    state.primaryAxis = state.ranking.primaryAxis;
-    renderAxisReveal();
+  function questionHint(text){ return text ? '<div class="ax-question-hint">' + nl2br(esc(text)) + '</div>' : ''; }
+  function introBlock(text){   return text ? '<div class="ax-intro">' + nl2br(esc(text)) + '</div>' : ''; }
+
+  function likertOption(opt){
+    var scale = [1,2,3,4,5,6,7].map(function(v){
+      var sel = (opt.saved === v) ? ' selected' : '';
+      return '<button class="ax-likert' + sel + '" data-letter="' + esc(opt.letter) + '" data-val="' + v + '">' + arabicNum(v) + '</button>';
+    }).join('');
+    var hintHTML = opt.hint ? '<div class="ax-option-hint">' + nl2br(esc(opt.hint)) + '</div>' : '';
+    return '<div class="ax-option">'
+         +   '<div class="ax-option-text"><span class="ax-letter">' + esc(opt.letter) + '</span><span>' + esc(opt.text) + '</span></div>'
+         +   hintHTML
+         +   '<div class="ax-scale">' + scale + '</div>'
+         +   '<div class="ax-scale-labels"><span>لا يشبهني إطلاقًا</span><span>يشبهني تمامًا</span></div>'
+         + '</div>';
   }
 
-  /* ════════════════════ كشف المحور الرئيسيّ (بين ط١ وط٢) ════════════════════
-     زيّ المرايا: «عرفت المحور، نتعمّق فيه» — الكشف قبل التسمية محفوظ لأن عبارات
-     ط٢ عن حالاتٍ معيشة لا عن «هل أنت تماسك». */
-  function renderAxisReveal(){
-    state.stage = 'axisReveal'; cache();
-    var name = BR().axisName(state.primaryAxis);
-    setHTML(
-        '<div class="ax-section-title">اتجاه طاقتك</div>'
-      + '<p class="ax-lead">من إجاباتك، طاقتك تتّجه قبل أن تفكّر نحو محورٍ أظهر من غيره:</p>'
-      + '<div class="ax-reveal">' + esc(name) + '</div>'
-      + '<p class="ax-p">الآن نتعمّق في هذا المحور قليلًا. ستقرأ عباراتٍ عن حالاتٍ قد تعيشها، وتقيّم كلّ واحدةٍ بمقدار ما تشبه حالك هذه الفترة — لا ما تتمنّاه.</p>'
-      + '<div class="ax-nav">'
-      +   '<button class="ax-btn ghost" id="axBackToL1">◄ أعِد أسئلة التحديد</button>'
-      +   '<button class="ax-btn primary" id="axToL2">تابِع ►</button>'
-      + '</div>'
-    );
-    document.getElementById('axToL2').addEventListener('click', function(){ prepareL2(); });
-    var bk = document.getElementById('axBackToL1');
-    if(bk) bk.addEventListener('click', function(){
-      state.stage='l1'; state.l1Index = Math.max(0, state.l1.length-1); cache(); renderL1();
-    });
+  function likertStatement(s){
+    var scale = [1,2,3,4,5,6,7].map(function(v){
+      var sel = (s.saved === v) ? ' selected' : '';
+      return '<button class="ax-likert' + sel + '" data-val="' + v + '">' + arabicNum(v) + '</button>';
+    }).join('');
+    var hintHTML = s.hint ? '<div class="ax-statement-hint">' + nl2br(esc(s.hint)) + '</div>' : '';
+    return '<div class="ax-statement-text">' + esc(s.text) + '</div>'
+         + hintHTML
+         + '<div class="ax-scale">' + scale + '</div>'
+         + '<div class="ax-scale-labels"><span>لا يشبهني إطلاقًا</span><span>يشبهني تمامًا</span></div>';
   }
 
-  /* ════════════════════ الطبقة الثانية — احتراق أبعاد المحور الرئيسيّ ════════════════════ */
-  function prepareL2(){
-    var axisL2 = Q().L2[state.primaryAxis] || {};
-    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === state.primaryAxis; });
-    var dimOrder = cfgAxis ? cfgAxis.dimensions.map(function(d){ return d.id; }) : Object.keys(axisL2);
+  function spectrumBar(sp){
+    sp = sp || {};
+    var position = sp.position || 'balance';
+    var ambiguous = (position === 'ambiguous');
+    var pct = 50;
+    if(position === 'deficit') pct = 17;
+    else if(position === 'excess') pct = 83;
+    else if(position === 'both') pct = 50;
+    else pct = 50;
 
-    state.l2Dims = [];
-    dimOrder.forEach(function(dimId){
-      var sts = axisL2[dimId] || [];
-      if(!Array.isArray(state.l2Ratings[dimId])) state.l2Ratings[dimId] = [];
-      sts.forEach(function(st, idx){ state.l2Dims.push({ dimId: dimId, idx: idx, text: st.text }); });
-    });
-    state.l2Index = firstUnrated(state.l2Dims, function(s){ return state.l2Ratings[s.dimId]; });
-    state.stage = 'l2'; cache(); renderL2();
+    var marker = ambiguous
+      ? '<span class="axsb-band"></span>'
+      : (position === 'both'
+          ? '<span class="axsb-dot" style="inset-inline-start:17%; background:' + COLOR.blue + '"></span>'
+          + '<span class="axsb-dot" style="inset-inline-start:83%; background:' + COLOR.gold + '"></span>'
+          : '<span class="axsb-dot" style="inset-inline-start:' + pct + '%; background:' + posColor(position) + '"></span>');
+
+    var whisper = '';
+    if(ambiguous) whisper = '<div class="axsb-whisper">لم يستقرّ بعد — يُفرَز في تأمّلٍ أعمق.</div>';
+    else if(position === 'both') whisper = '<div class="axsb-whisper">تذبذبٌ بين الطرفين — أشدّ من الوقوف في أحدهما.</div>';
+
+    return '<div class="ax-spectrum-bar">'
+         +   '<div class="axsb-track">'
+         +     '<span class="axsb-zone axsb-deficit"></span>'
+         +     '<span class="axsb-zone axsb-balance"></span>'
+         +     '<span class="axsb-zone axsb-excess"></span>'
+         +     marker
+         +   '</div>'
+         +   '<div class="axsb-labels"><span>تفريط</span><span>اتزان</span><span>إفراط</span></div>'
+         +   whisper
+         + '</div>';
   }
 
-  function renderL2(){
-    var total = state.l2Dims.length;
-    if(total === 0 || state.l2Index >= total){ computeBurnout(); return; }
-    var s = state.l2Dims[state.l2Index];
-    var pos = state.l2Index + 1, pct = Math.round((state.l2Index/total)*100);
-    var saved = (state.l2Ratings[s.dimId] && typeof state.l2Ratings[s.dimId][s.idx]==='number') ? state.l2Ratings[s.dimId][s.idx] : null;
-
-    // مقدّمة الطبقة الثانية: مرّةً واحدةً عند أوّل عبارة
-    var l2Intro = (state.l2Index === 0) ? RND().introBlock(INTROS().L2) : '';
-
-    setHTML(
-        '<div class="ax-progress-row">'
-      +   '<span class="ax-progress-label">أنت في ' + arabicNum(pos) + ' من ' + arabicNum(total) + '</span>'
-      +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
-      + '</div>'
-      + l2Intro
-      + RND().likertStatement({ text: s.text, saved: saved })
-      + '<div class="ax-nav">'
-      +   '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>'
-      +   '<button class="ax-btn primary" id="axNext" ' + (saved!=null?'':'disabled') + '>تابِع ►</button>'
-      + '</div>'
-    );
-    Array.prototype.forEach.call(document.querySelectorAll('.ax-likert'), function(btn){
-      btn.addEventListener('click', function(){
-        var v = parseInt(btn.getAttribute('data-val'),10);
-        if(!Array.isArray(state.l2Ratings[s.dimId])) state.l2Ratings[s.dimId] = [];
-        state.l2Ratings[s.dimId][s.idx] = v;
-        cache();
-        var group = btn.parentElement;
-        Array.prototype.forEach.call(group.querySelectorAll('.ax-likert'), function(b){ b.classList.remove('selected'); });
-        btn.classList.add('selected');
-        var nb = document.getElementById('axNext');
-        if(nb) nb.removeAttribute('disabled');
-      });
-    });
-
-    var pb = document.getElementById('axPrev');
-    if(pb) pb.addEventListener('click', function(){ l2Back(); });
-    var nb = document.getElementById('axNext');
-    if(nb) nb.addEventListener('click', function(){
-      var cur = (state.l2Ratings[s.dimId] && typeof state.l2Ratings[s.dimId][s.idx]==='number');
-      if(!cur) return;
-      state.l2Index++; cache(); renderL2();
-    });
+  function wellnessLine(points){
+    points = points || [];
+    var bars = points.map(function(p){
+      var pct = p.wellness != null ? Math.round((p.wellness / 7) * 100) : 0;
+      var col = p.isWorst ? COLOR.gold : COLOR.green;
+      return '<div class="ax-wl-row">'
+           +   '<span class="ax-wl-name">' + esc(p.name) + (p.isWorst ? ' <span class="ax-wl-tag">الأشدّ نزيفًا</span>' : '') + '</span>'
+           +   '<div class="ax-wl-bar"><div class="ax-wl-fill" style="width:' + pct + '%; background:' + col + '"></div></div>'
+           +   '<span class="ax-wl-val">' + (p.wellness != null ? arabicNum(p.wellness) : '—') + '</span>'
+           + '</div>';
+    }).join('');
+    return '<div class="ax-wellness">'
+         +   '<div class="ax-wl-caption">خطّ عافيتك اليوم — أوّل نقطةٍ ستراها ترتفع أسبوعًا بعد أسبوع:</div>'
+         +   bars
+         + '</div>';
   }
 
-  // الرجوع من ط٢: لو أوّل بند، نرجع لشاشة الكشف
-  function l2Back(){
-    if(state.l2Index > 0){ state.l2Index--; cache(); renderL2(); }
-    else { renderAxisReveal(); }
-  }
+  function resultScreen(m){
+    m = m || {};
+    var h = '';
 
-  function computeBurnout(){
-    try{ state.burnout = ENG().computeDimensionBurnout(state.primaryAxis, state.l2Ratings); }
-    catch(e){ errorCard('تعذّر حساب الاحتراق: ' + e.message); return; }
-    prepareL3();
-  }
+    function step(n){ return '<span class="axr-step">' + arabicNum(n) + '</span>'; }
 
-  /* ════════════════════ الطبقة الثالثة — نبضة الإحساس ════════════════════ */
-  function prepareL3(){
-    var l3 = Q().L3;
-    state.l3 = [];
-    ['tawaqud','hudur','imtila'].forEach(function(lvl){
-      if(!Array.isArray(state.l3Answers[lvl])) state.l3Answers[lvl] = [];
-      (l3[lvl]||[]).forEach(function(text, idx){ state.l3.push({ level: lvl, idx: idx, text: text }); });
-    });
-    state.l3Index = firstUnrated(state.l3, function(s){ return state.l3Answers[s.level]; });
-    state.stage = 'l3'; cache(); renderL3();
-  }
+    // القسم صفر — الافتتاحية (أرض الكرامة)
+    h += '<div class="axr-ground axr-ground-open">'
+       +   '<div class="axr-ground-title">' + esc(m.openingTitle || 'قبل أن تقرأ') + '</div>'
+       +   paras(m.openingBody)
+       + '</div>';
 
-  function renderL3(){
-    var total = state.l3.length;
-    if(total === 0 || state.l3Index >= total){ computeWellness(); return; }
-    var s = state.l3[state.l3Index];
-    var pos = state.l3Index + 1, pct = Math.round((state.l3Index/total)*100);
-    var saved = (state.l3Answers[s.level] && typeof state.l3Answers[s.level][s.idx]==='number') ? state.l3Answers[s.level][s.idx] : null;
+    // ١ — المحور الرئيسيّ (هيرو)
+    h += '<div class="axr-card axr-hero">'
+       +   step(1)
+       +   '<div class="axr-kicker">اتجاه طاقتك</div>'
+       +   paras(m.primaryPara, true)
+       + '</div>';
 
-    // مقدّمة الطبقة الثالثة: مرّةً واحدةً عند أوّل عبارة
-    var l3Intro = (state.l3Index === 0) ? RND().introBlock(INTROS().L3) : '';
-
-    setHTML(
-        '<div class="ax-progress-row">'
-      +   '<span class="ax-progress-label">أنت في ' + arabicNum(pos) + ' من ' + arabicNum(total) + '</span>'
-      +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
-      + '</div>'
-      + l3Intro
-      + '<div class="ax-reminder">قيّم كم تعيش هذا في هذه الفترة.</div>'
-      + RND().likertStatement({ text: s.text, saved: saved })
-      + '<div class="ax-nav">'
-      +   '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>'
-      +   '<button class="ax-btn primary" id="axNext" ' + (saved!=null?'':'disabled') + '>تابِع ►</button>'
-      + '</div>'
-    );
-    Array.prototype.forEach.call(document.querySelectorAll('.ax-likert'), function(btn){
-      btn.addEventListener('click', function(){
-        var v = parseInt(btn.getAttribute('data-val'),10);
-        if(!Array.isArray(state.l3Answers[s.level])) state.l3Answers[s.level] = [];
-        state.l3Answers[s.level][s.idx] = v;
-        cache();
-        var group = btn.parentElement;
-        Array.prototype.forEach.call(group.querySelectorAll('.ax-likert'), function(b){ b.classList.remove('selected'); });
-        btn.classList.add('selected');
-        var nb = document.getElementById('axNext');
-        if(nb) nb.removeAttribute('disabled');
-      });
-    });
-
-    var pb = document.getElementById('axPrev');
-    if(pb) pb.addEventListener('click', function(){ l3Back(); });
-    var nb = document.getElementById('axNext');
-    if(nb) nb.addEventListener('click', function(){
-      var cur = (state.l3Answers[s.level] && typeof state.l3Answers[s.level][s.idx]==='number');
-      if(!cur) return;
-      state.l3Index++; cache(); renderL3();
-    });
-  }
-
-  // الرجوع من ط٣: لو أوّل بند، نرجع لآخر بند في ط٢
-  function l3Back(){
-    if(state.l3Index > 0){ state.l3Index--; cache(); renderL3(); }
-    else {
-      // ارجع لآخر عبارة في ط٢
-      prepareL2Resume(state.l2Dims.length-1);
+    // ٢ — وراء الرئيسيّ (الفرعيّ + بذرة المكبوت)
+    if(m.secondaryPara || m.repressedSeed){
+      h += '<div class="axr-card">'
+         +   step(2)
+         +   '<div class="ax-h">وراء الرئيسيّ</div>'
+         +   (m.secondaryPara ? paras(m.secondaryPara) : '')
+         +   (m.repressedSeed ? '<p class="ax-p ax-seed">' + esc(m.repressedSeed) + '</p>' : '')
+         + '</div>';
     }
-  }
-  function prepareL2Resume(idx){
-    var axisL2 = Q().L2[state.primaryAxis] || {};
-    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === state.primaryAxis; });
-    var dimOrder = cfgAxis ? cfgAxis.dimensions.map(function(d){ return d.id; }) : Object.keys(axisL2);
-    state.l2Dims = [];
-    dimOrder.forEach(function(dimId){
-      var sts = axisL2[dimId] || [];
-      sts.forEach(function(st, i){ state.l2Dims.push({ dimId: dimId, idx: i, text: st.text }); });
-    });
-    state.l2Index = Math.max(0, Math.min(idx, state.l2Dims.length-1));
-    state.stage='l2'; cache(); renderL2();
-  }
 
-  function computeWellness(){
-    try{ state.wellness = ENG().computeWellnessLine(state.l3Answers); }
-    catch(e){ errorCard('تعذّر حساب خطّ العافية: ' + e.message); return; }
-    finalize();
-  }
-
-  /* ════════════════════ التركيب والحفظ والنتيجة ════════════════════ */
-  function finalize(){
-    // الميل النوعيّ (للقاع، لا يُعلَن)
-    try{ state.lean = ENG().computeBurnoutLean(state.ranking, state.burnout, state.wellness); }
-    catch(e){ state.lean = null; }
-
-    state.stage = 'saving';
-    setHTML('<div class="ax-centered"><div class="ax-spinner"></div><div class="ax-saving">نحفظ نتيجتك…</div></div>');
-
-    var payload = {
-      answers: { L1: state.l1Answers, L2: state.l2Ratings, L3: state.l3Answers },
-      results: {
-        ranking: state.ranking,
-        burnout: state.burnout,
-        wellness: state.wellness,
-        primaryAxis: state.primaryAxis
-      },
-      lean: state.lean
-    };
-
-    var uid = state.user && state.user.id;
-    STORE().saveResult(uid, payload).then(function(){
-      // أطفئ علم إعادة التمرين بعد إتمام جديد
-      try{ if(ROSTER() && ROSTER().setRetakeAxes && state.forceRetake) ROSTER().setRetakeAxes(uid, false); }catch(e){}
-      renderResult();
-    }).catch(function(){ renderResult(); });
-  }
-
-  function renderResult(){
-    state.stage = 'result';
-    var br = BR(), rnd = RND(), cfg = CFG();
-
-    var primaryAxis   = state.primaryAxis;
-    var secondaryAxis = state.ranking.secondaryAxis;
-    var repressedAxis = state.ranking.repressedAxis;
-
-    // البُعد المحترق وشكله
-    var burnedDim   = state.burnout ? state.burnout.burnedDim : null;
-    var burnedShape = state.burnout ? state.burnout.burnedShape : null;
-
-    // شريط الطيف لأبرز بُعد (المحترق، أو أوّل بُعد لو كله متّزن)
-    var spDim = burnedDim || (state.burnout && Object.keys(state.burnout.dimensions)[0]);
-    var spObj = (state.burnout && spDim) ? state.burnout.dimensions[spDim] : null;
-    var spectrumBarHTML = spObj ? rnd.spectrumBar({ position: spObj.position, positionLabel: spObj.positionLabel }) : '';
-
-    // تطابق المستوى الأشدّ نزيفًا مع مستوى المحور الرئيسيّ؟
-    var matched = state.lean ? state.lean.matched : null;
-    var worstLevel = state.wellness ? state.wellness.worstLevel : null;
-
-    // خطّ العافية: ثلاث نقاط
-    var levelMap = { tawaqud:'التوقّد', hudur:'الحضور', imtila:'الامتلاء' };
-    var wl = state.wellness ? state.wellness.wellnessPoint : {};
-    var points = ['tawaqud','hudur','imtila'].map(function(lvl){
-      return { name: levelMap[lvl], wellness: wl[lvl], isWorst: (lvl === worstLevel) };
-    });
-
-    var model = {
-      openingTitle: br.opening().title,
-      openingBody:  br.opening().body,
-      primaryPara:  br.primaryParagraph(primaryAxis),
-      secondaryPara:br.secondaryParagraph(secondaryAxis),
-      repressedSeed:br.repressedSeed(repressedAxis),
-      burnedDimName: burnedDim ? br.dimName(primaryAxis, burnedDim) : '',
-      burnedShapeLabel: burnedDim ? br.shapeLabel(primaryAxis, burnedDim, burnedShape) : '',
-      burnedPara:   br.burnedDimensionParagraph(primaryAxis, burnedDim, burnedShape),
-      spectrumBarHTML: spectrumBarHTML,
-      bridge:       br.buildBridge(primaryAxis, burnedDim, burnedShape, matched),
-      burnoutNarrative: br.burnoutNarrative(worstLevel),
-      wellnessHTML: rnd.wellnessLine(points),
-      closingBody:  br.closing().body,
-      practice:      burnedDim ? br.recoveryPractice(primaryAxis, burnedDim, burnedShape) : br.recoveryPractice(primaryAxis, null, null),
-      practiceIntro: br.practiceIntro()
-    };
-
-    var r = root();
-    if(r) r.innerHTML = '<div class="ax-card ax-result">' + rnd.resultScreen(model) + '</div>';
-    try{ window.scrollTo(0,0); }catch(e){}
-
-    var pb = document.getElementById('axPrint');
-    if(pb) pb.addEventListener('click', function(){ window.print(); });
-    var db = document.getElementById('axDone');
-    if(db) db.addEventListener('click', function(){
-      // نقطة وصلٍ مع حاوية reignite (الأدمن يقرّر ما بعدها)
-      if(typeof window.onAxesComplete === 'function') window.onAxesComplete(state.lean);
-      renderDone();
-    });
-  }
-
-  function renderDone(){
-    setHTML(
-        '<div class="ax-centered">'
-      +   '<div class="ax-check">✓</div>'
-      +   '<div class="ax-done-line">أتممتَ المقياس. خريطتك محفوظة.</div>'
-      +   '<div class="ax-done-note">سنبني على هذا فيما هو قادم من الرحلة.</div>'
-      + '</div>'
-    );
-  }
-
-  /* ════════════════════ أدوات ════════════════════ */
-  function firstUnrated(list, arrGetter){
-    for(var i=0;i<list.length;i++){
-      var s = list[i], arr = arrGetter(s);
-      if(!arr || typeof arr[s.idx] !== 'number') return i;
+    // ٣ — أين تحترق الآن (بطاقة التشخيص المبروزة)
+    var chip = '';
+    if(m.burnedDimName){
+      chip = '<div class="axr-chip">'
+           +   '<span class="axr-chip-dim">' + esc(m.burnedDimName) + '</span>'
+           +   (m.burnedShapeLabel ? '<span class="axr-chip-sep">·</span><span class="axr-chip-shape">' + esc(m.burnedShapeLabel) + '</span>' : '')
+           + '</div>';
     }
-    return list.length;
-  }
+    h += '<div class="axr-card axr-diag">'
+       +   step(3)
+       +   '<div class="ax-h">أين تحترق الآن</div>'
+       +   chip
+       +   (m.spectrumBarHTML || '')
+       +   paras(m.burnedPara)
+       + '</div>';
 
-  function resumeFromCache(c){
-    if(c.l1Answers) state.l1Answers = c.l1Answers;
-    if(c.l2Ratings) state.l2Ratings = c.l2Ratings;
-    if(c.l3Answers) state.l3Answers = c.l3Answers;
-    if(c.primaryAxis) state.primaryAxis = c.primaryAxis;
-
-    // أين توقّف؟ أوّل بند ط١ غير مكتمل
-    var firstUn = -1;
-    for(var i=0;i<state.l1.length;i++){
-      var e = state.l1[i];
-      if(!l1Complete(e.block, e.item)){ firstUn = i; break; }
+    // الجسر (بطاقة موصولة مميّزة)
+    if(m.bridge){
+      h += '<div class="axr-bridge">'
+         +   '<div class="axr-kicker">الخيط الذي يربط</div>'
+         +   paras(m.bridge)
+         + '</div>';
     }
-    if(firstUn !== -1){ state.stage='l1'; state.l1Index = firstUn; renderL1(); return; }
 
-    // ط١ مكتملة — احسب الترتيب ثمّ تابع من حيث وصل
-    try{ state.ranking = ENG().computeAxisRanking(state.l1Answers); state.primaryAxis = state.ranking.primaryAxis; }
-    catch(e){ renderIntro(); return; }
+    // ٤ — خطّ العافية
+    h += '<div class="axr-card">'
+       +   step(4)
+       +   '<div class="ax-h">خطّ عافيتك</div>'
+       +   paras(m.burnoutNarrative)
+       +   (m.wellnessHTML || '')
+       + '</div>';
 
-    // هل بدأ ط٢؟
-    var axisL2 = Q().L2[state.primaryAxis] || {};
-    var anyL2 = Object.keys(state.l2Ratings).some(function(d){ return (state.l2Ratings[d]||[]).some(function(v){ return typeof v==='number'; }); });
-    if(!anyL2){ renderAxisReveal(); return; }
+    // ٥ — ممارسة التعافي
+    if(m.practice){
+      h += '<div class="axr-card axr-practice-wrap">'
+         +   step(5)
+         +   '<div class="ax-h">ممارستك لهذا الأسبوع</div>'
+         +   (m.practiceIntro ? paras(m.practiceIntro) : '')
+         +   '<div class="ax-practice-card">' + esc(m.practice) + '</div>'
+         + '</div>';
+    }
 
-    prepareL2(); // prepareL2 يحسب أوّل غير مقيّم تلقائيًّا
+    // الخاتمة (أرض الكرامة)
+    h += '<div class="axr-ground axr-ground-close">'
+       +   '<div class="axr-ground-title">بعد أن قرأت</div>'
+       +   paras(m.closingBody)
+       + '</div>';
+
+    // أزرار (نفس المعرّفات)
+    h += '<div class="ax-actions">'
+       +   '<button class="ax-btn ghost" id="axPrint">احفظ نسخةً (طباعة)</button>'
+       +   '<button class="ax-btn primary" id="axDone">تمّ</button>'
+       + '</div>';
+
+    return h;
   }
 
-  // إعادة تصفير الحالة لتمرينٍ جديد
-  function resetState(){
-    state.stage='intro';
-    state.l1Index=0; state.l1Answers={ action:{}, longing:{}, critique:{} };
-    state.ranking=null; state.primaryAxis=null;
-    state.l2Dims=[]; state.l2Index=0; state.l2Ratings={};
-    state.l3=[]; state.l3Index=0; state.l3Answers={ tawaqud:[], hudur:[], imtila:[] };
-    state.burnout=null; state.wellness=null; state.lean=null;
-    try{ STORE().clearCache(state.user && state.user.id); }catch(e){}
-  }
-
-  /* ════════════════════ الإقلاع ════════════════════ */
-  function init(options){
-    options = options || {};
-    if(options.rootId) state.rootId = options.rootId;
-    if(!root()){ console.error('[AXES_APP] حاوية #' + state.rootId + ' غير موجودة'); return; }
-
-    var missing = [];
-    if(!CFG())   missing.push('AXES_CONFIG');
-    if(!Q())     missing.push('AXES_QUESTIONS');
-    if(!ENG())   missing.push('AXES_ENGINE');
-    if(!BR())    missing.push('AXES_BRIDGE');
-    if(!STORE()) missing.push('AXES_STORE');
-    if(!RND())   missing.push('AXES_RENDER');
-    if(missing.length){ errorCard('تعذّر تحميل ملفّات المقياس — الغائب: ' + missing.join('، ')); return; }
-
-    // المصادقة (نفس أكونت العميل الموجود)
-    var user = STORE().requireAuth({ loginPath: options.loginPath || '../login.html' });
-    if(!user) return;
-    state.user = user;
-    state.l1 = flattenL1();
-
-    setHTML('<div class="ax-centered"><div class="ax-spinner"></div><div class="ax-saving">نحمّل…</div></div>');
-
-    // اقرأ علم إعادة التمرين من الـ roster (لو الأدمن سمح بإعادته)
-    var retakeP = (ROSTER() && ROSTER().getMyRoster)
-      ? ROSTER().getMyRoster(user.id).then(function(r){ return !!(r && r.retakeAxes); }).catch(function(){ return false; })
-      : Promise.resolve(false);
-
-    retakeP.then(function(allowRetake){
-      state.forceRetake = allowRetake;
-
-      // هل أتمّ المقياس سابقًا؟ (عرض النتيجة) — أو استئناف من cache — أو بداية
-      STORE().loadAssessment(user.id).then(function(data){
-        if(data && data.results && data.results.ranking && !allowRetake){
-          // أعِد بناء الحالة من المحفوظ واعرض النتيجة
-          state.ranking      = data.results.ranking;
-          state.primaryAxis  = data.results.primaryAxis || data.results.ranking.primaryAxis;
-          state.burnout      = data.results.burnout;
-          state.wellness     = data.results.wellness;
-          state.lean         = data.lean || null;
-          renderResult();
-          return;
-        }
-        if(allowRetake){
-          // الأدمن سمح بإعادة التمرين → ابدأ من جديد نظيفًا
-          resetState();
-          renderIntro();
-          return;
-        }
-        var c = null; try{ c = STORE().readCache(); }catch(e){ c=null; }
-        var hasCache = c && (c.l1Answers && Object.keys(c.l1Answers.action||{}).length);
-        if(hasCache) resumeFromCache(c); else renderIntro();
-      }).catch(function(){ renderIntro(); });
-    });
-  }
-
-  window.AXES_APP = { init: init };
+  window.AXES_RENDER = {
+    COLOR: COLOR, esc: esc, nl2br: nl2br, arabicNum: arabicNum, posColor: posColor, paras: paras,
+    questionHint: questionHint, introBlock: introBlock,
+    likertOption: likertOption, likertStatement: likertStatement,
+    spectrumBar: spectrumBar, wellnessLine: wellnessLine,
+    resultScreen: resultScreen
+  };
 })();
