@@ -96,6 +96,7 @@
       <div class="tab" data-tab="track">متابعة العملاء</div>
       <div class="tab" data-tab="roster">العملاء والمجموعات</div>
       <div class="tab" data-tab="library">مكتبة اليوم</div>
+      <div class="tab" data-tab="states">حالة الأيام</div>
     </div>
 
     <!-- ═══ تبويب التحكّم ═══ -->
@@ -184,6 +185,18 @@
           <button class="btn ghost sm" id="btnLibNone">عطّل الكل</button>
         </div>
         <div class="note"><b>فكرة:</b> المكتبة تعرض نفس محتوى القاعة (الاستراتيجيات التسع بتفصيلها، المستويات، المحاور…) في وضع «قراءة» — العميل يتصفّح ويرجع للأسئلة لكن بلا تأثير على الجلسة الحيّة.</div>
+      </div>
+    </div>
+
+    <!-- ═══ تبويب حالة الأيام ═══ -->
+    <div class="panel" id="panel-states">
+      <div class="card">
+        <div class="h">حالة الأيام والحركات عند العميل</div>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 14px">
+          إنت اللي بتحدّد الكلمة اللي تظهر عند كل حركة في صفحة رحلة العميل (قادم / الآن / نشط / تمّ) — أو اكتب كلمتك الخاصة. الإعداد للجلسة الحالية (المجموعة الحالية) بس.
+        </p>
+        <div id="statesList"><div class="empty">…</div></div>
+        <div class="note"><b>ملاحظة:</b> لو سِبت الحركة على «تلقائيّ» هتتحسب من تقدّم العميل (مثلاً «تمّ» بعد المقياس). أيّ اختيار يدويّ بيتفوّق على التلقائيّ.</div>
       </div>
     </div>
   </div>
@@ -423,9 +436,61 @@
     /* ════════ مكتبة اليوم ════════ */
     var LIB_KEY='reignite_library_'+S.getSessionId();
     function libState(){ try{ return JSON.parse(localStorage.getItem(LIB_KEY)||'{}'); }catch(e){ return {}; } }
-    function libSave(st){ try{ localStorage.setItem(LIB_KEY, JSON.stringify(st)); }catch(e){}
-      // ننشرها في وثيقة الجلسة كي تقرأها صفحة العميل
-      try{ S.setPhase(curPhase, Object.assign({}, session&&session.customData, { library: st })); }catch(e){}
+    function patchSessionCustom(patch){
+      try{
+        var sid=S.getSessionId();
+        var cur=(session&&session.customData)||{};
+        var merged=Object.assign({}, cur, patch);
+        window.db.collection(S.SESSION_COLLECTION).doc(sid)
+          .set({ customData: merged, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      }catch(e){ console.warn('patchSessionCustom', e); }
+    }
+
+    function libSave(st){
+      try{ localStorage.setItem(LIB_KEY, JSON.stringify(st)); }catch(e){}
+      patchSessionCustom({ library: st });   // بلا setPhase — مايلمسش المرحلة ولا المؤقّت
+    }
+
+    /* ════════ حالة الأيام/الحركات عند العميل ════════ */
+    var ST_MOVEMENTS=[
+      {id:'m0',k:'تمهيد',t:'الاستقبال والإصغاء'},
+      {id:'m1',k:'الحركة الأولى',t:'الاعتراف'},
+      {id:'m2',k:'الحركة الثانية',t:'الميكانيكية المخفية'},
+      {id:'m3',k:'الحركة الثالثة',t:'النزول الكبير — المرايا'},
+      {id:'m4',k:'الحركة الرابعة',t:'القاع'},
+      {id:'m5',k:'الحركة الخامسة',t:'الدوران'},
+      {id:'m6',k:'الحركة السادسة',t:'الصعود'}
+    ];
+    var ST_STATES=[ ['','تلقائيّ'], ['soon','قادم'], ['now','الآن'], ['active','نشط'], ['prep','بنجهّز ليها'], ['done','تمّ'] ];
+
+    function renderStates(){
+      var box=document.getElementById('statesList'); if(!box) return;
+      var ms=(session&&session.customData&&session.customData.movementStates)||{};
+      box.innerHTML=ST_MOVEMENTS.map(function(m){
+        var cur=ms[m.id]||{}; var curState=cur.state||''; var curLabel=cur.label||'';
+        var opts=ST_STATES.map(function(s){ return '<option value="'+s[0]+'"'+(s[0]===curState?' selected':'')+'>'+s[1]+'</option>'; }).join('');
+        return '<div class="cl-card" data-mid="'+m.id+'" style="margin-bottom:10px">'
+          + '<div class="cl-head" style="margin-bottom:8px"><div class="cl-name">'+m.t+'<span class="mail">'+m.k+'</span></div></div>'
+          + '<div class="toolbar" style="margin:0">'
+          +   '<select class="stState">'+opts+'</select>'
+          +   '<input type="text" class="search stLabel" placeholder="كلمة خاصّة (اختياريّ) — تتفوّق على الاختيار" value="'+(curLabel.replace(/"/g,'&quot;'))+'">'
+          + '</div></div>';
+      }).join('');
+      box.querySelectorAll('.cl-card[data-mid]').forEach(function(card){
+        var save=function(){ saveStates(); };
+        card.querySelector('.stState').addEventListener('change', save);
+        card.querySelector('.stLabel').addEventListener('change', save);
+      });
+    }
+    function saveStates(){
+      var box=document.getElementById('statesList'); var out={};
+      box.querySelectorAll('.cl-card[data-mid]').forEach(function(card){
+        var id=card.getAttribute('data-mid');
+        var st=card.querySelector('.stState').value;
+        var lb=card.querySelector('.stLabel').value.trim();
+        if(st || lb) out[id]={ state:st, label:lb };
+      });
+      patchSessionCustom({ movementStates: out });
     }
     var LIB_PHASES=['ack_open','ack_charter','ack_exhaustion','ack_symptom','levels_three','axes_lens','axes_order','strategy_four','curve_mirror','cards_nine','pattern_live','recovery','closing'];
     function renderLibrary(){
@@ -443,7 +508,7 @@
     document.getElementById('btnLibNone').addEventListener('click', function(){ var st={}; LIB_PHASES.forEach(function(p){ st[p]=false; }); libSave(st); renderLibrary(); });
 
     /* ════════ الربط مع الجلسة ════════ */
-    function applySession(s){ session=s; curPhase=(s&&s.currentPhase)||'waiting'; renderControl(); syncTimer(s); renderStageCounts(); }
+    function applySession(s){ session=s; curPhase=(s&&s.currentPhase)||'waiting'; renderControl(); syncTimer(s); renderStageCounts(); renderStates(); }
     S.ensureSession({ cohort:'Reignite' }).then(function(){ renderControl(); renderLibrary(); });
     S.onSessionChange(applySession);
     S.onClientsChange(function(arr){ clients=arr; renderStageCounts(); renderTrack(); });
