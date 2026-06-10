@@ -150,7 +150,24 @@
     return true;
   }
 
+/* ── حلّ معرّف الجلسة من تسكين العميل في الـ roster (للقاعة) ──
+     لو الرابط فيه ?session= فهو الأولى (تجاوز يدويّ). وإلا نقرأ مجموعة العميل
+     من REIGNITE_ROSTER ونضبط الجلسة تلقائيًّا. */
+  async function resolveSessionFromRoster(user){
+    try{
+      var qs = new URLSearchParams(location.search);
+      var explicit = qs.get('session');
+      if(explicit){ setSessionId(explicit); return _sessionId; }      // تجاوز يدويّ له الأولوية
+      if(user && user.id && global.REIGNITE_ROSTER && global.REIGNITE_ROSTER.getMySessionId){
+        var sid = await global.REIGNITE_ROSTER.getMySessionId(user.id);
+        if(sid) setSessionId(sid);
+      }
+    }catch(e){ console.warn('[AXES_SESSION] resolveSessionFromRoster:', e); }
+    return _sessionId;
+  }
+   
   global.AXES_SESSION = {
+     resolveSessionFromRoster: resolveSessionFromRoster,
     setSessionId: setSessionId, getSessionId: function(){ return _sessionId; },
     PHASES: PHASES, phaseOrder: phaseOrder,
     getSession: getSession, initSession: initSession, ensureSession: ensureSession,
