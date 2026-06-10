@@ -79,6 +79,31 @@
     }catch(e){ console.error('[ROSTER] setCohort:', e); return false; }
   }
 
+  /* ── تسجيل/تحديث عميل في السجلّ (يُستدعى من صفحة التسجيل وقت الإنشاء) ──
+     يكتب لقطةً خفيفةً للأدمن: اسم/إيميل/باسورد/توكن/واتساب. لا يلمس users. */
+  async function enroll(userId, info){
+    if(!(await _ready()) || !userId) return false;
+    info = info || {};
+    try{
+      var snap = await _rosterCol().doc(userId).get();
+      var payload = {
+        userId: userId, courseId: COURSE_ID,
+        name: info.name || '—', email: info.email || '',
+        whatsapp: info.whatsapp || '', password: info.password || '',
+        token: info.token || null, status: info.status || 'active',
+        updatedAt: _fv().serverTimestamp()
+      };
+      if(!snap.exists){
+        payload.cohort = null;            // الأدمن يسكّنه لاحقًا
+        payload.retakeAxes = false;
+        payload.createdAt = _fv().serverTimestamp();
+        payload.source = info.source || 'self-signup';
+      }
+      await _rosterCol().doc(userId).set(payload, { merge:true });
+      return true;
+    }catch(e){ console.error('[ROSTER] enroll:', e); return false; }
+  }
+
   /* ── علم إعادة تمرين المحاور لعميل (للأدمن) ── */
   async function setRetakeAxes(userId, allow){
     if(!(await _ready()) || !userId) return false;
@@ -103,41 +128,27 @@
     return function(){ try{ unsub(); }catch(e){} };
   }
 
-  /* ── قراءة عملاء reignite من users (للأدمن: إيميل/اسم/باسورد/توكن الرابط) ──
-     نقرأ المسجّلين في دورة reignite فقط (enrollments[].courseId/ title) كي لا
-     نسحب آلاف المستخدمين. الباسورد مفكوكٌ من tempPassword (atob) للعرض للأدمن. */
+  /* ── قراءة عملاء reignite (للأدمن) — من السجلّ مباشرةً، سريع ونظيف ──
+     مصدر الحقيقة هو reignite_roster: كل من سجّل (جديدًا أو مهاجَرًا) موجود هنا.
+     لا تمشيط لـ users إطلاقًا. الباسورد والتوكن لُقطا وقت التسجيل. */
   async function loadReigniteUsers(opts){
     opts = opts || {};
     if(!(await _ready())) return [];
     var out = [];
     try{
-      // المرشّح الأساسيّ: title الالتحاق = 'reignite' (كما في reignite-signup)
-      var snap = await _usersCol().where('enrollments','!=',null).limit(opts.limit||500).get().catch(function(){ return null; });
-      // بعض مشاريع Firestore لا تسمح بـ '!=' على المصفوفات؛ fallback لقراءة عامّة محدودة
-      if(!snap){ snap = await _usersCol().limit(opts.limit||500).get(); }
-
+      var snap = await _rosterCol().limit(opts.limit||2000).get();
       snap.forEach(function(doc){
-        var u = doc.data() || {};
-        var enr = u.enrollments || [];
-        var inReignite = enr.some(function(e){
-          var t = (e.title||'').toString().toLowerCase();
-          var cid = (e.courseId||'').toString().toLowerCase();
-          return t.indexOf('reignite')>=0 || cid.indexOf('reignite')>=0;
-        });
-        if(!inReignite) return;
-
-        var pass = '';
-        try{ if(u.auth && u.auth.tempPassword) pass = atob(u.auth.tempPassword); }catch(e){ pass=''; }
-        var token = (u.auth && u.auth.telegramAutoLoginToken) || null;
-
+        var r = doc.data() || {};
         out.push({
           id: doc.id,
-          name: (u.personalInfo && u.personalInfo.name) || '—',
-          email: (u.personalInfo && u.personalInfo.email) || '',
-          whatsapp: (u.personalInfo && u.personalInfo.whatsapp) || '',
-          password: pass,
-          token: token,
-          status: (u.accountStatus && u.accountStatus.status) || 'active'
+          name: r.name || '—',
+          email: r.email || '',
+          whatsapp: r.whatsapp || '',
+          password: r.password || '',
+          token: r.token || null,
+          status: r.status || 'active',
+          cohort: r.cohort || null,
+          retakeAxes: !!r.retakeAxes
         });
       });
     }catch(e){ console.error('[ROSTER] loadReigniteUsers:', e); }
@@ -167,6 +178,7 @@
     sessionIdForCohort: sessionIdForCohort,
     getMyRoster: getMyRoster,
     getMySessionId: getMySessionId,
+    enroll: enroll,
     setCohort: setCohort,
     setRetakeAxes: setRetakeAxes,
     onRosterChange: onRosterChange,
