@@ -10,6 +10,14 @@
        ط٣ نبضة الإحساس → شاشة النتيجة (كتابة Firestore واحدة).
    • تحديث: زرّ «السابق» متاحٌ في كل مراحل المقياس (ط١/ط٢/ط٣) — العميل
      يقدر يرجع لو غلط أو جاوب بسرعة. وإعادة التمرين تُحترَم من الـ roster.
+
+   ☆ جديد: توصيل الشرح العاميّ (يشرح المقياس نفسه بنفسه دون مرافقة المدرّب):
+     • مقدّمة الافتتاح (intros.opening) في شاشة التمهيد.
+     • شرح كل سؤال (q.hint) تحت نصّه، وشرح كل خيار (o.hint) تحت الخيار.
+     • مقدّمة كل كتلة (intros.longing / intros.critique / intros.action)
+       تظهر مرّةً عند أوّل بندٍ من الكتلة.
+     • مقدّمة الطبقة الثانية (intros.L2) والثالثة (intros.L3) تظهر مرّةً
+       عند أوّل عبارةٍ فيهما.
    ════════════════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -25,6 +33,9 @@
 
   function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // وصول آمن للمقدّمات (intros) من ملفّ الأسئلة
+  function INTROS(){ var q = Q(); return (q && q.intros) ? q.intros : {}; }
 
   // مجموعة بنود الطبقة الأولى مسطّحة (action ثمّ longing ثمّ critique)
   function flattenL1(){
@@ -75,6 +86,7 @@
     setHTML(
         '<div class="ax-tag">مقياس المحاور — اتجاه طاقتك</div>'
       + '<div class="ax-core">قبل أن نعرف أين تحترق، نعرف أين تتّجه طاقتك. أجب من تجربتك الحقيقيّة, لا ممّا تتمنّاه — أصدق إجاباتك أنفعها لك.</div>'
+      + RND().introBlock(INTROS().opening)
       + '<div class="ax-reminder">لا توجد إجابة صحيحة. قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا. وتقدر ترجع للسؤال السابق في أيّ وقت.</div>'
       + '<button class="ax-btn primary" id="axStart">ابدأ</button>'
     );
@@ -99,9 +111,13 @@
       ? 'قيّم بمقدار ما يستفزّك فعلًا.'
       : 'قيّم كلّ وصفٍ بمقدار ما يشبهك — لا تختر واحدًا، فقد تشبهك أكثر من زاوية.';
 
+    // مقدّمة الكتلة: تظهر مرّةً واحدةً عند أوّل بندٍ من الكتلة
+    var firstInBlock = (state.l1Index === 0) || (state.l1[state.l1Index-1].block !== block);
+    var blockIntroHTML = firstInBlock ? RND().introBlock(INTROS()[block]) : '';
+
     var opts = ['أ','ب','ج'].map(function(L){
       var o = q.options[L]; if(!o) return '';
-      return RND().likertOption({ letter: L, text: o.text, saved: (typeof saved[L]==='number' ? saved[L] : null) });
+      return RND().likertOption({ letter: L, text: o.text, hint: o.hint, saved: (typeof saved[L]==='number' ? saved[L] : null) });
     }).join('');
 
     setHTML(
@@ -109,7 +125,9 @@
       +   '<span class="ax-progress-label">أنت في ' + arabicNum(pos) + ' من ' + arabicNum(N) + '</span>'
       +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
       + '</div>'
+      + blockIntroHTML
       + '<div class="ax-question">' + esc(q.text) + '</div>'
+      + RND().questionHint(q.hint)
       + '<div class="ax-reminder">' + blockHint + '</div>'
       + '<div class="ax-options">' + opts + '</div>'
       + '<div class="ax-nav">'
@@ -198,11 +216,15 @@
     var pos = state.l2Index + 1, pct = Math.round((state.l2Index/total)*100);
     var saved = (state.l2Ratings[s.dimId] && typeof state.l2Ratings[s.dimId][s.idx]==='number') ? state.l2Ratings[s.dimId][s.idx] : null;
 
+    // مقدّمة الطبقة الثانية: مرّةً واحدةً عند أوّل عبارة
+    var l2Intro = (state.l2Index === 0) ? RND().introBlock(INTROS().L2) : '';
+
     setHTML(
         '<div class="ax-progress-row">'
       +   '<span class="ax-progress-label">أنت في ' + arabicNum(pos) + ' من ' + arabicNum(total) + '</span>'
       +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
       + '</div>'
+      + l2Intro
       + RND().likertStatement({ text: s.text, saved: saved })
       + '<div class="ax-nav">'
       +   '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>'
@@ -264,11 +286,15 @@
     var pos = state.l3Index + 1, pct = Math.round((state.l3Index/total)*100);
     var saved = (state.l3Answers[s.level] && typeof state.l3Answers[s.level][s.idx]==='number') ? state.l3Answers[s.level][s.idx] : null;
 
+    // مقدّمة الطبقة الثالثة: مرّةً واحدةً عند أوّل عبارة
+    var l3Intro = (state.l3Index === 0) ? RND().introBlock(INTROS().L3) : '';
+
     setHTML(
         '<div class="ax-progress-row">'
       +   '<span class="ax-progress-label">أنت في ' + arabicNum(pos) + ' من ' + arabicNum(total) + '</span>'
       +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
       + '</div>'
+      + l3Intro
       + '<div class="ax-reminder">قيّم كم تعيش هذا في هذه الفترة.</div>'
       + RND().likertStatement({ text: s.text, saved: saved })
       + '<div class="ax-nav">'
