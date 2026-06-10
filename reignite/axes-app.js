@@ -8,6 +8,8 @@
    • التدفّق (الكشف قبل التسمية محفوظ):
        تمهيد → ط١ تحديد المحور → كشف المحور الرئيسيّ → ط٢ احتراق أبعاده →
        ط٣ نبضة الإحساس → شاشة النتيجة (كتابة Firestore واحدة).
+   • تحديث: زرّ «السابق» متاحٌ في كل مراحل المقياس (ط١/ط٢/ط٣) — العميل
+     يقدر يرجع لو غلط أو جاوب بسرعة. وإعادة التمرين تُحترَم من الـ roster.
    ════════════════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -19,6 +21,7 @@
   function BR()    { return (typeof AXES_BRIDGE    !== 'undefined') ? AXES_BRIDGE    : window.AXES_BRIDGE; }
   function STORE() { return window.AXES_STORE; }
   function RND()   { return (typeof AXES_RENDER    !== 'undefined') ? AXES_RENDER    : window.AXES_RENDER; }
+  function ROSTER(){ return window.REIGNITE_ROSTER; }
 
   function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -50,7 +53,8 @@
     l3Answers: { tawaqud:[], hudur:[], imtila:[] },
     burnout: null,
     wellness: null,
-    lean: null
+    lean: null,
+    forceRetake: false  // أمر إعادة التمرين من الأدمن
   };
 
   function root(){ return document.getElementById(state.rootId); }
@@ -70,8 +74,8 @@
     state.stage = 'intro'; cache();
     setHTML(
         '<div class="ax-tag">مقياس المحاور — اتجاه طاقتك</div>'
-      + '<div class="ax-core">قبل أن نعرف أين تحترق، نعرف أين تتّجه طاقتك. أجب من تجربتك الحقيقيّة، لا ممّا تتمنّاه — أصدق إجاباتك أنفعها لك.</div>'
-      + '<div class="ax-reminder">لا توجد إجابة صحيحة. قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا.</div>'
+      + '<div class="ax-core">قبل أن نعرف أين تحترق، نعرف أين تتّجه طاقتك. أجب من تجربتك الحقيقيّة, لا ممّا تتمنّاه — أصدق إجاباتك أنفعها لك.</div>'
+      + '<div class="ax-reminder">لا توجد إجابة صحيحة. قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا. وتقدر ترجع للسؤال السابق في أيّ وقت.</div>'
       + '<button class="ax-btn primary" id="axStart">ابدأ</button>'
     );
     document.getElementById('axStart').addEventListener('click', function(){
@@ -109,8 +113,8 @@
       + '<div class="ax-reminder">' + blockHint + '</div>'
       + '<div class="ax-options">' + opts + '</div>'
       + '<div class="ax-nav">'
-      +   (state.l1Index>0 ? '<button class="ax-btn ghost" id="axPrev">السابق</button>' : '')
-      +   '<button class="ax-btn primary" id="axNext" ' + (l1Complete(block,q)?'':'disabled') + '>تابِع</button>'
+      +   (state.l1Index>0 ? '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>' : '')
+      +   '<button class="ax-btn primary" id="axNext" ' + (l1Complete(block,q)?'':'disabled') + '>تابِع ►</button>'
       + '</div>'
     );
 
@@ -159,9 +163,16 @@
       + '<p class="ax-lead">من إجاباتك، طاقتك تتّجه قبل أن تفكّر نحو محورٍ أظهر من غيره:</p>'
       + '<div class="ax-reveal">' + esc(name) + '</div>'
       + '<p class="ax-p">الآن نتعمّق في هذا المحور قليلًا. ستقرأ عباراتٍ عن حالاتٍ قد تعيشها، وتقيّم كلّ واحدةٍ بمقدار ما تشبه حالك هذه الفترة — لا ما تتمنّاه.</p>'
-      + '<button class="ax-btn primary" id="axToL2">تابِع</button>'
+      + '<div class="ax-nav">'
+      +   '<button class="ax-btn ghost" id="axBackToL1">◄ أعِد أسئلة التحديد</button>'
+      +   '<button class="ax-btn primary" id="axToL2">تابِع ►</button>'
+      + '</div>'
     );
     document.getElementById('axToL2').addEventListener('click', function(){ prepareL2(); });
+    var bk = document.getElementById('axBackToL1');
+    if(bk) bk.addEventListener('click', function(){
+      state.stage='l1'; state.l1Index = Math.max(0, state.l1.length-1); cache(); renderL1();
+    });
   }
 
   /* ════════════════════ الطبقة الثانية — احتراق أبعاد المحور الرئيسيّ ════════════════════ */
@@ -193,15 +204,39 @@
       +   '<div class="ax-progress-bar"><div class="ax-progress-fill" style="width:' + pct + '%"></div></div>'
       + '</div>'
       + RND().likertStatement({ text: s.text, saved: saved })
+      + '<div class="ax-nav">'
+      +   '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>'
+      +   '<button class="ax-btn primary" id="axNext" ' + (saved!=null?'':'disabled') + '>تابِع ►</button>'
+      + '</div>'
     );
     Array.prototype.forEach.call(document.querySelectorAll('.ax-likert'), function(btn){
       btn.addEventListener('click', function(){
         var v = parseInt(btn.getAttribute('data-val'),10);
         if(!Array.isArray(state.l2Ratings[s.dimId])) state.l2Ratings[s.dimId] = [];
         state.l2Ratings[s.dimId][s.idx] = v;
-        state.l2Index++; cache(); renderL2();
+        cache();
+        var group = btn.parentElement;
+        Array.prototype.forEach.call(group.querySelectorAll('.ax-likert'), function(b){ b.classList.remove('selected'); });
+        btn.classList.add('selected');
+        var nb = document.getElementById('axNext');
+        if(nb) nb.removeAttribute('disabled');
       });
     });
+
+    var pb = document.getElementById('axPrev');
+    if(pb) pb.addEventListener('click', function(){ l2Back(); });
+    var nb = document.getElementById('axNext');
+    if(nb) nb.addEventListener('click', function(){
+      var cur = (state.l2Ratings[s.dimId] && typeof state.l2Ratings[s.dimId][s.idx]==='number');
+      if(!cur) return;
+      state.l2Index++; cache(); renderL2();
+    });
+  }
+
+  // الرجوع من ط٢: لو أوّل بند، نرجع لشاشة الكشف
+  function l2Back(){
+    if(state.l2Index > 0){ state.l2Index--; cache(); renderL2(); }
+    else { renderAxisReveal(); }
   }
 
   function computeBurnout(){
@@ -225,9 +260,6 @@
   function renderL3(){
     var total = state.l3.length;
     if(total === 0 || state.l3Index >= total){ computeWellness(); return; }
-    if(state.l3Index === 0){
-      // تمهيد خفيف لمرّة واحدة
-    }
     var s = state.l3[state.l3Index];
     var pos = state.l3Index + 1, pct = Math.round((state.l3Index/total)*100);
     var saved = (state.l3Answers[s.level] && typeof state.l3Answers[s.level][s.idx]==='number') ? state.l3Answers[s.level][s.idx] : null;
@@ -239,15 +271,54 @@
       + '</div>'
       + '<div class="ax-reminder">قيّم كم تعيش هذا في هذه الفترة.</div>'
       + RND().likertStatement({ text: s.text, saved: saved })
+      + '<div class="ax-nav">'
+      +   '<button class="ax-btn ghost" id="axPrev">◄ السابق</button>'
+      +   '<button class="ax-btn primary" id="axNext" ' + (saved!=null?'':'disabled') + '>تابِع ►</button>'
+      + '</div>'
     );
     Array.prototype.forEach.call(document.querySelectorAll('.ax-likert'), function(btn){
       btn.addEventListener('click', function(){
         var v = parseInt(btn.getAttribute('data-val'),10);
         if(!Array.isArray(state.l3Answers[s.level])) state.l3Answers[s.level] = [];
         state.l3Answers[s.level][s.idx] = v;
-        state.l3Index++; cache(); renderL3();
+        cache();
+        var group = btn.parentElement;
+        Array.prototype.forEach.call(group.querySelectorAll('.ax-likert'), function(b){ b.classList.remove('selected'); });
+        btn.classList.add('selected');
+        var nb = document.getElementById('axNext');
+        if(nb) nb.removeAttribute('disabled');
       });
     });
+
+    var pb = document.getElementById('axPrev');
+    if(pb) pb.addEventListener('click', function(){ l3Back(); });
+    var nb = document.getElementById('axNext');
+    if(nb) nb.addEventListener('click', function(){
+      var cur = (state.l3Answers[s.level] && typeof state.l3Answers[s.level][s.idx]==='number');
+      if(!cur) return;
+      state.l3Index++; cache(); renderL3();
+    });
+  }
+
+  // الرجوع من ط٣: لو أوّل بند، نرجع لآخر بند في ط٢
+  function l3Back(){
+    if(state.l3Index > 0){ state.l3Index--; cache(); renderL3(); }
+    else {
+      // ارجع لآخر عبارة في ط٢
+      prepareL2Resume(state.l2Dims.length-1);
+    }
+  }
+  function prepareL2Resume(idx){
+    var axisL2 = Q().L2[state.primaryAxis] || {};
+    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === state.primaryAxis; });
+    var dimOrder = cfgAxis ? cfgAxis.dimensions.map(function(d){ return d.id; }) : Object.keys(axisL2);
+    state.l2Dims = [];
+    dimOrder.forEach(function(dimId){
+      var sts = axisL2[dimId] || [];
+      sts.forEach(function(st, i){ state.l2Dims.push({ dimId: dimId, idx: i, text: st.text }); });
+    });
+    state.l2Index = Math.max(0, Math.min(idx, state.l2Dims.length-1));
+    state.stage='l2'; cache(); renderL2();
   }
 
   function computeWellness(){
@@ -277,8 +348,11 @@
     };
 
     var uid = state.user && state.user.id;
-    STORE().saveResult(uid, payload).then(function(){ renderResult(); })
-      .catch(function(){ renderResult(); });
+    STORE().saveResult(uid, payload).then(function(){
+      // أطفئ علم إعادة التمرين بعد إتمام جديد
+      try{ if(ROSTER() && ROSTER().setRetakeAxes && state.forceRetake) ROSTER().setRetakeAxes(uid, false); }catch(e){}
+      renderResult();
+    }).catch(function(){ renderResult(); });
   }
 
   function renderResult(){
@@ -386,6 +460,17 @@
     prepareL2(); // prepareL2 يحسب أوّل غير مقيّم تلقائيًّا
   }
 
+  // إعادة تصفير الحالة لتمرينٍ جديد
+  function resetState(){
+    state.stage='intro';
+    state.l1Index=0; state.l1Answers={ action:{}, longing:{}, critique:{} };
+    state.ranking=null; state.primaryAxis=null;
+    state.l2Dims=[]; state.l2Index=0; state.l2Ratings={};
+    state.l3=[]; state.l3Index=0; state.l3Answers={ tawaqud:[], hudur:[], imtila:[] };
+    state.burnout=null; state.wellness=null; state.lean=null;
+    try{ STORE().clearCache(state.user && state.user.id); }catch(e){}
+  }
+
   /* ════════════════════ الإقلاع ════════════════════ */
   function init(options){
     options = options || {};
@@ -409,22 +494,37 @@
 
     setHTML('<div class="ax-centered"><div class="ax-spinner"></div><div class="ax-saving">نحمّل…</div></div>');
 
-    // هل أتمّ المقياس سابقًا؟ (عرض النتيجة) — أو استئناف من cache — أو بداية
-    STORE().loadAssessment(user.id).then(function(data){
-      if(data && data.results && data.results.ranking){
-        // أعِد بناء الحالة من المحفوظ واعرض النتيجة
-        state.ranking      = data.results.ranking;
-        state.primaryAxis  = data.results.primaryAxis || data.results.ranking.primaryAxis;
-        state.burnout      = data.results.burnout;
-        state.wellness     = data.results.wellness;
-        state.lean         = data.lean || null;
-        renderResult();
-        return;
-      }
-      var c = null; try{ c = STORE().readCache(); }catch(e){ c=null; }
-      var hasCache = c && (c.l1Answers && Object.keys(c.l1Answers.action||{}).length);
-      if(hasCache) resumeFromCache(c); else renderIntro();
-    }).catch(function(){ renderIntro(); });
+    // اقرأ علم إعادة التمرين من الـ roster (لو الأدمن سمح بإعادته)
+    var retakeP = (ROSTER() && ROSTER().getMyRoster)
+      ? ROSTER().getMyRoster(user.id).then(function(r){ return !!(r && r.retakeAxes); }).catch(function(){ return false; })
+      : Promise.resolve(false);
+
+    retakeP.then(function(allowRetake){
+      state.forceRetake = allowRetake;
+
+      // هل أتمّ المقياس سابقًا؟ (عرض النتيجة) — أو استئناف من cache — أو بداية
+      STORE().loadAssessment(user.id).then(function(data){
+        if(data && data.results && data.results.ranking && !allowRetake){
+          // أعِد بناء الحالة من المحفوظ واعرض النتيجة
+          state.ranking      = data.results.ranking;
+          state.primaryAxis  = data.results.primaryAxis || data.results.ranking.primaryAxis;
+          state.burnout      = data.results.burnout;
+          state.wellness     = data.results.wellness;
+          state.lean         = data.lean || null;
+          renderResult();
+          return;
+        }
+        if(allowRetake){
+          // الأدمن سمح بإعادة التمرين → ابدأ من جديد نظيفًا
+          resetState();
+          renderIntro();
+          return;
+        }
+        var c = null; try{ c = STORE().readCache(); }catch(e){ c=null; }
+        var hasCache = c && (c.l1Answers && Object.keys(c.l1Answers.action||{}).length);
+        if(hasCache) resumeFromCache(c); else renderIntro();
+      }).catch(function(){ renderIntro(); });
+    });
   }
 
   window.AXES_APP = { init: init };
