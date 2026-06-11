@@ -150,6 +150,22 @@
 
             await ref.set(payload, { merge: true });
             clearCache(userId);
+
+            // ── إبلاغ منصّة الدورة لو الصفحة مضمّنة (REIGNITE_EMBED) ──
+            try {
+                var EMB = global.REIGNITE_EMBED;
+                var rk = data.results && data.results.ranking;
+                if (EMB && EMB.isEmbedded && EMB.isEmbedded() && rk) {
+                    EMB.complete(
+                        {
+                            type: 'axes-assessment',
+                            primaryAxis: (data.results.primaryAxis || rk.primaryAxis || null)
+                        },
+                        { completedFrom: 'axes-store' }
+                    );
+                }
+            } catch (embErr) { console.warn('[AXES_STORE] embed notify skipped:', embErr); }
+
             return true;
         } catch (e) { console.error('[AXES_STORE] saveResult error:', e); return false; }
     }
