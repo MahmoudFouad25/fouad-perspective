@@ -14,6 +14,7 @@
   'use strict';
 
   var ROSTER_COLLECTION = 'reignite_roster';
+  var COHORTS_COLLECTION= 'reignite_cohorts';
   var USERS_COLLECTION  = 'users';
   var COURSE_ID         = 'reignite';
   var READY_TIMEOUT_MS  = 10000;
@@ -37,6 +38,83 @@
 
   function _rosterCol(){ return _db().collection(ROSTER_COLLECTION); }
   function _usersCol(){  return _db().collection(USERS_COLLECTION); }
+  function _cohortsCol(){ return _db().collection(COHORTS_COLLECTION); }
+
+  /* ── المجموعات ككيان أوّل: reignite_cohorts/{id} ── */
+  function slugCohortId(s){
+    s=String(s||'').trim().toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g,'-').replace(/^-+|-+$/g,'');
+    return s;
+  }
+  async function listCohorts(){
+    if(!(await _ready())) return [];
+    var out=[];
+    try{ var snap=await _cohortsCol().orderBy('createdAt','asc').get(); snap.forEach(function(d){ out.push(Object.assign({id:d.id}, d.data())); }); }
+    catch(e){ try{ var s2=await _cohortsCol().get(); s2.forEach(function(d){ out.push(Object.assign({id:d.id}, d.data())); }); }catch(e2){ console.error('[ROSTER] listCohorts:', e2); } }
+    return out;
+  }
+  function onCohortsChange(cb){
+    var unsub=function(){};
+    _ready().then(function(ok){ if(!ok) return;
+      unsub=_cohortsCol().onSnapshot(function(snap){ var a=[]; snap.forEach(function(d){ a.push(Object.assign({id:d.id}, d.data())); }); cb(a); },
+        function(e){ console.error('[ROSTER] cohorts مستمع:', e); }); });
+    return function(){ try{ unsub(); }catch(e){} };
+  }
+  async function createCohort(name, code){
+    if(!(await _ready())) return null;
+    var id=slugCohortId(code) || ('g'+Date.now().toString(36).slice(-4));
+    try{
+      var ref=_cohortsCol().doc(id); var ex=await ref.get();
+      if(ex.exists) id=id+'-'+Date.now().toString(36).slice(-3);
+      await _cohortsCol().doc(id).set({
+        cohortId:id, name:(name||id), courseId:COURSE_ID,
+        sessionId:sessionIdForCohort(id), status:'active',
+        createdAt:_fv().serverTimestamp(), updatedAt:_fv().serverTimestamp()
+      });
+      return id;
+    }catch(e){ console.error('[ROSTER] createCohort:', e); return null; }
+  }
+  async function renameCohort(id, name){
+    if(!(await _ready())||!id) return false;
+    try{ await _cohortsCol().doc(id).set({ name:name||id, updatedAt:_fv().serverTimestamp() }, {merge:true}); return true; }catch(e){ return false; }
+  }
+  async function deleteCohort(id){
+    if(!(await _ready())||!id) return false;
+    try{
+      var snap=await _rosterCol().where('cohort','==',id).get();
+      var batch=_db().batch();
+      snap.forEach(function(d){ batch.set(d.ref, { cohort:null, updatedAt:_fv().serverTimestamp() }, {merge:true}); });
+      await batch.commit();
+      await _cohortsCol().doc(id).delete();
+      return true;
+    }catch(e){ console.error('[ROSTER] deleteCohort:', e); return false; }
+  }
+
+  /* ── استيراد العملاء الموجودين من users → roster (بضغطة بدل الكونسول) ──
+     آمن: قراءة فقط من users، ولا يكتب فوق cohort/retake موجود. */
+  async function importLegacyUsers(opts){
+    opts=opts||{};
+    if(!(await _ready())) return { found:0, migrated:0, skipped:0, errors:0 };
+    var found=0, migrated=0, skipped=0, errors=0, snap;
+    try{ snap=await _usersCol().limit(opts.limit||5000).get(); }
+    catch(e){ console.error('[ROSTER] import users:', e); return { found:0, migrated:0, skipped:0, errors:1 }; }
+    for(var i=0;i<snap.docs.length;i++){
+      var doc=snap.docs[i], u=doc.data()||{}, enr=u.enrollments||[];
+      var inR=enr.some(function(e){ var t=(e.title||'').toString().toLowerCase(), c=(e.courseId||'').toString().toLowerCase(); return t.indexOf('reignite')>=0||c.indexOf('reignite')>=0; });
+      if(!inR) continue; found++;
+      var pass=''; try{ if(u.auth&&u.auth.tempPassword) pass=atob(u.auth.tempPassword); }catch(e){ pass=''; }
+      var rec={ userId:doc.id, courseId:COURSE_ID,
+        name:(u.personalInfo&&u.personalInfo.name)||'—', email:(u.personalInfo&&u.personalInfo.email)||'',
+        whatsapp:(u.personalInfo&&u.personalInfo.whatsapp)||'', password:pass,
+        token:(u.auth&&u.auth.telegramAutoLoginToken)||null, status:(u.accountStatus&&u.accountStatus.status)||'active',
+        source:'imported', updatedAt:_fv().serverTimestamp() };
+      try{
+        var ex=await _rosterCol().doc(doc.id).get();
+        if(!ex.exists){ rec.cohort=null; rec.retakeAxes=false; rec.createdAt=_fv().serverTimestamp(); await _rosterCol().doc(doc.id).set(rec); migrated++; }
+        else { delete rec.cohort; await _rosterCol().doc(doc.id).set(rec, {merge:true}); skipped++; }
+      }catch(e){ console.warn('[ROSTER] import', doc.id, e); errors++; }
+    }
+    return { found:found, migrated:migrated, skipped:skipped, errors:errors };
+  }
 
   /* ── معرّف الجلسة من رقم/اسم المجموعة ──
      cohort 'g2' → 'reignite-g2' ، فاضي/null → 'reignite-active' (الافتراضيّة) */
@@ -174,7 +252,7 @@
     return base + '?text=' + encodeURIComponent(msg);
   }
 
-  global.REIGNITE_ROSTER = {
+global.REIGNITE_ROSTER = {
     sessionIdForCohort: sessionIdForCohort,
     getMyRoster: getMyRoster,
     getMySessionId: getMySessionId,
@@ -185,7 +263,15 @@
     loadReigniteUsers: loadReigniteUsers,
     quickLoginUrl: quickLoginUrl,
     whatsappLink: whatsappLink,
+    listCohorts: listCohorts,
+    onCohortsChange: onCohortsChange,
+    createCohort: createCohort,
+    renameCohort: renameCohort,
+    deleteCohort: deleteCohort,
+    slugCohortId: slugCohortId,
+    importLegacyUsers: importLegacyUsers,
     ROSTER_COLLECTION: ROSTER_COLLECTION,
+    COHORTS_COLLECTION: COHORTS_COLLECTION,
     COURSE_ID: COURSE_ID
   };
   console.log('✅ REIGNITE_ROSTER جاهز — مجموعة:', ROSTER_COLLECTION);
