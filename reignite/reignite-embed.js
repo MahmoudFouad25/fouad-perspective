@@ -29,6 +29,19 @@
     }catch(e){}
   }
 
+
+   /* في الوضع المضمّن: نزرع هويّة المستخدم القادمة من المنصّة في localStorage
+     حتى تجدها getCurrentUser في AXES_STORE — قبل أن يعمل أيّ سكريبت آخر */
+  if (embedded && ctx.userId) {
+    try {
+      var existingUid = localStorage.getItem('userId');
+      if (existingUid !== ctx.userId) {
+        localStorage.setItem('userId', ctx.userId);
+      }
+    } catch(e){}
+  }
+
+   
   var savedDataCallbacks = [];
   var summaryCallbacks   = [];
 
