@@ -106,6 +106,8 @@
     <div class="cohortbar" id="cohortBar">
       <span class="cb-lbl">المجموعة الحاليّة:</span>
       <select id="curCohort"><option value="">كل المجموعات (الافتراضيّة)</option></select>
+      <span class="cb-lbl">اليوم:</span>
+      <select id="curDay"></select>
       <span class="cb-hint">التحكّم والعرض والمتابعة كلّهم بيشتغلوا على المجموعة دي.</span>
     </div>
     <div class="tabs">
@@ -231,12 +233,12 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
-  <script src="../js/firebase-config.js"></script>
-  <script src="axes-config.js"></script>
-  <script src="axes-session.js"></script>
-  <script src="reignite-flow.js"></script>
-  <script src="reignite-live.js"></script>
-  <script src="reignite-roster.js"></script>
+  <script src="../../js/firebase-config.js"></script>
+  <script src="../scale/axes-config.js"></script>
+  <script src="../core/axes-session.js"></script>
+  <script src="../core/flow-loader.js"></script>
+  <script src="../core/reignite-live.js"></script>
+  <script src="../core/reignite-roster.js"></script>
 
   <script>
   (function(){
@@ -246,8 +248,9 @@
 
     /* جلسة لكل مجموعة: reignite-admin.html?session=reignite-g2 */
     (function(){ var q=new URLSearchParams(window.location.search); var sid=q.get('session'); if(sid) S.setSessionId(sid); })();
+    var CUR_DAY=(function(){ var q=new URLSearchParams(window.location.search); var d=q.get('day'); return (d&&/^\d+$/.test(d))?d:'1'; })();
     (function(){
-      var sp = (S.getSessionId()!=='reignite-active') ? ('?session='+encodeURIComponent(S.getSessionId())) : '';
+      var sp = '?day='+CUR_DAY + ((S.getSessionId()!=='reignite-active') ? ('&session='+encodeURIComponent(S.getSessionId())) : '');
       function wire(){
         var a=document.getElementById('lnkDisplay'); if(a) a.href='reignite-display.html'+sp;
         var b=document.getElementById('lnkClient');  if(b) b.href='reignite-client.html'+sp;
@@ -376,8 +379,19 @@
     }
     document.getElementById('curCohort').addEventListener('change', function(){
       var id=this.value;
-      window.location.href='reignite-admin.html'+(id?('?session='+encodeURIComponent('reignite-'+id)):'');
+      window.location.href='reignite-admin.html?day='+CUR_DAY+(id?('&session='+encodeURIComponent('reignite-'+id)):'');
     });
+    (function(){
+      var sel=document.getElementById('curDay'); if(!sel) return;
+      var o=''; for(var i=1;i<=9;i++){ o+='<option value="'+i+'"'+(String(i)===CUR_DAY?' selected':'')+'>اليوم '+i+'</option>'; }
+      sel.innerHTML=o;
+      sel.addEventListener('change', function(){
+        var v=this.value;
+        try{ window.db.collection(S.SESSION_COLLECTION).doc(S.getSessionId()).set({ customData:{ day:v } }, { merge:true }); }catch(e){}
+        var q=new URLSearchParams(window.location.search); q.set('day', v);
+        setTimeout(function(){ window.location.search='?'+q.toString(); }, 400);
+      });
+    })();
 
     function cohortSelectHTML(uid, cur){
       var known=cohorts.some(function(c){return c.id===cur;});
@@ -411,7 +425,7 @@
     function renderRoster(){
       var list=document.getElementById('rosterList');
       var q=(document.getElementById('rosterSearch').value||'').trim().toLowerCase();
-      var base=location.origin+location.pathname.replace(/[^/]*$/,'');
+      var base=location.origin+location.pathname.replace(/[^/]*$/,'').replace(/live\/$/,'');
       function match(u){ if(!q) return true; return ((u.name||'')+' '+(u.email||'')).toLowerCase().indexOf(q)>=0; }
       var filtered=roster.filter(match);
       var knownIds={}; cohorts.forEach(function(c){ knownIds[c.id]=true; });
@@ -443,7 +457,7 @@
 
       list.innerHTML=html || '<div class="empty">مفيش عملاء بعد. ادوس «استيراد العملاء الموجودين» أو استنّى التسجيلات.</div>';
 
-      list.querySelectorAll('.btnWork').forEach(function(b){ b.addEventListener('click', function(){ window.location.href='reignite-admin.html?session='+encodeURIComponent('reignite-'+b.getAttribute('data-id')); }); });
+      list.querySelectorAll('.btnWork').forEach(function(b){ b.addEventListener('click', function(){ window.location.href='reignite-admin.html?day='+CUR_DAY+'&session='+encodeURIComponent('reignite-'+b.getAttribute('data-id')); }); });
       list.querySelectorAll('.btnRename').forEach(function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-id'); var nm=prompt('اسم المجموعة الجديد:', cohortName(id)); if(nm){ ROSTER.renameCohort(id, nm.trim()).then(loadAll); } }); });
       list.querySelectorAll('.btnDelCohort').forEach(function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-id'); if(confirm('حذف مجموعة «'+cohortName(id)+'»؟ أعضاؤها هيرجعوا «غير مسكَّنين» (مش هيتمسحوا).')) ROSTER.deleteCohort(id).then(loadAll); }); });
       list.querySelectorAll('.mvsel').forEach(function(sel){ sel.addEventListener('change', function(){ ROSTER.setCohort(sel.getAttribute('data-uid'), sel.value||null); }); });
@@ -492,7 +506,7 @@
     }
 
     /* ════════ مكتبة اليوم ════════ */
-    var LIB_KEY='reignite_library_'+S.getSessionId();
+    var LIB_KEY='reignite_library_'+S.getSessionId()+'_d'+CUR_DAY;
     function libState(){ try{ return JSON.parse(localStorage.getItem(LIB_KEY)||'{}'); }catch(e){ return {}; } }
     function patchSessionCustom(patch){
       try{
@@ -550,7 +564,7 @@
       });
       patchSessionCustom({ movementStates: out });
     }
-    var LIB_PHASES=['ack_open','ack_charter','ack_exhaustion','ack_symptom','levels_three','axes_lens','axes_order','strategy_four','curve_mirror','cards_nine','pattern_live','recovery','closing'];
+    var LIB_PHASES=(F&&F.order)?F.order.filter(function(p){ return ['waiting','scale','result'].indexOf(p)<0; }):[];
     function renderLibrary(){
       var box=document.getElementById('libList'); var st=libState();
       box.innerHTML=LIB_PHASES.map(function(pid){
