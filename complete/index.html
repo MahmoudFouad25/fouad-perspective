@@ -370,11 +370,12 @@ const CAT_EMOJI={"اسم":"🧑","حيوان":"🐾","نبات":"🌿","جماد
 const POOLS={easy:["ا","ب","ت","ج","ح","د","ر","س","ش","ع","ف","ق","ك","ل","م","ن"],all:Object.keys(DICT)};
 const AVATARS=["🙂","😎","🤩","🦄","🐯","🐼","🦊","🐸","🐵","🐙","🦁","🐧"];
 const SPEED_BONUS=5;
+const REVEAL_MS=2600; // مدة كشف الحرف قبل ما الكتابة تبدأ
 
 /* ---------- الحالة المحلية ---------- */
 const L={pid:null,room:null,name:"",avatar:AVATARS[0],isHost:false,
   roomRef:null,playersRef:null,unsubRoom:null,unsubPlayers:null,
-  roomData:null,players:[],timer:null,saveT:null,lastResultsRound:-1,
+  roomData:null,players:[],timer:null,hostLoop:null,saveT:null,lastResultsRound:-1,
   settings:{time:60,pool:"easy",stop:"all",rounds:5,hints:true,cats:["اسم","حيوان","نبات","جماد","بلاد"]}};
 
 const $=id=>document.getElementById(id);
@@ -470,7 +471,7 @@ const Game={
   },
   leave(){
     try{L.unsubRoom&&L.unsubRoom();L.unsubPlayers&&L.unsubPlayers();}catch(e){}
-    clearInterval(L.timer);
+    this.clearLoops();
     Object.assign(L,{room:null,roomRef:null,playersRef:null,roomData:null,players:[],isHost:false,lastResultsRound:-1});
     history.replaceState(null,"",location.pathname);
     UI.show("start");
@@ -498,12 +499,14 @@ const Game={
     if(!L.isHost)return;
     const letter=this.pickLetter();
     const used=(L.roomData.usedLetters||[]).concat(letter);
-    await L.roomRef.update({status:"reveal",round:n,letter,usedLetters:used,roundEndsAt:0,revealAt:TS()});
-    // امسح إجابات الجولة دي عند الكل (المضيف بيمسح بتاعه؛ الباقي بيتمسح عند بداية اللعب محليًا)
-    setTimeout(async()=>{
-      if(L.roomData&&L.roomData.status==="reveal"&&L.isHost)
-        await L.roomRef.update({status:"playing",roundEndsAt:TS()+L.roomData.roundTime*1000});
-    },2700);
+    const now=TS();
+    // كتابة واحدة ذرّية: اللعب يبدأ، الوقت محسوب من البداية (شامل وقت كشف الحرف). مفيش لحظة صفر إطلاقًا.
+    await L.roomRef.update({
+      status:"playing", round:n, letter, usedLetters:used,
+      playStartAt: now+REVEAL_MS,
+      roundEndsAt: now+REVEAL_MS+L.roomData.roundTime*1000,
+      seq:(L.roomData.seq||0)+1
+    });
   },
   async nextRound(){ if(!L.isHost)return;
     const n=L.roomData.round+1;
@@ -534,8 +537,9 @@ const Game={
     });
     $("dock").style.display="block";$("doneBtn").disabled=false;$("doneBtn").textContent="خلّصت! ✋";
     UI.show("play");
-    this.runTimer(rd.roundEndsAt,"tcirc","ttext");
-    setTimeout(()=>{const f=sh.querySelector("input");if(f)f.focus();},250);
+    this.runTimer("tcirc","ttext");
+    const wait=Math.max(250,(rd.playStartAt||0)-TS()+100);
+    setTimeout(()=>{const f=$("sheet").querySelector("input");if(f&&L.roomData&&L.roomData.status==="playing"&&TS()>=(L.roomData.playStartAt||0))f.focus();},wait);
   },
   hint(cat,btn){const rd=L.roomData;const arr=(DICT[rd.letter]&&DICT[rd.letter][cat])||[];
     if(!arr.length){btn.textContent="—";return;}
@@ -557,38 +561,51 @@ const Game={
   async markDone(){
     $("doneBtn").disabled=true;clearTimeout(L.saveT);
     await this.saveAnswers(true);
-    stampThen(()=>{ /* الشاشة هتتنقل عبر route() لما المضيف/الفولباك يقفل الجولة */ });
-    // اعرض شاشة الانتظار فوراً (لو لسه في playing)
+    stampThen(()=>{});
     if(L.roomData&&L.roomData.status==="playing")renderWaiting();
+    setTimeout(()=>this.maybeEndRound(),150);
   },
 
-  /* ----- التوقيت ----- */
-  runTimer(endsAt,circId,txtId){
-    clearInterval(L.timer);const total=L.roomData.roundTime,circ=195;
+  /* ----- عرض الوقت فقط (مش بينهي الجولة) ----- */
+  runTimer(circId,txtId){
+    clearInterval(L.timer);const circ=195;
     const tick=()=>{
-      if(!L.roomData||L.roomData.roundEndsAt!==endsAt){clearInterval(L.timer);return;}
-      const remain=Math.max(0,Math.ceil((endsAt-TS())/1000));
+      const rd=L.roomData;
+      if(!rd||rd.status!=="playing"){clearInterval(L.timer);return;}
+      const total=rd.roundTime||60;
+      let remain=Math.ceil((rd.roundEndsAt-TS())/1000);
+      remain=Math.max(0,Math.min(total,remain)); // أثناء كشف الحرف يفضل ثابت على الوقت الكامل
       const el=$(txtId);if(el)el.textContent=toAr(remain);
       const c=$(circId);if(c){const frac=remain/total;c.setAttribute("stroke-dashoffset",(circ*(1-frac)).toFixed(1));
         c.setAttribute("stroke",remain<=Math.ceil(total*.25)?"var(--red)":"var(--hi)");}
       if(remain<=5&&remain>0)Sfx.tick();
-      if(TS()>=endsAt){clearInterval(L.timer);this.maybeEndRound(true);}
     };tick();L.timer=setInterval(tick,250);
   },
-  // إنهاء الجولة: المضيف بيقرر، وأي لاعب بيـ"يطالب" لو الوقت عدّى (فولباك لو المضيف نام)
-  async maybeEndRound(overdue){
-    const rd=L.roomData;if(!rd||rd.status!=="playing")return;
-    const present=L.players;const r=rd.round;
-    const doneCount=present.filter(p=>p.rounds&&p.rounds[r]&&p.rounds[r].done).length;
-    const allDone=present.length>0&&doneCount>=present.length;
-    const firstDone=rd.stopMode==="first"&&doneCount>=1;
-    const timeUp=overdue||TS()>=rd.roundEndsAt;
-    const should=allDone||firstDone||timeUp;
-    if(!should)return;
-    // المضيف يقفل فوراً؛ غير المضيف يقفل بس لو الوقت عدّى +1.5ث (فولباك)
-    const canClose=L.isHost||(timeUp&&TS()>rd.roundEndsAt+1500);
+  // حلقة المضيف: تتأكد كل لحظة من شرط إنهاء الجولة
+  hostLoopEnsure(){
+    if(L.hostLoop)return;
+    L.hostLoop=setInterval(()=>{ if(L.roomData&&L.roomData.status==="playing")Game.maybeEndRound(); },700);
+  },
+  clearLoops(){clearInterval(L.timer);clearInterval(L.hostLoop);L.hostLoop=null;},
+  // إنهاء الجولة: المضيف بيقرر؛ وأي لاعب فولباك لو الوقت عدّى بزيادة (لو المضيف اتقفل)
+  async maybeEndRound(){
+    const rd=L.roomData;
+    if(!rd||rd.status!=="playing")return;
+    if(typeof rd.roundEndsAt!=="number"||rd.roundEndsAt<=0)return;
+    const now=TS();
+    if(now < (rd.playStartAt||0)+1000) return;            // مستحيل تخلص في أول ثانية
+    const present=L.players; if(present.length===0)return;
+    const r=rd.round;
+    const doneCount=present.filter(p=>p.rounds&&p.rounds[r]&&p.rounds[r].done===true).length;
+    const allDone = doneCount>=present.length;
+    const firstDone = rd.stopMode==="first" && doneCount>=1;
+    const timeUp = now>=rd.roundEndsAt;
+    if(!(allDone||firstDone||timeUp))return;
+    const canClose = L.isHost || (timeUp && now>rd.roundEndsAt+2500);
     if(!canClose)return;
-    try{ await L.roomRef.update({status:"results"}); }catch(e){}
+    try{ await L.roomRef.update({status:"results"});
+      console.log("[komplit] نهاية الجولة:",{round:r,allDone,firstDone,timeUp,doneCount,present:present.length});
+    }catch(e){console.warn(e);}
   },
 
   /* ----- التقييم (محلي عند كل جهاز، نفس النتيجة للجميع) ----- */
@@ -629,29 +646,28 @@ function myPlayer(){return L.players.find(p=>p.pid===L.pid);}
 let _revealShownFor=-1;
 function route(){
   const rd=L.roomData;if(!rd)return;
-  // تحديث صلاحيات المضيف في الواجهة
   L.isHost=(rd.host===L.pid);
-  if(rd.status==="lobby"){renderLobby();return;}
-  if(rd.status==="reveal"){doReveal();return;}
+  if(rd.status==="lobby"){Game.clearLoops();renderLobby();return;}
   if(rd.status==="playing"){
     const me=myPlayer();const r=rd.round;
     const iAmDone=me&&me.rounds&&me.rounds[r]&&me.rounds[r].done;
+    if(_revealShownFor!==r){_revealShownFor=r;doReveal(rd.letter);}   // كشف الحرف مرة لكل جولة
     if(iAmDone){renderWaiting();}
     else if(!$("play").classList.contains("on")||$("bigLetter").textContent!==rd.letter){
       Game.startMyPlay();
     }
-    // المضيف يراقب شرط الإنهاء
-    if(L.isHost)Game.maybeEndRound(false);
+    if(L.isHost)Game.hostLoopEnsure();   // المضيف بيراقب الإنهاء
     return;
   }
-  if(rd.status==="results"){clearInterval(L.timer);renderResults();return;}
-  if(rd.status==="final"){clearInterval(L.timer);renderFinal();return;}
+  Game.clearLoops();
+  if(rd.status==="results"){renderResults();return;}
+  if(rd.status==="final"){renderFinal();return;}
 }
 function onPlayers(){
   const rd=L.roomData;
   if(rd&&rd.status==="lobby")renderLobby();
   if(rd&&rd.status==="playing"){
-    if(L.isHost)Game.maybeEndRound(false);
+    Game.maybeEndRound();   // رد فعل سريع لما آخر واحد يخلّص
     const me=myPlayer();const r=rd.round;
     if(me&&me.rounds&&me.rounds[r]&&me.rounds[r].done&&$("waiting").classList.contains("on"))renderWaiting();
   }
@@ -671,19 +687,18 @@ function renderLobby(){
   $("startBtn").disabled=L.players.length<2;
   UI.show("lobby");
 }
-function doReveal(){
-  const rd=L.roomData;if(_revealShownFor===rd.round){return;}_revealShownFor=rd.round;
+function doReveal(letter){
   const rv=$("reveal"),reel=$("reel");rv.classList.add("on");
   const pool=POOLS.all;let n=0;const total=20;
   const iv=setInterval(()=>{reel.textContent=pool[Math.floor(Math.random()*pool.length)];Sfx.roll();n++;
-    if(n>=total){clearInterval(iv);reel.textContent=rd.letter;reel.style.transform="scale(1.25)";Sfx.thunk();
+    if(n>=total){clearInterval(iv);reel.textContent=letter;reel.style.transform="scale(1.25)";Sfx.thunk();
       setTimeout(()=>{reel.style.transition="transform .2s";reel.style.transform="scale(1)";},90);
       setTimeout(()=>{rv.classList.remove("on");reel.style.transition="";},800);}
   },70);
 }
 function renderWaiting(){
   const rd=L.roomData,r=rd.round;
-  Game.runTimer(rd.roundEndsAt,"tcirc2","ttext2");
+  Game.runTimer("tcirc2","ttext2");
   const done=L.players.filter(p=>p.rounds&&p.rounds[r]&&p.rounds[r].done).length;
   $("waitMsg").textContent=rd.stopMode==="first"?"خلّصنا الجولة! بنحسب…":`خلّص ${toAr(done)} من ${toAr(L.players.length)} — مستنيين الباقي`;
   const box=$("waitPlayers");box.innerHTML="";
