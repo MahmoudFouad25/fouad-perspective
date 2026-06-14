@@ -4602,6 +4602,72 @@ async function loadBadgesForExternalExercise(preselectedIds = []) {
         container.innerHTML = `<div style="color:#ef4444; padding:0.5rem;">خطأ في تحميل الشارات: ${error.message}</div>`;
     }
 }
+        // عرض الشارات المرتبطة حاليًا فقط، كل واحدة بزرار حذف مباشر (لفورم التعديل)
+async function renderLinkedBadgesForEdit(linkedIds = []) {
+    const container = document.getElementById('externalBadgesContainer');
+    if (!container) return;
+
+    if (!linkedIds || linkedIds.length === 0) {
+        container.innerHTML = '<div style="color:#94a3b8; padding:0.5rem; font-size:0.9rem;">لا توجد شارات مرتبطة. اضغط "إضافة شارة" بالأسفل.</div>';
+        renderAddBadgeButton();
+        return;
+    }
+
+    container.innerHTML = '<div style="color:#f59e0b; padding:0.5rem;"><i class="fas fa-spinner fa-spin"></i> جاري تحميل الشارات المرتبطة...</div>';
+
+    try {
+        let html = '<div style="display:flex; flex-direction:column; gap:0.5rem;">';
+        for (const badgeId of linkedIds) {
+            const doc = await db.collection('badges').doc(badgeId).get();
+            const badge = doc.exists ? doc.data() : { name: 'شارة محذوفة', icon: '⚠️' };
+            html += `
+                <div class="linked-badge-row" data-badge-id="${badgeId}" style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0.75rem; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:8px;">
+                    <span style="font-size:1.3rem;">${badge.icon || '🏅'}</span>
+                    <span style="color:#e2e8f0; flex:1;">${badge.name || 'شارة بدون اسم'}</span>
+                    <button type="button" onclick="removeLinkedBadgeRow('${badgeId}')"
+                        style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.5); color:#ef4444; width:30px; height:30px; border-radius:6px; cursor:pointer;" title="إزالة الشارة">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>`;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+        renderAddBadgeButton();
+    } catch (error) {
+        console.error('❌ خطأ:', error);
+        container.innerHTML = `<div style="color:#ef4444;">خطأ: ${error.message}</div>`;
+    }
+}
+
+// زرار "إضافة شارة" تحت قائمة المرتبطة
+function renderAddBadgeButton() {
+    const container = document.getElementById('externalBadgesContainer');
+    if (!container) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.innerHTML = '<i class="fas fa-plus"></i> إضافة / تعديل الشارات';
+    btn.style.cssText = 'margin-top:0.75rem; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5); color:#f59e0b; padding:0.5rem 1rem; border-radius:8px; cursor:pointer; font-weight:600;';
+    btn.onclick = function() {
+        // نجمع المرتبط حاليًا (اللي لسه ظاهر بعد أي حذف) ونفتح القائمة الكاملة محدّدة
+        const currentLinked = Array.from(document.querySelectorAll('.linked-badge-row'))
+            .map(row => row.getAttribute('data-badge-id'));
+        loadBadgesForExternalExercise(currentLinked);
+    };
+    container.appendChild(btn);
+}
+
+// إزالة صف شارة من قائمة المرتبطة (مجرد إخفاء من الواجهة، الحفظ بياخد اللي باقي)
+function removeLinkedBadgeRow(badgeId) {
+    const row = document.querySelector(`.linked-badge-row[data-badge-id="${badgeId}"]`);
+    if (row) row.remove();
+    // لو القائمة فضيت، نعرض رسالة
+    const container = document.getElementById('externalBadgesContainer');
+    const remaining = container.querySelectorAll('.linked-badge-row').length;
+    if (remaining === 0) {
+        const wrap = container.querySelector('div');
+        if (wrap) wrap.innerHTML = '<div style="color:#94a3b8; padding:0.5rem; font-size:0.9rem;">لا توجد شارات مرتبطة.</div>';
+    }
+}
 
         // إظهار فورم إنشاء الشارة inline
 function showInlineBadgeForm() {
@@ -4614,6 +4680,7 @@ function showInlineBadgeForm() {
 }
 
 // حفظ شارة جديدة بنفس بنية collection badges، ثم إعادة التحميل مع تحديدها
+// حفظ شارة جديدة — مطابقة لـ saveBadge في course-content-library.html بالحرف
 async function saveNewBadgeInline() {
     const nameInput = document.getElementById('newBadgeName');
     const iconInput = document.getElementById('newBadgeIcon');
@@ -4634,8 +4701,20 @@ async function saveNewBadgeInline() {
     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
 
     try {
-        // نفس بنية الشارات في النظام — نوع manual لأنها تُمنح يدويًا عبر التمرين
-        const docRef = await db.collection('badges').add({
+        // 1️⃣ حساب sortOrder بنفس منطق saveBadge بالظبط
+        const lastBadge = await db.collection('badges')
+            .orderBy('sortOrder', 'desc')
+            .limit(1)
+            .get();
+
+        let newSortOrder = 0;
+        if (!lastBadge.empty) {
+            const lastData = lastBadge.docs[0].data();
+            newSortOrder = (lastData.sortOrder || 0) + 1;
+        }
+
+        // 2️⃣ بنية المستند — نفس saveBadge بالحرف
+        const badge = {
             name: name,
             description: description,
             icon: icon,
@@ -4644,10 +4723,12 @@ async function saveNewBadgeInline() {
             createdDate: firebase.firestore.FieldValue.serverTimestamp(),
             isActive: true,
             timesAwarded: 0,
-            sortOrder: 0
-        });
+            sortOrder: newSortOrder
+        };
 
-        // نحافظ على المختار حاليًا + نضيف الجديدة مختارة
+        const docRef = await db.collection('badges').add(badge);
+
+        // 3️⃣ نحافظ على المختار حاليًا + نضيف الجديدة مختارة، ونعيد التحميل
         const currentChecked = Array.from(
             document.querySelectorAll('.external-badge-checkbox:checked')
         ).map(cb => cb.value);
@@ -6257,14 +6338,6 @@ async function editExternalExercise(moduleId, lessonId, libraryContentId) {
                         <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #f59e0b;">
                             🏅 الشارات المرتبطة (اختياري):
                         </label>
-                        <input type="hidden" id="edit-existing-badges" value='${JSON.stringify(exData.linkedBadges || [])}'>
-                        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:0.5rem;">
-                            مرتبط حالياً بـ ${(exData.linkedBadges || []).length} شارة.
-                        </p>
-                        <button type="button" id="loadBadgesBtn" onclick='loadBadgesForExternalExercise(${JSON.stringify(exData.linkedBadges || [])})'
-                            style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5); color:#f59e0b; padding:0.5rem 1rem; border-radius:8px; cursor:pointer; font-weight:600;">
-                            <i class="fas fa-medal"></i> عرض / تعديل الشارات
-                        </button>
                         <div id="externalBadgesContainer" style="margin-top:0.75rem;"></div>
                     </div>
                 </div>
@@ -6274,6 +6347,9 @@ async function editExternalExercise(moduleId, lessonId, libraryContentId) {
             confirmButtonText: '💾 حفظ التعديلات',
             cancelButtonText: 'إلغاء',
             confirmButtonColor: '#f59e0b',
+            didOpen: () => {
+                renderLinkedBadgesForEdit(${JSON.stringify(exData.linkedBadges || [])});
+            },
             preConfirm: () => {
                 const name = document.getElementById('edit-external-exercise-name').value.trim();
                 const description = document.getElementById('edit-external-exercise-description').value.trim();
@@ -6303,7 +6379,7 @@ async function editExternalExercise(moduleId, lessonId, libraryContentId) {
                 if (badgeCheckboxes.length > 0) {
                     linkedBadges = Array.from(document.querySelectorAll('.external-badge-checkbox:checked')).map(cb => cb.value);
                 } else {
-                    linkedBadges = JSON.parse(document.getElementById('edit-existing-badges').value || '[]');
+                    linkedBadges = Array.from(document.querySelectorAll('.linked-badge-row')).map(row => row.getAttribute('data-badge-id'));
                 }
 
                 return {
