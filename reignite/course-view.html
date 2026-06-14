@@ -16098,6 +16098,44 @@ window.addEventListener('message', async function(event) {
                     console.log(`✅ ${pillarKey}: +${points} نقطة`);
                 }
             }
+
+            // ===== منح الشارات المرتبطة بالتمرين الخارجي =====
+            const linkedBadges = exerciseData.externalExercise?.linkedBadges || [];
+            if (linkedBadges.length > 0) {
+                const userRef = db.collection('users').doc(userId);
+                const userSnap = await userRef.get();
+                const currentUserBadges = userSnap.data()?.badges || [];
+                for (const badgeId of linkedBadges) {
+                    if (currentUserBadges.some(b => b.id === badgeId)) continue;
+                    const badgeDoc = await db.collection('badges').doc(badgeId).get();
+                    if (!badgeDoc.exists) continue;
+                    const badgeData = badgeDoc.data();
+                    const badgeWithCourse = {
+                        id: badgeId,
+                        name: badgeData.name,
+                        description: badgeData.description,
+                        icon: badgeData.icon,
+                        awardedDate: new Date().toISOString(),
+                        earnedAt: new Date().toISOString(),
+                        courseId: courseId,
+                        courseName: courseData.title,
+                        type: badgeData.type,
+                        reason: 'external-exercise'
+                    };
+                    await userRef.update({
+                        badges: firebase.firestore.FieldValue.arrayUnion(badgeWithCourse)
+                    });
+                    await db.collection('badges').doc(badgeId).update({
+                        timesAwarded: firebase.firestore.FieldValue.increment(1)
+                    });
+                    await db.collection('badgeAwardHistory').add({
+                        userId, badgeId, badgeName: badgeData.name, courseId,
+                        source: 'external-exercise', exerciseId,
+                        awardedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    currentUserBadges.push({ id: badgeId });
+                }
+            }
             
             // تحديث الواجهة
             if (typeof renderPointsDashboard === 'function') {
