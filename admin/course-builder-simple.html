@@ -4532,6 +4532,51 @@ async function importFromTemplate() {
         // ==========================================
 // 🌐 إضافة تمرين خارجي للوحدة
 // ==========================================
+
+        // ==========================================
+// 🏅 تحميل الشارات للتمرين الخارجي (عند الطلب فقط)
+// ==========================================
+async function loadBadgesForExternalExercise(preselectedIds = []) {
+    const container = document.getElementById('externalBadgesContainer');
+    const loadBtn = document.getElementById('loadBadgesBtn');
+    if (!container) return;
+
+    container.innerHTML = '<div style="color:#f59e0b; padding:0.5rem;"><i class="fas fa-spinner fa-spin"></i> جاري تحميل الشارات...</div>';
+
+    try {
+        const snapshot = await db.collection('badges').get();
+
+        if (snapshot.empty) {
+            container.innerHTML = `
+                <div style="color:#94a3b8; padding:0.75rem; background:rgba(0,0,0,0.2); border-radius:8px;">
+                    لا توجد شارات في النظام. أنشئ شارات أولاً من صفحة الشارات.
+                </div>`;
+            return;
+        }
+
+        let html = '<div style="display:flex; flex-direction:column; gap:0.5rem; max-height:220px; overflow-y:auto; padding:0.5rem; background:rgba(0,0,0,0.2); border-radius:8px;">';
+
+        snapshot.forEach(doc => {
+            const badge = doc.data();
+            const checked = preselectedIds.includes(doc.id) ? 'checked' : '';
+            html += `
+                <label style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem; background:rgba(255,255,255,0.05); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" class="external-badge-checkbox" value="${doc.id}" ${checked} style="width:18px; height:18px; cursor:pointer;">
+                    <span style="font-size:1.3rem;">${badge.icon || '🏅'}</span>
+                    <span style="color:#e2e8f0; flex:1;">${badge.name || 'شارة بدون اسم'}</span>
+                </label>`;
+        });
+
+        html += '</div>';
+        container.innerHTML = html;
+        if (loadBtn) loadBtn.style.display = 'none';
+
+    } catch (error) {
+        console.error('❌ خطأ في تحميل الشارات:', error);
+        container.innerHTML = `<div style="color:#ef4444; padding:0.5rem;">خطأ في تحميل الشارات: ${error.message}</div>`;
+    }
+}
+        
 // ==========================================
 // 🌐 نافذة اختيار نوع الإضافة
 // ==========================================
@@ -4714,6 +4759,17 @@ async function showCreateNewExerciseForm(moduleId) {
                         <span>السماح بإعادة التمرين بعد الإكمال</span>
                     </label>
                 </div>
+
+                <div style="margin-bottom: 1rem; padding-top: 1rem; border-top: 1px solid rgba(245,158,11,0.3);">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #f59e0b;">
+                        🏅 الشارات المرتبطة (اختياري):
+                    </label>
+                    <button type="button" id="loadBadgesBtn" onclick="loadBadgesForExternalExercise()"
+                        style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5); color:#f59e0b; padding:0.5rem 1rem; border-radius:8px; cursor:pointer; font-weight:600;">
+                        <i class="fas fa-medal"></i> اختر الشارات
+                    </button>
+                    <div id="externalBadgesContainer" style="margin-top:0.75rem;"></div>
+                </div>
             </div>
         `,
         width: '650px',
@@ -4756,6 +4812,10 @@ async function showCreateNewExerciseForm(moduleId) {
                 return false;
             }
             
+            const linkedBadges = Array.from(
+                document.querySelectorAll('.external-badge-checkbox:checked')
+            ).map(cb => cb.value);
+
             return {
                 name,
                 description,
@@ -4764,7 +4824,8 @@ async function showCreateNewExerciseForm(moduleId) {
                 totalPoints,
                 openMode,
                 duration,
-                allowMultiple
+                allowMultiple,
+                linkedBadges
             };
         }
     }).then(async (result) => {
@@ -5448,7 +5509,8 @@ async function saveAndAddExternalExercise(moduleId, exerciseData) {
                 allowMultiple: exerciseData.allowMultiple,
                 pillars: exerciseData.pillars,
                 totalPoints: exerciseData.totalPoints,
-                duration: exerciseData.duration
+                duration: exerciseData.duration,
+                linkedBadges: exerciseData.linkedBadges || []
             },
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
@@ -5474,7 +5536,8 @@ async function saveAndAddExternalExercise(moduleId, exerciseData) {
             duration: exerciseData.duration,
             points: exerciseData.totalPoints,
             pillars: exerciseData.pillars,
-            description: exerciseData.description
+            description: exerciseData.description,
+            linkedBadges: exerciseData.linkedBadges || []
         };
         
         if (!module.lessons) {
@@ -6102,6 +6165,21 @@ async function editExternalExercise(moduleId, lessonId, libraryContentId) {
                             <span>السماح بإعادة التمرين بعد الإكمال</span>
                         </label>
                     </div>
+
+                    <div style="margin-bottom: 1rem; padding-top: 1rem; border-top: 1px solid rgba(245,158,11,0.3);">
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #f59e0b;">
+                            🏅 الشارات المرتبطة (اختياري):
+                        </label>
+                        <input type="hidden" id="edit-existing-badges" value='${JSON.stringify(exData.linkedBadges || [])}'>
+                        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:0.5rem;">
+                            مرتبط حالياً بـ ${(exData.linkedBadges || []).length} شارة.
+                        </p>
+                        <button type="button" id="loadBadgesBtn" onclick='loadBadgesForExternalExercise(${JSON.stringify(exData.linkedBadges || [])})'
+                            style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5); color:#f59e0b; padding:0.5rem 1rem; border-radius:8px; cursor:pointer; font-weight:600;">
+                            <i class="fas fa-medal"></i> عرض / تعديل الشارات
+                        </button>
+                        <div id="externalBadgesContainer" style="margin-top:0.75rem;"></div>
+                    </div>
                 </div>
             `,
             width: '650px',
@@ -6132,6 +6210,15 @@ async function editExternalExercise(moduleId, lessonId, libraryContentId) {
                     return false;
                 }
                 
+                // لو الأدمن دوس "عرض/تعديل" نقرا من الـ checkboxes، لو لأ نسيب القديم زي ما هو
+                let linkedBadges;
+                const badgeCheckboxes = document.querySelectorAll('.external-badge-checkbox');
+                if (badgeCheckboxes.length > 0) {
+                    linkedBadges = Array.from(document.querySelectorAll('.external-badge-checkbox:checked')).map(cb => cb.value);
+                } else {
+                    linkedBadges = JSON.parse(document.getElementById('edit-existing-badges').value || '[]');
+                }
+
                 return {
                     name,
                     description,
@@ -6140,7 +6227,8 @@ async function editExternalExercise(moduleId, lessonId, libraryContentId) {
                     totalPoints,
                     openMode,
                     duration,
-                    allowMultiple
+                    allowMultiple,
+                    linkedBadges
                 };
             }
         }).then(async (result) => {
@@ -6177,6 +6265,7 @@ async function updateExternalExercise(moduleId, lessonId, libraryContentId, newD
             'externalExercise.pillars': newData.pillars,
             'externalExercise.totalPoints': newData.totalPoints,
             'externalExercise.duration': newData.duration,
+            'externalExercise.linkedBadges': newData.linkedBadges || [],
             updatedAt: new Date().toISOString()
         });
         
@@ -6190,6 +6279,7 @@ async function updateExternalExercise(moduleId, lessonId, libraryContentId, newD
             lesson.duration = newData.duration;
             lesson.points = newData.totalPoints;
             lesson.pillars = newData.pillars;
+            lesson.linkedBadges = newData.linkedBadges || [];
         }
         
         // 3️⃣ حفظ الكورس
