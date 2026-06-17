@@ -68,11 +68,17 @@
   }
   async function setPhase(phaseId, customData){
     if(!(await _ready())) return false;
-    await sessionRef().set({
-      currentPhase: phaseId, customData: customData || {},
+    var patch = {
+      currentPhase: phaseId,
       timerSeconds: 0, timerRunning: false, timerStartedAt: 0,
       updatedAt: _fv().serverTimestamp()
-    }, { merge: true });
+    };
+    // لا نكتب customData إلا لو مُرِّر فعليًّا وبه مفاتيح.
+    // set({customData:{}}, {merge:true}) يمسح الحقل بالكامل (اليوم/المكتبة/الحالات).
+    if(customData && Object.keys(customData).length){
+      patch.customData = customData;
+    }
+    await sessionRef().set(patch, { merge: true });
     return true;
   }
   async function startTimer(seconds){
