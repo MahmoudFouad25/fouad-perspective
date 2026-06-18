@@ -527,7 +527,25 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 .resume-card p{ font-size:15px; color:var(--gold-soft); margin-bottom:14px; line-height:1.8; }
 
 .hidden{ display:none !important; }
-
+   
+/* ─────────────── مراجعة المحطّات السابقة (قراءة فقط) ─────────────── */
+.progress .node.clickable{ cursor:pointer; }
+.progress .node.clickable:hover{ border-color:var(--axis); color:var(--axis-soft); }
+.review-hint{ text-align:center; font-size:12.5px; color:var(--ink-faint); margin:-8px 0 16px; }
+.review-card{
+  background:linear-gradient(180deg, var(--navy-2), var(--navy));
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:30px 28px;
+  box-shadow:var(--shadow);
+  animation:rise .4s ease both;
+}
+.review-card .kicker{ margin-bottom:14px; }
+.review-row{ margin-bottom:18px; }
+.review-row .rlab{ font-size:13px; color:var(--axis-soft); font-weight:700; margin-bottom:6px; display:block; }
+.review-row .rval{ font-size:16px; color:var(--ink); line-height:1.85; background:rgba(0,0,0,.22); border:1px solid var(--line); border-radius:var(--radius-sm); padding:13px 15px; }
+.review-row .rval.empty{ color:var(--ink-faint); }
+   
 @media(max-width:560px){
   .wrap{ padding:18px 14px 60px; }
   .station{ padding:26px 20px; }
@@ -1058,14 +1076,39 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     for(var i=1; i<=5; i++){
       var node = el.progress.querySelector('.node[data-st="'+i+'"]');
       if(!node) continue;
-      node.classList.remove('active','done');
+      node.classList.remove('active','done','clickable');
       if(i < cur) node.classList.add('done');
       else if(i === cur) node.classList.add('active');
+      // المحطّات اللي فاتت قابلة للنقر للمراجعة (قراءة فقط)
+      if(i < cur){
+        node.classList.add('clickable');
+        node.title = 'راجع هذه المحطّة';
+        node.onclick = (function(stationNum){ return function(){ openReview(stationNum); }; })(i);
+      } else {
+        node.onclick = null;
+        node.title = '';
+      }
     }
     for(var b=1; b<=4; b++){
       var bar = el.progress.querySelector('.bar[data-bar="'+b+'"]');
       if(!bar) continue;
       bar.classList.toggle('done', b < cur);
+    }
+    // تلميح المراجعة فوق وسم المحور
+    var hint = document.getElementById('reviewHint');
+    if(!hint){
+      hint = document.createElement('div');
+      hint.id = 'reviewHint';
+      hint.className = 'review-hint';
+      if(el.axisTag && el.axisTag.parentNode){
+        el.axisTag.parentNode.insertBefore(hint, el.axisTag);
+      }
+    }
+    if(cur > 1){
+      hint.textContent = 'تقدر تدوس على أي محطّة فاتت في الشريط فوق عشان تراجع اللي كتبته فيها.';
+      hint.style.display = '';
+    } else {
+      hint.style.display = 'none';
     }
   }
 
@@ -1197,6 +1240,79 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       case 5: renderStation5_antidote();      break;
       default: openFinal();                   break;
     }
+  }
+
+   /* ════════════════════════════════════════════════════════════════════
+     مراجعة محطّة سابقة (قراءة فقط) — لا تمسّ التقدّم ولا الحفظ
+     ════════════════════════════════════════════════════════════════════ */
+  function reviewRow(label, value){
+    var has = value && String(value).trim();
+    var v   = has ? escapeHtml(value) : 'لسه فاضية';
+    var cls = has ? 'rval' : 'rval empty';
+    return '<div class="review-row"><span class="rlab">'+label+'</span><div class="'+cls+'">'+v+'</div></div>';
+  }
+
+  function reviewContent(n){
+    var s = STATE.journey.stations || {};
+    if(n === 1){
+      var c = s.contradiction || {};
+      return '<span class="kicker">التناقض</span>' +
+        '<h2 class="st-title">اللي راجعته</h2>' +
+        reviewRow('هدفك المعلَن', c.declaredGoal) +
+        reviewRow('سلوكك المضادّ', c.counterBehavior);
+    }
+    if(n === 2){
+      var cm = s.commitment || {};
+      return '<span class="kicker">القفل</span>' +
+        '<h2 class="st-title">التزامك المخفيّ</h2>' +
+        reviewRow('بصياغتك إنت', cm.finalText) +
+        (cm.selectedOption ? reviewRow('الخيار اللي قرّب لك', cm.selectedOption) : '');
+    }
+    if(n === 3){
+      var a = s.assumption || {};
+      return '<span class="kicker">القاع</span>' +
+        '<h2 class="st-title">افتراضك الكبير</h2>' +
+        reviewRow('بصياغتك إنت', a.finalText) +
+        (a.selectedOption ? reviewRow('الخيار اللي قرّب لك', a.selectedOption) : '');
+    }
+    if(n === 4){
+      var t = s.trigger || {};
+      var trigText = '';
+      if(t.selectedTriggerId){
+        var arr = TRIGGERS[STATE.axis.primary] || [];
+        var tr = arr.filter(function(x){ return x.id === t.selectedTriggerId; })[0];
+        if(tr) trigText = tr.situation + ' — ' + tr.ignition;
+      }
+      var patLabel = (ANTIDOTES[t.neuralPattern] && ANTIDOTES[t.neuralPattern].label) || '';
+      return '<span class="kicker">المفتاح</span>' +
+        '<h2 class="st-title">تريجرك ونمطك</h2>' +
+        reviewRow('الموقف اللي بيشعّلك', trigText) +
+        reviewRow('نمطك العصبيّ', patLabel);
+    }
+    if(n === 5){
+      var t5 = s.trigger || {};
+      var anti = ANTIDOTES[t5.neuralPattern] || {};
+      return '<span class="kicker">الترياق</span>' +
+        '<h2 class="st-title">ترياقك على مقاسك</h2>' +
+        reviewRow('نمطك', anti.label || '') +
+        reviewRow('نداؤك المحوريّ', anti.coreCall && anti.coreCall.text);
+    }
+    return '<h2 class="st-title">…</h2>';
+  }
+
+  function openReview(n){
+    el.stationHost.innerHTML = '';
+    var card = document.createElement('div');
+    card.className = 'review-card';
+    card.innerHTML = reviewContent(n) +
+      '<div class="actions">' +
+        '<button class="btn btn-primary" id="reviewBack">ارجع وكمّل</button>' +
+      '</div>';
+    el.stationHost.appendChild(card);
+    card.querySelector('#reviewBack').onclick = function(){
+      goToStation(STATE.currentStation);
+    };
+    card.scrollIntoView({behavior:'smooth', block:'start'});
   }
 
   /* ════════════════════════════════════════════════════════════════════
