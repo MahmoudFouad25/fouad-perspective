@@ -761,6 +761,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     axis:    { primary:null, secondary:null, repressed:null },
     role:    null,
     currentStation: 0,           // 0 = استقبال · 1..5 محطّات · 6 = ختام
+    position: { station:0, screen:'', step:0 },  // الموضع الدقيق للاستئناف
     completed: false,
     docRef:  null,               // مرجع وثيقة Firestore
     journey: null,               // نسخة الإجابات في الذاكرة
@@ -775,6 +776,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       axis: { primary:STATE.axis.primary, secondary:STATE.axis.secondary, repressed:STATE.axis.repressed },
       role: STATE.role,
       currentStation: 0,
+      position: { station:0, screen:'', step:0 },
       stations: {
         contradiction: { declaredGoal:'', counterBehavior:'', status:'pending', completedAt:null },
         commitment:    { freeText:'', selectedOption:'', finalText:'', status:'pending', completedAt:null },
@@ -938,6 +940,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
           data.id = snap.id;                 // المفتاح لا يُرجَع من data() — نُسنده صراحةً
           STATE.journey = data;
           STATE.currentStation = data.currentStation || 0;
+          STATE.position = data.position || { station:STATE.currentStation, screen:'', step:0 };
           STATE.completed = !!data.completed;
           // لو الدور محفوظ في الوثيقة ولم يكن في localStorage
           if(!STATE.role && data.role){ STATE.role = data.role; }
@@ -958,6 +961,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
   /* ─────────────── ٤. الحفظ في Firestore (merge) ─────────────── */
   function saveStation(stationKey, payload, advanceTo){
     if(!STATE.docRef) return Promise.resolve();
+    if(_autosaveTimer){ clearTimeout(_autosaveTimer); _autosaveTimer = null; }
     var update = {
       userId: STATE.userId,
       session: STATE.session,
@@ -998,6 +1002,46 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     patch.lastUpdated = firebase.firestore.FieldValue.serverTimestamp();
     return STATE.docRef.set(patch, { merge:true })
       .catch(function(err){ console.error('فشل حفظ التحديث:', err); });
+  }
+
+   /* ─────────────── حفظ أوتوماتيك مؤجّل (autosave) + ذاكرة الموضع ─────────────── */
+  var _autosaveTimer = null;
+  function autosaveDraft(){
+    if(!STATE.docRef || !STATE.journey) return;
+    if(_autosaveTimer) clearTimeout(_autosaveTimer);
+    _autosaveTimer = setTimeout(function(){
+      _autosaveTimer = null;
+      var patch = {
+        userId:  STATE.userId,
+        session: STATE.session,
+        role:    STATE.role,
+        axis:    { primary:STATE.axis.primary, secondary:STATE.axis.secondary, repressed:STATE.axis.repressed },
+        stations: STATE.journey.stations,
+        position: STATE.position,
+        currentStation: STATE.currentStation,
+        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      STATE.docRef.set(patch, { merge:true })
+        .catch(function(err){ console.warn('فشل الحفظ التلقائيّ:', err); });
+    }, 600);
+  }
+
+  /* تسجيل الموضع الحاليّ (محطة/شاشة/خطوة) ثم حفظ مؤجّل */
+  function setPos(station, screen, step){
+    STATE.position = {
+      station: (station != null ? station : STATE.currentStation),
+      screen:  (screen  != null ? screen  : ''),
+      step:    (step    != null ? step    : 0)
+    };
+    autosaveDraft();
+  }
+
+  /* كتابة قيمة حقل في الذاكرة فورًا ثم حفظ مؤجّل (الحفظ أثناء الكتابة) */
+  function draftField(stationKey, field, value){
+    if(!STATE.journey || !STATE.journey.stations) return;
+    if(!STATE.journey.stations[stationKey]) STATE.journey.stations[stationKey] = {};
+    STATE.journey.stations[stationKey][field] = value;
+    autosaveDraft();
   }
 
   /* ─────────────── ٥. السمة اللونية + شريط التقدّم ─────────────── */
@@ -1169,7 +1213,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
        onComplete(result:{freeText,selectedOption,finalText})
      }
      ════════════════════════════════════════════════════════════════════ */
-  function buildSpiral(config){
+ function buildSpiral(config){
     var host = el.stationHost;
     host.innerHTML = '';
 
@@ -1177,7 +1221,12 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     station.className = 'station' + (config.floor ? ' floor' : '');
     host.appendChild(station);
 
-    var result = { freeText:'', selectedOption:'', finalText:'' };
+    var saved = (config.stationKey && STATE.journey.stations && STATE.journey.stations[config.stationKey]) || {};
+    var result = {
+      freeText:       saved.freeText || '',
+      selectedOption: saved.selectedOption || '',
+      finalText:      saved.finalText || ''
+    };
 
     /* رأس المحطّة (ثابت عبر الشاشات الأربع) */
     var head = '';
@@ -1186,6 +1235,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* ───── الشاشة (أ): يلمس بنفسه ───── */
     function screenTouch(){
+      setPos(config.station, 'touch');
       station.innerHTML = head +
         '<p class="st-q">'+config.touchQuestion+'</p>' +
         (config.touchSub ? '<p class="st-sub">'+config.touchSub+'</p>' : '') +
@@ -1198,6 +1248,8 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       var nxt = station.querySelector('#spiralTouchNext');
       ta.addEventListener('input', function(){
         nxt.disabled = ta.value.trim().length < 3;
+        result.freeText = ta.value.trim();
+        if(config.stationKey) draftField(config.stationKey, 'freeText', result.freeText);
       });
       nxt.disabled = ta.value.trim().length < 3;
       nxt.onclick = function(){
@@ -1209,6 +1261,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* ───── الشاشة (ب): يشوف خيارات ───── */
     function screenOptions(){
+      setPos(config.station, 'options');
       var optsHtml = config.options.map(function(o, i){
         return '<div class="ax-option" data-i="'+i+'">' +
                  '<div class="ax-option-text">'+o.text+'</div>' +
@@ -1241,6 +1294,8 @@ textarea.write::placeholder{ color:var(--ink-faint); }
           n.classList.add('selected');
           chosen = parseInt(n.getAttribute('data-i'), 10);
           nxt.disabled = false;
+          result.selectedOption = config.options[chosen].text;
+          if(config.stationKey) draftField(config.stationKey, 'selectedOption', result.selectedOption);
         };
       });
       otherNode.onclick = function(){
@@ -1248,7 +1303,19 @@ textarea.write::placeholder{ color:var(--ink-faint); }
         otherNode.classList.add('selected');
         chosen = 'other';
         nxt.disabled = false;
+        result.selectedOption = '';
+        if(config.stationKey) draftField(config.stationKey, 'selectedOption', '');
       };
+
+      /* تعبئة مسبقة: إبراز الخيار اللي سبق اختياره */
+      if(result.selectedOption){
+        Array.prototype.forEach.call(optNodes, function(n){
+          var i = parseInt(n.getAttribute('data-i'), 10);
+          if(config.options[i] && config.options[i].text === result.selectedOption){
+            n.classList.add('selected'); chosen = i; nxt.disabled = false;
+          }
+        });
+      }
 
       station.querySelector('#spiralBack').onclick = screenTouch;
       nxt.onclick = function(){
@@ -1263,6 +1330,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* ───── الشاشة (د): يعمّق بصياغته ───── */
     function screenDeepen(){
+      setPos(config.station, 'deepen');
       var ref =
         '<div class="ref-box">' +
           '<div class="ref-line"><b>كلامك أول:</b> '+escapeHtml(result.freeText)+'</div>' +
@@ -1270,8 +1338,6 @@ textarea.write::placeholder{ color:var(--ink-faint); }
             ? '<div class="ref-line"><b>اللي قرّب لك:</b> '+result.selectedOption+'</div>'
             : '<div class="ref-line"><b>اخترت:</b> صياغتك إنت</div>') +
         '</div>';
-
-      var seed = config.deepenFinalSeedHTML || '';
 
       station.innerHTML = head +
         '<p class="st-q">'+config.deepenQuestion+'</p>' +
@@ -1287,6 +1353,8 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       var nxt = station.querySelector('#spiralFinalNext');
       ta.addEventListener('input', function(){
         nxt.disabled = ta.value.trim().length < 3;
+        result.finalText = ta.value.trim();
+        if(config.stationKey) draftField(config.stationKey, 'finalText', result.finalText);
       });
       nxt.disabled = ta.value.trim().length < 3;
       station.querySelector('#spiralBack2').onclick = screenOptions;
@@ -1297,8 +1365,11 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       ta.focus();
     }
 
-    /* بدء من بيانات محفوظة لو وُجدت (استئناف داخل المحطّة غير مطلوب — نبدأ من أ) */
-    screenTouch();
+    /* بدء من الشاشة المحفوظة لو وُجدت (استئناف دقيق) */
+    var rs = (STATE.position && STATE.position.station === config.station && STATE.position.screen) ? STATE.position.screen : 'touch';
+    if(rs === 'deepen') screenDeepen();
+    else if(rs === 'options') screenOptions();
+    else screenTouch();
   }
 
   /* أداة تأمين النصوص داخل HTML (للـ textarea وعرض كلام المستخدم) */
@@ -1329,6 +1400,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* (أ) الهدف المعلَن */
     function screenGoal(){
+      setPos(1, 'goal');
       var exHtml = roleObj.declaredGoal.map(function(x){ return '<span class="ex">'+x+'</span>'; }).join('');
       station.innerHTML = head +
         '<p class="st-q">ما الشيء الذي تقول لنفسك منذ زمنٍ إنك تريد أن تفعله، وما فعلتَه بثبات؟</p>' +
@@ -1343,7 +1415,11 @@ textarea.write::placeholder{ color:var(--ink-faint); }
         '</div>';
       var ta  = station.querySelector('#s1goal');
       var nxt = station.querySelector('#s1goalNext');
-      ta.addEventListener('input', function(){ nxt.disabled = ta.value.trim().length < 3; });
+      ta.addEventListener('input', function(){
+        nxt.disabled = ta.value.trim().length < 3;
+        data.declaredGoal = ta.value.trim();
+        draftField('contradiction', 'declaredGoal', data.declaredGoal);
+      });
       nxt.disabled = ta.value.trim().length < 3;
       nxt.onclick = function(){ data.declaredGoal = ta.value.trim(); screenBehavior(); };
       ta.focus();
@@ -1351,6 +1427,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* (ب) السلوك المضادّ */
     function screenBehavior(){
+      setPos(1, 'behavior');
       var exHtml = roleObj.counterBehavior.map(function(x){ return '<span class="ex">'+x+'</span>'; }).join('');
       station.innerHTML = head +
         '<p class="st-q">وما الذي تفعله فعلًا، والذي يشتغل ضدّ هذا الهدف؟</p>' +
@@ -1367,7 +1444,11 @@ textarea.write::placeholder{ color:var(--ink-faint); }
         '</div>';
       var ta  = station.querySelector('#s1beh');
       var nxt = station.querySelector('#s1behNext');
-      ta.addEventListener('input', function(){ nxt.disabled = ta.value.trim().length < 3; });
+      ta.addEventListener('input', function(){
+        nxt.disabled = ta.value.trim().length < 3;
+        data.counterBehavior = ta.value.trim();
+        draftField('contradiction', 'counterBehavior', data.counterBehavior);
+      });
       nxt.disabled = ta.value.trim().length < 3;
       station.querySelector('#s1back').onclick = screenGoal;
       nxt.onclick = function(){
@@ -1380,7 +1461,8 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       ta.focus();
     }
 
-    screenGoal();
+    var startScreen = (STATE.position && STATE.position.station === 1 && STATE.position.screen) ? STATE.position.screen : 'goal';
+    if(startScreen === 'behavior') screenBehavior(); else screenGoal();
   }
 
   /* ════════════════════════════════════════════════════════════════════
@@ -1391,6 +1473,8 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     var opts = (COMMITMENTS[axis] || []).map(function(o){ return { text:o.text, hint:o.hint }; });
 
     buildSpiral({
+      station:2,
+      stationKey:'commitment',
       kicker:'القفل',
       title:'الالتزام المخفيّ',
       floor:false,
@@ -1416,7 +1500,16 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     var axis = STATE.axis.primary;
     var opts = (ASSUMPTIONS[axis] || []).map(function(o){ return { text:o.text, hint:o.hint }; });
 
+    /* استئناف على بذرة المرآة لو كان الموضع المحفوظ هناك */
+    if(STATE.position && STATE.position.station === 3 && STATE.position.screen === 'seed'){
+      var savedA = (STATE.journey.stations && STATE.journey.stations.assumption) || {};
+      showAssumptionSeed(savedA.finalText || '');
+      return;
+    }
+
     buildSpiral({
+      station:3,
+      stationKey:'assumption',
       kicker:'القاع',
       title:'الباب والجرح — الافتراض الكبير',
       floor:true,
@@ -1426,7 +1519,6 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       options:opts,
       deepenQuestion:'دلوقتي بعد ما شفت ده — اكتب افتراضك الكبير بجملتك إنت.',
       onComplete:function(result){
-        // بعد التعميق نعرض بذرة مرآة المعتقدات قبل الانتقال
         saveStation('assumption', {
           freeText: result.freeText,
           selectedOption: result.selectedOption,
@@ -1438,6 +1530,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
   /* بذرة مرآة المعتقدات بعد القاع */
   function showAssumptionSeed(finalText){
+    setPos(3, 'seed');
     var host = el.stationHost;
     host.innerHTML = '';
     var station = document.createElement('div');
@@ -1462,7 +1555,13 @@ textarea.write::placeholder{ color:var(--ink-faint); }
   function renderStation4_trigger(){
     var axis = STATE.axis.primary;
     var triggers = TRIGGERS[axis] || [];
-    var data = { freeText:'', selectedTriggerId:'', neuralPattern:'', _suggested:'' };
+    var saved = (STATE.journey.stations && STATE.journey.stations.trigger) || {};
+    var data = {
+      freeText:          saved.freeText || '',
+      selectedTriggerId: saved.selectedTriggerId || '',
+      neuralPattern:     saved.neuralPattern || '',
+      _suggested:''
+    };
 
     var host = el.stationHost;
     host.innerHTML = '';
@@ -1476,6 +1575,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* (أ) يلمس */
     function screenTouch(){
+      setPos(4, 'touch');
       station.innerHTML = head +
         '<p class="st-q">إيه أكتر نوع مواقف بيشعّلك فجأة، فتطلع منها بردٍّ أكبر من الموقف؟</p>' +
         '<span class="field-label">اكتب اللي جوّاك — لن يراه أحد.</span>' +
@@ -1485,7 +1585,11 @@ textarea.write::placeholder{ color:var(--ink-faint); }
         '</div>';
       var ta  = station.querySelector('#s4touch');
       var nxt = station.querySelector('#s4touchNext');
-      ta.addEventListener('input', function(){ nxt.disabled = ta.value.trim().length < 3; });
+      ta.addEventListener('input', function(){
+        nxt.disabled = ta.value.trim().length < 3;
+        data.freeText = ta.value.trim();
+        draftField('trigger', 'freeText', data.freeText);
+      });
       nxt.disabled = ta.value.trim().length < 3;
       nxt.onclick = function(){ data.freeText = ta.value.trim(); screenTriggers(); };
       ta.focus();
@@ -1493,6 +1597,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 
     /* (ب)+(ج) يشوف تسع نكهات اشتعال بلون محوره ويختار الأقرب */
     function screenTriggers(){
+      setPos(4, 'triggers');
       var cards = triggers.map(function(t, i){
         return '<div class="ax-option" data-id="'+t.id+'" data-pat="'+(t._pattern||'')+'">' +
                  '<div class="ax-option-text">'+t.situation+'</div>' +
@@ -1518,21 +1623,33 @@ textarea.write::placeholder{ color:var(--ink-faint); }
           data.selectedTriggerId = n.getAttribute('data-id');
           data._suggested = n.getAttribute('data-pat') || '';
           nxt.disabled = false;
+          draftField('trigger', 'selectedTriggerId', data.selectedTriggerId);
         };
       });
+
+      /* تعبئة مسبقة: إبراز التريجر اللي سبق اختياره */
+      if(data.selectedTriggerId){
+        Array.prototype.forEach.call(nodes, function(n){
+          if(n.getAttribute('data-id') === data.selectedTriggerId){
+            n.classList.add('selected'); nxt.disabled = false;
+            data._suggested = n.getAttribute('data-pat') || '';
+          }
+        });
+      }
+
       station.querySelector('#s4back').onclick = screenTouch;
       nxt.onclick = function(){ screenNeural(); };
     }
 
     /* (د) النمط العصبيّ — المشارك يحسم نمطه */
     function screenNeural(){
+      setPos(4, 'neural');
       var patterns = [
         { id:'muwajaha', label:'مواجهة', desc:'تعلو حرارتي وأندفع لأهاجم أو أجادل أو أدافع بحدّة.' },
         { id:'huroob',   label:'هروب',   desc:'أريد أن أخرج، أشتّت، أنشغل بعيدًا، أنهي الموقف.' },
         { id:'tajammud', label:'تجمّد',  desc:'أتشلّ، أصمت فجأة، أنفصل عن جسدي ولا أعرف ماذا أقرّر.' },
         { id:'musayara', label:'مسايرة', desc:'أرضي فورًا، أوافق وأنا مكسور، أعتذر بإفراط.' }
       ];
-      // ترتيب المقترح أولًا (تلميح خفيّ بلا فرض)
       var cards = patterns.map(function(p){
         return '<div class="ax-option" data-pat="'+p.id+'">' +
                  '<div class="ax-option-text">'+p.label+'</div>' +
@@ -1557,8 +1674,19 @@ textarea.write::placeholder{ color:var(--ink-faint); }
           n.classList.add('selected');
           data.neuralPattern = n.getAttribute('data-pat');
           done.disabled = false;
+          draftField('trigger', 'neuralPattern', data.neuralPattern);
         };
       });
+
+      /* تعبئة مسبقة: إبراز النمط اللي سبق اختياره */
+      if(data.neuralPattern){
+        Array.prototype.forEach.call(nodes, function(n){
+          if(n.getAttribute('data-pat') === data.neuralPattern){
+            n.classList.add('selected'); done.disabled = false;
+          }
+        });
+      }
+
       station.querySelector('#s4backN').onclick = screenTriggers;
       done.onclick = function(){
         saveStation('trigger', {
@@ -1569,7 +1697,10 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       };
     }
 
-    screenTouch();
+    var rs = (STATE.position && STATE.position.station === 4 && STATE.position.screen) ? STATE.position.screen : 'touch';
+    if(rs === 'neural') screenNeural();
+    else if(rs === 'triggers') screenTriggers();
+    else screenTouch();
   }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1596,7 +1727,8 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       { key:'dailyPractice',  name:'ممارستك اليوميّة' }
     ];
 
-    var idx = 0;
+    var idx = (STATE.position && STATE.position.station === 5 && typeof STATE.position.step === 'number') ? STATE.position.step : 0;
+    if(idx < 0 || idx >= STEPS.length) idx = 0;
     var host = el.stationHost;
     host.innerHTML = '';
     var station = document.createElement('div');
@@ -1611,6 +1743,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
       '</div>';
 
     function renderStep(){
+      setPos(5, 'step', idx);
       var step = STEPS[idx];
       var content = anti[step.key] || {};
       var stepText = content.text || '';
