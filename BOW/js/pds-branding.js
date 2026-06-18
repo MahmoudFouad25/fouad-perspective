@@ -39,49 +39,15 @@
      الدرع، الـP، والـS — كل عنصر يترسم بحركة stroke
      ──────────────────────────────────────────────────────────── */
   function pdsLogoSVG(size = "compact") {
-    // size: "compact" | "hero" | "footer"
-    const dims = {
-      compact: { w: 36, h: 42 },
-      hero:    { w: 88, h: 104 },
-      footer:  { w: 28, h: 32 }
-    }[size] || { w: 36, h: 42 };
-
-    // الدرع: shape مستوحى من اللوجو الأصلي
-    // ينتهي بنقطة سفلية، أطرافه العلوية متعرّجة قليلًا
-    return `
-      <svg class="pds-logo pds-logo--${size}" viewBox="0 0 100 120" width="${dims.w}" height="${dims.h}" xmlns="http://www.w3.org/2000/svg" aria-label="PDS logo">
-        <defs>
-          <linearGradient id="pdsShieldGrad-${size}" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#4FB8E0"/>
-            <stop offset="60%" stop-color="#1A6FAE"/>
-            <stop offset="100%" stop-color="#0D4D87"/>
-          </linearGradient>
-          <linearGradient id="pdsLetterGrad-${size}" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#7DD3FC"/>
-            <stop offset="100%" stop-color="#0EA5E9"/>
-          </linearGradient>
-        </defs>
-        <!-- الدرع outline (يترسم) -->
-        <path class="pds-shield" d="M 12 18 L 12 65 Q 12 88 50 112 Q 88 88 88 65 L 88 18 L 65 18 L 60 25 L 40 25 L 35 18 Z"
-              fill="none" stroke="url(#pdsShieldGrad-${size})" stroke-width="3.5"
-              stroke-linejoin="round" stroke-linecap="round"/>
-        <!-- الدرع fill (يظهر بعد الـoutline) -->
-        <path class="pds-shield-fill" d="M 12 18 L 12 65 Q 12 88 50 112 Q 88 88 88 65 L 88 18 L 65 18 L 60 25 L 40 25 L 35 18 Z"
-              fill="url(#pdsShieldGrad-${size})" opacity="0"/>
-        <!-- حرف P -->
-        <path class="pds-letter pds-letter--p"
-              d="M 28 40 L 28 78 M 28 40 L 42 40 Q 50 40 50 50 Q 50 60 42 60 L 28 60"
-              fill="none" stroke="url(#pdsLetterGrad-${size})" stroke-width="4"
-              stroke-linecap="round" stroke-linejoin="round"/>
-        <!-- حرف S (stylized) -->
-        <path class="pds-letter pds-letter--s"
-              d="M 72 44 Q 64 40 58 44 Q 54 48 58 54 L 68 60 Q 72 62 72 66 Q 72 74 62 76 Q 56 76 52 72"
-              fill="none" stroke="url(#pdsLetterGrad-${size})" stroke-width="4"
-              stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    `;
-  }
-
+  const widths = { compact: 150, hero: 300, footer: 110 };
+  const w = widths[size] || 150;
+  return `
+    <img class="pds-logo pds-logo--${size}"
+         src="https://raw.githubusercontent.com/MahmoudFouad25/fouad-perspective/main/media/courses/pds%20logo.jpg"
+         alt="Proactive Development Solutions"
+         style="width:${w}px;max-width:100%;height:auto;display:block;" />
+  `;
+}
   /* ════════════════════════════════════════════════════════════
      شعار + اسم الشركة (لـheaders)
      ──────────────────────────────────────────────────────────── */
@@ -91,7 +57,6 @@
       <div class="pds-brand">
         <div class="pds-brand__logo">${pdsLogoSVG("compact")}</div>
         <div class="pds-brand__text">
-          <span class="pds-brand__company">Proactive Development Solutions</span>
           ${showProgram ? `<span class="pds-brand__program">${PDS_CONFIG.programName}</span>` : ``}
         </div>
       </div>
@@ -113,12 +78,6 @@
           <!-- العمود الأيمن: الشركة والبرنامج -->
           <div class="pds-hero__main">
             <div class="pds-hero__logo-wrap">${pdsLogoSVG("hero")}</div>
-
-            <div class="pds-hero__company">
-              <span class="pds-hero__company-line">Proactive</span>
-              <span class="pds-hero__company-line">Development</span>
-              <span class="pds-hero__company-line">Solutions</span>
-            </div>
 
             <div class="pds-hero__divider" aria-hidden="true"></div>
 
