@@ -545,6 +545,60 @@ textarea.write::placeholder{ color:var(--ink-faint); }
 .review-row .rlab{ font-size:13px; color:var(--axis-soft); font-weight:700; margin-bottom:6px; display:block; }
 .review-row .rval{ font-size:16px; color:var(--ink); line-height:1.85; background:rgba(0,0,0,.22); border:1px solid var(--line); border-radius:var(--radius-sm); padding:13px 15px; }
 .review-row .rval.empty{ color:var(--ink-faint); }
+
+
+   /* ─────────────── ملخّص الختام الكامل ─────────────── */
+.fs-block{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:22px 24px; margin-bottom:18px;
+}
+.fs-block .fs-head{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin-bottom:6px;
+}
+.fs-block h3{
+  font-family:'Reem Kufi',sans-serif;
+  font-size:17px; color:var(--gold-soft); margin:0;
+}
+.fs-edit-btn{
+  background:transparent; border:1px solid var(--line-2);
+  color:var(--ink-soft); border-radius:20px;
+  font-family:'Tajawal',sans-serif; font-size:13px;
+  padding:5px 14px; cursor:pointer; transition:all .2s; flex:0 0 auto;
+}
+.fs-edit-btn:hover{ border-color:var(--axis-soft); color:var(--ink); }
+.fs-field{ margin-top:14px; }
+.fs-lab{ font-size:13px; color:var(--axis-soft); font-weight:700; margin-bottom:6px; display:block; }
+.fs-val{
+  font-size:16px; color:var(--ink); line-height:1.9;
+  background:rgba(0,0,0,.22); border:1px solid var(--line);
+  border-radius:var(--radius-sm); padding:13px 15px;
+}
+.fs-val.empty{ color:var(--ink-faint); }
+.fs-edit-area textarea{
+  width:100%; min-height:90px; background:rgba(0,0,0,.25);
+  border:1px solid var(--axis); border-radius:var(--radius-sm);
+  color:var(--ink); font-family:'Tajawal',sans-serif; font-size:16px;
+  line-height:1.85; padding:13px 15px; resize:vertical;
+}
+.fs-edit-actions{ display:flex; gap:10px; margin-top:10px; }
+.fs-mini-btn{
+  font-family:'Tajawal',sans-serif; font-size:14px; font-weight:700;
+  border:none; border-radius:20px; padding:8px 18px; cursor:pointer;
+}
+.fs-mini-btn.save{ background:var(--axis); color:#0b1120; }
+.fs-mini-btn.cancel{ background:transparent; border:1px solid var(--line-2); color:var(--ink-soft); }
+.fs-trigger-detail{ font-size:15px; color:var(--ink-soft); line-height:1.95; margin-top:6px; }
+.fs-pattern-name{ font-family:'Reem Kufi',sans-serif; font-size:16px; color:var(--gold); font-weight:700; margin:4px 0 14px; }
+.fs-step{ border-right:3px solid var(--gold); background:rgba(212,164,76,.05); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+.fs-step-name{ font-family:'Reem Kufi',sans-serif; font-size:14px; color:var(--gold-soft); font-weight:700; margin-bottom:8px; }
+.fs-step-text{ font-size:15px; color:var(--ink); line-height:1.95; }
+.fs-step-hint{ font-size:13.5px; color:var(--ink-soft); line-height:1.85; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+.fs-pick{ display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.fs-pick-sub{ font-size:13px; color:var(--ink-faint); margin:14px 0 6px; }
+   
    
 @media(max-width:560px){
   .wrap{ padding:18px 14px 60px; }
@@ -631,6 +685,9 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     <div class="map-wrap">
       <div id="mapHost"></div>
     </div>
+
+    <!-- ملخّص كامل قابل للقراءة والتعديل (يُملأ بالـ JS) -->
+    <div id="finalSummary"></div>
 
     <!-- القياس الأسبوعيّ -->
     <div class="final-block">
@@ -1916,6 +1973,7 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     show(el.finalScreen);
 
     buildLiveMap();
+    buildFinalSummary();
     prefillCharter();
     window.__MECH.bindMetricLive();
     bindFinish();
@@ -2073,6 +2131,226 @@ textarea.write::placeholder{ color:var(--ink-faint); }
     done.scrollIntoView({behavior:'smooth', block:'center'});
   }
 
+   /* ════════════════════════════════════════════════════════════════════
+     ١٤. ملخّص الختام الكامل — كل الإجابات بدون قص + تعديل + خطوات الترياق
+     ════════════════════════════════════════════════════════════════════ */
+  var FS_FIELDS = {
+    goal:       { station:'contradiction', prop:'declaredGoal' },
+    behavior:   { station:'contradiction', prop:'counterBehavior' },
+    commitment: { station:'commitment',    prop:'finalText' },
+    assumption: { station:'assumption',    prop:'finalText' }
+  };
+
+  function fsSaveField(key, newVal){
+    var f = FS_FIELDS[key]; if(!f) return Promise.resolve();
+    var payload = {}; payload[f.prop] = newVal;
+    return saveStation(f.station, payload);
+  }
+
+  function fsValHtml(v){
+    var has = v && String(v).trim();
+    return '<div class="fs-val'+(has?'':' empty')+'">'+(has?escapeHtml(v):'لسه فاضية')+'</div>';
+  }
+
+  function buildFinalSummary(){
+    var host = document.getElementById('finalSummary');
+    if(!host) return;
+    var s  = STATE.journey.stations || {};
+    var c  = s.contradiction || {};
+    var cm = s.commitment || {};
+    var a  = s.assumption || {};
+    var t  = s.trigger || {};
+
+    var trig = null;
+    if(t.selectedTriggerId){
+      var arr = TRIGGERS[STATE.axis.primary] || [];
+      trig = arr.filter(function(x){ return x.id === t.selectedTriggerId; })[0] || null;
+    }
+    var anti = ANTIDOTES[t.neuralPattern] || null;
+
+    var html = '';
+
+    /* التناقض */
+    html +=
+      '<div class="fs-block" data-block="contradiction">' +
+        '<div class="fs-head"><h3>تناقضك</h3>' +
+          '<button class="fs-edit-btn" data-fkey="goal">تعديل الهدف</button>' +
+        '</div>' +
+        '<div class="fs-field"><span class="fs-lab">هدفك المعلَن</span>' + fsValHtml(c.declaredGoal) + '</div>' +
+        '<div class="fs-field"><span class="fs-lab">سلوكك المضادّ</span>' + fsValHtml(c.counterBehavior) +
+          '<div style="margin-top:8px"><button class="fs-edit-btn" data-fkey="behavior">تعديل السلوك</button></div>' +
+        '</div>' +
+      '</div>';
+
+    /* القفل — الالتزام */
+    html +=
+      '<div class="fs-block" data-block="commitment">' +
+        '<div class="fs-head"><h3>قفلك — التزامك المخفيّ</h3>' +
+          '<button class="fs-edit-btn" data-fkey="commitment">تعديل</button>' +
+        '</div>' +
+        '<div class="fs-field">' + fsValHtml(cm.finalText) + '</div>' +
+      '</div>';
+
+    /* الباب — الافتراض */
+    html +=
+      '<div class="fs-block" data-block="assumption">' +
+        '<div class="fs-head"><h3>بابك — افتراضك الكبير</h3>' +
+          '<button class="fs-edit-btn" data-fkey="assumption">تعديل</button>' +
+        '</div>' +
+        '<div class="fs-field">' + fsValHtml(a.finalText) + '</div>' +
+      '</div>';
+
+    /* المفتاح — التريجر + النمط */
+    var trigHtml = trig
+      ? '<div class="fs-trigger-detail">' + escapeHtml(trig.situation) + '<br><br>' + escapeHtml(trig.ignition) +
+        (trig.hint ? '<br><br><span style="color:var(--ink-faint)">' + escapeHtml(trig.hint) + '</span>' : '') + '</div>'
+      : '<div class="fs-val empty">لسه ما اخترتش</div>';
+    html +=
+      '<div class="fs-block" data-block="trigger">' +
+        '<div class="fs-head"><h3>مفتاحك — تريجرك</h3>' +
+          '<button class="fs-edit-btn" data-ftrig="1">تعديل التريجر/النمط</button>' +
+        '</div>' +
+        trigHtml +
+        '<div class="fs-field"><span class="fs-lab">نمطك العصبيّ</span>' + fsValHtml(anti ? anti.label : '') + '</div>' +
+        '<div id="fsTrigEditor"></div>' +
+      '</div>';
+
+    /* الترياق — كل الخطوات للقراءة والممارسة */
+    var stepsHtml = '';
+    if(anti){
+      var STEP_NAMES = [
+        ['essence','جوهر نمطك'],
+        ['firstAid','الإسعاف الأوّل'],
+        ['pauseGround','الوقفة والإرساء'],
+        ['naming','التسمية'],
+        ['observingHeart','القلب المراقب'],
+        ['assumptionTest','اختبار الافتراض'],
+        ['coreCall','النداء المحوريّ'],
+        ['dailyPractice','ممارستك اليوميّة']
+      ];
+      stepsHtml += '<div class="fs-pattern-name">ترياق ' + escapeHtml(anti.label || '') + '</div>';
+      STEP_NAMES.forEach(function(pair){
+        var st = anti[pair[0]];
+        if(!st) return;
+        stepsHtml +=
+          '<div class="fs-step">' +
+            '<div class="fs-step-name">' + pair[1] + '</div>' +
+            '<div class="fs-step-text">' + escapeHtml(st.text || '') + '</div>' +
+            (st.hint ? '<div class="fs-step-hint">' + escapeHtml(st.hint) + '</div>' : '') +
+          '</div>';
+      });
+    } else {
+      stepsHtml = '<div class="fs-val empty">يظهر بعد اختيار نمطك</div>';
+    }
+    html +=
+      '<div class="fs-block" data-block="antidote">' +
+        '<div class="fs-head"><h3>ترياقك — اقرأه ومارِسه</h3></div>' +
+        stepsHtml +
+      '</div>';
+
+    host.innerHTML = html;
+    fsWire();
+  }
+
+  function fsWire(){
+    var host = document.getElementById('finalSummary');
+    if(!host) return;
+    Array.prototype.forEach.call(host.querySelectorAll('.fs-edit-btn[data-fkey]'), function(btn){
+      btn.onclick = function(){ fsEditField(btn.getAttribute('data-fkey')); };
+    });
+    var trigBtn = host.querySelector('.fs-edit-btn[data-ftrig]');
+    if(trigBtn) trigBtn.onclick = fsEditTrigger;
+  }
+
+  function fsFindFieldDiv(block, key){
+    var fields = block.querySelectorAll('.fs-field');
+    if(key === 'goal')     return fields[0];
+    if(key === 'behavior') return fields[1];
+    return fields[0]; // القفل/الباب: حقل واحد
+  }
+
+  function fsEditField(key){
+    var f = FS_FIELDS[key]; if(!f) return;
+    var cur = (STATE.journey.stations[f.station] && STATE.journey.stations[f.station][f.prop]) || '';
+    var block = document.querySelector('#finalSummary .fs-block[data-block="'+f.station+'"]');
+    if(!block) return;
+    var fieldDiv = fsFindFieldDiv(block, key);
+    if(!fieldDiv) return;
+    var label = (key === 'goal') ? 'هدفك المعلَن' : (key === 'behavior') ? 'سلوكك المضادّ' : '';
+    fieldDiv.innerHTML =
+      (label ? '<span class="fs-lab">'+label+'</span>' : '') +
+      '<div class="fs-edit-area"><textarea>'+escapeHtml(cur)+'</textarea></div>' +
+      '<div class="fs-edit-actions">' +
+        '<button class="fs-mini-btn save">احفظ</button>' +
+        '<button class="fs-mini-btn cancel">إلغاء</button>' +
+      '</div>';
+    var ta = fieldDiv.querySelector('textarea');
+    ta.focus();
+    fieldDiv.querySelector('.save').onclick = function(){
+      fsSaveField(key, ta.value.trim()).then(function(){ buildFinalSummary(); buildLiveMap(); });
+    };
+    fieldDiv.querySelector('.cancel').onclick = function(){ buildFinalSummary(); };
+  }
+
+  function fsEditTrigger(){
+    var box = document.getElementById('fsTrigEditor');
+    if(!box) return;
+    var t = STATE.journey.stations.trigger || {};
+    var arr = TRIGGERS[STATE.axis.primary] || [];
+    var sel = t.selectedTriggerId || '';
+    var selPat = t.neuralPattern || '';
+
+    var cards = arr.map(function(x){
+      var on = (x.id === sel) ? ' selected' : '';
+      return '<div class="ax-option'+on+'" data-tid="'+x.id+'">' +
+               '<div class="ax-option-text">'+x.situation+'</div>' +
+               '<div class="ax-option-hint">'+x.ignition+'</div>' +
+             '</div>';
+    }).join('');
+
+    var pats = [
+      {id:'muwajaha',label:'مواجهة'},{id:'huroob',label:'هروب'},
+      {id:'tajammud',label:'تجمّد'},{id:'musayara',label:'مسايرة'}
+    ].map(function(p){
+      var on = (p.id === selPat) ? ' selected' : '';
+      return '<div class="ax-option'+on+'" data-pid="'+p.id+'"><div class="ax-option-text">'+p.label+'</div></div>';
+    }).join('');
+
+    box.innerHTML =
+      '<div class="fs-pick-sub">اختار الموقف الأقرب:</div>' +
+      '<div class="fs-pick" id="fsTrigCards">'+cards+'</div>' +
+      '<div class="fs-pick-sub">ونمطك العصبيّ:</div>' +
+      '<div class="fs-pick" id="fsPatCards">'+pats+'</div>' +
+      '<div class="fs-edit-actions">' +
+        '<button class="fs-mini-btn save">احفظ</button>' +
+        '<button class="fs-mini-btn cancel">إلغاء</button>' +
+      '</div>';
+
+    var pickTid = sel, pickPid = selPat;
+    var tCards = box.querySelectorAll('#fsTrigCards .ax-option');
+    Array.prototype.forEach.call(tCards, function(n){
+      n.onclick = function(){
+        Array.prototype.forEach.call(tCards, function(x){ x.classList.remove('selected'); });
+        n.classList.add('selected'); pickTid = n.getAttribute('data-tid');
+      };
+    });
+    var pCards = box.querySelectorAll('#fsPatCards .ax-option');
+    Array.prototype.forEach.call(pCards, function(n){
+      n.onclick = function(){
+        Array.prototype.forEach.call(pCards, function(x){ x.classList.remove('selected'); });
+        n.classList.add('selected'); pickPid = n.getAttribute('data-pid');
+      };
+    });
+    box.querySelector('.save').onclick = function(){
+      saveStation('trigger', {
+        freeText: t.freeText || '',
+        selectedTriggerId: pickTid,
+        neuralPattern: pickPid
+      }).then(function(){ buildFinalSummary(); buildLiveMap(); prefillCharter(); });
+    };
+    box.querySelector('.cancel').onclick = function(){ box.innerHTML = ''; };
+  }
+   
   /* ─────────────── ربط دوال المحطّات بالموجّه (نفس الـ IIFE) ─────────────── */
   // الدوال معرّفة أعلاه في نفس النطاق، لا حاجة لتصديرها خارجيًّا.
 
