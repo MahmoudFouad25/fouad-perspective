@@ -253,7 +253,7 @@ function goToStation(n){
          saveJourneyLocal();
     render();
     // scroll لأعلى بسلاسة
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    smoothScrollTo(document.getElementById("stationContainer"), 90);
   }, 220);
 }
 
