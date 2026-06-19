@@ -48,6 +48,17 @@ class FirestoreBackend {
     return true;
   }
 
+  // One-time read — used by the client page to avoid a live listener that
+  // keeps consuming reads while the page sits open. Saves Firestore quota.
+  async getOnce() {
+    const snap = await this.db.collection(COLLECTION).get();
+    const slots = [];
+    snap.forEach((d) => slots.push({ id: d.id, ...d.data() }));
+    return sortSlots(slots);
+  }
+
+  // Live listener — used only by the admin panel, which is opened briefly by
+  // the coach. Returns an unsubscribe function.
   subscribe(cb) {
     return this.db.collection(COLLECTION).onSnapshot(
       (snap) => {
@@ -133,6 +144,7 @@ class LocalBackend {
   _emit() { this.subs.forEach((cb) => cb(sortSlots(this.slots), null)); }
 
   async testRead() { return true; }
+  async getOnce() { return sortSlots(this.slots); }
 
   subscribe(cb) {
     this.subs.push(cb);
