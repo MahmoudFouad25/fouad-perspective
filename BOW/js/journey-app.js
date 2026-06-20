@@ -68,6 +68,7 @@ const journeyState = {
   completedStations: [],
   choices: {
     station2_level: null,
+    station_curveMoment: null,
     station3_firstThought: null,
     station4_axisMain: null, station4_axisSub: null,
     station5_door: null, station5_flavor: null,
@@ -314,6 +315,7 @@ function renderInteraction(station, mountEl){
     case "door-flavor":    return renderDoorFlavor(station, mountEl);
     case "multi-choice":   return renderMultiChoice(station, mountEl);
     case "covenant":       return renderCovenant(station, mountEl);
+    case "curve-moment":   return renderCurveMoment(station, mountEl);
     default:
       console.warn("نوع تفاعل غير معروف:", ix.type);
   }
@@ -1095,7 +1097,7 @@ function renderAxisCrossover(station, mountEl){
     const echo = composeAxisEcho(ix, main, local.caseType, !!local.didTiebreak, local.behaviorLeader);
     mountEl.innerHTML = `<div class="ix ix-axis ix-axis--done"><p class="ix-form__note">${escapeHtml(ix.resultNote)}</p></div>`;
     showEcho(stationEl, echo, true);
-    completeStation(4);
+    completeStation(station.id);
     setTimeout(() => smoothScrollTo(stationEl.querySelector("[data-role='echo']")), 380);
     setTimeout(() => renderAxisReport(stationEl, mountEl, main), 1200);
   }
@@ -1625,8 +1627,8 @@ function dfRenderPhaseE(stage, ix, local, opts){
   const invite = stage.querySelector("[data-role='explore-invite']");
   setTimeout(() => invite.classList.add("is-shown"), 1400);
  
-  // حفظ نهائي + فتح زر التالي
-  completeStation(5);
+ // حفظ نهائي + فتح زر التالي
+  completeStation(+stationEl.dataset.station);
   saveJourneyRemote();
   unlockNext(stationEl);
  
@@ -2021,6 +2023,95 @@ function renderMultiChoice(station, mountEl){
   }
 }
 
+
+/* ============================================================
+   النوع (جديد): curve-moment — لحظتك على المنحنى + خريطة الـ٩ (عرض فقط)
+   ============================================================ */
+function injectCurveStyles(){
+  if (document.getElementById("jr-curve-styles")) return;
+  var s = document.createElement("style");
+  s.id = "jr-curve-styles";
+  s.textContent = `
+  .cm-intro{font-size:16px;color:#e7e3da;line-height:1.95;margin:0 0 22px;}
+  .cm-map{margin-top:30px;padding-top:26px;border-top:1px solid rgba(212,175,55,.18);}
+  .cm-map__title{font-family:var(--font-quote);font-size:20px;color:var(--cream);text-align:center;margin:0 0 6px;}
+  .cm-map__note{font-size:14px;color:var(--muted);line-height:1.85;text-align:center;max-width:560px;margin:0 auto 22px;}
+  .cm-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .cm-card{background:var(--navy-deep);border:1px solid rgba(212,175,55,.16);border-radius:12px;padding:16px 12px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;}
+  .cm-card__icon{width:42px;height:42px;border-radius:50%;border:1px solid rgba(212,175,55,.4);display:grid;place-items:center;font-size:20px;background:rgba(212,175,55,.04);}
+  .cm-card__name{font-family:var(--font-quote);font-size:15px;font-weight:700;color:var(--cream);margin:0;line-height:1.3;}
+  .cm-card__line{font-size:12px;color:var(--muted);line-height:1.6;margin:0;}
+  @media (max-width:680px){.cm-grid{grid-template-columns:1fr;}.cm-card{flex-direction:row;text-align:right;gap:14px;}}`;
+  document.head.appendChild(s);
+}
+
+function renderCurveMoment(station, mountEl){
+  injectCurveStyles();
+  var ix = station.interaction;
+  var stationEl = mountEl.closest(".station");
+
+  var mapHtml =
+    '<div class="cm-map">' +
+      '<p class="cm-map__title">' + escapeHtml(ix.mapTitle || "") + '</p>' +
+      '<p class="cm-map__note">' + escapeHtml(ix.mapNote || "") + '</p>' +
+      '<div class="cm-grid">' +
+        (ix.strategies || []).map(function(s){
+          return '<div class="cm-card">' +
+            '<span class="cm-card__icon" aria-hidden="true">' + s.icon + '</span>' +
+            '<p class="cm-card__name">' + escapeHtml(s.name) + '</p>' +
+            '<p class="cm-card__line">' + escapeHtml(s.line) + '</p>' +
+          '</div>';
+        }).join("") +
+      '</div>' +
+    '</div>';
+
+  mountEl.innerHTML =
+    '<div class="ix ix-choice">' +
+      (ix.intro ? '<p class="cm-intro">' + escapeHtml(ix.intro) + '</p>' : '') +
+      '<h2 class="ix__prompt">' + escapeHtml(ix.prompt) + '</h2>' +
+      '<div class="ix-choice__list" role="radiogroup" aria-label="' + escapeHtml(ix.prompt) + '">' +
+        ix.options.map(function(o){
+          return '<button type="button" class="ix-choice__btn" data-id="' + escapeHtml(o.id) + '" role="radio" aria-checked="false">' +
+            '<span class="ix-choice__label">' + escapeHtml(o.label) + '</span>' +
+            '<span class="ix-choice__mark" aria-hidden="true">✓</span>' +
+          '</button>';
+        }).join("") +
+      '</div>' +
+      mapHtml +
+    '</div>';
+
+  var buttons = mountEl.querySelectorAll(".ix-choice__btn");
+
+  function apply(id, animate){
+    var opt = ix.options.find(function(o){ return o.id === id; });
+    if (!opt) return;
+    buttons.forEach(function(b){
+      var match = b.dataset.id === id;
+      b.classList.toggle("is-selected", match);
+      b.setAttribute("aria-checked", match ? "true" : "false");
+      if (!match){ b.classList.add("is-disabled"); b.disabled = true; }
+      else { b.disabled = false; }
+    });
+    journeyState.choices[ix.saveKey] = id;
+    showEcho(stationEl, opt.echo, animate);
+    if (animate){
+      completeStation(station.id);
+      setTimeout(function(){ smoothScrollTo(stationEl.querySelector("[data-role='echo']")); }, 350);
+    }
+    unlockNext(stationEl);
+  }
+
+  var saved = journeyState.choices[ix.saveKey];
+  if (saved){ apply(saved, false); }
+
+  buttons.forEach(function(b){
+    b.addEventListener("click", function(){
+      if (journeyState.choices[ix.saveKey]) return;
+      apply(b.dataset.id, true);
+    });
+  });
+}
+
 /* ============================================================
    النوع (و): covenant — الميثاق
    ============================================================ */
@@ -2207,9 +2298,10 @@ function hideFingerprintScreen(){
   setTimeout(() => {
     screen.hidden = true;
     screen.setAttribute("aria-hidden", "true");
-    // ارجع للمحطة ٧
-    if (journeyState.currentStation !== 7){
-      journeyState.currentStation = 7;
+    // ارجع لمحطة الميثاق (آخر محطة) ديناميكيًا
+    const covenantId = CONTENT.stations[CONTENT.stations.length - 1].id;
+    if (journeyState.currentStation !== covenantId){
+      journeyState.currentStation = covenantId;
       render();
     }
     // ارجع العنوان
