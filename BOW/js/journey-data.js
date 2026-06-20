@@ -105,7 +105,7 @@
         completed: true,
         completed_at: now(),
         current_station: 7,
-        completed_stations: p.completedStations || [1,2,3,4,5,6,7],
+        completed_stations: p.completedStations || [1,2,3,4,5,6,7,8],
         choices: ch,
         fingerprint: fp,
         // حقول مُسطّحة لتسهيل عرض الأدمن والتقرير
