@@ -149,6 +149,8 @@
     document.documentElement.style.setProperty("--accent", ac.c);
     document.documentElement.style.setProperty("--accent-deep", ac.deep);
     document.documentElement.style.setProperty("--accent-glow", ac.glow);
+         injectSelfStrategyStyles();   // ← ضيف السطر ده
+
 
     const name      = (d.name || "").trim() || "صاحبي";
     const axisName  = window.AXIS_AR[axis] || "—";
@@ -242,6 +244,7 @@
           <div class="r-prose pds-reveal">${paras(flavorProse)}</div>
         </div>
       </section>
+      ${ buildSelfStrategyScene(d) }
 
       <!-- المشهد ٥: نوع الاحتراق + المستوى -->
       <section class="r-scene r-scene--burnout">
@@ -440,6 +443,69 @@
     update();
     window.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
+  }
+
+   /* ════════════════════════════════════════════════════════════
+     الطريقة اللي اخترها بنفسه (محطة ٣) — في التقرير الدائم
+     ──────────────────────────────────────────────────────────── */
+  function injectSelfStrategyStyles() {
+    if (document.getElementById("r-self-strategy-styles")) return;
+    const s = document.createElement("style");
+    s.id = "r-self-strategy-styles";
+    s.textContent = `
+    .r-self-strategy{margin-top:6px;background:rgba(255,255,255,.025);border:1px solid var(--accent-glow,rgba(212,175,55,.25));border-radius:16px;padding:26px 24px;}
+    .r-self-strategy__head{display:flex;align-items:center;gap:14px;margin-bottom:18px;}
+    .r-self-strategy__icon{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-size:24px;flex-shrink:0;border:1.5px solid var(--accent,#d4af37);background:var(--accent-glow,rgba(212,175,55,.18));}
+    .r-self-strategy__name{font-size:20px;font-weight:700;color:var(--accent,#d4af37);margin:0;line-height:1.3;}
+    .r-self-strategy__tag{font-size:13px;color:var(--muted,#9aa3b2);margin:4px 0 0;}
+    .r-self-strategy__voice{font-size:18px;line-height:1.9;color:var(--cream,#e7e3da);margin:0 0 14px;padding-inline-start:16px;border-inline-start:2px solid var(--accent,#d4af37);}
+    .r-self-strategy__insight{margin:0;}
+    @media (max-width:680px){.r-self-strategy{padding:22px 18px;}.r-self-strategy__voice{font-size:16px;}}`;
+    document.head.appendChild(s);
+  }
+
+  function buildSelfStrategyScene(d) {
+    const sid = d.choices && d.choices.station3_strategy;
+    if (!sid) return "";
+    const c = (window.STRATEGY_CARDS || []).find(x => x.id === sid);
+    if (!c) return "";
+
+    const fp = d.fingerprint || {};
+    const flavor = (d.flavor != null) ? d.flavor : fp.flavor;
+    const hasFlavor = flavor != null;
+    const discovered = window.FLAVOR_AR[flavor] || "";
+
+    let insight = "";
+    if (hasFlavor) {
+      insight = (c.order === flavor)
+        ? `ولافت إن دي نفس طبقتك اللي اكتشفتها الرحلة (طابع ${esc(discovered)}) — وعيك بنفسك عالي، اللي حسّيته من بدري أكّدته الرحلة بالتفصيل.`
+        : `ومثير للاهتمام إن اللي اخترته مختلف عن طابعك اللي اكتشفته الرحلة (طابع ${esc(discovered)}). الفرق ده مش غلط — هو مساحة غنية بين صورتك عن نفسك واللي اتكشف لما نزلنا أعمق، وده بالظبط شغل الرحلة الكاملة.`;
+    }
+
+    return `
+      <!-- مشهد: الطريقة اللي اخترتها بنفسك -->
+      <section class="r-scene r-scene--self-strategy">
+        <div class="r-scene__inner">
+          <div class="r-scene__head pds-reveal">
+            <span class="r-scene__num" aria-hidden="true">✦</span>
+            <div>
+              <p class="r-scene__kicker">صورتك عن نفسك</p>
+              <h2 class="r-scene__title">الطريقة اللي اخترتها بنفسك</h2>
+            </div>
+          </div>
+          <div class="r-self-strategy pds-reveal">
+            <div class="r-self-strategy__head">
+              <span class="r-self-strategy__icon" aria-hidden="true">${c.icon || ""}</span>
+              <div>
+                <p class="r-self-strategy__name">${esc(c.name)}</p>
+                <p class="r-self-strategy__tag">${esc(c.tag || "")}</p>
+              </div>
+            </div>
+            <p class="r-self-strategy__voice">«${esc(c.front)}»</p>
+            ${ insight ? `<p class="r-prose r-self-strategy__insight">${insight}</p>` : "" }
+          </div>
+        </div>
+      </section>`;
   }
 
   /* helpers */
