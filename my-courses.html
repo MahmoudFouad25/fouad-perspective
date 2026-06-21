@@ -3584,15 +3584,17 @@ if (secureUserData) {
     userId = localStorage.getItem('userId');
 }
 
-        // حماية الصفحة
-        auth.onAuthStateChanged(async (user) => {
-            if (!user || !userId) {
-                console.log('⌠لا يوجد مستخدم مسجل دخول');
+        // حماية الصفحة — تعتمد على جلسة Firestore المشفّرة كمصدر أساسي
+        // (نظام LocalAuth: المستخدم قد لا يكون في Firebase Auth)
+        async function guardAndLoad(user) {
+            // مصدر الحقيقة: وجود userId من الجلسة المشفّرة
+            if (!userId) {
+                console.log('لا توجد جلسة صالحة — التوجيه لتسجيل الدخول');
                 window.location.href = './login.html';
                 return;
             }
 
-            currentUser = user;
+            currentUser = user; // قد يكون null في وضع firestore-only، وهذا مقبول
         
 // منع التمرير أثناء التحميل
 document.body.classList.add('loading');
@@ -3612,8 +3614,26 @@ setTimeout(() => {
         await loadUserData();
             await initializePage();
             console.log('✅ تم تحميل الصفحة - عدد الدورات:', allCourses.length);
-            
-        });
+        }
+
+        // نستمع لـ Auth لو وُجد، وإلا نشغّل الحماية فورًا بالجلسة المشفّرة
+        if (typeof auth !== 'undefined' && auth.onAuthStateChanged) {
+            let guardStarted = false;
+            auth.onAuthStateChanged((user) => {
+                if (guardStarted) return;
+                guardStarted = true;
+                guardAndLoad(user);
+            });
+            // احتياطي: لو Auth ما رجّعش خلال ثانيتين، نشغّل بالجلسة
+            setTimeout(() => {
+                if (!guardStarted) {
+                    guardStarted = true;
+                    guardAndLoad(null);
+                }
+            }, 2000);
+        } else {
+            guardAndLoad(null);
+        }
 
         // تحميل بيانات المستخدم
         async function loadUserData() {
