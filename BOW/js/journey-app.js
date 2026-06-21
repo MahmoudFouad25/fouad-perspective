@@ -2165,7 +2165,6 @@ function renderStrategiesSelf(station, mountEl){
     modal.querySelector("[data-select]").addEventListener("click", function(){ selectCard(id); close(); });
   }
 }
-
 /* ============================================================
    النوع (و): covenant — الميثاق
    ============================================================ */
