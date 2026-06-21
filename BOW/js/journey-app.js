@@ -68,7 +68,7 @@ const journeyState = {
   completedStations: [],
   choices: {
     station2_level: null,
-    station_curveMoment: null,
+    station3_strategy: null,
     station3_firstThought: null,
     station4_axisMain: null, station4_axisSub: null,
     station5_door: null, station5_flavor: null,
@@ -315,7 +315,7 @@ function renderInteraction(station, mountEl){
     case "door-flavor":    return renderDoorFlavor(station, mountEl);
     case "multi-choice":   return renderMultiChoice(station, mountEl);
     case "covenant":       return renderCovenant(station, mountEl);
-    case "curve-moment":   return renderCurveMoment(station, mountEl);
+    case "strategies-self": return renderStrategiesSelf(station, mountEl);
     default:
       console.warn("نوع تفاعل غير معروف:", ix.type);
   }
@@ -2025,91 +2025,145 @@ function renderMultiChoice(station, mountEl){
 
 
 /* ============================================================
-   النوع (جديد): curve-moment — لحظتك على المنحنى + خريطة الـ٩ (عرض فقط)
+   النوع (جديد): strategies-self — استكشاف الـ٩ بعمق + اختيار واحدة (بصمتك المبدئية)
    ============================================================ */
-function injectCurveStyles(){
-  if (document.getElementById("jr-curve-styles")) return;
+function injectStrategiesStyles(){
+  if (document.getElementById("jr-strat-styles")) return;
   var s = document.createElement("style");
-  s.id = "jr-curve-styles";
+  s.id = "jr-strat-styles";
   s.textContent = `
-  .cm-intro{font-size:16px;color:#e7e3da;line-height:1.95;margin:0 0 22px;}
-  .cm-map{margin-top:30px;padding-top:26px;border-top:1px solid rgba(212,175,55,.18);}
-  .cm-map__title{font-family:var(--font-quote);font-size:20px;color:var(--cream);text-align:center;margin:0 0 6px;}
-  .cm-map__note{font-size:14px;color:var(--muted);line-height:1.85;text-align:center;max-width:560px;margin:0 auto 22px;}
-  .cm-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
-  .cm-card{background:var(--navy-deep);border:1px solid rgba(212,175,55,.16);border-radius:12px;padding:16px 12px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;}
-  .cm-card__icon{width:42px;height:42px;border-radius:50%;border:1px solid rgba(212,175,55,.4);display:grid;place-items:center;font-size:20px;background:rgba(212,175,55,.04);}
-  .cm-card__name{font-family:var(--font-quote);font-size:15px;font-weight:700;color:var(--cream);margin:0;line-height:1.3;}
-  .cm-card__line{font-size:12px;color:var(--muted);line-height:1.6;margin:0;}
-  @media (max-width:680px){.cm-grid{grid-template-columns:1fr;}.cm-card{flex-direction:row;text-align:right;gap:14px;}}`;
+  .ss-intro{font-size:16px;color:#e7e3da;line-height:1.95;margin:0 0 18px;}
+  .ss-note{font-size:13.5px;color:var(--muted);line-height:1.8;margin:18px 0 0;padding:12px 16px;background:rgba(212,175,55,.04);border:1px solid rgba(212,175,55,.18);border-radius:10px;}
+  .ss-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .ss-card{appearance:none;background:var(--navy-deep);color:var(--cream);border:1px solid rgba(212,175,55,.2);border-radius:14px;padding:20px 16px;font:inherit;cursor:pointer;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:178px;transition:all .3s var(--ease);position:relative;}
+  .ss-card:hover{border-color:var(--gold);transform:translateY(-4px);box-shadow:0 12px 32px rgba(0,0,0,.28);}
+  .ss-card.is-selected{border-color:var(--gold);background:linear-gradient(135deg,rgba(212,175,55,.1),var(--navy-deep));box-shadow:0 0 0 2px rgba(212,175,55,.4);}
+  .ss-card__icon{width:46px;height:46px;border-radius:50%;border:1.5px solid var(--gold);display:grid;place-items:center;font-size:22px;background:rgba(212,175,55,.05);}
+  .ss-card__name{font-family:var(--font-quote);font-size:16px;font-weight:700;color:var(--cream);margin:0;line-height:1.3;}
+  .ss-card__line{font-size:12px;color:var(--muted);line-height:1.6;margin:0;flex:1;}
+  .ss-card__cta{font-size:11.5px;color:var(--gold);font-weight:600;margin-top:auto;}
+  .ss-card__badge{position:absolute;top:-9px;inset-inline-end:14px;background:var(--gold);color:var(--navy-deep);font-size:10.5px;font-weight:700;padding:3px 11px;border-radius:99px;display:none;}
+  .ss-card.is-selected .ss-card__badge{display:block;}
+  .ss-modal{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:20px;opacity:0;transition:opacity .3s var(--ease);}
+  .ss-modal[hidden]{display:none;}
+  .ss-modal.is-open{opacity:1;}
+  .ss-modal__backdrop{position:absolute;inset:0;background:rgba(10,23,41,.8);backdrop-filter:blur(6px);}
+  .ss-modal__panel{position:relative;background:linear-gradient(180deg,var(--navy),var(--navy-deep));border:1px solid rgba(212,175,55,.35);border-radius:18px;max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 30px 80px rgba(0,0,0,.5);transform:translateY(16px) scale(.98);transition:transform .35s var(--ease);}
+  .ss-modal.is-open .ss-modal__panel{transform:translateY(0) scale(1);}
+  .ss-modal__close{position:absolute;top:14px;inset-inline-end:14px;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:var(--muted);cursor:pointer;display:grid;place-items:center;z-index:3;}
+  .ss-modal__close:hover{border-color:var(--gold);color:var(--gold);}
+  .ss-modal__head{padding:34px 32px 18px;text-align:center;border-bottom:1px solid rgba(212,175,55,.15);}
+  .ss-modal__icon{width:58px;height:58px;border-radius:50%;border:1.5px solid var(--gold);display:grid;place-items:center;font-size:28px;margin:0 auto 14px;background:rgba(212,175,55,.05);}
+  .ss-modal__name{font-family:var(--font-quote);font-size:26px;font-weight:700;color:var(--gold);margin:0 0 4px;}
+  .ss-modal__tag{font-size:13px;color:var(--muted);margin:0;letter-spacing:.5px;}
+  .ss-modal__body{padding:24px 32px 8px;}
+  .ss-modal__voice{font-family:var(--font-quote);font-size:18px;color:var(--cream);line-height:1.9;margin:0 0 22px;padding-inline-start:16px;border-inline-start:2px solid var(--gold);}
+  .ss-modal__story p{font-size:15.5px;color:#e7e3da;line-height:1.95;margin:0 0 14px;}
+  .ss-modal__foot{padding:18px 32px 28px;display:flex;justify-content:center;position:sticky;bottom:0;background:linear-gradient(180deg,transparent,var(--navy-deep) 30%);}
+  .ss-select-btn{appearance:none;background:rgba(212,175,55,.1);color:var(--cream);border:1px solid var(--gold);border-radius:10px;padding:14px 30px;font:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:all .25s var(--ease);}
+  .ss-select-btn:hover{background:rgba(212,175,55,.2);color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
+  .ss-select-btn.is-current{background:var(--gold);color:var(--navy-deep);}
+  @media (max-width:680px){.ss-grid{grid-template-columns:1fr;}.ss-card{flex-direction:row;text-align:right;min-height:0;gap:14px;align-items:center;}.ss-card__cta{display:none;}.ss-modal__body{padding:20px 22px 8px;}.ss-modal__head{padding:28px 22px 16px;}.ss-modal__foot{padding:16px 22px 22px;}}`;
   document.head.appendChild(s);
 }
 
-function renderCurveMoment(station, mountEl){
-  injectCurveStyles();
+function renderStrategiesSelf(station, mountEl){
+  injectStrategiesStyles();
   var ix = station.interaction;
   var stationEl = mountEl.closest(".station");
-
-  var mapHtml =
-    '<div class="cm-map">' +
-      '<p class="cm-map__title">' + escapeHtml(ix.mapTitle || "") + '</p>' +
-      '<p class="cm-map__note">' + escapeHtml(ix.mapNote || "") + '</p>' +
-      '<div class="cm-grid">' +
-        (ix.strategies || []).map(function(s){
-          return '<div class="cm-card">' +
-            '<span class="cm-card__icon" aria-hidden="true">' + s.icon + '</span>' +
-            '<p class="cm-card__name">' + escapeHtml(s.name) + '</p>' +
-            '<p class="cm-card__line">' + escapeHtml(s.line) + '</p>' +
-          '</div>';
-        }).join("") +
-      '</div>' +
-    '</div>';
+  var cards = (window.STRATEGY_CARDS || []).slice().sort(function(a,b){ return a.order - b.order; });
 
   mountEl.innerHTML =
-    '<div class="ix ix-choice">' +
-      (ix.intro ? '<p class="cm-intro">' + escapeHtml(ix.intro) + '</p>' : '') +
-      '<h2 class="ix__prompt">' + escapeHtml(ix.prompt) + '</h2>' +
-      '<div class="ix-choice__list" role="radiogroup" aria-label="' + escapeHtml(ix.prompt) + '">' +
-        ix.options.map(function(o){
-          return '<button type="button" class="ix-choice__btn" data-id="' + escapeHtml(o.id) + '" role="radio" aria-checked="false">' +
-            '<span class="ix-choice__label">' + escapeHtml(o.label) + '</span>' +
-            '<span class="ix-choice__mark" aria-hidden="true">✓</span>' +
+    '<div class="ix ss">' +
+      (ix.intro ? '<p class="ss-intro">'+escapeHtml(ix.intro)+'</p>' : '') +
+      '<h2 class="ix__prompt">'+escapeHtml(ix.prompt)+'</h2>' +
+      '<div class="ss-grid">' +
+        cards.map(function(c){
+          return '<button type="button" class="ss-card" data-id="'+escapeHtml(c.id)+'">' +
+            '<span class="ss-card__badge">اختيارك</span>' +
+            '<span class="ss-card__icon" aria-hidden="true">'+(c.icon||"")+'</span>' +
+            '<p class="ss-card__name">'+escapeHtml(c.name)+'</p>' +
+            '<p class="ss-card__line">'+escapeHtml(c.coach)+'</p>' +
+            '<span class="ss-card__cta">افتح واقرا قصتها ←</span>' +
           '</button>';
         }).join("") +
       '</div>' +
-      mapHtml +
+      (ix.note ? '<p class="ss-note">'+escapeHtml(ix.note)+'</p>' : '') +
     '</div>';
 
-  var buttons = mountEl.querySelectorAll(".ix-choice__btn");
+  var gridCards = mountEl.querySelectorAll(".ss-card");
 
-  function apply(id, animate){
-    var opt = ix.options.find(function(o){ return o.id === id; });
-    if (!opt) return;
-    buttons.forEach(function(b){
-      var match = b.dataset.id === id;
-      b.classList.toggle("is-selected", match);
-      b.setAttribute("aria-checked", match ? "true" : "false");
-      if (!match){ b.classList.add("is-disabled"); b.disabled = true; }
-      else { b.disabled = false; }
-    });
-    journeyState.choices[ix.saveKey] = id;
-    showEcho(stationEl, opt.echo, animate);
-    if (animate){
-      completeStation(station.id);
-      setTimeout(function(){ smoothScrollTo(stationEl.querySelector("[data-role='echo']")); }, 350);
-    }
-    unlockNext(stationEl);
+  function markSelected(id){
+    gridCards.forEach(function(b){ b.classList.toggle("is-selected", b.dataset.id === id); });
   }
 
-  var saved = journeyState.choices[ix.saveKey];
-  if (saved){ apply(saved, false); }
+  function selectCard(id){
+    var c = cards.find(function(x){ return x.id === id; });
+    if (!c) return;
+    journeyState.choices[ix.saveKey] = id;
+    journeyState.choices[ix.saveKey + "_name"] = c.name;
+    markSelected(id);
+    saveJourneyLocal(); saveJourneyRemote();
+    showEcho(stationEl, "اخترت «"+c.name+"». ده اللي إنت شايفه عن نفسك دلوقتي — وفي آخر الرحلة هنشوف سوا هل هو هو اللي هنكتشفه، ولا في طبقة أعمق.", true);
+    completeStation(station.id);
+    unlockNext(stationEl);
+    setTimeout(function(){ smoothScrollTo(stationEl.querySelector("[data-role='echo']")); }, 350);
+  }
 
-  buttons.forEach(function(b){
-    b.addEventListener("click", function(){
-      if (journeyState.choices[ix.saveKey]) return;
-      apply(b.dataset.id, true);
-    });
+  /* الاسترجاع */
+  var saved = journeyState.choices[ix.saveKey];
+  if (saved){
+    markSelected(saved);
+    var sc = cards.find(function(x){ return x.id === saved; });
+    if (sc){ showEcho(stationEl, "اخترت «"+sc.name+"». تقدر تفتح أي طريقة تاني وتغيّر اختيارك، أو تكمّل.", false); unlockNext(stationEl); }
+  }
+
+  gridCards.forEach(function(b){
+    b.addEventListener("click", function(){ openCardModal(b.dataset.id); });
   });
+
+  function openCardModal(id){
+    var c = cards.find(function(x){ return x.id === id; });
+    if (!c) return;
+    var isCurrent = journeyState.choices[ix.saveKey] === id;
+    var storyHtml = (c.back||[]).map(function(p){ return '<p>'+escapeHtml(p)+'</p>'; }).join("");
+
+    var modal = document.createElement("div");
+    modal.className = "ss-modal";
+    modal.innerHTML =
+      '<div class="ss-modal__backdrop" data-close="1"></div>' +
+      '<div class="ss-modal__panel" role="dialog">' +
+        '<button type="button" class="ss-modal__close" data-close="1" aria-label="إغلاق"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>' +
+        '<div class="ss-modal__head">' +
+          '<div class="ss-modal__icon" aria-hidden="true">'+(c.icon||"")+'</div>' +
+          '<h3 class="ss-modal__name">'+escapeHtml(c.name)+'</h3>' +
+          '<p class="ss-modal__tag">'+escapeHtml(c.tag||"")+'</p>' +
+        '</div>' +
+        '<div class="ss-modal__body">' +
+          '<p class="ss-modal__voice">«'+escapeHtml(c.front)+'»</p>' +
+          '<div class="ss-modal__story">'+storyHtml+'</div>' +
+        '</div>' +
+        '<div class="ss-modal__foot">' +
+          '<button type="button" class="ss-select-btn '+(isCurrent?"is-current":"")+'" data-select="1">'+
+            escapeHtml(isCurrent ? (ix.selectedLabel||"دي اختيارك ✓") : (ix.selectLabel||"دي أقرب واحدة ليّا"))+
+          '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){ modal.classList.add("is-open"); }); });
+
+    function close(){
+      modal.classList.remove("is-open");
+      document.body.style.overflow = "";
+      document.removeEventListener("keydown", esc);
+      setTimeout(function(){ modal.remove(); }, 320);
+    }
+    function esc(e){ if (e.key === "Escape") close(); }
+    document.addEventListener("keydown", esc);
+    modal.querySelectorAll("[data-close]").forEach(function(el){ el.addEventListener("click", close); });
+    modal.querySelector("[data-select]").addEventListener("click", function(){ selectCard(id); close(); });
+  }
 }
 
 /* ============================================================
@@ -2384,6 +2438,8 @@ function buildFingerprintDoc(){
       </p>
     </section>
  
+    ${ buildSelfStrategyBlock() }
+
     <section class="fp-section">
       <h2 class="fp-section__head">نوع احتراقك المُرشّح</h2>
       <p class="fp-section__value">${escapeHtml(burnoutText)}</p>
@@ -2485,7 +2541,32 @@ function buildSavedReportBlock(){
     </section>`;
 }
 
-
+/* ============================================================
+   بلوك "الطريقة اللي اخترتها بنفسك" — في التقرير النهائي
+   ============================================================ */
+function buildSelfStrategyBlock(){
+  var sid = journeyState.choices.station3_strategy;
+  if (!sid) return "";
+  var c = (window.STRATEGY_CARDS || []).find(function(x){ return x.id === sid; });
+  if (!c) return "";
+  var fp = journeyState.fingerprint;
+  var hasFlavor = fp.flavor != null;
+  var discovered = FLAVOR_AR[fp.flavor] || "";
+  var insight = "";
+  if (hasFlavor){
+    insight = (c.order === fp.flavor)
+      ? `ولافت إن دي نفس طبقتك اللي اكتشفتها الرحلة (طابع ${escapeHtml(discovered)}) — وعيك بنفسك عالي، اللي حسّيته من بدري أكّدته الرحلة بالتفصيل.`
+      : `ومثير للاهتمام إن اللي اخترته مختلف عن طابعك اللي اكتشفته الرحلة (طابع ${escapeHtml(discovered)}). الفرق ده مش غلط — هو مساحة غنية بين صورتك عن نفسك واللي اتكشف لما نزلنا أعمق، وده بالظبط شغل الرحلة الكاملة.`;
+  }
+  return `
+    <hr class="fp-divider" />
+    <section class="fp-section">
+      <h2 class="fp-section__head">الطريقة اللي اخترتها بنفسك</h2>
+      <p class="fp-section__value">${escapeHtml(c.name)}</p>
+      <p class="fp-section__sub"><q>${escapeHtml(c.front)}</q></p>
+      ${ insight ? `<p class="fp-section__sub" style="margin-top:14px;">${insight}</p>` : "" }
+    </section>`;
+}
 
 /* ============================================================
    تصدير الوثيقة كـ PDF عبر html2pdf — مطابق للشاشة
