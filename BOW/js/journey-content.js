@@ -20,8 +20,8 @@ const CONTENT = {
     {
       id: 1,
       title: "البداية والأهمية والسؤال البسيط المؤثر",
-      duration: "٨ دقائق",
-      videoId: "",
+      duration: "22 دقيقة",
+      videoId: "1203298841",
       interaction: {
         type: "form",
         prompt: "ابدأ رحلتك",
@@ -86,7 +86,7 @@ const CONTENT = {
     {
       id: 3,
       title: "الاستراتيجية اللي بنيت بيها نجاحك",
-      duration: "١٥ دقيقة",
+      duration: "24 دقيقة",
       videoId: "1203281083",   // ← حُطّ id فيديو الفصل الجديد على Vimeo
             interaction: {
         type: "strategies-self",
