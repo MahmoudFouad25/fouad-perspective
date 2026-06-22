@@ -59,6 +59,8 @@
       door, flavor,
       fingerprint_name: window.BURNOUT_FINGERPRINTS[`${axis}_${flavor}`] || "",
       burnout_type: p.get("burnout") || "muhtariq",
+             choices: { station3_strategy: p.get("strat") || ("c" + flavor) },
+
       covenant: {
         line1: `محوري الرئيسي: ${window.AXIS_AR[axis] || ""}`,
         line2: p.get("l2") || "إن أنا ما أبانش ناقص",
