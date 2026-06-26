@@ -696,6 +696,21 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
 
     const model = { mirrorName: mirror.name, mirrorOrdinal: ord };
 
+    // ── نِسَب حضور المحاور (صورة هذه المرآة) — كما ظهرت في شاشة الترتيب، تُعرَض في كلّ الحالات ──
+    if(res && Array.isArray(res.ranking) && res.ranking.length){
+      const axisScoreR = {};
+      res.ranking.forEach(function(item){
+        if(!item || !item.axisId) return;
+        if(axisScoreR[item.axisId]===undefined || item.percent > axisScoreR[item.axisId])
+          axisScoreR[item.axisId] = item.percent;
+      });
+      const domAxisR = res.dominantAxis || (res.ranking[0] ? res.ranking[0].axisId : null);
+      const rankRows = mirror.axes.map(function(a){
+        return { name: a.name, percent: axisScoreR[a.id]||0, top: (a.id===domAxisR) };
+      }).sort(function(x,y){ return (y.percent - x.percent) || (x.top ? -1 : 1); });
+      model.ranking = { rows: rankRows, dominantName: axisName(domAxisR) };
+    }
+
    // إشارة ضعيفة أو غياب طيف → نصّ المرآة الضعيف (كما رآه العميل)
     const hasSpectrum = res && res.spectrum && Object.keys(res.spectrum).length;
     const isWeak = res && (res.scenario === 'weak' || (res.flags && res.flags.weakSignal));
