@@ -207,6 +207,22 @@
     inner += '<div class="mirror-tag">المرآة ' + esc(m.mirrorOrdinal || '') + ' — ' + esc(m.mirrorName || '') + '</div>';
     inner += '<div class="review-note">هذه قراءتك كما رأيتَها — نعيدها عليك كما هي، لا نكتب جديدًا.</div>';
 
+    // صورة هذه المرآة: نِسَب حضور المحاور (بنفس شكل شاشة الترتيب) — تظهر في كلّ الحالات
+    if(m.ranking && m.ranking.rows && m.ranking.rows.length){
+      var rankRowsHTML = m.ranking.rows.map(function(r){
+        return '<div class="rank-row' + (r.top ? ' top' : '') + '">'
+             +    '<span class="rank-axis">' + esc(r.name || '') + '</span>'
+             +    '<div class="rank-bar"><div class="rank-fill" style="width:' + (r.percent || 0) + '%"></div></div>'
+             +    '<span class="rank-pct">' + arabicNum(r.percent || 0) + '٪</span>'
+             +  '</div>';
+      }).join('');
+      inner += '<div class="review-ranking">'
+            +    '<div class="sr-axis">صورة هذه المرآة</div>'
+            +    '<div class="ranking">' + rankRowsHTML + '</div>'
+            +    (m.ranking.dominantName ? '<div class="dominant">المحور الأظهر: <strong>' + esc(m.ranking.dominantName) + '</strong></div>' : '')
+            +  '</div>';
+    }
+
     if(m.weakText){
       inner += '<div class="edu-block weak"><p>' + esc(m.weakText) + '</p></div>';
     } else {
