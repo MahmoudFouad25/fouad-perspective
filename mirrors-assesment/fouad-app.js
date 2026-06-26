@@ -600,10 +600,16 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         <div class="rest-check">${saved?'✓':'…'}</div>
         ${savedNote}
         ${retry}
-        <div class="home-actions"><button class="btn primary" id="backHome">رجوع للبيت</button></div>
+        <div class="rest-line subtle">قراءة هذه المرآة محفوظةٌ لك — تعود إليها متى شئت.</div>
+        <div class="home-actions">
+          <button class="btn ghost" id="reviewThis">راجع قراءة هذه المرآة</button>
+          <button class="btn primary" id="backHome">رجوع للبيت</button>
+        </div>
       </div>`);
 
     if(!saved){ const rb=document.getElementById('retrySave'); if(rb) rb.addEventListener('click', finishMirror); }
+    const rv = document.getElementById('reviewThis');
+    if(rv) rv.addEventListener('click', function(){ renderMirrorReview(state.mirrorId); });
     const hb = document.getElementById('backHome');
     if(hb) hb.addEventListener('click', renderHome);
   }
