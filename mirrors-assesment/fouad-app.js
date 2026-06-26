@@ -690,11 +690,31 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
 
     const model = { mirrorName: mirror.name, mirrorOrdinal: ord };
 
-    // إشارة ضعيفة أو غياب طيف → نصّ المرآة الضعيف (كما رآه العميل)
+    // المراجعة تطابق الحل تمامًا:
+    //  • لا طيف محفوظ إطلاقًا → نصّ الإشارة الضعيفة فقط (هذا كلّ ما رآه ساعتها).
     const hasSpectrum = res && res.spectrum && Object.keys(res.spectrum).length;
     const isWeak = res && (res.scenario === 'weak' || (res.flags && res.flags.weakSignal));
-    if(isWeak || !hasSpectrum){
+    if(!hasSpectrum){
       model.weakText = edu.weakSignal || '';
+      setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
+      wireReviewBack(); return;
+    }
+    //  • ضعيف + يوجد طيف → نصّ الإشارة الضعيفة فوق الطيف، وبلا شرح للمحور
+    //    (لأنّ الحل في الضعيف عرض الطيف دون axisIntro/door). نعرض الطيف فقط.
+    if(isWeak){
+      model.weakText = edu.weakSignal || '';
+      const spectraOnly = [];
+      Object.keys(res.spectrum).forEach(function(axisId){
+        const ac = (edu.axes && edu.axes[axisId]) || {};
+        const sp = res.spectrum[axisId];
+        spectraOnly.push({
+          axisName: axisName(axisId),
+          positionLabel: sp.positionLabel || '',
+          barHTML: RND().spectrumBar(sp),
+          text: (ac.spectrum || {})[sp.key] || ''
+        });
+      });
+      model.spectra = spectraOnly;   // طيف فقط، بلا blocks (مطابقةً للحل)
       setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
       wireReviewBack(); return;
     }
