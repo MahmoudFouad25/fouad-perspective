@@ -75,26 +75,40 @@
         return global.db.collection(COLLECTION).doc(userId);
     }
 
-    // ── هويّة العميل (نسخة مستقلّة: مفاتيح maqyas_ خاصّة بها على نفس الدومين) ──
+    // ── هويّة العميل (هويّة المنصّة المشتركة: نفس userId الذي تستخدمه باقي الدورات) ──
+    //   العميل يفتح الدورة وهو مسجَّل دخول على المنصّة، فنقرأ هويّته منها مباشرة.
+    //   نقرأ أوّلًا المفاتيح العاديّة، فإن لم توجد جرّبنا المخزّن المشفّر (SecureStorage).
     function getCurrentUser() {
         try {
-            var uid = localStorage.getItem('maqyas_userId');
+            var uid   = localStorage.getItem('userId');
+            var uname = localStorage.getItem('userName');
+            var uemail= localStorage.getItem('userEmail');
+
+            if (!uid) {
+                try {
+                    var ss = _getSecureStorage();
+                    uid    = ss.getItem('userId')    || uid;
+                    uname  = ss.getItem('userName')  || uname;
+                    uemail = ss.getItem('userEmail') || uemail;
+                } catch (e) { /* تجاهُل */ }
+            }
+
             if (uid) {
                 return {
                     id: uid,
-                    name: localStorage.getItem('maqyas_userName') || null,
-                    email: localStorage.getItem('maqyas_userEmail') || null,
+                    name: uname || null,
+                    email: uemail || null,
                     level: null,
                     status: 'active'
                 };
             }
             return null;
-        } catch (e) { console.error('[MAQYAS_STORE] getCurrentUser error:', e); return null; }
+        } catch (e) { console.error('[AXES_STORE] getCurrentUser error:', e); return null; }
     }
 
     function requireAuth(options) {
         options = options || {};
-        var loginPath = options.loginPath || 'index.html';
+        var loginPath = options.loginPath || '../login.html';
         var user = getCurrentUser();
         if (!user || !user.id) {
             try { window.location.href = loginPath; } catch (e) {}
