@@ -56,17 +56,35 @@
     l1Answers: { action:{}, longing:{}, critique:{} },
     ranking: null,
     primaryAxis: null,
-    l2Dims: [],        // أبعاد المحور الرئيسيّ (مسطّحة بعباراتها)
+    l2Dims: [],        // أبعاد المحور الجاري قياسه (مسطّحة بعباراتها)
     l2Index: 0,
-    l2Ratings: {},     // { dimId: [r,r,r] }
+    l2Ratings: {},     // { dimId: [r,r,r] } — تقييمات المحور الجاري (alias حيّ للمحور الجاري)
+    // ── قياس طيف محورين: الرئيسيّ + المكبوت (الوسط الذكيّ) ──
+    //   l2RatingsByAxis: تقييمات كل محور محفوظة منفصلةً بمعرّفه كي لا تتصادم.
+    //   l2Phase: أيّ محورٍ نقيس طيفه الآن — 'primary' ثمّ 'repressed'.
+    l2RatingsByAxis: {},   // { axisId: { dimId:[r,r,r] } }
+    l2Phase: 'primary',    // 'primary' | 'repressed'
+    l2Axis: null,          // المحور الجاري قياس طيفه (يُضبط في prepareL2)
     l3: [],            // عبارات الإحساس المسطّحة
     l3Index: 0,
     l3Answers: { tawaqud:[], hudur:[], imtila:[] },
-    burnout: null,
+    burnout: null,         // احتراق أبعاد المحور الرئيسيّ (كما كان — توافُق خلفيّ)
+    burnoutRepressed: null,// احتراق أبعاد المحور المكبوت (جديد — للتقاطع والقراءة)
     wellness: null,
     lean: null,
     forceRetake: false  // أمر إعادة التمرين من الأدمن
   };
+
+  /* المحور المكبوت كما رتّبه المحرّك (نقيس طيفه بعد الرئيسيّ). */
+  function repressedAxisId(){ return state.ranking ? state.ranking.repressedAxis : null; }
+
+  /* ربط alias الحيّ: state.l2Ratings يشير دائمًا لبكت المحور الجاري في l2RatingsByAxis،
+     فيظلّ كلّ كود العرض/الكاش/الاستئناف يعمل بلا تغيير على «المحور الجاري». */
+  function bindL2Axis(axisId){
+    state.l2Axis = axisId;
+    if(!state.l2RatingsByAxis[axisId]) state.l2RatingsByAxis[axisId] = {};
+    state.l2Ratings = state.l2RatingsByAxis[axisId];
+  }
 
   function root(){ return document.getElementById(state.rootId); }
   function setHTML(html){ var r = root(); if(!r) return; r.innerHTML = '<div class="ax-card">' + html + '</div>'; try{ window.scrollTo(0,0); }catch(e){} }
@@ -75,7 +93,8 @@
   function cache(){
     try{ STORE().cacheProgress({
       stage: state.stage, l1Answers: state.l1Answers,
-      l2Ratings: state.l2Ratings, l3Answers: state.l3Answers,
+      l2RatingsByAxis: state.l2RatingsByAxis, l2Phase: state.l2Phase,
+      l3Answers: state.l3Answers,
       primaryAxis: state.primaryAxis
     }); }catch(e){}
   }
@@ -193,10 +212,16 @@
     });
   }
 
-  /* ════════════════════ الطبقة الثانية — احتراق أبعاد المحور الرئيسيّ ════════════════════ */
+  /* ════════════════════ الطبقة الثانية — احتراق أبعاد المحور (الرئيسيّ ثمّ المكبوت) ════════════════════
+     نقيس طيف محورين بالتتابع: الرئيسيّ أوّلًا (l2Phase='primary')، ثمّ المكبوت
+     (l2Phase='repressed'). كلٌّ في بكت مستقلّ داخل l2RatingsByAxis، وstate.l2Ratings
+     يبقى alias حيًّا للمحور الجاري فيظلّ كود العرض/الكاش يعمل بلا أيّ تغيير. */
   function prepareL2(){
-    var axisL2 = Q().L2[state.primaryAxis] || {};
-    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === state.primaryAxis; });
+    if(state.l2Phase === 'primary') bindL2Axis(state.primaryAxis);
+    else                            bindL2Axis(repressedAxisId());
+
+    var axisL2 = Q().L2[state.l2Axis] || {};
+    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === state.l2Axis; });
     var dimOrder = cfgAxis ? cfgAxis.dimensions.map(function(d){ return d.id; }) : Object.keys(axisL2);
 
     state.l2Dims = [];
@@ -216,8 +241,23 @@
     var pos = state.l2Index + 1, pct = Math.round((state.l2Index/total)*100);
     var saved = (state.l2Ratings[s.dimId] && typeof state.l2Ratings[s.dimId][s.idx]==='number') ? state.l2Ratings[s.dimId][s.idx] : null;
 
-    // مقدّمة الطبقة الثانية: مرّةً واحدةً عند أوّل عبارة
-    var l2Intro = (state.l2Index === 0) ? RND().introBlock(INTROS().L2) : '';
+    // مقدّمة الطبقة الثانية: مرّةً واحدةً عند أوّل عبارة.
+    //   للمحور الرئيسيّ: المقدّمة المعتادة. للمكبوت: مقدّمة انتقالٍ تشرح أنّنا
+    //   ننظر الآن في اتجاهٍ آخر من طاقتك (الذي يعمل بهدوءٍ في الخلفيّة).
+    var l2Intro = '';
+    if(state.l2Index === 0){
+      if(state.l2Phase === 'repressed'){
+        var repName = BR().axisName(state.l2Axis);
+        l2Intro =
+            '<div class="ax-section-title">اتجاهٌ آخر في طاقتك</div>'
+          + '<p class="ax-p">نظرنا في المحور الأظهر. والآن ننظر في اتجاهٍ يعمل فيك بهدوء، '
+          + 'أبعد عن السطح — محور <strong>' + esc(repName) + '</strong>. '
+          + 'قيّم العبارات التالية بمقدار ما تشبه حالك هذه الفترة، لا ما تتمنّاه. '
+          + 'ما يظهر هنا غالبًا ألطف صوتًا، لكنّه يكمّل الصورة.</p>';
+      } else {
+        l2Intro = RND().introBlock(INTROS().L2);
+      }
+    }
 
     setHTML(
         '<div class="ax-progress-row">'
@@ -255,15 +295,42 @@
     });
   }
 
-  // الرجوع من ط٢: لو أوّل بند، نرجع لشاشة الكشف
+  // الرجوع من ط٢: أوّل بندٍ في المحور الرئيسيّ يرجع لشاشة الكشف؛
+  //   وأوّل بندٍ في المكبوت يرجع لآخر عبارةٍ في المحور الرئيسيّ.
   function l2Back(){
-    if(state.l2Index > 0){ state.l2Index--; cache(); renderL2(); }
-    else { renderAxisReveal(); }
+    if(state.l2Index > 0){ state.l2Index--; cache(); renderL2(); return; }
+    if(state.l2Phase === 'repressed'){
+      state.l2Phase = 'primary';
+      bindL2Axis(state.primaryAxis);
+      prepareL2Resume(9999); // آخر عبارة في طيف الرئيسيّ
+      return;
+    }
+    renderAxisReveal();
   }
 
   function computeBurnout(){
-    try{ state.burnout = ENG().computeDimensionBurnout(state.primaryAxis, state.l2Ratings); }
-    catch(e){ errorCard('تعذّر حساب الاحتراق: ' + e.message); return; }
+    if(state.l2Phase === 'primary'){
+      // احسب احتراق المحور الرئيسيّ من بكته المخصّص
+      try{ state.burnout = ENG().computeDimensionBurnout(state.primaryAxis, state.l2RatingsByAxis[state.primaryAxis] || {}); }
+      catch(e){ errorCard('تعذّر حساب الاحتراق: ' + e.message); return; }
+
+      // انتقل لقياس طيف المحور المكبوت (الوسط الذكيّ: رئيسيّ + مكبوت)
+      var rep = repressedAxisId();
+      if(rep && rep !== state.primaryAxis && Q().L2[rep]){
+        state.l2Phase = 'repressed';
+        prepareL2();         // يربط بكت المكبوت ويعرض مقدّمة الانتقال
+        return;
+      }
+      // لا مكبوت صالح للقياس (نادر) — تابع كما كان
+      state.burnoutRepressed = null;
+      prepareL3();
+      return;
+    }
+
+    // l2Phase === 'repressed' — احسب احتراق المحور المكبوت ثمّ تابع لخطّ العافية
+    var repAxis = repressedAxisId();
+    try{ state.burnoutRepressed = ENG().computeDimensionBurnout(repAxis, state.l2RatingsByAxis[repAxis] || {}); }
+    catch(e){ state.burnoutRepressed = null; } // لا نُسقط الرحلة لو تعثّر المكبوت
     prepareL3();
   }
 
@@ -326,17 +393,25 @@
     });
   }
 
-  // الرجوع من ط٣: لو أوّل بند، نرجع لآخر بند في ط٢
+  // الرجوع من ط٣: لو أوّل بند، نرجع لآخر بندٍ في آخر محورٍ قِيس طيفه
+  //   (المكبوت إن وُجد، وإلّا الرئيسيّ).
   function l3Back(){
-    if(state.l3Index > 0){ state.l3Index--; cache(); renderL3(); }
-    else {
-      // ارجع لآخر عبارة في ط٢
-      prepareL2Resume(state.l2Dims.length-1);
+    if(state.l3Index > 0){ state.l3Index--; cache(); renderL3(); return; }
+    var rep = repressedAxisId();
+    if(rep && rep !== state.primaryAxis && Q().L2[rep]){
+      state.l2Phase = 'repressed';
+      bindL2Axis(rep);
+    } else {
+      state.l2Phase = 'primary';
+      bindL2Axis(state.primaryAxis);
     }
+    prepareL2Resume(9999); // آخر عبارة في طيف ذلك المحور
   }
   function prepareL2Resume(idx){
-    var axisL2 = Q().L2[state.primaryAxis] || {};
-    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === state.primaryAxis; });
+    var axisId = state.l2Axis || state.primaryAxis;
+    bindL2Axis(axisId);
+    var axisL2 = Q().L2[axisId] || {};
+    var cfgAxis = (CFG().axes || []).find(function(a){ return a.id === axisId; });
     var dimOrder = cfgAxis ? cfgAxis.dimensions.map(function(d){ return d.id; }) : Object.keys(axisL2);
     state.l2Dims = [];
     dimOrder.forEach(function(dimId){
@@ -363,10 +438,19 @@
     setHTML('<div class="ax-centered"><div class="ax-spinner"></div><div class="ax-saving">نحفظ نتيجتك…</div></div>');
 
     var payload = {
-      answers: { L1: state.l1Answers, L2: state.l2Ratings, L3: state.l3Answers },
+      answers: {
+        L1: state.l1Answers,
+        // L2 يبقى تقييمات المحور الرئيسيّ (توافُق خلفيّ مع أيّ قارئ قديم)
+        L2: state.l2RatingsByAxis[state.primaryAxis] || {},
+        // L2ByAxis: تقييمات كل محورٍ قِيس طيفه (الرئيسيّ + المكبوت) — لإعادة الحساب والتقاطع
+        L2ByAxis: state.l2RatingsByAxis,
+        L3: state.l3Answers
+      },
       results: {
         ranking: state.ranking,
-        burnout: state.burnout,
+        burnout: state.burnout,                  // احتراق المحور الرئيسيّ (كما كان)
+        burnoutRepressed: state.burnoutRepressed, // احتراق المحور المكبوت (جديد — للتقاطع)
+        repressedAxis: repressedAxisId(),         // معرّف المحور المكبوت صراحةً
         wellness: state.wellness,
         primaryAxis: state.primaryAxis
       },
@@ -462,7 +546,13 @@
 
   function resumeFromCache(c){
     if(c.l1Answers) state.l1Answers = c.l1Answers;
-    if(c.l2Ratings) state.l2Ratings = c.l2Ratings;
+    // استرجاع التقييمات: الصيغة الجديدة (l2RatingsByAxis) أو القديمة (l2Ratings) للتوافق
+    if(c.l2RatingsByAxis && typeof c.l2RatingsByAxis === 'object'){
+      state.l2RatingsByAxis = c.l2RatingsByAxis;
+    } else if(c.l2Ratings && c.primaryAxis){
+      state.l2RatingsByAxis = {}; state.l2RatingsByAxis[c.primaryAxis] = c.l2Ratings;
+    }
+    if(c.l2Phase) state.l2Phase = c.l2Phase;
     if(c.l3Answers) state.l3Answers = c.l3Answers;
     if(c.primaryAxis) state.primaryAxis = c.primaryAxis;
 
@@ -478,12 +568,24 @@
     try{ state.ranking = ENG().computeAxisRanking(state.l1Answers); state.primaryAxis = state.ranking.primaryAxis; }
     catch(e){ renderIntro(); return; }
 
-    // هل بدأ ط٢؟
-    var axisL2 = Q().L2[state.primaryAxis] || {};
-    var anyL2 = Object.keys(state.l2Ratings).some(function(d){ return (state.l2Ratings[d]||[]).some(function(v){ return typeof v==='number'; }); });
-    if(!anyL2){ renderAxisReveal(); return; }
+    var rep = repressedAxisId();
+    var primRatings = state.l2RatingsByAxis[state.primaryAxis] || {};
+    var repRatings  = rep ? (state.l2RatingsByAxis[rep] || {}) : {};
+    function anyRated(obj){ return Object.keys(obj).some(function(d){ return (obj[d]||[]).some(function(v){ return typeof v==='number'; }); }); }
 
-    prepareL2(); // prepareL2 يحسب أوّل غير مقيّم تلقائيًّا
+    // لم يبدأ أيّ طيف بعد → شاشة الكشف
+    if(!anyRated(primRatings)){ state.l2Phase='primary'; renderAxisReveal(); return; }
+
+    // بدأ المكبوت (أو الصيغة تقول repressed) → استأنف طيف المكبوت
+    if(state.l2Phase === 'repressed' || anyRated(repRatings)){
+      state.l2Phase = 'repressed';
+      prepareL2(); // يربط بكت المكبوت ويحسب أوّل غير مقيّم
+      return;
+    }
+
+    // ما زلنا في طيف الرئيسيّ
+    state.l2Phase = 'primary';
+    prepareL2();
   }
 
   // إعادة تصفير الحالة لتمرينٍ جديد
@@ -492,8 +594,9 @@
     state.l1Index=0; state.l1Answers={ action:{}, longing:{}, critique:{} };
     state.ranking=null; state.primaryAxis=null;
     state.l2Dims=[]; state.l2Index=0; state.l2Ratings={};
+    state.l2RatingsByAxis={}; state.l2Phase='primary'; state.l2Axis=null;
     state.l3=[]; state.l3Index=0; state.l3Answers={ tawaqud:[], hudur:[], imtila:[] };
-    state.burnout=null; state.wellness=null; state.lean=null;
+    state.burnout=null; state.burnoutRepressed=null; state.wellness=null; state.lean=null;
     try{ STORE().clearCache(state.user && state.user.id); }catch(e){}
   }
 
@@ -535,6 +638,7 @@
           state.ranking      = data.results.ranking;
           state.primaryAxis  = data.results.primaryAxis || data.results.ranking.primaryAxis;
           state.burnout      = data.results.burnout;
+          state.burnoutRepressed = data.results.burnoutRepressed || null;
           state.wellness     = data.results.wellness;
           state.lean         = data.lean || null;
           renderResult();
