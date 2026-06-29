@@ -136,9 +136,55 @@
     window.addEventListener("scroll", onScroll, { passive: true });
   }
 
+  /* ── بناء رحلة العزم الحيّة (٨ نقط بتتوهّج للقرار) ── */
+  function renderAzmJourney() {
+    const g = document.getElementById("azmDots");
+    if (!g) return;
+    const NS = "http://www.w3.org/2000/svg";
+    const N = 8;
+    for (let i = 0; i < N; i++) {
+      const x = 660 - (620 / (N - 1)) * i;   // RTL: من اليمين للشمال
+      const isLast = i === N - 1;
+      const r = isLast ? 13 : 6;
+      const fill = isLast ? "url(#azmFinal)" : (i < 4 ? "#57D2C4" : "#E5B567");
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", x); c.setAttribute("cy", 60); c.setAttribute("r", r);
+      c.setAttribute("fill", fill); c.setAttribute("class", "azm-dot");
+      g.appendChild(c);
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", x); t.setAttribute("y", 88);
+      t.setAttribute("fill", isLast ? "#E5B567" : "#7F979C");
+      t.setAttribute("font-size", "12"); t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-family", "'Readex Pro', sans-serif");
+      if (isLast) t.setAttribute("font-weight", "600");
+      t.textContent = isLast ? "القرار" : toAr(i + 1);
+      g.appendChild(t);
+    }
+
+    const viz = document.querySelector(".azm-viz");
+    if (!viz) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const lightUp = () => {
+      const dots = viz.querySelectorAll(".azm-dot");
+      if (reduce) { dots.forEach((d) => d.classList.add("lit")); return; }
+      dots.forEach((d, i) => setTimeout(() => d.classList.add("lit"), 1200 + i * 350));
+    };
+    if ("IntersectionObserver" in window && !reduce) {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) { lightUp(); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.3 });
+      io.observe(viz);
+    } else {
+      lightUp();
+    }
+  }
+
   function init() {
     renderMirrors();
     renderStations();
+    renderAzmJourney();
     setupReveal();
     setupNav();
     setupStickyBar();
