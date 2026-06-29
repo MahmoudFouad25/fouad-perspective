@@ -121,6 +121,13 @@
     const span = primary && repressed ? (primary.action - repressed.action) : 0;
     const weakSignal = span < DIFF_GAP;
 
+    // علم التقارب: الرئيسيّ والفرعيّ متقاربان بفارقٍ ضئيل في الفعل → المحور الرئيسيّ
+    // نفسه غير محسوم. نُبرز الفرعيّ كمرشّحٍ صريحٍ للعرض (نظير dualAxis في المرايا).
+    let closeTop = false;
+    if (primary && secondary) {
+      closeTop = (primary.action - secondary.action) <= DIFF_GAP;
+    }
+
     return {
       ranking: order,                               // مرتّبة تنازليًّا بالفعل
       primaryAxis:   primary ? primary.axisId : null,
@@ -128,6 +135,8 @@
       repressedAxis: repressed ? repressed.axisId : null,
       repressedConfirmed: repressedConfirmed,
       weakSignal: weakSignal,
+      closeTop: closeTop,                           // تقارب الرئيسيّ/الفرعيّ — يُعرَضان معًا
+      closeTopCandidate: closeTop && secondary ? secondary.axisId : null,
       sums: { action: actionSum, longing: longingSum, critique: critiqueSum }
     };
   }
