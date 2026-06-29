@@ -83,7 +83,7 @@ window.COURSE_CONFIG = {
   launchOffer: {
     enabled: true,
     name: "عرض الإطلاق",
-    endDate: "2026-07-31",     // ⚠️ غيّره للتاريخ الفعلي لانتهاء العرض
+    endDate: "2026-07-07",     // ⚠️ غيّره للتاريخ الفعلي لانتهاء العرض
     showCountdown: true,
   },
 
@@ -94,7 +94,7 @@ window.COURSE_CONFIG = {
        تشغّله؟ خلّي enabled:true وحدّد النسبة.
      ────────────────────────────────────────────────────────────────────── */
   cashDiscount: {
-    enabled: false,
+    enabled: true,
     percentage: 10,
   },
 
@@ -151,7 +151,7 @@ window.COURSE_CONFIG = {
        والاستمارة بتترفع لنفس مسار tempBookings (bookingType: grant_request).
      ────────────────────────────────────────────────────────────────────── */
   grant: {
-    enabled: false,
+    enabled: true,
     maxDiscountPercent: 90,
   },
 };
