@@ -432,8 +432,8 @@
         if (!snap.empty) {
           const doc = snap.docs[0];
           const data = doc.data();
-          if (data.status === "used")    { swal("error", "كود مستخدم", "الكود ده اتستخدم قبل كده."); return; }
-          if (data.status === "expired") { swal("error", "كود منتهي", "الكود ده انتهت صلاحيته."); return; }
+          if (data.status === "disabled" || data.status === "expired") { swal("error", "كود معطّل", "الكود ده مش متاح حالياً."); return; }
+          if (data.limit && (data.used || 0) >= data.limit) { swal("error", "نفد الكود", "الكود ده وصل للحد الأقصى للاستخدام."); return; }
           validCoupon = {
             id: doc.id, code: data.code,
             type: data.type || "fixed", value: data.value || 0,
@@ -963,9 +963,8 @@
           try {
             await db.collection("coupons").doc(fullRecord.coupon.id).update({
               used: firebase.firestore.FieldValue.increment(1),
-              status: "used",
               usedAt: firebase.firestore.FieldValue.serverTimestamp(),
-              bookingId: docRef.id,
+              lastBookingId: docRef.id,
             });
           } catch (e) { console.warn("Coupon update failed:", e); }
         }
