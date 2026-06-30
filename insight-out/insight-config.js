@@ -108,12 +108,12 @@ window.COURSE_CONFIG = {
     {
       name: "تقسيط على دفعتين",
       installments: 2,
-      firstPaymentPercent: 50,
+      firstPaymentPercent: 0,
     },
     {
       name: "تقسيط على ٣ دفعات",
       installments: 3,
-      firstPaymentPercent: 40,
+      firstPaymentPercent: 0,
     },
   ],
 
