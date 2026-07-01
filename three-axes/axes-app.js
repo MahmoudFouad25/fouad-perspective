@@ -100,18 +100,62 @@
   }
 
   /* ════════════════════ التمهيد ════════════════════ */
+  /* ────────────────────────────────────────────────────────────────────────
+   (١) استبدل دالة renderIntro القديمة بالكامل بهذه.
+   الفرق:
+     • تفتح بشاشة ترحيب كاملة (welcome) تشرح «ده إيه وهيطلّعلي إيه».
+     • بعدها زرّ «يلا نبدأ» ينقل لشاشة «إزاي تجاوب» (opening) ثمّ الأسئلة.
+     • لغةٌ منقّاة: «وين بتتعب» بدل «أين تحترق».
+   ──────────────────────────────────────────────────────────────────────── */
   function renderIntro(){
     state.stage = 'intro'; cache();
+    // المرحلة الأولى: شاشة الترحيب — تعريف المقياس كلّه
     setHTML(
-        '<div class="ax-tag">مقياس المحاور — اتجاه طاقتك</div>'
-      + '<div class="ax-core">قبل أن نعرف أين تحترق، نعرف أين تتّجه طاقتك. أجب من تجربتك الحقيقيّة, لا ممّا تتمنّاه — أصدق إجاباتك أنفعها لك.</div>'
-      + RND().introBlock(INTROS().opening)
-      + '<div class="ax-reminder">لا توجد إجابة صحيحة. قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا. وتقدر ترجع للسؤال السابق في أيّ وقت.</div>'
-      + '<button class="ax-btn primary" id="axStart">ابدأ</button>'
+        '<div class="ax-tag">مقياس مسارات الطاقة الثلاثة</div>'
+      + '<div class="ax-core">خريطةٌ لاتجاه طاقتك: وين رايحة، شغّالة إزاي، ووين بتحسّ إنّك بتتعب.</div>'
+      + RND().introBlock(INTROS().welcome)
+      + '<button class="ax-btn primary" id="axWelcomeNext">يلا نبدأ ►</button>'
     );
+    document.getElementById('axWelcomeNext').addEventListener('click', renderHowTo);
+  }
+ 
+  /* المرحلة الثانية من التمهيد: «إزاي تجاوب» ثمّ الدخول للأسئلة */
+  function renderHowTo(){
+    state.stage = 'intro'; cache();
+    setHTML(
+        '<div class="ax-tag">قبل ما نبدأ</div>'
+      + '<div class="ax-core">تلات حاجات بسيطة تخلّي خريطتك تطلع حقيقيّة.</div>'
+      + RND().introBlock(INTROS().opening)
+      + '<div class="ax-reminder">مفيش إجابة صحّ وإجابة غلط. قيّم كل وصف بقدر ما يشبهك فعلًا. وتقدر ترجع للسؤال السابق في أيّ وقت، وتوقف وترجع تكمّل وقت ما تحب.</div>'
+      + '<div class="ax-nav-row">'
+      +   '<button class="ax-btn ghost" id="axBackWelcome">◄ رجوع</button>'
+      +   '<button class="ax-btn primary" id="axStart">ابدأ المرحلة الأولى ►</button>'
+      + '</div>'
+    );
+    document.getElementById('axBackWelcome').addEventListener('click', renderIntro);
     document.getElementById('axStart').addEventListener('click', function(){
-      state.stage = 'l1'; state.l1Index = 0; renderL1();
+      state.stage = 'l1'; state.l1Index = 0; cache(); renderL1();
     });
+  }
+ 
+ 
+/* ────────────────────────────────────────────────────────────────────────
+   (٢) رسالة العودة — لمن يكمّل من حيث وقف.
+   في دالة resumeFromCache، أضف هذا السطر في أوّلها (قبل استرجاع الإجابات)،
+   بحيث يُعرَض ترحيبٌ بالعودة لثانيةٍ ثمّ يتابع تلقائيًّا لمكان التوقّف.
+ 
+   البديل الأنظف (المطبَّق هنا): اعرض شاشة عودةٍ بزرّ «كمّل»، فلا نقفز
+   بالعميل فجأةً إلى منتصف الأسئلة دون أن يعرف أنّه عائد.
+   ──────────────────────────────────────────────────────────────────────── */
+  function renderResumeWelcome(continueFn){
+    state.stage = 'intro';
+    setHTML(
+        '<div class="ax-tag">أهلًا بيك تاني</div>'
+      + '<div class="ax-core">كمّل من نفس المكان اللي وقفت فيه.</div>'
+      + RND().introBlock(INTROS().resume)
+      + '<button class="ax-btn primary" id="axResumeGo">كمّل من مكاني ►</button>'
+    );
+    document.getElementById('axResumeGo').addEventListener('click', continueFn);
   }
 
   /* ════════════════════ الطبقة الأولى — تحديد المحور ════════════════════ */
@@ -534,6 +578,12 @@
     return list.length;
   }
 
+ /* ════════════════════════════════════════════════════════════════════════
+   استبدل دالة resumeFromCache القديمة بالكامل بهذه النسخة.
+   الفرق الوحيد: بدل ما تقفز بالعميل فجأةً لمنتصف الأسئلة، تعرض شاشة عودة
+   ترحيبيّة أوّلًا («أهلًا بيك تاني — كمّل من مكانك»)، وبزرّ واحد يكمّل من
+   حيث وقف بالظبط. كل نقاط الاستئناف (ط١/ط٢/ط٣) مغلّفة بنفس الشاشة.
+   ════════════════════════════════════════════════════════════════════════ */
   function resumeFromCache(c){
     if(c.l1Answers) state.l1Answers = c.l1Answers;
     // استرجاع التقييمات: الصيغة الجديدة (l2RatingsByAxis) أو القديمة (l2Ratings) للتوافق
@@ -552,7 +602,11 @@
       var e = state.l1[i];
       if(!l1Complete(e.block, e.item)){ firstUn = i; break; }
     }
-    if(firstUn !== -1){ state.stage='l1'; state.l1Index = firstUn; renderL1(); return; }
+    if(firstUn !== -1){
+      state.stage='l1'; state.l1Index = firstUn;
+      renderResumeWelcome(function(){ renderL1(); });
+      return;
+    }
 
     // ط١ مكتملة — احسب الترتيب ثمّ تابع من حيث وصل
     try{ state.ranking = ENG().computeAxisRanking(state.l1Answers); state.primaryAxis = state.ranking.primaryAxis; }
@@ -563,19 +617,23 @@
     var repRatings  = rep ? (state.l2RatingsByAxis[rep] || {}) : {};
     function anyRated(obj){ return Object.keys(obj).some(function(d){ return (obj[d]||[]).some(function(v){ return typeof v==='number'; }); }); }
 
-    // لم يبدأ أيّ طيف بعد → شاشة الكشف
-    if(!anyRated(primRatings)){ state.l2Phase='primary'; renderAxisReveal(); return; }
-
-    // بدأ المكبوت (أو الصيغة تقول repressed) → استأنف طيف المكبوت
-    if(state.l2Phase === 'repressed' || anyRated(repRatings)){
-      state.l2Phase = 'repressed';
-      prepareL2(); // يربط بكت المكبوت ويحسب أوّل غير مقيّم
+    // لم يبدأ أيّ طيف بعد → شاشة الكشف (بعد ترحيب العودة)
+    if(!anyRated(primRatings)){
+      state.l2Phase='primary';
+      renderResumeWelcome(function(){ renderAxisReveal(); });
       return;
     }
 
-    // ما زلنا في طيف الرئيسيّ
+    // بدأ المكبوت → استأنف طيف المكبوت (بعد ترحيب العودة)
+    if(state.l2Phase === 'repressed' || anyRated(repRatings)){
+      state.l2Phase = 'repressed';
+      renderResumeWelcome(function(){ prepareL2(); });
+      return;
+    }
+
+    // ما زلنا في طيف الرئيسيّ (بعد ترحيب العودة)
     state.l2Phase = 'primary';
-    prepareL2();
+    renderResumeWelcome(function(){ prepareL2(); });
   }
 
   // إعادة تصفير الحالة لتمرينٍ جديد
