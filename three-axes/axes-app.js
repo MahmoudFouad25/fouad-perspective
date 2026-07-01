@@ -465,64 +465,54 @@
     }).catch(function(){ renderResult(); });
   }
 
+  /* ════════════════════════════════════════════════════════════════════════
+   تعديل renderResult في axes-app.js
+   ────────────────────────────────────────────────────────────────────────
+   استبدل دالة renderResult القديمة بالكامل بهذه النسخة.
+   هي تُطلق رحلة التقرير الجديدة (AXES_JOURNEY_CONTROLLER) بدل الشاشة القديمة،
+   وتمرّر لها نتيجة العميل كاملةً، وتحافظ على منطق الإتمام (onAxesComplete).
+
+   ملاحظة: لم نعد نستعمل br.* ولا rnd.resultScreen هنا — العرض كلّه صار داخل
+   الرحلة. الدوال القديمة تبقى في الملفّ دون ضرر (لا تُستدعى).
+   ════════════════════════════════════════════════════════════════════════ */
+
   function renderResult(){
     state.stage = 'result';
-    var br = BR(), rnd = RND(), cfg = CFG();
-
-    var primaryAxis   = state.primaryAxis;
-    var secondaryAxis = state.ranking.secondaryAxis;
-    var repressedAxis = state.ranking.repressedAxis;
-
-    // البُعد المحترق وشكله
-    var burnedDim   = state.burnout ? state.burnout.burnedDim : null;
-    var burnedShape = state.burnout ? state.burnout.burnedShape : null;
-
-    // شريط الطيف لأبرز بُعد (المحترق، أو أوّل بُعد لو كله متّزن)
-    var spDim = burnedDim || (state.burnout && Object.keys(state.burnout.dimensions)[0]);
-    var spObj = (state.burnout && spDim) ? state.burnout.dimensions[spDim] : null;
-    var spectrumBarHTML = spObj ? rnd.spectrumBar({ position: spObj.position, positionLabel: spObj.positionLabel }) : '';
-
-    // تطابق المستوى الأشدّ نزيفًا مع مستوى المحور الرئيسيّ؟
-    var matched = state.lean ? state.lean.matched : null;
-    var worstLevel = state.wellness ? state.wellness.worstLevel : null;
-
-    // خطّ العافية: ثلاث نقاط
-    var levelMap = { tawaqud:'التوقّد', hudur:'الحضور', imtila:'الامتلاء' };
-    var wl = state.wellness ? state.wellness.wellnessPoint : {};
-    var points = ['tawaqud','hudur','imtila'].map(function(lvl){
-      return { name: levelMap[lvl], wellness: wl[lvl], isWorst: (lvl === worstLevel) };
-    });
-
-    var model = {
-      openingTitle: br.opening().title,
-      openingBody:  br.opening().body,
-      primaryPara:  br.primaryParagraph(primaryAxis),
-      secondaryPara:br.secondaryParagraph(secondaryAxis),
-      repressedSeed:br.repressedSeed(repressedAxis),
-      burnedDimName: burnedDim ? br.dimName(primaryAxis, burnedDim) : '',
-      burnedShapeLabel: burnedDim ? br.shapeLabel(primaryAxis, burnedDim, burnedShape) : '',
-      burnedPara:   br.burnedDimensionParagraph(primaryAxis, burnedDim, burnedShape),
-      spectrumBarHTML: spectrumBarHTML,
-      bridge:       br.buildBridge(primaryAxis, burnedDim, burnedShape, matched),
-      burnoutNarrative: br.burnoutNarrative(worstLevel),
-      wellnessHTML: rnd.wellnessLine(points),
-      closingBody:  br.closing().body,
-      practice:      burnedDim ? br.recoveryPractice(primaryAxis, burnedDim, burnedShape) : br.recoveryPractice(primaryAxis, null, null),
-      practiceIntro: br.practiceIntro()
-    };
 
     var r = root();
-    if(r) r.innerHTML = '<div class="ax-card ax-result">' + rnd.resultScreen(model) + '</div>';
-    try{ window.scrollTo(0,0); }catch(e){}
+    if(!r) return;
 
-    var pb = document.getElementById('axPrint');
-    if(pb) pb.addEventListener('click', function(){ window.print(); });
-    var db = document.getElementById('axDone');
-    if(db) db.addEventListener('click', function(){
-      // نقطة وصلٍ مع حاوية reignite (الأدمن يقرّر ما بعدها)
-      if(typeof window.onAxesComplete === 'function') window.onAxesComplete(state.lean);
-      renderDone();
-    });
+    // مُلّاذ الوصول لمتحكّم الرحلة
+    var CTRL = (typeof AXES_JOURNEY_CONTROLLER !== 'undefined')
+      ? AXES_JOURNEY_CONTROLLER
+      : (window.AXES_JOURNEY_CONTROLLER || null);
+
+    // نتيجة العميل كاملةً — كما جهّزها المحرّك وحُفظت في الـstate
+    var result = {
+      ranking:          state.ranking,
+      burnout:          state.burnout,           // احتراق المحور الأقوى
+      burnoutRepressed: state.burnoutRepressed,  // احتراق المحور المنسيّ
+      wellness:         state.wellness,          // خطّ النزيف
+      lean:             state.lean               // تطابق النزيف (للمجوّع)
+    };
+
+    // احتياط: لو لم يُحمّل متحكّم الرحلة، لا نكسر التجربة
+    if(!CTRL || typeof CTRL.start !== 'function'){
+      errorCard('تعذّر تحميل عرض التقرير. حدّث الصفحة أو راجع تحميل ملفّات الرحلة.');
+      return;
+    }
+
+    // نقطة الإتمام: تُستدعى عند بلوغ التقرير الكامل (آخر الرحلة)
+    function handleComplete(){
+      if(typeof window.onAxesComplete === 'function'){
+        try{ window.onAxesComplete(state.lean); }catch(e){}
+      }
+    }
+
+    // أطلق الرحلة داخل جذر المقياس
+    CTRL.start(r, result, { onComplete: handleComplete });
+
+    try{ window.scrollTo(0,0); }catch(e){}
   }
 
   function renderDone(){
