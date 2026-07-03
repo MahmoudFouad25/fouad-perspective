@@ -54,23 +54,33 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
   }
   // محرّك التقرير الذاتيّ (report-engine.js) — يُحمَّل بعد mirrors-config.js
   function REP(){ return (typeof FOUAD_REPORT_ENGINE !== 'undefined') ? FOUAD_REPORT_ENGINE : window.FOUAD_REPORT_ENGINE; }
+  // محتوى رحلة الفهم (fouad-journey-content.js) ومحرك رحلة التقرير (fouad-journey.js)
+  function JC(){ return (typeof FOUAD_JOURNEY_CONTENT !== 'undefined') ? FOUAD_JOURNEY_CONTENT : window.FOUAD_JOURNEY_CONTENT; }
+  function JR(){ return (typeof FOUAD_JOURNEY !== 'undefined') ? FOUAD_JOURNEY : window.FOUAD_JOURNEY; }
+
+  // اسم العرض للمرآة (المعرفات الداخلية لا تتغير؛ «الجروح» تُعرض «الجذر الخفي»)
+  function mirrorDisplayName(name){
+    const map = (JC() && JC().mirrorDisplay) || {};
+    return map[name] || name;
+  }
+
+  // صيغة المخاطبة وشاشة الترحيب (تفضيلات محلية بمعرف العميل)
+  function genderKey(){  return 'fouad_v2_gender_'  + ((state.user && state.user.id) || ''); }
+  function welcomeKey(){ return 'fouad_v2_welcome_' + ((state.user && state.user.id) || ''); }
+  function getGender(){  try{ return localStorage.getItem(genderKey()) || ''; }catch(e){ return ''; } }
+  function setGender(v){ try{ localStorage.setItem(genderKey(), v || ''); }catch(e){ /* تجاهُل */ } }
+  function welcomeDone(){ try{ return localStorage.getItem(welcomeKey()) === '1'; }catch(e){ return false; } }
+  function markWelcomeDone(){ try{ localStorage.setItem(welcomeKey(), '1'); }catch(e){ /* تجاهُل */ } }
 
   // ── أدوات صغيرة ──
   const ORDINALS = {1:'الأولى',2:'الثانية',3:'الثالثة',4:'الرابعة',5:'الخامسة',6:'السادسة',7:'السابعة'};
   function arabicNum(n){ const m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,d=>m[+d]); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-  // ── النصوص الثابتة الوحيدة في التقرير: نبرة «مرآة لا محكمة» (لا أرقام) ──
-  const REPORT_TEXT = {
-    openingTitle: 'قبل أن تقرأ',
-    opening: `قبل أيّ كلمةٍ تقرؤها هنا، نضع شيئًا في موضعه: قيمتك ثابتةٌ قبل هذا التقرير وبعده، لا يرفعها سطرٌ فيه ولا يخفضها. ما بين يديك مرآةٌ لا محكمة — تعيد عليك ما رأيته في رحلتك عبر المرايا، مرتّبًا في صورةٍ واحدة، لا لتحكم عليك بل لتراك. وما من نتيجةٍ هنا تُعرِّفك تعريفًا نهائيًّا؛ هي قراءةٌ لِلَحظتك التي أجبتَ فيها، تتحرّك معك حين تتحرّك. اقرأها بالهدوء الذي تُقرأ به مرآة: تنظر، وتتأمّل، ثمّ تمضي.`,
-    closingTitle: 'بعد أن قرأت',
-    closing: `ما قرأته صورةٌ لِما هو حاضرٌ فيك الآن، لا حكمًا على ما ستكونه. المواضع التي بدت متّزنةً نعمةٌ تُشكَر، والتي بدت مائلةً ليست عيبًا تُدان عليه، هي أبوابٌ تعرف الآن أين تقف منها. وأصدق ما يُفعَل بمرآةٍ كهذه أن تُترَك تعمل بهدوء: تعود إليها حين تنضج، أو تأخذ ما استوقفك منها إلى جلسةٍ هادئةٍ مع مَن يُحسن أن يصغي ويسأل. قيمتك — كما بدأنا — ثابتةٌ، والطريق مفتوح.`,
-    partialNote: `هذه صورةٌ جزئيّةٌ بُنيت على ما أتممتَه من المرايا حتى الآن؛ تكتمل حين تكتمل بقيّتها.`
-  };
+  // تطبيع عرضي: الشرطة الطويلة في النصوص المصدرية القديمة → فاصلة منقوطة (عرض فقط)
+  function noDash(t){ return String(t==null?'':t).replace(/\s*—\s*/g, '؛ '); }
 
   // أسماء عرض مواقع الطيف (بالهويّة، لا حسم لأيّ تعادل)
-  const POS_LABEL = { balance:'اتزان', excess:'إفراط', deficit:'تفريط', ambiguous:'التباس' };
+  const POS_LABEL = { balance:'وسطية', excess:'إفراط', deficit:'تفريط', ambiguous:'لم يستقر بعد' };
 
   const $app = () => document.getElementById('app');
   function setHTML(html){ const a=$app(); if(!a) return; a.innerHTML = html; window.scrollTo(0,0); }
@@ -269,7 +279,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const m = state.mirror, ord = ORDINALS[m.order] || arabicNum(m.order);
     setHTML(`
       <div class="card intro">
-        <div class="mirror-tag">المرآة ${ord} — ${esc(m.name)}</div>
+        <div class="mirror-tag">المرآة ${ord}: ${esc(mirrorDisplayName(m.name))}</div>
+        ${m.id==='mirror1' ? `<p class="founding-line">${esc(JC().mirror1Founding)}</p>` : ''}
         <div class="core-question">${esc(m.coreQuestion)}</div>
         <div class="reminder">ستجيب من تجربتك الحقيقيّة. لا توجد إجابة صحيحة. أصدق إجاباتك أنفعها لك.</div>
         <button class="btn primary" id="startBtn">ابدأ</button>
@@ -315,7 +326,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
         </div>
         <div class="question-text">${esc(q.text)}</div>
-        <div class="reminder">قيّم كلّ وصفٍ بمقدار ما يشبهك فعلًا — لا تختر واحدًا، فقد تشبهك أكثر من زاوية.</div>
+        <div class="reminder">قيّم كل وصف بمقدار ما يشبهك فعلًا؛ لا تختر واحدًا، فقد تشبهك أكثر من زاوية.</div>
         <div class="id-options">${opts}</div>
         <div class="id-nav" style="display:flex; gap:12px; margin-top:8px;">
           ${state.qIndex>0 ? '<button class="btn ghost" id="idPrev">السابق</button>' : ''}
@@ -407,9 +418,10 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     setHTML(`
       <div class="card">
         <div class="section-title">صورة هذه المرآة</div>
-        <p class="lead">يميل سلوكك في هذه المرآة إلى محورٍ أظهر من غيره. هذه نسبة حضور كلّ محورٍ في إجاباتك:</p>
+        <p class="lead">${esc(JC().ranking.intro)}</p>
         <div class="ranking">${rows}</div>
-        <div class="dominant">المحور الأظهر: <strong>${esc(axisName(state.dominantAxis))}</strong></div>
+        <div class="dominant">${esc(JC().ranking.dominantLabel)}: <strong>${esc(axisName(state.dominantAxis))}</strong></div>
+        <p class="lead subtle-lead">${esc(JC().ranking.explain)}</p>
         <button class="btn primary" id="toEdu">تابِع</button>
       </div>`);
     document.getElementById('toEdu').addEventListener('click', ()=>{ state.stage='education'; cache(); renderEducation(); });
@@ -421,18 +433,18 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const mirror = state.mirror;
     const axisName = id => { const a=mirror.axes.find(x=>x.id===id); return a?a.name:id; };
     const sc = state.scenario.scenario;
-    const title = (sc==='weak') ? 'إشارة هذه المرآة'
-                : (sc==='dual') ? 'بابان متقاربان' : 'باب المحور الأظهر';
+    const title = (JC().eduTitles && JC().eduTitles[sc]) || 'التعرف على طريقتك';
 
     let inner = '';
+    if(sc === 'dual') inner += `<p class="lead">${esc(JC().dualNote)}</p>`;
     blocks.forEach(b=>{
-      if(b.type==='weak'){ inner += `<div class="edu-block weak"><p>${esc(b.text)}</p></div>`; }
+      if(b.type==='weak'){ inner += `<div class="edu-block weak"><p>${esc(noDash(b.text))}</p></div>`; }
       else {
         inner += `<div class="edu-block door">`;
         inner += `<div class="edu-axis-name">${esc(axisName(b.axisId))}</div>`;
-        if(b.axisIntro)    inner += `<p class="edu-intro">${esc(b.axisIntro)}</p>`;
-        if(b.afterRanking) inner += `<p class="edu-after">${esc(b.afterRanking)}</p>`;
-        if(b.rooting)      inner += `<div class="edu-rooting"><div class="edu-rooting-tag">في الأصل</div><p>${esc(b.rooting)}</p></div>`;
+        if(b.axisIntro)    inner += `<p class="edu-intro">${esc(noDash(b.axisIntro))}</p>`;
+        if(b.afterRanking) inner += `<p class="edu-after">${esc(noDash(b.afterRanking))}</p>`;
+        if(b.rooting)      inner += `<div class="edu-rooting"><div class="edu-rooting-tag">في الأصل</div><p>${esc(noDash(b.rooting))}</p></div>`;
         inner += `</div>`;
       }
     });
@@ -454,10 +466,10 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
 
     setHTML(`
       <div class="card">
-        <div class="section-title">تعميق القراءة</div>
-        <p class="lead">عرفتَ المحور الأظهر. الآن نتعمّق فيه قليلًا.</p>
-        <p class="edu-intro">ستقرأ ${arabicNum(count)} عباراتٍ تخصّ ${esc(namesText)}، وتقيّم كلّ عبارةٍ على مقياسٍ من ١ إلى ٧ بحسب ما تراه أقرب إلى حقيقتك — لا إلى ما تتمنّاه.</p>
-        <p class="reminder">قيّم على سجيّتك. لا توجد إجابة صحيحة، والقراءة تكتمل بعد أن تنتهي.</p>
+        <div class="section-title">${esc(JC().spectrumIntro.title)}</div>
+        <p class="edu-intro">${esc(JC().spectrumIntro.body)}</p>
+        <p class="lead">${esc(JC().spectrumIntro.note)}</p>
+        <p class="reminder">${esc(JC().spectrumIntro.task.replace('{n}', arabicNum(count)))}</p>
         <button class="btn primary" id="startSpectrum">ابدأ التقييم</button>
       </div>`);
     document.getElementById('startSpectrum').addEventListener('click', ()=>{
@@ -518,14 +530,14 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       const bar = RND() ? RND().spectrumBar(sp) : '';
       inner += `
         <div class="spectrum-result" style="border-inline-start-color:${color}">
-          <div class="sr-axis" style="color:${color}">${esc(axisName(ax))} — ${esc(sr.result.positionLabel||'')}</div>
+          <div class="sr-axis" style="color:${color}">${esc(axisName(ax))}: ${esc(POS_LABEL[sr.result.position] || '')}</div>
           ${bar}
-          <p class="sr-text">${esc(sr.text)}</p>
+          <p class="sr-text">${esc(noDash(sr.text))}</p>
         </div>`;
     });
     setHTML(`
       <div class="card">
-        <div class="section-title">قراءة الطيف</div>
+        <div class="section-title">${esc(JC().spectrumResultTitle)}</div>
         ${inner}
         <button class="btn primary" id="finishMirror">أنهِ المرآة</button>
       </div>`);
@@ -600,10 +612,10 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
         <div class="rest-check">${saved?'✓':'…'}</div>
         ${savedNote}
         ${retry}
-        <div class="rest-line subtle">قراءة هذه المرآة محفوظةٌ لك — تعود إليها متى شئت.</div>
+        <div class="rest-line subtle">${esc(JC().rest.savedLine)}</div>
         <div class="home-actions">
-          <button class="btn ghost" id="reviewThis">راجع قراءة هذه المرآة</button>
-          <button class="btn primary" id="backHome">رجوع للبيت</button>
+          <button class="btn ghost" id="reviewThis">${esc(JC().rest.reviewBtn)}</button>
+          <button class="btn primary" id="backHome">${esc(JC().rest.homeBtn)}</button>
         </div>
       </div>`);
 
@@ -645,7 +657,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       else if(id===next && mirrorHasCache(id)) status = 'active';   // مرآةٌ جاريّة (تقدّمٌ غير مكتمل)
       return {
         id: id,
-        name: (mirrorById[id] ? mirrorById[id].name : id),
+        name: mirrorDisplayName(mirrorById[id] ? mirrorById[id].name : id),
         status: status,
         color: (status==='done') ? mirrorNodeColor(id, results) : null
       };
@@ -655,7 +667,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const totalCount = order.length;
     const progressPct = totalCount ? Math.round((doneCount/totalCount)*100) : 0;
 
-    const palmSVG = RND().palmTree(nodes, { allDone: allDone });
+    const palmSVG = RND().layersMap(nodes, { allDone: allDone });
     const card = RND().homeCard({
       name: clientName(), palmSVG: palmSVG,
       doneCount: doneCount, totalCount: totalCount, progressPct: progressPct,
@@ -674,7 +686,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     if(rep) rep.addEventListener('click', function(){ if(REP()) renderReportGate(); else renderReport(); });
 
     // نقر عقدةٍ تمّت → مراجعة تلك المرآة (لا قفز داخل مرآةٍ جاريّة)
-    Array.prototype.forEach.call(document.querySelectorAll('.palm-hit'), function(hit){
+    Array.prototype.forEach.call(document.querySelectorAll('.layer-hit'), function(hit){
       hit.addEventListener('click', function(){
         const id = hit.getAttribute('data-node');
         if(id) renderMirrorReview(id);
@@ -694,7 +706,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const axisName = function(id){ const a=mirror.axes.find(function(x){return x.id===id;}); return a?a.name:id; };
     const ord = ORDINALS[mirror.order] || arabicNum(mirror.order);
 
-    const model = { mirrorName: mirror.name, mirrorOrdinal: ord };
+    const model = { mirrorName: mirrorDisplayName(mirror.name), mirrorOrdinal: ord };
 
     // ── نِسَب حضور المحاور (صورة هذه المرآة) — كما ظهرت في شاشة الترتيب، تُعرَض في كلّ الحالات ──
     if(res && Array.isArray(res.ranking) && res.ranking.length){
@@ -715,7 +727,7 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const hasSpectrum = res && res.spectrum && Object.keys(res.spectrum).length;
     const isWeak = res && (res.scenario === 'weak' || (res.flags && res.flags.weakSignal));
     if(isWeak || !hasSpectrum){
-      model.weakText = edu.weakSignal || '';
+      model.weakText = noDash(edu.weakSignal || '');
       setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
       wireReviewBack(); return;
     }
@@ -735,18 +747,18 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       const topType = topByAxis[axisId];
       blocks.push({
         axisName: axisName(axisId),
-        axisIntro: ac.axisIntro || '',
-        afterRanking: (topType && ac.doors && ac.doors[topType]) ? ac.doors[topType].afterRanking : '',
+        axisIntro: noDash(ac.axisIntro || ''),
+        afterRanking: noDash((topType && ac.doors && ac.doors[topType]) ? ac.doors[topType].afterRanking : ''),
         // التأصيل عُرِض في الحالة الواضحة فقط (مطابقةً لـ buildEducationBlocks)
-        rooting: (res.scenario === 'clear' && axisId===domAxis) ? (ac.rooting || '') : ''
+        rooting: noDash((res.scenario === 'clear' && axisId===domAxis) ? (ac.rooting || '') : '')
       });
       const sp = res.spectrum[axisId];
       const text = (ac.spectrum || {})[sp.key] || '';
       spectra.push({
         axisName: axisName(axisId),
-        positionLabel: sp.positionLabel || '',
+        positionLabel: POS_LABEL[sp.position] || '',
         barHTML: RND().spectrumBar(sp),
-        text: text
+        text: noDash(text)
       });
     });
     model.blocks = blocks;
@@ -763,185 +775,29 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
 
   /* ════════════════════ شاشة التقرير الذاتيّ المتكامل ════════════════════ */
 
-  // اسم عرض النمط (الطبائع بلا أسماء في config → «النمط الأوّل/الثاني» أو رقم الطابع)
-  function typeDisplay(typeId, ordinalIdx){
-    const n = String(typeId||'').replace(/\D/g,'');           // "type1" → "1"
-    const ord = { 1:'الأوّل', 2:'الثاني', 3:'الثالث' }[ordinalIdx] || '';
-    return ord ? ('النمط ' + ord + (n ? (' (الطابع ' + arabicNum(n) + ')') : ''))
-               : (n ? ('الطابع ' + arabicNum(n)) : '—');
-  }
-
-  function reportSpectrumColor(key, position){
-    if(key === 'balance' || position === 'balance') return COLOR.green;
-    if((key||'').indexOf('excess')===0  || position==='excess')  return COLOR.gold;
-    if((key||'').indexOf('deficit')===0 || position==='deficit') return COLOR.blue;
-    return COLOR.purple; // ambiguous + suspicious_balance
-  }
-
-  // يبني شاشة التقرير من التجميع + مخرجات المحرّك (تجميع لا توليد)
+  /* شاشة التقرير: تُطلق رحلة الفهم (fouad-journey) — سبع محطات مسماة،
+     ثم تقرير كامل قابل للطباعة. لا أرقام طبائع ولا مصطلحات تصل للعميل. */
   function renderReport(){
     state.stage = 'report'; cache();
-    const cfg = CFG();
-
-    // ١) اجمع النتائج ومرّرها للمحرّك
     let results, rep;
     try{
       results = collectResultsForReport();
       rep = REP().computeReport(results);
     }catch(e){ errorCard('تعذّر تركيب التقرير: ' + e.message); return; }
-
-    // خلايا خريطة التحرّك البصريّة (محور كلّ مرآة الأظهر بموقعه ولونه) — عرض صرف
-    const mmCells = orderedActiveMirrors().map(function(id){
-      const mm = cfg.mirrors.find(function(x){ return x.id===id; });
-      const r2 = results[id];
-      const nm = mm ? mm.name : id;
-      if(!r2 || !r2.spectrum){ return { name: nm, present: false }; }
-      const domAxis = r2.dominantAxis || (r2.ranking && r2.ranking[0] ? r2.ranking[0].axisId : null);
-      let sp = domAxis ? r2.spectrum[domAxis] : null;
-      if(!sp){ const ks = Object.keys(r2.spectrum); if(ks.length) sp = r2.spectrum[ks[0]]; }
-      if(!sp){ return { name: nm, present: false }; }
-      return {
-        name: nm, present: true,
-        position: sp.position,
-        color: RND().posColor(sp.position, sp.key),
-        ambiguous: (sp.ambiguous===true || sp.position==='ambiguous'),
-        suspicious: (sp.suspiciousBalance===true)
-      };
-    });
-
-    const partial = !allActiveMirrorsComplete();
-    const axisInfo = function(axisId){
-      for(let i=0;i<cfg.mirrors.length;i++){
-        const ax = cfg.mirrors[i].axes.find(function(a){ return a.id===axisId; });
-        if(ax) return { axisName: ax.name, mirrorName: cfg.mirrors[i].name };
-      }
-      return { axisName: axisId, mirrorName: '' };
-    };
-
-    let html = '';
-
-    // ── (١) افتتاحيّة الأرض ──
-    html += `<div class="report-section report-ground">
-               <div class="report-ground-title">${esc(REPORT_TEXT.openingTitle)}</div>
-               <p>${esc(REPORT_TEXT.opening)}</p>
-               ${partial ? `<p class="report-partial">${esc(REPORT_TEXT.partialNote)}</p>` : ''}
-             </div>`;
-
-    // ── (٢) النمط الإجماليّ (typesPattern.dominant، مع رصد التعادل) ──
-    const tp = rep.typesPattern;
-    let typesBody = '';
-    if(tp.tie && tp.dominant.length > 1){
-      const names = tp.dominant.map(function(t,i){ return typeDisplay(t, i+1); });
-      typesBody = `<p class="report-p">ظهر أكثر من نمطٍ بقوّةٍ متقاربة، فلا نحسم لك نمطًا واحدًا — ظهر معك: ${esc(names.join('، و'))}. هذا تعدّدٌ نعرضه كما هو، لا تردّدٌ يُصحَّح.</p>`;
-    } else if(tp.dominant.length === 1){
-      typesBody = `<p class="report-p">النمط الأبرز عبر مراياك: <strong style="color:var(--gold)">${esc(typeDisplay(tp.dominant[0], 1))}</strong>. ظهر متصدّرًا في أكثر من مرآة، فكان أقوى ما تكرّر في حركتك.</p>`;
-    } else {
-      typesBody = `<p class="report-p">لم يتقدّم نمطٌ واحدٌ تقدّمًا بيّنًا في هذه الصورة.</p>`;
-    }
-    html += `<div class="report-section">
-               <div class="report-h">النمط الإجماليّ</div>
-               ${typesBody}
-             </div>`;
-
-    // ── (٣) صورة كل مرآة (إعادة عرض القراءة التي رآها العميل حرفيًّا) ──
-    let mirrorsHtml = '';
-    cfg.mirrors.forEach(function(m){
-      const res = results[m.id];
-      if(!res || !res.spectrum) return;                          // مرآة غير مكتملة → تُتخطّى
-      const domAxis = res.dominantAxis || (res.ranking && res.ranking[0] ? res.ranking[0].axisId : null);
-
-      let axesHtml = '';
-      // نعرض محاور الطيف الفعليّة لهذه المرآة (قد تكون محورًا أو محورين في dual)
-      Object.keys(res.spectrum).forEach(function(axisId){
-        const sp = res.spectrum[axisId];
-        if(!sp) return;
-        const key = sp.key;
-        const text = ((EDU()[m.id] && EDU()[m.id].axes[axisId] && EDU()[m.id].axes[axisId].spectrum) || {})[key] || '';
-        const info = axisInfo(axisId);
-        const color = reportSpectrumColor(key, sp.position);
-        const isDom = (axisId === domAxis);
-        axesHtml += `<div class="report-axis" style="border-inline-start-color:${color}">
-                       <div class="report-axis-name" style="color:${color}">
-                         ${esc(info.axisName)}${isDom ? ' <span class="report-dom-tag">المحور الأظهر</span>' : ''}
-                         ${sp.positionLabel ? ` — ${esc(sp.positionLabel)}` : ''}
-                       </div>
-                       <p class="report-axis-text">${esc(text)}</p>
-                     </div>`;
+    try{
+      JR().start({
+        cfg: CFG(), edu: EDU(), content: JC(),
+        rep: rep, results: results,
+        partial: !allActiveMirrorsComplete(),
+        gender: getGender(),
+        posLabel: POS_LABEL,
+        mirrorDisplayName: mirrorDisplayName,
+        posColor: function(pos, key){ return RND().posColor(pos, key); },
+        spectrumBar: function(sp){ return RND().spectrumBar(sp); },
+        setHTML: setHTML,
+        onExit: renderHome
       });
-
-      mirrorsHtml += `<div class="report-mirror">
-                        <div class="report-mirror-name">المرآة ${esc(m.name)}</div>
-                        ${axesHtml}
-                      </div>`;
-    });
-    html += `<div class="report-section">
-               <div class="report-h">صورتك في كلّ مرآة</div>
-               ${mirrorsHtml || '<p class="report-p">لا قراءات طيفٍ متاحة بعد.</p>'}
-             </div>`;
-
-    // ── (٤) خريطة التحرّك (تمثيلٌ بصريّ أوّلًا، ثمّ الأرقام النصّيّة كملحق) ──
-    const sm = rep.spectrumMap, c = sm.counts;
-    const fmtList = function(arr){
-      return (arr||[]).map(function(e){ const i = axisInfo(e.axisId); return esc(i.mirrorName + ' · ' + i.axisName); }).join('، ');
-    };
-    let mapBody = `<p class="report-p">عبر المرايا المكتملة: 
-        <span style="color:var(--green)">اتزان ${arabicNum(c.balance)}</span>،
-        <span style="color:var(--gold)">إفراط ${arabicNum(c.excess)}</span>،
-        <span style="color:var(--blue)">تفريط ${arabicNum(c.deficit)}</span>،
-        <span style="color:var(--purple)">التباس ${arabicNum(c.ambiguous)}</span>.</p>`;
-    if(c.balance)  mapBody += `<p class="report-map-line"><span style="color:var(--green)">اتزان:</span> ${fmtList(sm.byPosition.balance)}</p>`;
-    if(c.excess)   mapBody += `<p class="report-map-line"><span style="color:var(--gold)">إفراط:</span> ${fmtList(sm.byPosition.excess)}</p>`;
-    if(c.deficit)  mapBody += `<p class="report-map-line"><span style="color:var(--blue)">تفريط:</span> ${fmtList(sm.byPosition.deficit)}</p>`;
-    if(c.ambiguous)mapBody += `<p class="report-map-line"><span style="color:var(--purple)">التباس:</span> ${fmtList(sm.byPosition.ambiguous)}</p>`;
-    // الميل العامّ — لا حسم عند التعادل
-    if(sm.lean){
-      mapBody += `<p class="report-p">الميل العامّ في هذه الصورة إلى <strong>${esc(POS_LABEL[sm.lean]||sm.lean)}</strong>.</p>`;
-    } else if(sm.leanTie && sm.leanCandidates && sm.leanCandidates.length){
-      const cands = sm.leanCandidates.map(function(p){ return POS_LABEL[p]||p; });
-      mapBody += `<p class="report-p">لم يترجّح ميلٌ عامٌّ واحد — تقاربت: ${esc(cands.join('، و'))}، فنعرضها كما هي دون حسم.</p>`;
-    }
-    html += `<div class="report-section">
-               <div class="report-h">خريطة تحرّكك</div>
-               ${RND().movementMap({ cells: mmCells })}
-               <div class="movemap-appendix">${mapBody}</div>
-             </div>`;
-
-    // ── (٥) مواضع تُفرَز لاحقًا (flags.items، بنبرة دعوة لا حكم) ──
-    if(rep.flags && rep.flags.items && rep.flags.items.length){
-      let flagsHtml = '';
-      rep.flags.items.forEach(function(f){
-        const info = axisInfo(f.axisId);
-        const note = f.suspiciousBalance ? 'اتزانٌ يستحقّ نظرةً أعمق' : 'موضعٌ لم يستقرّ بعد';
-        flagsHtml += `<div class="report-flag">
-                        <span class="report-flag-axis">${esc(info.mirrorName + ' · ' + info.axisName)}</span>
-                        <span class="report-flag-note">${esc(note)}</span>
-                      </div>`;
-      });
-      html += `<div class="report-section report-flags">
-                 <div class="report-h">مواضع تستحقّ وقفةً أعمق</div>
-                 <p class="report-p">هذه مواضع لم تُحسَم في الأرقام وحدها — نعرضها دعوةً إلى تأمّلٍ أصدق، أو إلى جلسةٍ هادئة، لا حكمًا عليك:</p>
-                 ${flagsHtml}
-               </div>`;
-    }
-
-    // ── (٦) خاتمة الأرض ──
-    html += `<div class="report-section report-ground">
-               <div class="report-ground-title">${esc(REPORT_TEXT.closingTitle)}</div>
-               <p>${esc(REPORT_TEXT.closing)}</p>
-             </div>`;
-
-    // أزرار: طباعة + رجوع للبيت
-    html += `<div class="report-actions">
-               <button class="btn ghost" id="printReport">احفظ نسخةً (طباعة)</button>
-               <button class="btn ghost" id="backFromReport">رجوع للبيت</button>
-             </div>`;
-
-    setHTML(`<div class="card report">${html}</div>`);
-
-    const pb = document.getElementById('printReport');
-    if(pb) pb.addEventListener('click', function(){ window.print(); });
-    const bb = document.getElementById('backFromReport');
-    if(bb) bb.addEventListener('click', renderHome);
+    }catch(e){ errorCard('تعذّر عرض التقرير: ' + e.message); }
   }
 
   /* (٣) بوّابة الاكتمال — شاشة النخلة المكتملة ثمّ زرّ «اعرض صورتك المتكاملة» */
@@ -956,13 +812,13 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const nodes = order.map(function(id){
       return {
         id: id,
-        name: (mirrorById[id] ? mirrorById[id].name : id),
+        name: mirrorDisplayName(mirrorById[id] ? mirrorById[id].name : id),
         status: 'done',
         color: mirrorNodeColor(id, results)
       };
     });
 
-    const palmSVG = RND().palmTree(nodes, { allDone: true });
+    const palmSVG = RND().layersMap(nodes, { allDone: true });
     const card = RND().completionCard({ palmSVG: palmSVG, name: clientName() });
     setHTML(`<div class="card completion-card centered">${card}</div>`);
 
@@ -1018,7 +874,34 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       (c.answers && Object.keys(c.answers).length) ||
       (c.ratings && Object.keys(c.ratings).length)
     );
-    if(hasCache) resumeMirror(c); else renderIntro();
+    if(hasCache) renderResumeNotice(c); else renderIntro();
+  }
+
+  /* رسالة العودة: تُطمئن العائد وتخبره أين توقف قبل استئناف الأسئلة */
+  function renderResumeNotice(c){
+    const R = JC().resume;
+    const m = state.mirror;
+    const total = state.questions.length;
+    let answered = 0;
+    state.questions.forEach(function(q){
+      const a = (c.answers || {})[q.id];
+      if(a && typeof a === 'object' && ['أ','ب','ج'].every(function(L){ return !q.options[L] || typeof a[L] === 'number'; })) answered++;
+    });
+    const inSpectrum = answered >= total;
+    const line = inSpectrum
+      ? R.atSpectrum.replace('{mirror}', mirrorDisplayName(m.name))
+      : R.atQuestion.replace('{mirror}', mirrorDisplayName(m.name))
+                    .replace('{n}', arabicNum(Math.min(answered + 1, total)))
+                    .replace('{t}', arabicNum(total));
+    const name = clientName();
+    setHTML(`
+      <div class="card centered resume-card">
+        <div class="section-title">${esc(R.title)}${name ? ('، ' + esc(name)) : ''}</div>
+        <p class="lead">${esc(line)}</p>
+        <p class="reminder">${esc(R.saved)}</p>
+        <button class="btn primary" id="resumeGo">${esc(R.btn)}</button>
+      </div>`);
+    document.getElementById('resumeGo').addEventListener('click', function(){ resumeMirror(c); });
   }
 
   /* ════════════════════ الإقلاع ════════════════════ */
@@ -1033,6 +916,8 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     if(!BR())    _missing.push('FOUAD_BRIDGE');
     if(!STORE()) _missing.push('FOUAD_STORE');
     if(!RND())   _missing.push('FOUAD_RENDER');
+    if(!JC())    _missing.push('FOUAD_JOURNEY_CONTENT');
+    if(!JR())    _missing.push('FOUAD_JOURNEY');
     if(_missing.length){
       console.error('[FOUAD_APP] طبقات غائبة:', _missing.join(', '));
       errorCard('تعذّر تحميل ملفّات المقياس — الغائب: ' + _missing.join('، ')); return;
@@ -1056,7 +941,42 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const hasProgress = completed.length>0 || hasAnyCachedProgress();
     if(hasProgress){ renderHome(); return; }
     if(!next){ renderHome(); return; }    // (نادر) لا تالٍ ولا تقدّم
+    // عميل جديد بلا تقدم: شاشة الترحيب أولًا (مرة واحدة)، ثم أول مرآة
+    if(!welcomeDone()){ renderWelcome(next); return; }
     startMirror(next);
+  }
+
+  /* شاشة الترحيب: تجيب أسئلة العميل الأربعة، وتذيب معنى «المرايا»،
+     وتأخذ صيغة المخاطبة المفضلة (اختياري)، قبل أول مرآة. */
+  function renderWelcome(nextMirrorId){
+    state.stage = 'welcome';
+    const W = JC().welcome;
+    const paras  = W.paras.map(function(t){ return `<p class="welcome-p">${esc(t)}</p>`; }).join('');
+    const blocks = W.blocks.map(function(b){
+      return `<div class="welcome-block"><span class="welcome-h">${esc(b.h)}</span> <span class="welcome-bp">${esc(b.p)}</span></div>`;
+    }).join('');
+    const opts = W.genderQ.options.map(function(o, i){
+      return `<label class="gender-opt"><input type="radio" name="genderPick" value="${esc(o.v)}" ${o.v==='' ? 'checked' : ''}/> <span>${esc(o.t)}</span></label>`;
+    }).join('');
+    setHTML(`
+      <div class="card welcome">
+        <div class="welcome-title">${esc(W.title)}</div>
+        ${paras}
+        <div class="welcome-blocks">${blocks}</div>
+        <div class="gender-q">
+          <div class="gender-label">${esc(W.genderQ.label)}</div>
+          <div class="gender-opts">${opts}</div>
+        </div>
+        <button class="btn primary" id="welcomeStart">${esc(W.startBtn)}</button>
+      </div>`);
+    document.getElementById('welcomeStart').addEventListener('click', function(){
+      let v = '';
+      const picked = document.querySelector('input[name="genderPick"]:checked');
+      if(picked) v = picked.value || '';
+      setGender(v);
+      markWelcomeDone();
+      startMirror(nextMirrorId);
+    });
   }
 
   window.FOUAD_APP = { init: init };
