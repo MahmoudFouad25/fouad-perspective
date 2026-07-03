@@ -2084,6 +2084,12 @@ async function loadPendingOnly() {
             displayStudents();
         }
         console.log('✅ معلقة فقط:', allStudents.length, '— بدون استدعاء باقي الحجوزات');
+
+        // ملء فلتر الدورات من البيانات المحمّلة + تمييز التحويل الجديد لو موجود
+        try {
+            if (typeof populateCourseFilter === 'function') populateCourseFilter();
+            if (typeof checkForNewTransfer === 'function') checkForNewTransfer();
+        } catch (fErr) { console.warn('⚠️ فلاتر:', fErr); }
     } catch (e) {
         console.error('❌ خطأ في تحميل المعلقة:', e);
     }
@@ -3008,11 +3014,8 @@ window.sendMessage = sendMessage;
     filteredStudents = [];
     allStudents = [];
     
-    // تحميل البيانات
-    loadStudents();
-    
-    // تحديث كل 30 ثانية
-  //  setInterval(loadStudents, 30000);
+    // ❌ اتشال نداء loadStudents() نهائياً — كان بيعمل تحميل كامل مزدوج
+    // التحميل الفعلي بيتم من المعالج الثاني عبر loadPendingOnly()
 });
 
         // إرسال بيانات الدخول
@@ -3198,7 +3201,7 @@ async function resendWelcome(studentId) {
 // ==================== 🚀 دالة إنشاء الحساب المتكاملة ====================
 async function createAccount(studentId) {
     try {
-        const student = allStudents.find(s => s.id === studentId);
+        const student = await hydrateStudent(studentId);
         if (!student) {
             throw new Error('لم يتم العثور على بيانات الطالب');
         }
@@ -3632,7 +3635,7 @@ async function loadAvailableCourses() {
         
 async function assignCourseToStudent(studentId) {
     try {
-        const student = allStudents.find(s => s.id === studentId);
+        const student = await hydrateStudent(studentId);
         if (!student) {
             throw new Error('لم يتم العثور على الطالب');
         }
@@ -4990,6 +4993,15 @@ async function openCustomerDetail(id, type) {
                 </div>
                 <h4 style="margin-bottom:8px;color:#374151"><i class="fas fa-graduation-cap"></i> الدورات (${enrollments.length})</h4>
                 ${enrHtml}
+                ${studentRecord ? `
+                <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+                  ${(userId || studentRecord.accountCreated) ? `
+                    <button onclick="Swal.close();assignCourseToStudent('${studentRecord.id}')" style="flex:1;min-width:160px;background:linear-gradient(135deg,#10B981,#059669);color:#fff;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;font-family:inherit;font-weight:700;font-size:0.95rem"><i class="fas fa-graduation-cap"></i> تخصيص دورة جديدة</button>
+                    <button onclick="Swal.close();reopenCourseAssignment('${studentRecord.id}')" style="flex:1;min-width:160px;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;font-family:inherit;font-weight:700;font-size:0.95rem"><i class="fas fa-sync-alt"></i> إدارة التخصيصات</button>
+                  ` : `
+                    <button onclick="Swal.close();createAccount('${studentRecord.id}')" style="flex:1;min-width:200px;background:linear-gradient(135deg,#3B82F6,#2563EB);color:#fff;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;font-family:inherit;font-weight:700;font-size:0.95rem"><i class="fas fa-user-plus"></i> إنشاء حساب متكامل</button>
+                  `}
+                </div>` : ''}
                 ${userId ? `<a href="https://mahmoudfouad25.github.io/fouad-perspective/admin/edite-user.html?id=${userId}" target="_blank" style="display:inline-block;margin-top:14px;background:linear-gradient(135deg,#8B5CF6,#7C3AED);color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600"><i class="fas fa-external-link-alt"></i> فتح صفحة التعديل الكاملة</a>` : ''}
               </div>`,
             width: '600px',
@@ -5033,6 +5045,72 @@ function bookingNeedsProcessing(data) {
         || (data.courseAssigned !== true);
 }
 window.bookingNeedsProcessing = bookingNeedsProcessing;
+
+// ============ جلب طالب واحد كامل عند الطلب (قراءة واحدة فقط) ============
+// تُستخدم من أوضاع التصفّح: العميل مش موجود في allStudents (المعلقة فقط)
+// فنجيبه من Firestore بنفس تطبيع loadStudents ونضيفه لـ allStudents
+// علشان كل دوال التخصيص/الإدارة اللاحقة تلاقيه
+async function hydrateStudent(studentId) {
+    let student = allStudents.find(s => s.id === studentId);
+    if (student) return student;
+
+    console.log('🔥 جلب بيانات طالب واحد من Firebase:', studentId);
+    const studentDoc = await db.collection('individualStudents').doc(studentId).get();
+    if (!studentDoc.exists) return null;
+    const data = studentDoc.data();
+
+    student = {
+        id: studentDoc.id,
+        ...data,
+        transferredAt: data.transferredAt || data.transferInfo?.transferredAt || new Date().toISOString(),
+        originalBookingId: data.transferInfo?.originalBookingId || data.originalBookingId || studentDoc.id,
+        accountCreated: data.accountCreated || false,
+        accountStatus: data.accountStatus || 'pending',
+        userId: data.userId || null,
+        paymentInfo: data.paymentInfo || {
+            status: data.status || 'pending',
+            paymentConfirmed: data.paymentConfirmed || false,
+            paymentMethod: data.paymentMethod || null,
+            paymentReference: data.paymentReference || null,
+            paymentDetails: data.paymentDetails || null,
+            paidAt: data.paidAt || null,
+            paymentConfirmedAt: data.paymentConfirmedAt || null,
+            paymentConfirmedBy: data.paymentConfirmedBy || null,
+            isInstallment: data.paymentDetails?.type === 'installment' || false,
+            fullyPaid: data.paymentDetails?.fullyPaid || false,
+            totalAmount: data.paymentDetails?.totalAmount || data.pricing?.finalPriceNumber || 0,
+            paidAmount: data.paymentDetails?.paidAmount || 0,
+            remainingAmount: data.paymentDetails?.remainingAmount || 0,
+            installmentSchedule: data.paymentDetails?.installmentSchedule || [],
+            nextDueDate: data.paymentDetails?.nextDueDate || null,
+            totalInstallments: data.paymentDetails?.totalInstallments || 0,
+            paidInstallments: data.paymentDetails?.paidInstallments || 0
+        },
+        paymentConfirmed: data.paymentConfirmed || data.paymentInfo?.paymentConfirmed || data.paymentDetails?.fullyPaid || false,
+        paymentMethod: data.paymentMethod || data.paymentInfo?.paymentMethod || data.paymentDetails?.paymentMethod || null,
+        paymentReference: data.paymentReference || data.paymentInfo?.paymentReference || data.paymentDetails?.paymentReference || null,
+        progress: data.progress || {
+            accountSetup: 0,
+            courseAssignment: 0,
+            firstPayment: data.paymentConfirmed ? 100 : 0,
+            welcomeMessage: 0,
+            totalProgress: 0
+        },
+        dataCompleteness: data.dataCompleteness || { percentage: 0, isComplete: false },
+        pricing: data.pricing || { finalPrice: '0', basePrice: '0' },
+        discounts: data.discounts || [],
+        totalSavings: data.totalSavings || 0,
+        totalSavingsText: data.totalSavingsText || '0 ج.م',
+        activeOffer: data.activeOffer || null,
+        coupon: data.coupon || null,
+        payment: data.payment || {},
+        journey: data.journey || { type: 'individual' }
+    };
+
+    allStudents.push(student); // علشان دوال findIndex اللاحقة تشتغل عادي
+    return student;
+}
+window.hydrateStudent = hydrateStudent;
         
 // دالة تخصيص الدورة التلقائي
 async function autoAssignCourse(studentId, userId) {
@@ -5467,62 +5545,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
     } 
-    // إذا مفيش ID - فحص الطلبات المعلقة فقط (بدون سؤال تلقائي)
-    else if (!bookingId) {
-        console.log('🔍 فحص الطلبات المعلقة...');
-        
-        // انتظر تحميل Firebase
-        const waitForFirebase = setInterval(async () => {
-            if (typeof db !== 'undefined') {
-                clearInterval(waitForFirebase);
-                
-                // فحص الطلبات المعلقة
-                const snapshot = await db.collection('individualStudents')
-                    .where('paymentConfirmed', '==', true)
-                    .get();
-                
-                const pendingDocs = [];
-                snapshot.forEach(doc => {
-                    if (bookingNeedsProcessing(doc.data())) {
-                        pendingDocs.push(doc);
-                    }
-                });
-                
-                if (pendingDocs.length > 0) {
-                    // إضافة زر في أعلى الصفحة
-                    setTimeout(() => {
-                        const header = document.querySelector('.header-content');
-                        if (header && !document.getElementById('auto-process-btn')) {
-                            const autoBtn = document.createElement('button');
-                            autoBtn.id = 'auto-process-btn';
-                            autoBtn.innerHTML = `
-                                <i class="fas fa-robot"></i> 
-                                معالجة الطلبات المعلقة
-                                <span style="background: #EF4444; color: white; 
-                                             padding: 2px 8px; border-radius: 10px; 
-                                             margin-right: 10px;">${pendingDocs.length}</span>
-                            `;
-                            autoBtn.style.cssText = `
-                                background: linear-gradient(135deg, #3B82F6, #10B981);
-                                color: white;
-                                border: none;
-                                padding: 10px 20px;
-                                border-radius: 10px;
-                                cursor: pointer;
-                                font-weight: bold;
-                                animation: pulse 2s infinite;
-                            `;
-                            autoBtn.onclick = showPendingBookingsSelector;
-                            header.appendChild(autoBtn);
-                        }
-                    }, 1000);
-                }
-            }
-        }, 500);
-    }
-    
-    // تحميل البيانات العادي
+    // انتظر تحميل Firebase قبل أي قراءة
+    await new Promise(resolve => {
+        const waitForFirebase = setInterval(() => {
+            if (typeof db !== 'undefined') { clearInterval(waitForFirebase); resolve(); }
+        }, 200);
+    });
+
+    // تحميل البيانات العادي (قراءة واحدة للمعلقة)
     await loadPendingOnly();
+
+    // بناء زر المعالجة من نفس البيانات المحمّلة — بدون استعلام مكرر
+    if (!bookingId && allStudents.length > 0) {
+        const header = document.querySelector('.header-content');
+        if (header && !document.getElementById('auto-process-btn')) {
+            const autoBtn = document.createElement('button');
+            autoBtn.id = 'auto-process-btn';
+            autoBtn.innerHTML = `
+                <i class="fas fa-robot"></i> 
+                معالجة الطلبات المعلقة
+                <span style="background: #EF4444; color: white; 
+                             padding: 2px 8px; border-radius: 10px; 
+                             margin-right: 10px;">${allStudents.length}</span>
+            `;
+            autoBtn.style.cssText = `
+                background: linear-gradient(135deg, #3B82F6, #10B981);
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 10px;
+                cursor: pointer;
+                font-weight: bold;
+                animation: pulse 2s infinite;
+            `;
+            autoBtn.onclick = showPendingBookingsSelector;
+            header.appendChild(autoBtn);
+        }
+    }
 });
 
 // دالة مساعدة لتحديث حالة الأتمتة في الوقت الفعلي
@@ -7186,7 +7245,7 @@ async function filterByLabel(label) {
 // دالة عرض معلومات التخصيص الحالي وإعادة التخصيص
 async function reopenCourseAssignment(studentId) {
     try {
-        const student = allStudents.find(s => s.id === studentId);
+        const student = await hydrateStudent(studentId);
         if (!student) {
             throw new Error('لم يتم العثور على الطالب');
         }
