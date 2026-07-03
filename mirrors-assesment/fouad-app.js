@@ -50,7 +50,17 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
   function RND(){   return (typeof FOUAD_RENDER !== 'undefined') ? FOUAD_RENDER : window.FOUAD_RENDER; }
   function PAUSES(){
     var p = (typeof REFLECTION_PAUSES !== 'undefined') ? REFLECTION_PAUSES : window.REFLECTION_PAUSES;
-    return (p && p.length) ? p : null;
+    if(!p) return null;
+    if(Array.isArray(p)) return p.length ? p : null;          // النسخة القديمة (مصفوفة عامة)
+    if(p.byMirror || p.fallback) return p;                    // النسخة الجديدة (طقم لكل مرآة)
+    return null;
+  }
+  // طقم وقفات المرآة الحالية (بترتيبها الثلاثي)، أو الطقم الاحتياطي
+  function pauseSetForMirror(){
+    var P = PAUSES(); if(!P) return null;
+    if(Array.isArray(P)) return P;
+    var set = (P.byMirror && P.byMirror[state.mirrorId]) || P.fallback;
+    return (set && set.length) ? set : null;
   }
   // محرّك التقرير الذاتيّ (report-engine.js) — يُحمَّل بعد mirrors-config.js
   function REP(){ return (typeof FOUAD_REPORT_ENGINE !== 'undefined') ? FOUAD_REPORT_ENGINE : window.FOUAD_REPORT_ENGINE; }
@@ -376,12 +386,25 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
   }
 
   function renderPause(beforeIndex){
-    const pauses = PAUSES();
-    const p = pauses[Object.keys(state.pausesShown).length % pauses.length]; // تناوب
+    const set = pauseSetForMirror();
+    if(!set){ state.pausesShown[beforeIndex] = true; renderIdentification(); return; }
+    // الوقفات تُعرض بترتيبها داخل المرآة: الأولى تُحضِر، والثانية تُصدِق، والثالثة تُثبِت
+    const p = set[Object.keys(state.pausesShown).length % set.length];
+    const kind = p.kind || (p.verse ? 'verse' : 'voice');
+
+    let inner = '';
+    if(kind === 'verse' || p.verse){
+      inner = `<div class="pause-verse">${esc(p.verse || '')}</div>
+               <div class="pause-note">${esc(p.note || p.text || '')}</div>`;
+    } else if(kind === 'breath'){
+      inner = `<div class="pause-breath">${esc(p.text || '')}</div>`;
+    } else {
+      inner = `<div class="pause-line pause-${esc(kind)}">${esc(p.text || '')}</div>`;
+    }
+
     setHTML(`
-      <div class="card pause">
-        <div class="pause-verse">${esc(p.verse)}</div>
-        <div class="pause-note">${esc(p.note)}</div>
+      <div class="card pause pause-kind-${esc(kind)}">
+        ${inner}
         <button class="btn ghost" id="pauseBtn">أكمل</button>
       </div>`);
     document.getElementById('pauseBtn').addEventListener('click', ()=>{
