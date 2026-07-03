@@ -61,8 +61,8 @@
 
     // الهمسات (نبرة مرآة لا محكمة)
     var whisper = '';
-    if(ambiguous)       whisper = '<div class="sb-whisper">لم تُحسَم بعد — تُفرَز في تأمّلٍ أعمق.</div>';
-    else if(suspicious) whisper = '<div class="sb-whisper">اتزانٌ يستحقّ نظرة.</div>';
+    if(ambiguous)       whisper = '<div class="sb-whisper">لم تستقر بعد، وتتضح مع تأمل أهدأ.</div>';
+    else if(suspicious) whisper = '<div class="sb-whisper">وسطية تستحق نظرة أصدق.</div>';
 
     return ''
       + '<div class="spectrum-bar' + (ambiguous ? ' is-amb' : '') + '">'
@@ -72,104 +72,81 @@
       +     '<span class="sb-zone sb-excess"></span>'
       +     marker
       +   '</div>'
-      +   '<div class="sb-labels"><span>تفريط</span><span>اتزان</span><span>إفراط</span></div>'
+      +   '<div class="sb-labels"><span>تفريط</span><span>وسطية</span><span>إفراط</span></div>'
       +   suffixHTML
       +   whisper
       + '</div>';
   }
 
-  /* ───────────────── (١)(٣) النخلة/المسار الصاعد ─────────────────
-     nodes: مصفوفة بترتيب القوس (القاعدة→القمّة): السلوك أسفل، الجروح أعلى.
-     كلّ عنصر: { id, name, status:'done'|'active'|'todo', color }.
-     opts.allDone: يُشعل تاج النخلة عند اكتمال المرايا.
-     SVG موحٍ بالنخلة لا محاكاةٌ حرفيّة. الوصول دائمًا بالهويّة لا بالموضع. */
-  function palmTree(nodes, opts){
+  /* ───────────────── (١)(٣) خريطة النزول في الطبقات ─────────────────
+     nodes: مصفوفة بترتيب القوس (السطح أولًا): السلوك في أعلى طبقة،
+     والجذر الخفي في أعمق طبقة. كل عنصر: { id, name, status, color }.
+     opts.allDone: تُضاء الخريطة كلها عند اكتمال المرايا.
+     الفكرة: العميل ينزل من السطح نحو العمق، فكل طبقة تكتمل تُضاء بلون
+     قراءتها، والطبقة الجارية عليها علامة "أنت هنا". الوصول بالهوية. */
+  function layersMap(nodes, opts){
     opts  = opts  || {};
     nodes = nodes || [];
     var n = nodes.length || 7;
-    var W = 400, padTop = 72, padBottom = 58, step = 86, trunkX = 104, labelX = 268;
-    var H = padTop + (n > 1 ? (n - 1) * step : 0) + padBottom;
+    var W = 400, headH = 40, rowH = 62, padBottom = 16;
+    var H = headH + n * rowH + padBottom;
+    var STATUS_WORD = { done: 'اكتملت', active: 'أنت هنا', todo: '' };
 
-    // نقاط العقد من القاعدة (أسفل) إلى القمّة (أعلى) مع تمايلٍ عضويّ خفيف
-    var pts = [];
-    for(var i = 0; i < n; i++){
-      pts.push({ x: +(trunkX + Math.sin(i * 1.05) * 15).toFixed(1), y: H - padBottom - i * step });
-    }
-
-    // الجذع: منحنى ناعم صاعد عبر العقد
-    var trunk = 'M ' + pts[0].x + ' ' + (H - 14).toFixed(1) + ' L ' + pts[0].x + ' ' + pts[0].y.toFixed(1);
-    for(var k = 1; k < n; k++){
-      var a = pts[k-1], b = pts[k], my = ((a.y + b.y) / 2).toFixed(1);
-      trunk += ' C ' + a.x + ' ' + my + ' ' + b.x + ' ' + my + ' ' + b.x + ' ' + b.y.toFixed(1);
-    }
-
-    var STATUS_WORD = { done: 'تمّت', active: 'جاريّة', todo: 'لم تبدأ' };
     var body = '';
 
-    for(var j = 0; j < n; j++){
-      var p = pts[j], nd = nodes[j] || {}, st = nd.status || 'todo';
+    // خط السطح في الأعلى
+    body += '<line x1="14" y1="' + (headH - 6) + '" x2="' + (W - 14) + '" y2="' + (headH - 6) + '" stroke="var(--gold)" stroke-width="1.4" opacity="0.55"/>'
+         +  '<text x="' + (W - 18) + '" y="' + (headH - 14) + '" text-anchor="end" class="layer-surface">السطح</text>';
+
+    for(var i = 0; i < n; i++){
+      var nd = nodes[i] || {}, st = nd.status || 'todo';
+      var y = headH + i * rowH;
       var col = (st === 'done') ? (nd.color || DONE_NEUTRAL) : null;
-      var frondOp = (st === 'done') ? 0.9 : (st === 'active' ? 0.5 : 0.22);
-      var frondColor = col || 'var(--palm-frond)';
-      var y = p.y.toFixed(1);
+      var shade = Math.min(0.05 + i * 0.045, 0.4);   // الطبقات تغمق كلما نزلنا
 
-      // سعفتان توحيان بالنخلة
-      body += '<g opacity="' + frondOp + '" fill="none" stroke="' + frondColor + '" stroke-width="2.2" stroke-linecap="round">'
-           +    '<path d="M ' + p.x + ' ' + y + ' q -16 -9 -28 -26"/>'
-           +    '<path d="M ' + p.x + ' ' + y + ' q 16 -9 28 -26"/>'
-           +  '</g>';
+      // جسم الطبقة
+      body += '<rect x="12" y="' + (y + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="var(--card)"/>'
+           +  '<rect x="12" y="' + (y + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="#000" opacity="' + shade.toFixed(3) + '"/>';
 
-      // خيطٌ خافتٌ يربط العقدة باسمها
-      body += '<line x1="' + (p.x + 16) + '" y1="' + y + '" x2="196" y2="' + y + '" stroke="var(--line)" stroke-width="1" opacity="0.38" stroke-dasharray="2 4"/>';
-
-      // العقدة بحسب الحالة
       if(st === 'done'){
-        body += '<circle cx="' + p.x + '" cy="' + y + '" r="22" fill="' + col + '" opacity="0.13"/>'
-             +  '<circle cx="' + p.x + '" cy="' + y + '" r="13" fill="' + col + '" stroke="' + col + '" stroke-width="1.5"/>'
-             +  '<circle cx="' + p.x + '" cy="' + y + '" r="4" fill="#0f172a" opacity="0.55"/>';
+        body += '<rect x="12" y="' + (y + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="none" stroke="' + col + '" stroke-width="1.4" opacity="0.75"/>'
+             +  '<rect x="' + (W - 20) + '" y="' + (y + 8) + '" width="5" height="' + (rowH - 18) + '" rx="2.5" fill="' + col + '"/>'
+             +  '<circle cx="34" cy="' + (y + rowH/2 - 3) + '" r="6.5" fill="' + col + '"/>';
       } else if(st === 'active'){
-        body += '<circle cx="' + p.x + '" cy="' + y + '" r="13" fill="rgba(251,191,36,0.14)" stroke="' + COLOR.gold + '" stroke-width="2" stroke-dasharray="3 4"/>'
-             +  '<circle cx="' + p.x + '" cy="' + y + '" r="3.5" fill="' + COLOR.gold + '"/>';
+        body += '<rect x="12" y="' + (y + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="none" stroke="' + COLOR.gold + '" stroke-width="1.6" stroke-dasharray="5 5"/>'
+             +  '<path d="M 34 ' + (y + rowH/2 - 11) + ' l 6 10 h -12 z" fill="' + COLOR.gold + '" transform="rotate(180 34 ' + (y + rowH/2 - 6) + ')"/>';
       } else {
-        body += '<circle cx="' + p.x + '" cy="' + y + '" r="12.5" fill="none" stroke="var(--line)" stroke-width="1.5"/>';
+        body += '<circle cx="34" cy="' + (y + rowH/2 - 3) + '" r="5.5" fill="none" stroke="var(--line)" stroke-width="1.4"/>';
       }
 
-      // الاسم والحالة (نصّ SVG عربيّ)
-      body += '<text x="' + labelX + '" y="' + (p.y - 3) + '" text-anchor="middle" class="palm-name">' + esc(nd.name || '') + '</text>'
-           +  '<text x="' + labelX + '" y="' + (p.y + 16) + '" text-anchor="middle" class="palm-status palm-' + st + '">' + esc(STATUS_WORD[st] || '') + '</text>';
+      // الاسم (يمين) والحالة (يسار)
+      var nameOp = (st === 'todo') ? 0.5 : 1;
+      body += '<text x="' + (W - 34) + '" y="' + (y + rowH/2 + 2) + '" text-anchor="end" class="layer-name" opacity="' + nameOp + '">' + esc(nd.name || '') + '</text>';
+      var word = STATUS_WORD[st] || '';
+      if(word){
+        var wc = (st === 'done') ? col : COLOR.gold;
+        body += '<text x="52" y="' + (y + rowH/2 + 2) + '" text-anchor="start" class="layer-status" fill="' + wc + '">' + esc(word) + '</text>';
+      }
 
-      // منطقة النقر للمكتملة فقط → مراجعة (لا قفز داخل مرآةٍ جاريّة)
+      // منطقة النقر للمكتملة فقط (مراجعة)
       if(st === 'done'){
-        body += '<circle class="palm-hit" data-node="' + esc(nd.id || '') + '" cx="' + p.x + '" cy="' + y + '" r="30" fill="transparent" style="cursor:pointer"/>';
+        body += '<rect class="layer-hit" data-node="' + esc(nd.id || '') + '" x="12" y="' + (y + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" fill="transparent" style="cursor:pointer"/>';
       }
     }
 
-    // تاج النخلة في القمّة — يكتمل ضوؤه حين تكتمل المرايا
-    var top = pts[n - 1];
-    var crownVivid = !!opts.allDone;
-    var crownCol = crownVivid ? 'url(#palmCrown)' : 'var(--palm-frond)';
-    var crown = '<g opacity="' + (crownVivid ? 0.95 : 0.3) + '" fill="none" stroke="' + crownCol + '" stroke-width="2.4" stroke-linecap="round">';
-    var fan = [-46, -28, -10, 10, 28, 46];
-    for(var f = 0; f < fan.length; f++){
-      var ang = fan[f] * Math.PI / 180;
-      var ex = (top.x + Math.sin(ang) * 52).toFixed(1);
-      var ey = (top.y - 30 - Math.cos(ang) * 40).toFixed(1);
-      crown += '<path d="M ' + top.x + ' ' + (top.y - 6) + ' Q ' + (top.x + Math.sin(ang) * 22).toFixed(1) + ' ' + (top.y - 24) + ' ' + ex + ' ' + ey + '"/>';
+    // عند الاكتمال: توهج هادئ في أعمق طبقة
+    if(opts.allDone && n){
+      var by = headH + (n - 1) * rowH;
+      body += '<rect x="12" y="' + (by + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="url(#layerGlow)" opacity="0.16"/>';
     }
-    crown += '</g>';
 
     return ''
-      + '<svg class="palm-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="شجرة الرحلة">'
+      + '<svg class="layers-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="خريطة النزول في الطبقات">'
       +   '<defs>'
-      +     '<linearGradient id="palmTrunk" x1="0" y1="1" x2="0" y2="0">'
-      +       '<stop offset="0" stop-color="var(--palm-trunk-1)"/><stop offset="1" stop-color="var(--palm-trunk-2)"/>'
-      +     '</linearGradient>'
-      +     '<linearGradient id="palmCrown" x1="0" y1="1" x2="0" y2="0">'
+      +     '<linearGradient id="layerGlow" x1="0" y1="0" x2="0" y2="1">'
       +       '<stop offset="0" stop-color="' + COLOR.green + '"/><stop offset="1" stop-color="' + COLOR.gold + '"/>'
       +     '</linearGradient>'
       +   '</defs>'
-      +   '<path d="' + trunk + '" fill="none" stroke="url(#palmTrunk)" stroke-width="5" stroke-linecap="round"/>'
-      +   crown
       +   body
       + '</svg>';
   }
@@ -178,7 +155,7 @@
      model: { name, palmSVG, doneCount, totalCount, progressPct, hasNext, allDone } */
   function homeCard(m){
     m = m || {};
-    var greet = m.name ? ('أهلًا، ' + esc(m.name)) : 'أهلًا بك';
+    var greet = m.name ? ('مرحبًا، ' + esc(m.name)) : 'مرحبًا بك';
     var actions = '';
     if(m.hasNext) actions += '<button class="btn primary" id="homeContinue">تابِع رحلتك</button>';
     if(m.allDone) actions += '<button class="btn primary" id="homeReport">صورتك المتكاملة</button>';
@@ -186,15 +163,15 @@
     return ''
       + '<div class="home-head">'
       +   '<div class="home-greet">' + greet + '</div>'
-      +   '<div class="home-sub">هذه شجرة رحلتك في المرايا. انظر أين بلغتَ، وعُد إلى ما تمّ حين تشاء.</div>'
+      +   '<div class="home-sub">هذه خريطة رحلتك: سبع طبقات تنزل فيها من السطح نحو العمق، تبدأ بما يظهر منك للناس وتنتهي بأعمق ما يعمل فيك. كل طبقة تكتمل تُضاء بلون قراءتك فيها، ويمكنك العودة إلى أي طبقة اكتملت بالنقر عليها.</div>'
       + '</div>'
       + '<div class="home-progress">'
       +   '<div class="progress-bar"><div class="progress-fill" style="width:' + (m.progressPct || 0) + '%"></div></div>'
       +   '<div class="home-progress-label">أتممتَ ' + arabicNum(m.doneCount || 0) + ' من ' + arabicNum(m.totalCount || 0) + ' مرايا</div>'
       + '</div>'
-      + '<div class="palm-wrap">' + (m.palmSVG || '') + '</div>'
+      + '<div class="layers-wrap">' + (m.palmSVG || '') + '</div>'
       + (actions ? '<div class="home-actions">' + actions + '</div>' : '')
-      + '<div class="home-hint">انقر مرآةً تمّت لتعود إلى قراءتها.</div>';
+      + '';
   }
 
   /* ───────────────── شاشة المراجعة ─────────────────
@@ -204,8 +181,8 @@
   function mirrorReviewCard(m){
     m = m || {};
     var inner = '';
-    inner += '<div class="mirror-tag">المرآة ' + esc(m.mirrorOrdinal || '') + ' — ' + esc(m.mirrorName || '') + '</div>';
-    inner += '<div class="review-note">هذه قراءتك كما رأيتَها — نعيدها عليك كما هي، لا نكتب جديدًا.</div>';
+    inner += '<div class="mirror-tag">المرآة ' + esc(m.mirrorOrdinal || '') + ': ' + esc(m.mirrorName || '') + '</div>';
+    inner += '<div class="review-note">هذه قراءتك كما رأيتها، نعيدها عليك كما هي.</div>';
 
     // صورة هذه المرآة: نِسَب حضور المحاور (بنفس شكل شاشة الترتيب) — تظهر في كلّ الحالات
     if(m.ranking && m.ranking.rows && m.ranking.rows.length){
@@ -219,7 +196,7 @@
       inner += '<div class="review-ranking">'
             +    '<div class="sr-axis">صورة هذه المرآة</div>'
             +    '<div class="ranking">' + rankRowsHTML + '</div>'
-            +    (m.ranking.dominantName ? '<div class="dominant">المحور الأظهر: <strong>' + esc(m.ranking.dominantName) + '</strong></div>' : '')
+            +    (m.ranking.dominantName ? '<div class="dominant">طريقتك الغالبة: <strong>' + esc(m.ranking.dominantName) + '</strong></div>' : '')
             +  '</div>';
     }
 
@@ -236,7 +213,7 @@
       });
       (m.spectra || []).forEach(function(s){
         inner += '<div class="review-spectrum">'
-              +    '<div class="sr-axis">' + esc(s.axisName || '') + (s.positionLabel ? (' — ' + esc(s.positionLabel)) : '') + '</div>'
+              +    '<div class="sr-axis">' + esc(s.axisName || '') + (s.positionLabel ? (': ' + esc(s.positionLabel)) : '') + '</div>'
               +    (s.barHTML || '')
               +    '<p class="sr-text">' + esc(s.text || '') + '</p>'
               +  '</div>';
@@ -253,9 +230,9 @@
     m = m || {};
     return ''
       + '<div class="completion">'
-      +   '<div class="palm-wrap palm-complete">' + (m.palmSVG || '') + '</div>'
-      +   '<div class="completion-line">أتممتَ المرايا السبع. ما رأيتَه فيها مجموعٌ الآن في صورةٍ واحدة.</div>'
-      +   '<div class="completion-sub">خذ نَفَسًا، ثمّ انظر إليها كما تُنظَر مرآة — بهدوء.</div>'
+      +   '<div class="layers-wrap layers-complete">' + (m.palmSVG || '') + '</div>'
+      +   '<div class="completion-line">نزلت الطبقات السبع كلها، من السطح إلى أعمق نقطة. ما رأيته فيها مجموع الآن في صورة واحدة.</div>'
+      +   '<div class="completion-sub">خذ نفسًا، ثم اقرأها كما تُقرأ مرآة: بهدوء.</div>'
       +   '<button class="btn primary" id="completionShow">اعرض صورتك المتكاملة</button>'
       + '</div>';
   }
@@ -283,7 +260,7 @@
 
   window.FOUAD_RENDER = {
     COLOR: COLOR, esc: esc, arabicNum: arabicNum, posColor: posColor,
-    spectrumBar: spectrumBar, palmTree: palmTree,
+    spectrumBar: spectrumBar, layersMap: layersMap,
     homeCard: homeCard, mirrorReviewCard: mirrorReviewCard,
     completionCard: completionCard, movementMap: movementMap
   };
