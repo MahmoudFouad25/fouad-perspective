@@ -21,6 +21,9 @@
   "use strict";
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  /* تطبيع عرضي للترقيم: الشرطة الاعتراضية الطويلة في النصوص المصدرية القديمة
+     تتحول عند العرض فقط إلى فاصلة منقوطة (الملفات الأصلية لا تُمس). */
+  function noDash(t){ return String(t==null?'':t).replace(/\s*—\s*/g, '؛ '); }
   function arabicNum(n){ var m=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩']; return String(n).replace(/\d/g,function(d){return m[+d];}); }
   function fill(tpl, map){
     return String(tpl||'').replace(/\{(\w+)\}/g, function(_,k){ return (map && map[k]!=null) ? map[k] : ''; });
@@ -221,7 +224,7 @@
       var inner = '<div class="jr-mirror-name">مرآة ' + esc(b.name) + '</div>'
                 + (b.intro ? '<p class="jr-mirror-intro">' + esc(b.intro) + '</p>' : '');
       if(b.weak){
-        inner += '<p class="jr-p">' + esc(b.weak) + '</p>';
+        inner += '<p class="jr-p">' + esc(noDash(b.weak)) + '</p>';
       } else {
         (b.axes || []).forEach(function(a){
           var color = ctx.posColor ? ctx.posColor(a.position, a.key) : 'var(--muted)';
@@ -233,7 +236,7 @@
                 +      (a.label ? ': ' + esc(a.label) : '')
                 +    '</div>'
                 +    bar
-                +    '<p class="jr-axis-text">' + esc(a.text) + '</p>'
+                +    '<p class="jr-axis-text">' + esc(noDash(a.text)) + '</p>'
                 +    (a.suspicious ? '<p class="jr-flag">' + esc(a.suspicious) + '</p>' : '')
                 +    (a.unstable && (a.position === 'ambiguous') ? '<p class="jr-flag">' + esc(a.unstable) + '</p>' : '')
                 +  '</div>';
