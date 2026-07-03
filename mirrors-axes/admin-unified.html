@@ -866,8 +866,11 @@
           '<div class="hero-tags">' + tags + '</div>' +
         '</div>' +
         '<div class="hero-actions" style="display:flex;gap:8px;flex-wrap:wrap">' +
-          '<button class="btn primary" id="btnExport">⬇ تصدير JSON موحّد</button>' +
-          '<button class="btn gold" id="btnImport">📥 استيراد تقرير</button>' +
+          (c.kind.mirrors ? '<button class="btn gold" id="btnExpMirrors">🪞 تصدير المرايا</button>' : '') +
+          (c.kind.axes ? '<button class="btn teal" id="btnExpAxes">🧭 تصدير المسارات</button>' : '') +
+          (c.kind.both ? '<button class="btn purple" id="btnExpCross">✦ تصدير القوّة</button>' : '') +
+          '<button class="btn primary" id="btnExport">⬇ موحّد</button>' +
+          '<button class="btn" id="btnImport">📥 استيراد تقرير</button>' +
         '</div>' +
       '</div>';
 
@@ -896,6 +899,9 @@
     // wire
     $('btnExport').addEventListener('click', exportUnifiedJSON);
     $('btnImport').addEventListener('click', triggerImport);
+    var bem = $('btnExpMirrors'); if (bem) bem.addEventListener('click', exportMirrorsJSON);
+    var bea = $('btnExpAxes');    if (bea) bea.addEventListener('click', exportAxesJSON);
+    var bec = $('btnExpCross');   if (bec) bec.addEventListener('click', exportCrossJSON);
     var bl = $('btnCopyLink'); if (bl) bl.addEventListener('click', copyClientLink);
     el.querySelectorAll('.tab').forEach(function (t) {
       t.addEventListener('click', function () {
@@ -1416,6 +1422,161 @@
   // ═══════════════════════════════════════════════════════════════════════
   //  التصدير الموحّد (مرايا + مسارات + تقاطع + كوتشينج) لمحادثة التركيب
   // ═══════════════════════════════════════════════════════════════════════
+  // ── القوس التشخيصيّ للمرايا (السطح → العمق) — لترتيب القراءة في تركيب التقرير ──
+  var MIRROR_ARC = ['behavior','attention','emotions','perception','motivation','beliefs','wounds'];
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  (1) تصدير المرايا — سياق كامل لجلسة المرايا (الطابع + التوليفة + القوس)
+  // ═══════════════════════════════════════════════════════════════════════
+  function exportMirrorsJSON() {
+    if (!SELECTED) return;
+    var c = SELECTED; var agg = c.typeAgg;
+    if (!agg) { toast('لا توجد نتائج مرايا لهذا العميل'); return; }
+
+    var out = {
+      station: 'mirrors',
+      sessionTitle: 'جلسة المرايا — قراءة الطابع',
+      client: { userId:c.userId, name:c.name, email:c.email },
+      source: agg.source, // new | legacy
+      diagnosticArc: MIRROR_ARC,
+      primaryType: agg.primary ? { type:agg.primary.num, name:agg.primary.name, score:agg.primary.score } : null,
+      tritype: agg.tri ? agg.tri.map(function (t){ return { center:t.center, centerLabel:t.label, type:t.type?t.type.num:null, name:t.type?t.type.name:null, score:t.type?t.type.score:null }; }) : null,
+      typeRanking: agg.ranked ? agg.ranked.map(function (t){ return { type:t.num, name:t.name, center:t.center, score:t.score }; }) : null,
+      mirrors: null,
+      exportedAt: new Date().toISOString()
+    };
+
+    // النتائج لكل مرآة (للنسخة الجديدة — فيها ranking + dominantAxis + flags لكل مرآة)
+    if (agg.source === 'new' && c.mirrorDoc && c.mirrorDoc.results) {
+      var mres = c.mirrorDoc.results;
+      out.mirrors = Object.keys(mres).map(function (mid) {
+        var mr = mres[mid] || {};
+        var ranking = Array.isArray(mr.ranking) ? mr.ranking.map(function (it){
+          var num = typeNum(it.type);
+          return { type:num, name:(num&&TYPE_INFO[num])?TYPE_INFO[num].name:null, raw:numOrNull(it.raw), percent:numOrNull(it.percent) };
+        }) : [];
+        ranking.sort(function (a,b){ return (b.raw||b.percent||0)-(a.raw||a.percent||0); });
+        var domId = mr.dominantAxis ? (typeof mr.dominantAxis==='string'?mr.dominantAxis:(mr.dominantAxis.id||mr.dominantAxis.axisId)) : null;
+        return {
+          mirrorId: mid, mirrorName: mr.mirrorName || mid,
+          dominantAxis: domId, dominantAxisName: domId ? axisName(domId) : null,
+          topType: ranking[0] ? ranking[0].type : null,
+          ranking: ranking,
+          spectrum: mr.spectrum || null,
+          flags: mr.flags || {}
+        };
+      });
+    } else if (agg.source === 'legacy') {
+      out.legacyNote = 'عميل قديم — نتيجة محسوبة من awakening_progress بنفس منطق التجميع. الطابع والتوليفة والترتيب كاملة؛ تفاصيل المرايا الفرديّة (dominantAxis/spectrum) غير مخزّنة بنفس شكل النسخة الجديدة.';
+    }
+
+    downloadJSON(out, 'fouad-mirrors-' + String(c.userId).substring(0,8) + '.json');
+    toast('✅ تُصدّر ملفّ جلسة المرايا');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  (2) تصدير المسارات — سياق كامل لجلسة المسارات (بلا طابع، بلا أسماء قوّة)
+  // ═══════════════════════════════════════════════════════════════════════
+  function exportAxesJSON() {
+    if (!SELECTED) return;
+    var c = SELECTED;
+    if (!c.kind.axes || !c.axesDoc) { toast('لا توجد نتائج مسارات لهذا العميل'); return; }
+    var ax = readAxes(c.axesDoc.results || {});
+
+    var out = {
+      station: 'axes',
+      sessionTitle: 'جلسة مسارات الطاقة الثلاثة — اتجاه الطاقة والفطرة/القناع',
+      client: { userId:c.userId, name:c.name, email:c.email },
+      note: 'قراءة عامّة بلا طابع وبلا أسماء نقاط قوّة — المسارات محطّة مستقلّة. الطيف: اتزان=فطرة (يعمل بالحبّ)، إفراط/تفريط=قناع (يعمل بالخوف).',
+      ranking: {
+        primaryAxis: ax.primaryAxis, primaryAxisName: axisName(ax.primaryAxis),
+        secondaryAxis: ax.secondaryAxis, secondaryAxisName: axisName(ax.secondaryAxis),
+        repressedAxis: ax.repressedAxis, repressedAxisName: axisName(ax.repressedAxis)
+      },
+      flags: {
+        closeTop: ax.closeTop, closeTopCandidate: ax.closeTopCandidate,
+        closeTopCandidateName: ax.closeTopCandidate ? axisName(ax.closeTopCandidate) : null,
+        repressedConfirmed: ax.repressedConfirmed, weakSignal: ax.weakSignal
+      },
+      primaryCluster: dimsExport(ax.primaryAxis, ax.primaryDims),
+      repressedCluster: dimsExport(ax.repressedAxis, ax.repressedDims),
+      wellnessLine: ax.wellness || null, // داخليّ للكوتش
+      exportedAt: new Date().toISOString()
+    };
+
+    downloadJSON(out, 'fouad-axes-' + String(c.userId).substring(0,8) + '.json');
+    toast('✅ تُصدّر ملفّ جلسة المسارات');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  (3) تصدير التقاطع/القوّة — سياق كامل لجلسة نقاط القوّة (طابع × مسار)
+  // ═══════════════════════════════════════════════════════════════════════
+  function exportCrossJSON() {
+    if (!SELECTED) return;
+    var c = SELECTED;
+    if (!c.kind.both) { toast('نقاط القوّة تحتاج إكمال المقياسين معًا'); return; }
+    var agg = c.typeAgg; var tn = agg && agg.primary ? agg.primary.num : null;
+    var ax = readAxes(c.axesDoc.results || {});
+    var primaryCluster = buildCluster(ax, 'primary');
+    var repressedCluster = buildCluster(ax, 'repressed');
+
+    // النمط المضاد لكل مسار حاضر (من محتوى التقاطع إن حُمِّل)
+    function counterOf(axisId) {
+      if (!window.INTERSECTION_CONTENT) return null;
+      var t = window.INTERSECTION_CONTENT['type' + tn]; if (!t) return null;
+      var a = t[axisId];
+      return (a && a.counterType) ? { axis:axisId, axisName:axisName(axisId), note:a.counterNote||null } : null;
+    }
+
+    var out = {
+      station: 'cross',
+      sessionTitle: 'جلسة نقاط القوّة — تقاطع الطابع مع المسار',
+      client: { userId:c.userId, name:c.name, email:c.email },
+      note: 'مجمِّع لا قائس: الطابع من المرايا، المسار من المسارات، نقطة القوّة = تقاطعهما. الرئيسيّ بإطار الهبة/الكُلفة، المكبوت بإطار الحدّ النائم.',
+      primaryType: agg && agg.primary ? { type:tn, name:agg.primary.name } : null,
+      tritype: (agg && agg.tri) ? agg.tri.map(function (t){ return t.type?t.type.num:null; }) : null,
+      axes: {
+        primaryAxis: ax.primaryAxis, primaryAxisName: axisName(ax.primaryAxis),
+        repressedAxis: ax.repressedAxis, repressedAxisName: axisName(ax.repressedAxis)
+      },
+      flags: {
+        closeTop: ax.closeTop, closeTopCandidate: ax.closeTopCandidate,
+        repressedConfirmed: ax.repressedConfirmed, weakSignal: ax.weakSignal,
+        counterTypePrimary: counterOf(ax.primaryAxis),
+        counterTypeRepressed: counterOf(ax.repressedAxis)
+      },
+      clusters: {
+        primary: { frame:'الهبة والكُلفة', axis:ax.primaryAxis, axisName:axisName(ax.primaryAxis), points: crossPointsExport(tn, primaryCluster) },
+        repressed: { frame:'الحدّ النائم', axis:ax.repressedAxis, axisName:axisName(ax.repressedAxis), points: crossPointsExport(tn, repressedCluster) }
+      },
+      exportedAt: new Date().toISOString()
+    };
+
+    downloadJSON(out, 'fouad-strengths-' + String(c.userId).substring(0,8) + '.json');
+    toast('✅ تُصدّر ملفّ جلسة نقاط القوّة');
+  }
+
+  // نقاط القوّة للتصدير — الاسم + الموقع + قراءة الطيف المُلوّنة بالطابع (إن وُجدت)
+  function crossPointsExport(typeNum, cluster) {
+    if (!cluster.measured) return [];
+    return cluster.points.map(function (p) {
+      var content = strengthContent(typeNum, p.axisId, p.dimId);
+      var reading = null;
+      if (content && content.spectrum && (p.position==='balance'||p.position==='excess'||p.position==='deficit')) {
+        reading = content.spectrum[p.position] || null;
+      }
+      return {
+        dimId: p.dimId, dimName: dimName(p.axisId, p.dimId),
+        strengthName: content ? content.name : null,
+        position: p.position, positionLabel: p.positionLabel || posText(p.position),
+        ambiguous: p.ambiguous,
+        reading: reading,                        // القراءة الجاهزة للموقع (إن أُنتِج محتوى الطابع)
+        rootsRef: content ? (content.rootsRef||null) : null,
+        scores: p.scores
+      };
+    });
+  }
+
   function exportUnifiedJSON() {
     if (!SELECTED) return;
     var c = SELECTED;
