@@ -15,6 +15,14 @@
     var COLLECTION = 'fouad_v2_results';   // مجموعة النتائج: وثيقة واحدة لكل عميل بمعرّفه
     var CACHE_PREFIX = 'fouad_v2_cache_';  // بادئة الـ cache المحلّي أثناء حلّ المرآة
 
+    // ── مزامنة المسودّة السحابيّة (استئناف من أيّ جهاز) ──────────
+    // أثناء حلّ المرآة يُحفَظ التقدّم محلّيًّا فورًا، ويُزامَن إلى Firestore
+    // في حقل draft.<mirrorId> بكتابة واحدة كل DRAFT_THROTTLE_MS على الأكثر.
+    var DRAFT_THROTTLE_MS = 15000;  // ارفعها إلى 30000 لتقليل الكتابات للنصف
+    var _draftTimers = {};          // mirrorId → معرّف مؤقّت الكتابة المؤجّلة
+    var _draftLastWrite = {};       // mirrorId → آخر وقت كتابة سحابيّة (ms)
+    var _draftDirty = {};           // mirrorId → هل توجد تغييرات لم تُزامَن بعد؟
+
     // إعدادات قابلة للضبط من الصفحة (مثل courseId الخاصّ بالمقياس)
     var _config = {
         courseId: null,        // يُضبط عبر FOUAD_STORE.setConfig({ courseId: '...' })
@@ -171,13 +179,47 @@
             if (!ref) return null;
 
             var doc = await ref.get();
-            if (doc.exists) return doc.data();
+            if (doc.exists) {
+                var data = doc.data();
+                // زرع المسودّات السحابيّة في الـcache المحلّي (إن كانت أحدث)
+                // حتى يعمل الاستئناف من نفس السؤال على أيّ جهاز دون تعديل التطبيق
+                _seedLocalFromCloudDrafts(data);
+                return data;
+            }
 
             return null; // عميل جديد — لا توجد وثيقة بعد
         } catch (e) {
             // فشل القراءة لا يعطّل التطبيق
             console.error('[FOUAD_STORE] loadAssessment error:', e);
             return null;
+        }
+    }
+
+    // مقارنة مسودّة السحابة بالمحلّيّة لكل مرآة، والأخذ بالأحدث محلّيًّا
+    function _seedLocalFromCloudDrafts(data) {
+        try {
+            var drafts = data && data.draft;
+            if (!drafts || typeof drafts !== 'object') return;
+
+            Object.keys(drafts).forEach(function (mirrorId) {
+                var cloud = drafts[mirrorId];
+                if (!cloud || !cloud.data) return;
+
+                var localRaw = _readRawCache(mirrorId);
+                var localAt = (localRaw && localRaw.savedAt) ? localRaw.savedAt : 0;
+                var cloudAt = cloud.savedAt || 0;
+
+                // السحابة أحدث (أو لا محلّيّ أصلًا) → ازرعها محلّيًّا
+                if (cloudAt > localAt) {
+                    localStorage.setItem(_cacheKey(mirrorId), JSON.stringify({
+                        mirrorId: mirrorId,
+                        data: cloud.data,
+                        savedAt: cloudAt
+                    }));
+                }
+            });
+        } catch (e) {
+            console.error('[FOUAD_STORE] _seedLocalFromCloudDrafts error:', e);
         }
     }
 
@@ -256,6 +298,15 @@
             payload.answers[mirrorId] = { identification: identification, spectrum: spectrum };
             payload.results[mirrorId] = results;
 
+            // المرآة اكتملت → احذف مسودّتها السحابيّة في نفس الكتابة (بلا كتابة إضافيّة)
+            if (exists) {
+                payload.draft = {};
+                payload.draft[mirrorId] = FV.delete();
+            }
+
+            // وألغِ أيّ مزامنة مؤجّلة لهذه المرآة حتى لا تُعاد كتابة المسودّة بعد الحذف
+            _cancelDraftSync(mirrorId);
+
             // كتابة واحدة: merge ليعمل سواء كانت الوثيقة جديدة أو موجودة
             await ref.set(payload, { merge: true });
 
@@ -324,7 +375,7 @@
         return CACHE_PREFIX + uid + '_' + mirrorId;
     }
 
-    // حفظ تقدّم المرآة الجاري محلّيًّا (يُستدعى أثناء الحلّ — لا يلمس Firestore)
+    // حفظ تقدّم المرآة الجاري: محلّيًّا فورًا + مزامنة سحابيّة مخنوقة زمنيًّا
     function cacheMirrorProgress(mirrorId, partialData) {
         try {
             if (!mirrorId) return false;
@@ -333,12 +384,100 @@
                 data: partialData,
                 savedAt: Date.now()
             }));
+            // مزامنة إلى Firestore (كتابة واحدة كل DRAFT_THROTTLE_MS على الأكثر)
+            _scheduleDraftSync(mirrorId);
             return true;
         } catch (e) {
             console.error('[FOUAD_STORE] cacheMirrorProgress error:', e);
             return false;
         }
     }
+
+    // قراءة الـcache الخام (مع savedAt) — للاستعمال الداخليّ في المزامنة والمقارنة
+    function _readRawCache(mirrorId) {
+        try {
+            var raw = localStorage.getItem(_cacheKey(mirrorId));
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && 'data' in parsed) return parsed;
+            // توافق مع صيغة قديمة بلا غلاف
+            return { mirrorId: mirrorId, data: parsed, savedAt: 0 };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // جدولة مزامنة المسودّة: فوريّة إن مضت المهلة، وإلّا مؤجّلة لنهايتها
+    function _scheduleDraftSync(mirrorId) {
+        _draftDirty[mirrorId] = true;
+        if (_draftTimers[mirrorId]) return; // مؤقّت قائم بالفعل — سيلتقط آخر حالة
+
+        var last = _draftLastWrite[mirrorId] || 0;
+        var elapsed = Date.now() - last;
+        var wait = Math.max(0, DRAFT_THROTTLE_MS - elapsed);
+
+        _draftTimers[mirrorId] = setTimeout(function () {
+            _draftTimers[mirrorId] = null;
+            _syncDraftNow(mirrorId);
+        }, wait);
+    }
+
+    // إلغاء أيّ مزامنة مؤجّلة لمرآة (تُستدعى عند اكتمالها)
+    function _cancelDraftSync(mirrorId) {
+        _draftDirty[mirrorId] = false;
+        if (_draftTimers[mirrorId]) {
+            clearTimeout(_draftTimers[mirrorId]);
+            _draftTimers[mirrorId] = null;
+        }
+    }
+
+    // الكتابة السحابيّة الفعليّة: draft.<mirrorId> = { data, savedAt }
+    async function _syncDraftNow(mirrorId) {
+        try {
+            if (!_draftDirty[mirrorId]) return;
+            var u = getCurrentUser();
+            if (!u || !u.id) return;
+
+            var cached = _readRawCache(mirrorId);
+            if (!cached || !cached.data) return;
+
+            var ref = await _docRef(u.id);
+            if (!ref) return;
+
+            _draftDirty[mirrorId] = false;
+            _draftLastWrite[mirrorId] = Date.now();
+
+            var FV = firebase.firestore.FieldValue;
+            var payload = { draft: {}, meta: { lastUpdated: FV.serverTimestamp() } };
+            payload.draft[mirrorId] = {
+                data: cached.data,
+                savedAt: cached.savedAt || Date.now()
+            };
+            await ref.set(payload, { merge: true });
+        } catch (e) {
+            // فشل المزامنة لا يعطّل الحلّ — المحلّيّ محفوظ، وستُعاد المحاولة مع التغيير التالي
+            _draftDirty[mirrorId] = true;
+            console.error('[FOUAD_STORE] _syncDraftNow error:', e);
+        }
+    }
+
+    // دفع فوريّ لكل المسودّات المعلّقة (عند مغادرة الصفحة أو التبديل عنها)
+    function _flushAllDrafts() {
+        Object.keys(_draftDirty).forEach(function (mirrorId) {
+            if (!_draftDirty[mirrorId]) return;
+            if (_draftTimers[mirrorId]) {
+                clearTimeout(_draftTimers[mirrorId]);
+                _draftTimers[mirrorId] = null;
+            }
+            _syncDraftNow(mirrorId);
+        });
+    }
+
+    // على الموبايل: التبديل لتطبيق آخر أو قفل الشاشة يطلق visibilitychange
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') _flushAllDrafts();
+    });
+    window.addEventListener('pagehide', _flushAllDrafts);
 
     // قراءة التقدّم المحلّي للمرآة (للاستئناف لو أُغلقت الصفحة في المنتصف)
     function readMirrorCache(mirrorId) {
@@ -359,6 +498,7 @@
     function clearMirrorCache(mirrorId) {
         try {
             if (!mirrorId) return false;
+            _cancelDraftSync(mirrorId);
             localStorage.removeItem(_cacheKey(mirrorId));
             return true;
         } catch (e) {
