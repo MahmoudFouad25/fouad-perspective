@@ -83,7 +83,7 @@ window.COURSE_CONFIG = {
   launchOffer: {
     enabled: true,
     name: "عرض الإطلاق",
-    endDate: "2026-07-07",     // ⚠️ غيّره للتاريخ الفعلي لانتهاء العرض
+    endDate: "2026-07-10",     // ⚠️ غيّره للتاريخ الفعلي لانتهاء العرض
     showCountdown: true,
   },
 
