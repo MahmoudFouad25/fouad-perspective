@@ -50,6 +50,10 @@
   .btn.gold:hover{filter:brightness(1.06)}
   .btn.ghost{background:transparent}
   .btn.danger:hover{border-color:var(--clay);color:var(--clay)}
+  .cloud{font-family:'IBM Plex Sans Arabic';font-size:12.5px;padding:9px 14px;border-radius:20px;
+    border:1px solid var(--line);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .cloud.ok{color:var(--sage);border-color:rgba(125,184,154,.4);background:rgba(125,184,154,.08)}
+  .cloud.off{color:var(--gold-soft);border-color:rgba(235,185,74,.4);background:rgba(235,185,74,.08)}
 
   /* setup */
   .setup{max-width:640px;margin:6vh auto;background:var(--ink-2);border:1px solid var(--line);
@@ -199,6 +203,7 @@
         </div>
       </div>
       <div class="top-actions">
+        <span id="cloud" class="cloud off">⚠ محلي فقط</span>
         <button class="btn ghost" onclick="openSetup()">تعديل الفرق</button>
         <button class="btn danger" onclick="resetAll()">تصفير الكل</button>
         <button class="btn gold" onclick="announce()">🏆 إعلان المصير</button>
@@ -260,6 +265,9 @@
   </div>
 </div>
 
+<!-- Firebase (compat SDK — same project as fouad-perspective) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script>
 /* ================= DATA ================= */
 const START = 50;
@@ -296,16 +304,58 @@ const STATIONS = [
 const STORE='munataf_scoreboard_v1';
 
 let state = load() || { teams:[], log:[], sel:{team:null, station:'s1'} };
+if(!state.sel) state.sel={team:null, station:'s1'};
 
 function load(){ try{const r=localStorage.getItem(STORE);return r?JSON.parse(r):null;}catch(e){return null;} }
-function save(){ try{localStorage.setItem(STORE,JSON.stringify(state));}catch(e){} }
+function saveLocal(){ try{localStorage.setItem(STORE,JSON.stringify(state));}catch(e){} }
+function save(){ saveLocal(); pushCloud(); }
+
+/* ---------- Firebase cloud sync (storage + live mirror) ---------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
+  authDomain: "fouad-perspective.firebaseapp.com",
+  projectId: "fouad-perspective",
+  storageBucket: "fouad-perspective.firebasestorage.app",
+  messagingSenderId: "1068763865336",
+  appId: "1:1068763865336:web:b791abcd22d536aedd5b0d"
+};
+let cdb=null, docRef=null, localStamp=0, userInSetup=false;
+function setCloud(ok){ const el=document.getElementById('cloud'); if(!el) return;
+  el.className='cloud '+(ok?'ok':'off'); el.textContent = ok?'☁ متزامن':'⚠ محلي فقط'; }
+function initCloud(){
+  try{
+    if(typeof firebase==='undefined'){ setCloud(false); return; }
+    firebase.initializeApp(firebaseConfig);
+    cdb=firebase.firestore();
+    try{ cdb.enablePersistence({synchronizeTabs:true}); }catch(e){}
+    docRef=cdb.collection('scoreboards').doc('munataf');
+    docRef.onSnapshot(snap=>{
+      setCloud(true);
+      const d=snap.data();
+      if(!d){ if(state.teams.length) pushCloud(); return; }
+      if(d.updatedAt && d.updatedAt!==localStamp){
+        localStamp=d.updatedAt;
+        state.teams=d.teams||[]; state.log=d.log||[];
+        saveLocal();
+        const appVisible=document.getElementById('app').style.display!=='none';
+        if(appVisible) render();
+        else if(state.teams.length && !userInSetup) showApp();
+      }
+    }, err=>{ console.error('cloud read',err); setCloud(false); });
+  }catch(e){ console.error(e); setCloud(false); }
+}
+function pushCloud(){
+  if(!docRef) return;
+  localStamp=Date.now();
+  docRef.set({teams:state.teams, log:state.log, updatedAt:localStamp})
+    .then(()=>setCloud(true)).catch(e=>{ console.error('cloud write',e); setCloud(false); });
+}
 
 /* ================= SETUP ================= */
 function buildSetupFields(names){
   const box=document.getElementById('teamInputs'); box.innerHTML='';
   const list = names && names.length ? names : ['','','','',''];
   list.forEach((n,i)=>addTeamField(n,i+1));
-  function addTeamField(){} // no-op guard
 }
 function addTeamField(val='', idx){
   const box=document.getElementById('teamInputs');
@@ -332,9 +382,10 @@ function startGame(){
     return prev || { name:n, entries:[] };
   });
   if(!state.sel.team) state.sel.team = state.teams[0].name;
-  save(); showApp();
+  userInSetup=false; save(); showApp();
 }
 function openSetup(){
+  userInSetup=true;
   document.getElementById('app').style.display='none';
   document.getElementById('setup').style.display='block';
   buildSetupFields((state.teams||[]).map(t=>t.name));
@@ -481,6 +532,7 @@ function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.
 
 /* ================= BOOT ================= */
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+initCloud();
 if(state.teams && state.teams.length){ showApp(); }
 else { buildSetupFields(); }
 </script>
