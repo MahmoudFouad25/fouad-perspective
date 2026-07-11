@@ -61,6 +61,12 @@
   .rchip.on{background:var(--ink-3);color:var(--gold);border-color:var(--gold)}
   .rchip .tick{color:var(--green);font-size:12px}
   .rchip.crown.on{border-color:var(--gold);color:var(--gold)}
+  .rchip.locked{opacity:.38;cursor:default}
+  .rchip.locked:hover{border-color:var(--line);color:var(--muted)}
+  .rchip .lk{font-size:11px}
+  .gate-wait{margin-top:14px;text-align:center;font-size:13.5px;color:var(--gold-soft);
+    background:rgba(235,185,74,.07);border:1px dashed rgba(235,185,74,.35);border-radius:14px;padding:14px}
+  .gate-wait b{color:var(--cream)}
 
   /* ---------- STAGE CARD ---------- */
   .stage{margin-top:16px;animation:pop .22s ease}
@@ -352,6 +358,7 @@ const firebaseConfig = {
   appId:"1:1068763865336:web:b791abcd22d536aedd5b0d"
 };
 let TEAM=null, STAGE_LIST=[], answers={}, cur=0, docRef=null, cdb=null, saveTimer=null, localStamp=0;
+let gateMax=99, ctrlRef=null, ctrlActive=false;   // بوّابة المراحل (99 = كله مفتوح لحد ما الأدمن يشتغل)
 const LSKEY = t => 'munataf_input_'+t;
 
 function initCloud(){
@@ -361,6 +368,18 @@ function initCloud(){
     cdb=firebase.firestore();
     try{ cdb.enablePersistence({synchronizeTabs:true}); }catch(e){}
     docRef=cdb.collection('munataf_inputs').doc(TEAM);
+
+    // بوّابة المراحل — مستند تحكّم واحد صغير جدًا.
+    // onSnapshot بيدفع التغيير بس لما يحصل فعلاً؛ وهو ساكت = صفر قراءات.
+    ctrlRef=cdb.collection('munataf_control').doc('state');
+    ctrlRef.onSnapshot(s=>{
+      const d=s.data();
+      if(d && typeof d.openStage==='number'){ ctrlActive=true; gateMax=d.openStage; }
+      else { ctrlActive=false; gateMax=STAGE_LIST.length-1; }   // مفيش أدمن → كله مفتوح
+      if(cur>gateMax) cur=gateMax;
+      renderStage(); renderRail();
+    }, e=>{ ctrlActive=false; gateMax=STAGE_LIST.length-1; });
+
     // اقرأ مرّة عند البداية (وبعدها الفريق هو مصدر مستنده)
     docRef.get().then(snap=>{
       setCloud(true);
@@ -386,7 +405,7 @@ function pushCloud(){
 function queueSave(){
   saveLocal(); flash();
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(pushCloud, 550);
+  saveTimer=setTimeout(pushCloud, 1500);   // يكتب بعد ما يهدأ الكتابة (أخف على الفايرستور؛ المحلي فوري)
 }
 let flashTimer=null;
 function flash(){ const t=document.getElementById('savedTag'); if(!t) return;
@@ -442,21 +461,26 @@ function stageAnswered(st){
 function renderRail(){
   const rail=document.getElementById('rail'); rail.innerHTML='';
   STAGE_LIST.forEach((st,i)=>{
+    const locked = i>gateMax;
     const c=document.createElement('button');
-    c.className='rchip'+(i===cur?' on':'')+(st.crown?' crown':'');
-    c.innerHTML=`<span>${st.tab}</span>${stageAnswered(st)?'<span class="tick">✓</span>':''}`;
-    c.onclick=()=>{ cur=i; renderStage(); renderRail(); scrollTop(); };
+    c.className='rchip'+(i===cur?' on':'')+(st.crown?' crown':'')+(locked?' locked':'');
+    c.innerHTML=`<span>${st.tab}</span>${locked?'<span class="lk">🔒</span>':(stageAnswered(st)?'<span class="tick">✓</span>':'')}`;
+    c.onclick=()=>{ if(locked) return; cur=i; renderStage(); renderRail(); scrollTop(); };
     rail.appendChild(c);
   });
 }
 function renderStage(){
+  if(cur>gateMax) cur=gateMax; if(cur<0) cur=0;
   const st=STAGE_LIST[cur];
   const host=document.getElementById('stageHost');
+  const atGate = cur>=gateMax && cur<STAGE_LIST.length-1;
   let h=`<div class="stage"><div class="st-head">
       <span class="st-num">${st.tab}</span>
       <span class="st-title">${st.title}</span></div>
       ${st.principle?`<div class="st-principle">${st.principle}</div>`:''}`;
   st.blocks.forEach(b=> h+=renderBlock(b));
+  if(atGate && ctrlActive)
+    h+=`<div class="gate-wait">✍️ لسه ماتنقلش للمحطة الجاية.<br><b>مستنيين المدرّب يفتحها.</b></div>`;
   h+='</div>';
   host.innerHTML=h;
   bindInputs();
@@ -464,7 +488,8 @@ function renderStage(){
   document.getElementById('prevBtn').disabled = cur===0;
   const nb=document.getElementById('nextBtn');
   if(cur===STAGE_LIST.length-1){ nb.textContent='خلصنا ✓'; nb.disabled=false; }
-  else nb.textContent='التالي ►';
+  else if(atGate){ nb.textContent='🔒 مقفولة'; nb.disabled=true; }
+  else { nb.textContent='التالي ►'; nb.disabled=false; }
 }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -521,7 +546,8 @@ function bindInputs(){
 
 function go(dir){
   if(cur===STAGE_LIST.length-1 && dir>0){ pushCloud(); flash(); return; }
-  cur=Math.max(0,Math.min(STAGE_LIST.length-1,cur+dir));
+  const max=Math.min(STAGE_LIST.length-1, gateMax);   // مايعديش البوّابة اللي فاتحها المدرّب
+  cur=Math.max(0, Math.min(max, cur+dir));
   renderStage(); renderRail(); scrollTop();
 }
 function scrollTop(){ window.scrollTo({top:0,behavior:'smooth'}); }
