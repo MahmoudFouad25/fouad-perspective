@@ -98,7 +98,7 @@
     } },
     m3: { name: 'المشاعر', divisions: {
       ihtiwa:    ['1', '3', '5'],
-      tabir:     ['4', '6', '8'],
+      taabir:    ['4', '6', '8'],
       tahwil:    ['2', '7', '9']
     } },
     m4: { name: 'النموذج الإدراكي', divisions: {
@@ -131,11 +131,11 @@
     '1': { m1: 'imtithal', m2: 'dakhili',   m3: 'ihtiwa', m4: 'tanfith', m5: 'agency',    m6: 'sayrura', m7: 'waqi'    },
     '2': { m1: 'imtithal', m2: 'khariji',   m3: 'tahwil', m4: 'taqyim',  m5: 'bonding',   m6: 'maiyya',  m7: 'ihtiyaj' },
     '3': { m1: 'hazm',     m2: 'mutaarjih', m3: 'ihtiwa', m4: 'tanfith', m5: 'bonding',   m6: 'sayrura', m7: 'ittisal' },
-    '4': { m1: 'insihab',  m2: 'dakhili',   m3: 'tabir',  m4: 'ibtikar', m5: 'bonding',   m6: 'kaynuna', m7: 'waqi'    },
+    '4': { m1: 'insihab',  m2: 'dakhili',   m3: 'taabir',  m4: 'ibtikar', m5: 'bonding',   m6: 'kaynuna', m7: 'waqi'    },
     '5': { m1: 'insihab',  m2: 'dakhili',   m3: 'ihtiwa', m4: 'taqyim',  m5: 'certainty', m6: 'kaynuna', m7: 'ihtiyaj' },
-    '6': { m1: 'imtithal', m2: 'mutaarjih', m3: 'tabir',  m4: 'tanfith', m5: 'certainty', m6: 'maiyya',  m7: 'ittisal' },
+    '6': { m1: 'imtithal', m2: 'mutaarjih', m3: 'taabir',  m4: 'tanfith', m5: 'certainty', m6: 'maiyya',  m7: 'ittisal' },
     '7': { m1: 'hazm',     m2: 'khariji',   m3: 'tahwil', m4: 'ibtikar', m5: 'certainty', m6: 'sayrura', m7: 'waqi'    },
-    '8': { m1: 'hazm',     m2: 'khariji',   m3: 'tabir',  m4: 'ibtikar', m5: 'agency',    m6: 'kaynuna', m7: 'ihtiyaj' },
+    '8': { m1: 'hazm',     m2: 'khariji',   m3: 'taabir',  m4: 'ibtikar', m5: 'agency',    m6: 'kaynuna', m7: 'ihtiyaj' },
     '9': { m1: 'insihab',  m2: 'mutaarjih', m3: 'tahwil', m4: 'taqyim',  m5: 'agency',    m6: 'maiyya',  m7: 'ittisal' }
   };
 
@@ -196,23 +196,26 @@
       CONFIRM_NET: 2
     },
 
-    /* فض الاشتباك (stageD) — درجاته الأربع بترتيب المنهجية §٣/د:
-       المبارزات: ٣ بنود اختيار إجباري (الأقرب/الأبعد). التنقيط:
-         اختيار «الأقرب» = +٢ لطرفه، واختيار «الأبعد» = +١ للطرف الآخر
-         (استبعاد أحدهما دليل موجب على الآخر). أقصى مدى للبند ٣ نقاط.
-       حسم المبارزات: |الفارق| ≥ DUEL_NET بعد الثلاثة.
-       الجذور: بندان، كل اختيار = +٢ لطرفه. حسم: |الفارق| ≥ ROOT_NET.
+    /* فض الاشتباك (stageD) — درجاته بترتيب المنهجية §٣/د، والتنقيط
+       مبني على الميكانيكا الفعلية لبنود البنك (اختيار واحد من وصفين):
+       المبارزات: ٣ بنود، المختار +DUEL_POINTS. بعد الثلاثة:
+         ٣-٠ (صافي ٦) ≥ DUEL_NET → حسم بالمبارزة.
+         ٢-١ (صافي ٢) < DUEL_NET → «بقي التقارب» → الجذور.
+       الجذور: بندان أعمق فأثقل، المختار +ROOT_POINTS. الحسم بالمجموع
+       التراكمي: |الصافي| ≥ RESOLVE_NET — فانقسام الجذور (١-١) وحده هو
+       ما يُبقي التقارب ويستدعي التعرّف.
        التعرّف المرآتي: اختيار واحد إجباري = +RECOGNITION_WEIGHT — وزن
-       حاسم أعلى من أقصى فارق يمكن أن يكون معلقًا قبله، فيستحيل رياضيًّا
-       التعادل بعده. وإن بقي (نظريًّا) تعادل في المجموع الكلي: كسر حتمي
-       بمجموع الأدلة الخام ثم بأسبقية خلية المربع للمرشح الأصلي —
-       المحرك لا يخرج بغير طابع واحد. */
+       يجعل |الصافي| بعده ≥ RESOLVE_NET حتميًّا من أي نقطة سابقة، فيستحيل
+       رياضيًّا خروج المحرك بغير طابع واحد. وللاحتياط النظري المطلق:
+       كسر حتمي بمجموع الأدلة الخام ثم بأسبقية خلية المربع للمرشح.
+       الأزواج بلا بطارية (المنافس من قرب الأدلة خارج السبعة الضيقة):
+       تصعيدها المباشر هو التعرّف المرآتي — بنك الأصوات التسعة صُمّم
+       ليغطي أي زوج من الـ٣٦ (قرار موثق في رأس البنك). */
     duel: {
-      CLOSEST_POINTS: 2,
-      FURTHEST_POINTS: 1,
-      DUEL_NET: 3,
-      ROOT_POINTS: 2,
-      ROOT_NET: 2,
+      DUEL_POINTS: 2,
+      DUEL_NET: 4,
+      ROOT_POINTS: 3,
+      RESOLVE_NET: 4,
       RECOGNITION_WEIGHT: 6
     },
 
