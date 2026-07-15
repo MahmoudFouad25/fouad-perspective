@@ -274,20 +274,20 @@
     var cumNet = 0;
 
     if (battery) {
-      /* ١) المبارزات */
-      var answeredDuels = battery.duels.filter(function (it) { return (d.duels || {})[it.id]; });
-      if (answeredDuels.length < battery.duels.length) {
-        return { resolved: false, serve: { kind: 'duels', items: battery.duels }, trace: trace };
+      /* ١) المبارزات — يُقدَّم غير المُجاب منها فقط */
+      var pendingDuels = battery.duels.filter(function (it) { return !(d.duels || {})[it.id]; });
+      if (pendingDuels.length) {
+        return { resolved: false, serve: { kind: 'duels', items: pendingDuels }, trace: trace };
       }
       var duelR = _binaryNet(battery.duels, d.duels, candidate, T.DUEL_POINTS);
       cumNet += duelR.net;
       trace.steps.push({ step: 'duels', net: duelR.net, log: duelR.log });
       if (Math.abs(cumNet) >= T.DUEL_NET) return _decide(cumNet, 'duel');
 
-      /* ٢) الجذور */
-      var answeredRoots = battery.roots.filter(function (it) { return (d.roots || {})[it.id]; });
-      if (answeredRoots.length < battery.roots.length) {
-        return { resolved: false, serve: { kind: 'roots', items: battery.roots }, cumNet: cumNet, trace: trace };
+      /* ٢) الجذور — يُقدَّم غير المُجاب منها فقط */
+      var pendingRoots = battery.roots.filter(function (it) { return !(d.roots || {})[it.id]; });
+      if (pendingRoots.length) {
+        return { resolved: false, serve: { kind: 'roots', items: pendingRoots }, cumNet: cumNet, trace: trace };
       }
       var rootR = _binaryNet(battery.roots, d.roots, candidate, T.ROOT_POINTS);
       cumNet += rootR.net;
@@ -618,8 +618,17 @@
     if (uE.length) return { phase: 'paths', items: uE, context: context };
 
     var ranking = RAPID_ENGINE.computeAxisRanking(answers);
-    if (ranking.closeTop) {
-      var uR = (Q.rankingItems || []).filter(function (it) {
+    var rankItems = Q.rankingItems || [];
+    var rankAnswered = rankItems.filter(function (it) {
+      var o = (answers.stageERank || {})[it.id];
+      return Array.isArray(o) && o.length === 3;
+    }).length;
+    /* الزناد: closeTop قبل أي ترتيب — وبعد انطلاقه يُستكمل البندان كلاهما
+       (المنهجية: «بندا الترتيب الإجباري يُقدَّمان») */
+    var rankTriggered = (ranking.closeTop && rankAnswered === 0) ||
+                        (rankAnswered > 0 && rankAnswered < rankItems.length);
+    if (rankTriggered) {
+      var uR = rankItems.filter(function (it) {
         var o = (answers.stageERank || {})[it.id];
         return !(Array.isArray(o) && o.length === 3);
       });
