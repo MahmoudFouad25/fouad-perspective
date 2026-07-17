@@ -106,6 +106,7 @@ h2.sec{font-size:12px;letter-spacing:.16em;color:var(--mute);margin:22px 0 8px;f
   font-size:11px;color:var(--mute);margin-inline-start:6px}
 </style>
 
+<script src="sync.js"></script>
 <div id="drain"><i></i></div>
 <div id="wrap"></div>
 <div id="sheet" onclick="if(event.target.id==='sheet')closeSheet()"><div class="inner" id="sheetIn"></div></div>
@@ -315,9 +316,8 @@ const ROLES = {
 const ORDER = ["raei","tager","raqib"];
 
 /* ==========  الحالة  ========== */
-const KEY = "sbm:round:v1";
-const DEV = Math.random().toString(36).slice(2,9);       // معرّف الجهاز — بيعيش مع الجلسة بس
-let S = { round:1, lap:1, phase:"idle", t0:0, seq:0 };   // مشتركة (الأدمن بيكتبها)
+const DEV = SYNC.dev;
+let S = { round:1, lap:1, phase:"idle", t0:0, seq:0 };
 let me = { start:null, view:"pick", peeks:0, marks:{}, worry:null, variant:0, synced:false, sent:{} };
 let tick=null, poll=null;
 
@@ -328,35 +328,24 @@ const dur = () => S.phase==="prep" ? R().prep : S.phase==="run" ? R().lap : S.ph
 const left = () => Math.max(0, dur() - Math.floor((Date.now()-S.t0)/1000));
 const mmss = s => Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
 
-/* ==========  المزامنة (لو متاحة) — والفشل مش بيوقف حاجة  ========== */
-async function push(){
-  S.seq++;
-  try{ await window.storage.set(KEY, JSON.stringify(S), true); me.synced=true; }
-  catch(e){ me.synced=false; }
-  render();
-}
+/* الحالة جاية من المدرب — الصفحة دي بتقرا بس، وبتكتب حالتها المحلية لو الجرس اليدوي */
+async function push(){ try{ await SYNC.setState(S); me.synced=true; }catch(e){ me.synced=false; } render(); }
 async function pull(){
   try{
-    const r = await window.storage.get(KEY, true);
-    if(r && r.value){
-      const n = JSON.parse(r.value);
-      if(n.seq !== S.seq || n.phase !== S.phase || n.round !== S.round || n.lap !== S.lap){
-        S = n; me.marks={};
-      }
-      me.synced = true;
-    }
+    const n = await SYNC.getState();
+    if(n && (n.seq!==S.seq || n.phase!==S.phase || n.round!==S.round || n.lap!==S.lap)){ S=n; me.marks={}; }
+    me.synced = SYNC.crossDevice ? !!n : false;
   }catch(e){ me.synced=false; }
 }
 function startPoll(){ if(poll) clearInterval(poll); poll=setInterval(async()=>{ await pull(); render(); },3000); }
 
 /* ---- المراقب بيبعت نتيجته مرة واحدة أول ما الجرس يضرب ---- */
-const resKey = (r,l) => `sbm:res:${r}:${l}:`;
 async function submitMarks(){
   const k = `${S.round}:${S.lap}`;
   if(myRole()!=="raqib" || Object.keys(me.marks).length===0) return;
   me.sent[k]=true;
   const arr = R().raqib.map((_,i)=> me.marks[i]||"skip");
-  try{ await window.storage.set(resKey(S.round,S.lap)+DEV, JSON.stringify(arr), true); }
+  try{ await SYNC.putResult(S.round, S.lap, DEV, arr); }
   catch(e){ me.sent[k]="fail"; }
 }
 function maybeSubmit(){
@@ -421,7 +410,7 @@ function player(){
   return head() + bodyHtml + `
   <div style="margin-top:26px;border-top:1px solid var(--line);padding-top:12px">
     <button class="btn ghost" onclick="localAdvance()">وضع الجرس: دوس مع كل صافرة من محمود</button>
-    <div class="mini" style="text-align:center">استخدم الزرار ده لو النت وقع أو الأدمن مش شغال. ${me.synced?'<span class="pill">متصل بالأدمن</span>':'<span class="pill">شغال محليًا</span>'}</div>
+    <div class="mini" style="text-align:center">استخدم الزرار ده لو النت وقع أو الأدمن مش شغال. <span class="pill">${me.synced?"متصل بالمدرب":SYNC.label}</span></div>
   </div>`;
 }
 
