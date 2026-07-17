@@ -43,11 +43,10 @@ h2.sec{font-size:12px;letter-spacing:.16em;color:var(--mute);margin:22px 0 8px;f
 input{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--ink2);
   color:var(--chalk);font:inherit;text-align:center;font-size:22px;font-weight:800}
 </style>
+<script src="sync.js"></script>
 <div id="wrap"></div>
 <script>
 /* ===== نفس مفاتيح التخزين بتاعة صفحة الناس ===== */
-const KEY = "sbm:round:v1";
-const resKey = (r,l) => `sbm:res:${r}:${l}:`;
 const PASS = "جرس";
 
 const ROUNDS = [
@@ -79,7 +78,7 @@ const ROUNDS = [
 ];
 
 let S = { round:1, lap:1, phase:"idle", t0:0, seq:0 };
-let ui = { gate:true, synced:false, err:null };
+let ui = { gate:true, synced:false, err:null, test:null, testing:false };
 let stats = { scope:null, n:0, rows:[], loading:false, err:null };
 
 const $ = s => document.querySelector(s);
@@ -90,7 +89,7 @@ const mmss = s => Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
 
 async function push(){
   S.seq++;
-  try{ await window.storage.set(KEY, JSON.stringify(S), true); ui.synced=true; ui.err=null; }
+  try{ await SYNC.setState(S); ui.synced=true; ui.err=null; }
   catch(e){ ui.synced=false; ui.err="المزامنة وقعت — قول للناس يستخدموا «وضع الجرس» ويمشوا بصوتك."; }
   render();
 }
@@ -100,12 +99,8 @@ function setRound(n){ S.round=n; S.lap=1; clearStats(true); setPhase("prep"); }
 
 async function collect(scope){
   stats.loading=true; stats.err=null; stats.scope=scope; render();
-  const prefix = scope==="lap" ? resKey(S.round,S.lap) : `sbm:res:${S.round}:`;
   try{
-    const l = await window.storage.list(prefix, true);
-    const keys = (l && l.keys) || [];
-    const vals = await Promise.all(keys.map(async k=>{ try{ const r=await window.storage.get(k,true); return JSON.parse(r.value); }catch(e){ return null; } }));
-    const good = vals.filter(v=>Array.isArray(v));
+    const good = await SYNC.getResults(S.round, scope==="lap" ? S.lap : null);
     stats.rows = R().raqib.map((t,i)=>{
       const m = good.filter(v=>v[i]==="yes"||v[i]==="no");
       const no = m.filter(v=>v[i]==="no").length;
@@ -123,12 +118,21 @@ function gate(){
   <div style="max-width:420px;margin:12vh auto 0;text-align:center">
     <div class="mini" style="letter-spacing:.2em">سبورة المحروسة · النموذج الرباعي</div>
     <h1 style="font-size:40px;font-weight:900;margin:10px 0 4px">لوحة المدرب</h1>
-    <p class="mini" style="margin:0 0 26px">الصفحة دي لمحمود لوحده. لو انت متدرب — اقفلها وافتح لينك غرفة التمرين.</p>
+    <p class="mini" style="margin:0 0 12px">الصفحة دي لمحمود لوحده. لو انت متدرب — اقفلها وافتح لينك غرفة التمرين.</p>
+    <div class="mini" style="margin:0 0 22px;color:${SYNC.crossDevice?'var(--go)':'var(--danger)'}">وضع المزامنة: ${SYNC.label}${SYNC.crossDevice?'':' — حط لينك Firebase في sync.js عشان يوصل لموبايلات الناس'}</div>
     <input id="p" placeholder="مفتاح المدرب" autocomplete="off"
       onkeydown="if(event.key==='Enter')tryGate()">
     <button class="btn" style="margin-top:10px;border-color:var(--gold);color:var(--gold)" onclick="tryGate()">افتح</button>
     <div id="ge" class="mini" style="color:var(--danger);height:18px;margin-top:8px"></div>
+    <button class="btn" style="margin-top:18px;background:transparent;color:var(--mute)" onclick="runTest()">${ui.testing?"بختبر…":"اختبر الاتصال بالقاعدة"}</button>
+    ${ui.test?`<div class="note ${ui.test.ok?'':'stop'}" style="text-align:right;border-inline-start-color:${ui.test.ok?'var(--go)':'var(--danger)'}">
+        <b>${ui.test.ok?"✅ تمام":"❌ في مشكلة"}</b><br>${ui.test.msg}</div>`:""}
   </div>`;
+}
+async function runTest(){
+  ui.testing=true; ui.test=null; render();
+  ui.test = await SYNC.test();
+  ui.testing=false; render();
 }
 function tryGate(){
   if($("#p").value.trim()===PASS){ ui.gate=false; setPhase("idle"); }
@@ -154,7 +158,7 @@ function panel(){
     : ["قفلة الجولة — اقرا ده", R0.say.end];
   return `
   <div class="eyebrow"><span>لوحة المدرب · محمود</span>
-    <span>${ui.synced?"متصل":"مش متصل"}<span class="dot ${ui.synced?'on':''}"></span></span></div>
+    <span>${ui.synced?SYNC.label:"مش متصل"}<span class="dot ${ui.synced?'on':''}"></span></span></div>
   ${ui.err?`<div class="note stop">${ui.err}</div>`:""}
   <div class="grid">${ROUNDS.map(r=>`<button class="${S.round===r.n?'on':''}" onclick="setRound(${r.n})">${r.n}</button>`).join("")}</div>
   <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -174,6 +178,10 @@ function panel(){
     <button class="btn" style="border-color:var(--danger);color:var(--danger)" onclick="setPhase('feedback')">🔔 جرس — وقفوا</button>
     <button class="btn" onclick="nextLap()">${S.lap<3?"اللفة الجاية":"قفلة الجولة"}</button>
   </div>
+  <div class="row" style="margin-bottom:4px">
+    <button class="btn" style="background:transparent;color:var(--mute);padding:10px;font-size:13px" onclick="runTest()">${ui.testing?"بختبر…":"اختبر الاتصال"}</button>
+  </div>
+  ${ui.test?`<div class="note ${ui.test.ok?'':'stop'}" style="border-inline-start-color:${ui.test.ok?'var(--go)':'var(--danger)'}">${ui.test.ok?"✅":"❌"} ${ui.test.msg}</div>`:""}
   <h2 class="sec">نتايج المراقبين</h2>
   <div class="row">
     <button class="btn" onclick="collect('lap')">اجمع اللفة دي</button>
