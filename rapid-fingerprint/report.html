@@ -93,6 +93,31 @@
     .rp-arena-sub{ color:var(--rp-muted); font-size:13.5px; }
     .rp-strength{ padding:14px 0 10px; border-top:1px dashed #223049; }
     .rp-strength:first-of-type{ border-top:none; padding-top:2px; }
+    /* الشرح التفصيلي للقوة */
+    .rp-str-define{ color:#cbd5e1; font-size:15px; line-height:1.95; margin:10px 0 12px; }
+    .rp-str-detail{ margin-top:12px; display:flex; flex-direction:column; gap:10px; }
+    .rp-detail-block{ border-inline-start:2px solid var(--rp-line); padding:2px 14px; }
+    .rp-detail-block.active{ border-inline-start-color:var(--rp-gold); background:rgba(251,191,36,.04); border-radius:0 10px 10px 0; }
+    .rp-detail-label{ font-size:12.5px; font-weight:700; margin-bottom:3px; }
+    .rp-detail-label.bal{ color:var(--rp-green); } .rp-detail-label.exc{ color:var(--rp-gold); } .rp-detail-label.def{ color:var(--rp-blue); }
+    .rp-detail-text{ color:#b8c4d4; font-size:14px; line-height:1.9; }
+    .rp-detail-block.active .rp-detail-text{ color:#dbe3ee; }
+    .rp-str-seed{ margin-top:10px; color:var(--rp-purple); font-size:13.5px; line-height:1.9;
+      background:rgba(167,139,250,.05); border-radius:10px; padding:10px 14px; }
+    .rp-str-seed b{ color:var(--rp-purple); }
+    /* قسم التملّك + سؤال التأمّل */
+    .rp-card.rp-own{ border-color:rgba(59,130,246,.3); }
+    .rp-ask{ color:var(--rp-blue); font-weight:700; }
+    /* طبقة الصدق */
+    .rp-trust{ display:flex; gap:16px; align-items:flex-start; }
+    .rp-trust-icon{ flex:0 0 44px; height:44px; border-radius:12px; display:flex; align-items:center;
+      justify-content:center; font-size:22px; }
+    .rp-trust.solid .rp-trust-icon{ background:rgba(16,185,129,.12); }
+    .rp-trust.check .rp-trust-icon{ background:rgba(251,191,36,.12); }
+    .rp-trust-body{ flex:1; }
+    .rp-trust-title{ font-weight:700; margin-bottom:5px; }
+    .rp-trust.solid .rp-trust-title{ color:var(--rp-green); }
+    .rp-trust.check .rp-trust-title{ color:var(--rp-gold); }
     .rp-str-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
     .rp-str-name{ font-weight:700; font-size:16.5px; }
     .rp-pos{ border-radius:99px; padding:3px 12px; font-size:12.5px; border:1px solid; white-space:nowrap; }
@@ -174,6 +199,7 @@
   <!-- ٢) البيانات والبنية والمخزن (لا محرّك: النتائج محسوبة ومخزّنة) -->
   <script src="rapid-questions.js"></script>
   <script src="rapid-config.js"></script>
+  <script src="rapid-strengths-content.js"></script>
   <script src="rapid-store.js"></script>
 
   <!-- ٣) رادار تجميعي (تحسين تدريجي — غيابه لا يكسر شيئًا) -->
@@ -271,6 +297,33 @@
       return 'قائمةٌ في اتزانها — تعمل من موضعها الصحيح.';
     }
 
+    /* الشرح التفصيلي لقوّة — من الحاوية إن مُلئت، وإلا فراغ (تدهور رشيق).
+       يُبرز الكتلة المطابقة لموضع العميل الحالي (اتزان/إفراط/تفريط). */
+    function strengthDetail(s, names){
+      var API = window.RAPID_STRENGTHS_CONTENT;
+      var c = API && API.getStrengthContent ? API.getStrengthContent(s.id) : null;
+      if(!c) return '';   // لا محتوى بعد → يبقى العرض مختصرًا كما هو
+
+      var activeExc = (s.position === 'excess') || (s.position === 'both') || (s.position === 'nearBalanceLean' && s.leanDir === 'excess');
+      var activeDef = (s.position === 'deficit') || (s.position === 'both') || (s.position === 'nearBalanceLean' && s.leanDir === 'deficit');
+      var activeBal = (s.position === 'balance');
+
+      function block(cls, label, name, text, active){
+        return '<div class="rp-detail-block' + (active ? ' active' : '') + '">'
+             +   '<div class="rp-detail-label ' + cls + '">' + esc(label) + (name ? ' · ' + esc(name) : '') + '</div>'
+             +   '<div class="rp-detail-text">' + esc(text) + '</div>'
+             + '</div>';
+      }
+
+      return '<div class="rp-str-define">' + esc(c.define) + '</div>'
+           + '<div class="rp-str-detail">'
+           +   block('bal', 'في اتزانها', '', c.balance, activeBal)
+           +   block('exc', 'حين تعمل فوق حدّها', names.excessName, c.excess, activeExc)
+           +   block('def', 'حين تخفت دون حدّها', names.deficitName, c.deficit, activeDef)
+           + '</div>'
+           + (c.seed ? '<div class="rp-str-seed"><b>ربما تجرّب:</b> ' + esc(c.seed) + '</div>' : '');
+    }
+
     /* فهرس أسماء القوى وانزلاقاتها من البنية (المصدر الموحّد) */
     function strengthNamesIndex(typeNum){
       var map = window.RAPID_CONFIG.getStrengthMap(typeNum);
@@ -282,13 +335,16 @@
     }
 
     /* ═══════════ البناء ═══════════ */
-    function render(results){
+    function render(results, trace){
+      trace = trace || {};
       var typeKey = results.type;
       var typeNum = results.typeNum;
       var c = CONTENT[typeKey] || {};
       var names = strengthNamesIndex(typeNum);
       var Q = window.RAPID_QUESTIONS;
       var h = '';
+      var _step = 0;
+      function nextStep(){ _step++; return arabicNum(_step); }
 
       /* أرض الكرامة — الافتتاح */
       h += '<div class="rp-ground rp-shell">'
@@ -308,6 +364,16 @@
          +   '<p class="rp-p rp-lead">' + esc(c.para || '') + '</p>'
          + '</div>';
 
+      /* ١ب — التملّك: دعوةٌ ليرى القارئ طابعه في سيرته قبل التفاصيل
+         (مبدأ ٩: لا فعل قبل تملّك · Aware-Explore-Apply) */
+      h += '<div class="rp-card rp-own rp-shell">'
+         +   '<div class="rp-h">قبل أن تكمل — لحظةُ تملّك</div>'
+         +   '<div class="rp-kicker">التقرير يصف، وأنت تُصدّق أو تردّ. اقرأ بهذه العين</div>'
+         +   '<p class="rp-p">قبل أن تمضي إلى مساراتك وقواك، قف عند جوهرك أعلاه لحظة، واسأل نفسك سؤالًا واحدًا: '
+         +     '<span class="rp-ask">متى آخر مرّةٍ شعرتَ فيها أنّ هذا الجوهر يعمل فيك بأصدق صوره؟</span> '
+         +     'استحضر الموقف بتفاصيله. ما قرأتَه ليس حكمًا يُنزَل عليك، بل مرآةٌ تعرضها على سيرتك أنت — فما صدّقته سيرتُك خذه، وما لم يُشبهك دعه على الرفّ. بهذه العين وحدها ينفعك ما يأتي.</p>'
+         + '</div>';
+
       /* ٢ — المسارات الثلاثة */
       var rk = results.axesRanking || {};
       var ranking = rk.ranking || [];
@@ -317,7 +383,7 @@
         { key: rk.secondaryAxis, cls: '',          role: ROLE.secondary },
         { key: rk.repressedAxis, cls: 'repressed', role: ROLE.repressed }
       ];
-      h += '<div class="rp-card rp-shell"><span class="rp-step">' + arabicNum(1) + '</span>'
+      h += '<div class="rp-card rp-shell"><span class="rp-step">' + nextStep() + '</span>'
          +   '<div class="rp-h">مساراتك الثلاثة</div>'
          +   '<div class="rp-kicker">أين تصبّ طاقتك فعلًا — بترتيب ما تفعله لا ما تتمنّاه</div>'
          +   '<div class="rp-axes">';
@@ -339,9 +405,10 @@
       h += '</div>';
 
       /* ٣ — خريطة القوى التسع */
-      h += '<div class="rp-card rp-shell"><span class="rp-step">' + arabicNum(2) + '</span>'
+      h += '<div class="rp-card rp-shell"><span class="rp-step">' + nextStep() + '</span>'
          +   '<div class="rp-h">خريطة قواك التسع</div>'
-         +   '<div class="rp-kicker">ثلاث ساحات، في كلّ ساحةٍ ثلاث قوى — وموضع كلّ قوّةٍ على طيفها اليوم</div>';
+         +   '<div class="rp-kicker">ثلاث ساحات، في كلّ ساحةٍ ثلاث قوى — وموضع كلّ قوّةٍ على طيفها اليوم</div>'
+         +   '<p class="rp-p" style="margin-bottom:18px">لكلّ قوّةٍ ثلاث حالات على متّصلٍ واحد: تعمل من موضعها، أو تميل فوق حدّها، أو تخفت دونه. وأنت تقرأ، اسأل: <span class="rp-ask">أيّ هذه القوى تعمل فيك بأصدق صورها هذه الأيّام، وأيّها مالت عن موضعها تحت حملٍ حملتَه؟</span></p>';
 
       ['tamasuk','hayawiyya','intima'].forEach(function(ax){
         var t = Q.spectrum[typeKey];
@@ -356,6 +423,7 @@
              +   '<div class="rp-str-top"><span class="rp-str-name">' + esc(s.name) + '</span>'
              +   '<span class="rp-pos ' + esc(s.position) + '">' + esc(POS_LABEL[s.position] || s.positionLabel || '') + '</span></div>'
              +   strengthBar(s)
+             +   strengthDetail(s, names[s.id] || {})
              + '</div>';
         });
         h += '</div>';
@@ -372,20 +440,49 @@
         var wNames = names[worst.id] || {};
         var wFull = null;
         (results.strengths || []).forEach(function(s){ if(s.id === worst.id) wFull = s; });
-        h += '<div class="rp-card rp-worst rp-shell"><span class="rp-step">' + arabicNum(3) + '</span>'
+        var wAPI = window.RAPID_STRENGTHS_CONTENT;
+        var wContent = wAPI && wAPI.getStrengthContent ? wAPI.getStrengthContent(worst.id) : null;
+        h += '<div class="rp-card rp-worst rp-shell"><span class="rp-step">' + nextStep() + '</span>'
            +   '<div class="rp-h">هدف تعافيك الأوّل</div>'
            +   '<div class="rp-kicker">أشدّ قوّةٍ نازفةٍ اليوم — منها يبدأ الطريق، لا من تسع جبهات</div>'
            +   '<div class="rp-worst-chip"><b>' + esc(worst.name) + '</b><span class="rp-muted">في ' + esc(wNames.axisName || '') + '</span></div>'
+           +   (wContent ? '<p class="rp-p">' + esc(wContent.define) + '</p>' : '')
            +   '<p class="rp-p">' + (wFull ? directionalReading(wFull, wNames) : '') + '</p>'
            +   '<p class="rp-p">لا يُطلب منك اليوم إصلاحها — يُطلب منك أن تراها وهي تعمل. الرؤية وحدها تُرخي أوّل عقدة.</p>'
+           +   (wContent ? '<div class="rp-str-seed"><b>ربما تجرّب:</b> ' + esc(wContent.seed) + '</div>' : '')
            + '</div>';
       }
 
-      /* ٥ — بروتوكول التحقّق الذاتي */
+      /* ٥ — طبقة الصدق: مقدار الثقة في تماسك النتيجة (درس iEQ9 §المحور السابع)
+         للعميل صياغةٌ مطمئنة أو دعوةٌ لطيفة للتحقّق — لا كشفٌ للأرقام. */
+      var confVal = results.confidence || 0;
+      var flags = ((trace.consistencyFlags || []).length) + (trace.attentionFlagged ? 1 : 0);
+      var solid = (flags === 0 && confVal >= 60);
+      if(solid){
+        h += '<div class="rp-card rp-shell"><span class="rp-step">' + nextStep() + '</span>'
+           +   '<div class="rp-trust solid">'
+           +     '<div class="rp-trust-icon">✓</div>'
+           +     '<div class="rp-trust-body"><div class="rp-trust-title">بصمةٌ متماسكة</div>'
+           +       '<p class="rp-p" style="margin:0">أجبتَ بصدقٍ واتّساق، فخرجت بصمتك واضحةً يُطمَأنّ إليها. اقرأ ما سبق بثقة صاحب البيت.</p>'
+           +     '</div>'
+           +   '</div>'
+           + '</div>';
+      } else {
+        h += '<div class="rp-card rp-shell"><span class="rp-step">' + nextStep() + '</span>'
+           +   '<div class="rp-trust check">'
+           +     '<div class="rp-trust-icon">◑</div>'
+           +     '<div class="rp-trust-body"><div class="rp-trust-title">بصمةٌ تستحقّ نظرةً ثانية</div>'
+           +       '<p class="rp-p" style="margin:0">تباينت بعض إجاباتك على مواقفَ متقاربة، فبعض ملامح بصمتك أقلّ حدّةً من غيرها. خذ ما أضاء منها، واحمل ما تشكّ فيه إلى جلسةٍ مع مدرّبك أو إلى المقياس الكامل. هذا لا يُنقص التقرير، بل يجعلك أعرف بمواضع اليقين فيه.</p>'
+           +     '</div>'
+           +   '</div>'
+           + '</div>';
+      }
+
+      /* ٦ — بروتوكول التحقّق الذاتي */
       var voice = Q.recognitionVoices ? Q.recognitionVoices[typeKey] : null;
       var wFull2 = null;
       if(worst) (results.strengths || []).forEach(function(s){ if(s.id === worst.id) wFull2 = s; });
-      h += '<div class="rp-card rp-shell"><span class="rp-step">' + arabicNum(4) + '</span>'
+      h += '<div class="rp-card rp-shell"><span class="rp-step">' + nextStep() + '</span>'
          +   '<div class="rp-h">بروتوكول التحقّق — أسبوعُ رصد</div>'
          +   '<div class="rp-kicker">التقرير يقول، وأيّامك تشهد. راقب ثلاث علاماتٍ لمدّة أسبوع — رصدٌ فقط، بلا أيّ تعديل سلوك</div>'
          +   '<div class="rp-marker"><span class="rp-marker-num">' + arabicNum(1) + '</span><div class="rp-marker-body">'
@@ -483,7 +580,7 @@
       var user = STORE.requireAuth({ loginPath: '../login.html' });
       if(!user) return;
       STORE.loadAssessment(user.id).then(function(doc){
-        if(doc && doc.results && doc.results.type){ render(doc.results); }
+        if(doc && doc.results && doc.results.type){ render(doc.results, doc.trace || {}); }
         else { emptyState(); }
       }).catch(emptyState);
     }
