@@ -861,9 +861,22 @@
     return RND().mirrorReviewCard(model);
   }
 
+  // ربطٌ بالتفويض لا بالعنصر.
+  // شاشة المراجعة قد يُعاد بناء محتواها بالكامل بعد أوّل رسم (تبديل اللسان
+  // في mirrors-report-bridge يستبدل innerHTML للبطاقة)، فيُستبدل زرّ الرجوع
+  // بزرٍّ جديدٍ لا مستمع له ويموت. الاستماع على المستند مرّةً واحدة يجعل الزرّ
+  // حيًّا مهما أُعيد رسمه، ومهما أُعيد رسمه كم مرّة.
+  let _reviewBackBound = false;
   function wireReviewBack(){
-    const b = document.getElementById('reviewBack');
-    if(b) b.addEventListener('click', renderHome);
+    if(_reviewBackBound) return;
+    _reviewBackBound = true;
+    document.addEventListener('click', function(e){
+      const t = e.target;
+      if(!t || typeof t.closest !== 'function') return;
+      if(!t.closest('#reviewBack')) return;
+      e.preventDefault();
+      renderHome();
+    });
   }
 
   /* ════════════════════ شاشة التقرير الذاتيّ المتكامل ════════════════════ */
