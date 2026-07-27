@@ -15,6 +15,24 @@
     var COLLECTION = 'fouad_v2_results';   // مجموعة النتائج: وثيقة واحدة لكل عميل بمعرّفه
     var CACHE_PREFIX = 'fouad_v2_cache_';  // بادئة الـ cache المحلّي أثناء حلّ المرآة
 
+    // ── إعدادات الإتاحة (الإطلاق المرحليّ) ────────────────────────
+    // وثيقة واحدة عامّة يضبطها الأدمن، ويجوز لكلّ عميل استثناءٌ على وثيقته.
+    var SETTINGS_COLLECTION = 'fouad_v2_settings';
+    var SETTINGS_DOC        = 'release';
+
+    // الافتراضيّات تُعيد سلوك النظام الحاليّ حرفيًّا لو غابت الوثيقة أو فشلت قراءتها.
+    // مبدأ: غياب الإعداد لا يغيّر شيئًا على أيّ عميل.
+    var DEFAULT_SETTINGS = {
+        activeMirrors: null,          // null = كلّ المرايا المعرّفة في mirrors-config.js
+        report: {
+            adminMinMirrors : 1,      // الأدمن يرى تقرير العميل بعد أوّل مرآة
+            clientEnabled   : true,   // التقرير متاح للعميل من حيث المبدأ
+            clientMinMirrors: 7       // ولا يظهر له إلّا باكتمال السبع
+        }
+    };
+
+    var _settings = null;  // نسخة الجلسة: قراءة واحدة لكلّ تحميل صفحة
+
     // ── مزامنة المسودّة السحابيّة (استئناف من أيّ جهاز) ──────────
     // أثناء حلّ المرآة يُحفَظ التقدّم محلّيًّا فورًا، ويُزامَن إلى Firestore
     // في حقل draft.<mirrorId> بكتابة واحدة كل DRAFT_THROTTLE_MS على الأكثر.
@@ -117,6 +135,13 @@
             return null;
         }
         return global.db.collection(COLLECTION).doc(userId);
+    }
+
+    // مرجع وثيقة الإعدادات العامّة
+    async function _settingsRef() {
+        var ok = await _ready();
+        if (!ok || !global.db) return null;
+        return global.db.collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -507,6 +532,179 @@
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // 🔓 إعدادات الإتاحة — الإطلاق المرحليّ وبوّابة التقرير
+    //    قاعدة ذهبيّة: أيّ خللٍ هنا يرجع بالنظام إلى سلوكه الحاليّ،
+    //    ولا يعطّل عميلًا ولا يمنعه من متابعة ما بدأه.
+    // ═══════════════════════════════════════════════════════════
+
+    // تطبيع دفاعيّ: يقبل أيّ شكلٍ للبيانات ويُخرج بنيةً مضمونة
+    function _normalizeSettings(raw) {
+        var d = DEFAULT_SETTINGS;
+        var s = {
+            activeMirrors: null,
+            report: {
+                adminMinMirrors : d.report.adminMinMirrors,
+                clientEnabled   : d.report.clientEnabled,
+                clientMinMirrors: d.report.clientMinMirrors
+            }
+        };
+        if (!raw || typeof raw !== 'object') return s;
+
+        // المرايا المفتوحة: مصفوفة نصوصٍ غير فارغة، وإلّا فالكلّ مفتوح
+        if (Array.isArray(raw.activeMirrors)) {
+            var list = raw.activeMirrors.filter(function (x) {
+                return typeof x === 'string' && x.length > 0;
+            });
+            s.activeMirrors = list.length ? list : null;
+        }
+
+        var r = raw.report;
+        if (r && typeof r === 'object') {
+            if (typeof r.adminMinMirrors === 'number' && isFinite(r.adminMinMirrors)) {
+                s.report.adminMinMirrors = Math.max(0, Math.round(r.adminMinMirrors));
+            }
+            if (typeof r.clientMinMirrors === 'number' && isFinite(r.clientMinMirrors)) {
+                s.report.clientMinMirrors = Math.max(0, Math.round(r.clientMinMirrors));
+            }
+            if (typeof r.clientEnabled === 'boolean') {
+                s.report.clientEnabled = r.clientEnabled;
+            }
+        }
+        return s;
+    }
+
+    // قراءة الإعدادات العامّة مرّة واحدة لكلّ تحميل صفحة
+    // options.force = true لإعادة القراءة (تستعملها لوحة الأدمن بعد الحفظ)
+    async function loadReleaseSettings(options) {
+        options = options || {};
+        if (_settings && !options.force) return _settings;
+        try {
+            var ref = await _settingsRef();
+            if (!ref) { _settings = _normalizeSettings(null); return _settings; }
+
+            var doc = await ref.get();
+            _settings = _normalizeSettings(doc.exists ? doc.data() : null);
+        } catch (e) {
+            console.warn('[FOUAD_STORE] تعذّرت قراءة إعدادات الإتاحة — نعمل بالافتراضيّ:', e);
+            _settings = _normalizeSettings(null);
+        }
+        return _settings;
+    }
+
+    // كتابة الإعدادات العامّة (لوحة الأدمن وحدها)
+    async function saveReleaseSettings(settings) {
+        try {
+            var ref = await _settingsRef();
+            if (!ref) return false;
+
+            var clean = _normalizeSettings(settings);
+            var payload = {
+                activeMirrors: clean.activeMirrors,   // null مسموح: يعني الكلّ
+                report: {
+                    adminMinMirrors : clean.report.adminMinMirrors,
+                    clientEnabled   : clean.report.clientEnabled,
+                    clientMinMirrors: clean.report.clientMinMirrors
+                },
+                updatedAt: new Date().toISOString()
+            };
+
+            var u = getCurrentUser();
+            if (u && u.id) payload.updatedBy = u.id;
+
+            await ref.set(payload, { merge: true });
+            _settings = clean;   // حدّث نسخة الجلسة فورًا
+            return true;
+        } catch (e) {
+            console.error('[FOUAD_STORE] saveReleaseSettings error:', e);
+            return false;
+        }
+    }
+
+    // كتابة استثناءٍ على وثيقة عميلٍ بعينه (لوحة الأدمن وحدها)
+    // مرّر null لمسح الاستثناء وإعادة العميل إلى الوضع العامّ
+    async function saveClientAccess(userId, access) {
+        try {
+            var ref = await _docRef(userId);
+            if (!ref) return false;
+
+            // مسح الاستثناء بالكامل
+            if (access === null) {
+                await ref.set({
+                    access: firebase.firestore.FieldValue.delete()
+                }, { merge: true });
+                return true;
+            }
+
+            if (!access || typeof access !== 'object') return false;
+
+            // نكتب الحقول الموجودة فقط؛ الغائب يعني «اتبع الوضع العامّ»
+            var payload = { updatedAt: new Date().toISOString() };
+
+            if (Array.isArray(access.activeMirrors)) {
+                var list = access.activeMirrors.filter(function (x) {
+                    return typeof x === 'string' && x.length > 0;
+                });
+                payload.activeMirrors = list.length ? list : null;
+            } else {
+                payload.activeMirrors = null;
+            }
+
+            payload.clientEnabled = (typeof access.clientEnabled === 'boolean')
+                ? access.clientEnabled : null;
+
+            payload.clientMinMirrors = (typeof access.clientMinMirrors === 'number' && isFinite(access.clientMinMirrors))
+                ? Math.max(0, Math.round(access.clientMinMirrors)) : null;
+
+            payload.note = (typeof access.note === 'string') ? access.note : '';
+
+            var u = getCurrentUser();
+            if (u && u.id) payload.updatedBy = u.id;
+
+            await ref.set({ access: payload }, { merge: true });
+            return true;
+        } catch (e) {
+            console.error('[FOUAD_STORE] saveClientAccess error:', e);
+            return false;
+        }
+    }
+
+    // دالّة خالصة: تدمج استثناء العميل فوق الوضع العامّ وتُخرج الإتاحة النهائيّة.
+    // يستعملها المقياس ولوحة الأدمن معًا — مصدر حقيقةٍ واحد لمنطق الأولويّة.
+    //   settings   = ناتج loadReleaseSettings()
+    //   assessment = وثيقة العميل (أو null لعميلٍ لم يبدأ بعد)
+    function resolveAccess(settings, assessment) {
+        var s = _normalizeSettings(settings);
+        var out = {
+            activeMirrors   : s.activeMirrors,
+            adminMinMirrors : s.report.adminMinMirrors,
+            clientEnabled   : s.report.clientEnabled,
+            clientMinMirrors: s.report.clientMinMirrors,
+            hasOverride     : false,
+            note            : ''
+        };
+
+        var a = assessment && assessment.access;
+        if (!a || typeof a !== 'object') return out;
+
+        if (Array.isArray(a.activeMirrors)) {
+            var list = a.activeMirrors.filter(function (x) {
+                return typeof x === 'string' && x.length > 0;
+            });
+            if (list.length) { out.activeMirrors = list; out.hasOverride = true; }
+        }
+        if (typeof a.clientEnabled === 'boolean') {
+            out.clientEnabled = a.clientEnabled; out.hasOverride = true;
+        }
+        if (typeof a.clientMinMirrors === 'number' && isFinite(a.clientMinMirrors)) {
+            out.clientMinMirrors = Math.max(0, Math.round(a.clientMinMirrors));
+            out.hasOverride = true;
+        }
+        if (typeof a.note === 'string') out.note = a.note;
+
+        return out;
+    }
+
     // ضبط إعدادات اختياريّة (مثل courseId)
     function setConfig(cfg) {
         if (cfg && typeof cfg === 'object') {
@@ -532,9 +730,17 @@
         cacheMirrorProgress: cacheMirrorProgress,
         readMirrorCache: readMirrorCache,
         clearMirrorCache: clearMirrorCache,
+        // إعدادات الإتاحة (الإطلاق المرحليّ وبوّابة التقرير)
+        loadReleaseSettings: loadReleaseSettings,
+        saveReleaseSettings: saveReleaseSettings,
+        saveClientAccess: saveClientAccess,
+        resolveAccess: resolveAccess,
+        DEFAULT_SETTINGS: DEFAULT_SETTINGS,
         // إعدادات + ثوابت مكشوفة للقراءة
         setConfig: setConfig,
-        COLLECTION: COLLECTION
+        COLLECTION: COLLECTION,
+        SETTINGS_COLLECTION: SETTINGS_COLLECTION,
+        SETTINGS_DOC: SETTINGS_DOC
     };
 
     console.log('✅ FOUAD_STORE جاهز — مجموعة:', COLLECTION);
