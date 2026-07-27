@@ -846,6 +846,21 @@
     wireReviewBack();
   }
 
+
+
+   // يختار بين قراءة المرآة الجديدة والقديمة. لو المرآة لسه بلا محتوى
+  // جديد، يرجع للقديمة تمامًا فلا يتوقف شيء عن الناس.
+  function _reviewHTML(mirror, res, model){
+    try {
+      var RB = window.MIRRORS_REPORT_BRIDGE;
+      if (RB && RB.canRender(mirror)) {
+        var html = RB.render(mirror, res, model);
+        if (html) return html;
+      }
+    } catch (e) { console.warn('[قراءة المرآة] رجعنا للطريقة القديمة:', e); }
+    return RND().mirrorReviewCard(model);
+  }
+
   function wireReviewBack(){
     const b = document.getElementById('reviewBack');
     if(b) b.addEventListener('click', renderHome);
