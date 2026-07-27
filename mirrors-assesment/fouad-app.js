@@ -806,7 +806,7 @@
     const isWeak = res && (res.scenario === 'weak' || (res.flags && res.flags.weakSignal));
     if(isWeak || !hasSpectrum){
       model.weakText = noDash(edu.weakSignal || '');
-      setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
+      setHTML(`<div class="card review">${_reviewHTML(mirror, res, model)}</div>`);
       wireReviewBack(); return;
     }
 
