@@ -13,9 +13,24 @@
 (function () {
   "use strict";
 
-  // ── الإطلاق المرحليّ: عدّل هذه المصفوفة فقط لفتح بقيّة المرايا لاحقًا ──
- // const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirror6','mirror7'];
-const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirror6','mirror7'];
+  // ── الإطلاق المرحليّ ──────────────────────────────────────────────
+  // لم تعد المرايا المفتوحة مكتوبةً هنا. تُقرأ عند الإقلاع من إعدادات
+  // الإتاحة في Firestore (لوحة الأدمن)، ويجوز لكلّ عميل استثناءٌ خاصّ.
+  // القيمة null تعني: كلّ المرايا المعرّفة في mirrors-config.js.
+  // أيّ فشلٍ في القراءة يُبقيها null، أي يفتح الكلّ كما كان اليوم.
+  let ACTIVE_MIRRORS = null;
+
+  // الإتاحة النهائيّة لهذا العميل (الوضع العامّ + استثناؤه). تُملأ في init().
+  // القيم هنا احتياطٌ صرف لو تعذّر الوصول إلى المخزن أصلًا.
+  let ACCESS = {
+    activeMirrors   : null,
+    adminMinMirrors : 1,
+    clientEnabled   : true,
+    clientMinMirrors: 7,
+    hasOverride     : false,
+    note            : ''
+  };
+
   // عدد المجموعات البصريّة لأسئلة التحديد (الوقفات بينها = العدد − 1)
   const ID_GROUPS = 4;
 
@@ -122,8 +137,39 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const a = state.assessment;
     return (a && a.progress && Array.isArray(a.progress.completedMirrors)) ? a.progress.completedMirrors : [];
   }
+  // كلّ المرايا المعرّفة بنيويًّا (السبع) — مستقلّة تمامًا عن المفتوح
+  function allMirrorIds(){ return CFG().mirrors.map(function(m){ return m.id; }); }
+  function totalStructuralMirrors(){ return CFG().mirrors.length; }
+
+  // كم مرآةً أتمّها العميل فعليًّا من السبع (لا من المفتوح)
+  function completedStructuralCount(){
+    const ids = allMirrorIds(), done = getCompletedMirrors();
+    return ids.filter(function(id){ return done.indexOf(id)!==-1; }).length;
+  }
+  // اكتمالٌ بنيويّ = السبع كلّها. هذا وحده ما يجعل التقرير غير جزئيّ.
+  function isStructurallyComplete(){
+    return completedStructuralCount() >= totalStructuralMirrors();
+  }
+
+  // المرايا المفتوحة لهذا العميل، بترتيب الـconfig.
+  // احتياطٌ مزدوج: لو القائمة غائبة أو فارغة أو لا تطابق شيئًا → الكلّ مفتوح.
+  // المبدأ: خللٌ في الإعدادات لا يقفل المقياس في وجه أحد.
   function orderedActiveMirrors(){
-    return CFG().mirrors.filter(m => ACTIVE_MIRRORS.indexOf(m.id)!==-1).map(m=>m.id);
+    const all = allMirrorIds();
+    if(!Array.isArray(ACTIVE_MIRRORS) || !ACTIVE_MIRRORS.length) return all;
+    const open = CFG().mirrors
+      .filter(function(m){ return ACTIVE_MIRRORS.indexOf(m.id)!==-1; })
+      .map(function(m){ return m.id; });
+    return open.length ? open : all;
+  }
+
+  // هل يُعرَض للعميل زرّ «صورتك المتكاملة»؟
+  // شرطان معًا: التقرير مُتاح له أصلًا، وبلغ عتبة عدد المرايا المطلوبة.
+  function clientCanSeeReport(){
+    if(!ACCESS || ACCESS.clientEnabled === false) return false;
+    const need = (typeof ACCESS.clientMinMirrors === 'number')
+      ? ACCESS.clientMinMirrors : totalStructuralMirrors();
+    return completedStructuralCount() >= need;
   }
 
   // ── أدوات البيت (عرض صرف يعتمد على الهويّة) ──
@@ -273,7 +319,9 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     return out;
   }
 
-  // هل اكتملت كل المرايا الفعّالة؟ (لتقرير كليّ، لا جزئيّ)
+  // (لم تعد مستعملة) كانت تقيس الاكتمال بالمرايا المفتوحة، وهو ما جعل تقريرًا
+  // مبنيًّا على مرآتين يظهر «كاملًا». حلّ محلّها isStructurallyComplete().
+  // تُترك للتوافق فقط — لا تُوصَل بالتقرير مرّةً أخرى.
   function allActiveMirrorsComplete(){
     const completed = getCompletedMirrors().slice();
     if(state.mirrorId && completed.indexOf(state.mirrorId)===-1) completed.push(state.mirrorId);
@@ -694,7 +742,9 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     const card = RND().homeCard({
       name: clientName(), palmSVG: palmSVG,
       doneCount: doneCount, totalCount: totalCount, progressPct: progressPct,
-      hasNext: !!next, allDone: allDone
+      hasNext: !!next,
+      allDone: allDone,                    // إضاءة الخريطة: باكتمال المفتوح
+      canReport: clientCanSeeReport()      // زرّ التقرير: بقواعد الإتاحة وحدها
     });
     setHTML(`<div class="card home">${card}</div>`);
 
@@ -704,9 +754,14 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       const nx = orderedActiveMirrors().find(function(id){ return getCompletedMirrors().indexOf(id)===-1; });
       if(nx) startMirror(nx);
     });
-    // «صورتك المتكاملة» → بوّابة الاكتمال (شاشة النخلة) ثمّ التقرير
+    // «صورتك المتكاملة» → بوّابة الاكتمال (شاشة النخلة) ثمّ التقرير.
+    // البوّابة شاشة تهنئةٍ باكتمال السبع، فلا تُعرض على تقريرٍ جزئيّ:
+    // الجزئيّ يذهب إلى التقرير مباشرةً حاملًا ملاحظة الجزئيّة.
     const rep = document.getElementById('homeReport');
-    if(rep) rep.addEventListener('click', function(){ if(REP()) renderReportGate(); else renderReport(); });
+    if(rep) rep.addEventListener('click', function(){
+      if(REP() && isStructurallyComplete()) renderReportGate();
+      else renderReport();
+    });
 
     // نقر عقدةٍ تمّت → مراجعة تلك المرآة (لا قفز داخل مرآةٍ جاريّة)
     Array.prototype.forEach.call(document.querySelectorAll('.layer-hit'), function(hit){
@@ -811,7 +866,9 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
       JR().start({
         cfg: CFG(), edu: EDU(), content: JC(),
         rep: rep, results: results,
-        partial: !allActiveMirrorsComplete(),
+        // الاكتمال يُقاس بالسبع دائمًا، لا بالمفتوح.
+        // فلو كان المفتوح مرآتين وأتمّهما، يظلّ التقرير جزئيًّا كما هو حقًّا.
+        partial: !isStructurallyComplete(),
         gender: getGender(),
         posLabel: POS_LABEL,
         mirrorDisplayName: mirrorDisplayName,
@@ -955,6 +1012,22 @@ const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirro
     let assessment = null;
     try{ assessment = await STORE().loadAssessment(user.id); }catch(e){ assessment=null; }
     state.assessment = assessment;        // null = عميل جديد
+
+    // ٢-ب) إعدادات الإتاحة: الوضع العامّ من Firestore + استثناء هذا العميل.
+    //      قراءة واحدة لكلّ تحميل صفحة. أيّ فشلٍ هنا يُبقي الافتراضيّ،
+    //      أي كلّ المرايا مفتوحة والتقرير عند اكتمال السبع — سلوك اليوم حرفيًّا.
+    try{
+      const S = STORE();
+      if(S && typeof S.loadReleaseSettings === 'function' && typeof S.resolveAccess === 'function'){
+        const settings = await S.loadReleaseSettings();
+        ACCESS = S.resolveAccess(settings, assessment);
+      }
+    }catch(e){
+      console.warn('[FOUAD_APP] تعذّرت قراءة إعدادات الإتاحة — نعمل بالافتراضيّ:', e);
+    }
+    // احتياطٌ أخير: لو غابت العتبة لأيّ سبب، اجعلها اكتمال السبع
+    if(typeof ACCESS.clientMinMirrors !== 'number') ACCESS.clientMinMirrors = totalStructuralMirrors();
+    ACTIVE_MIRRORS = ACCESS.activeMirrors;   // null = الكلّ
 
     // ٣) توجيه نقطة الدخول:
     //    • يوجد تقدّم سابق (مرآة مكتملة أو تقدّم محلّيّ) → اهبط على البيت.
