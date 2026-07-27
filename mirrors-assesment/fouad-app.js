@@ -15,7 +15,7 @@
 
   // ── الإطلاق المرحليّ: عدّل هذه المصفوفة فقط لفتح بقيّة المرايا لاحقًا ──
  // const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirror6','mirror7'];
-const ACTIVE_MIRRORS = ['mirror1','mirror2'];
+const ACTIVE_MIRRORS = ['mirror1','mirror2','mirror3','mirror4','mirror5','mirror6','mirror7'];
   // عدد المجموعات البصريّة لأسئلة التحديد (الوقفات بينها = العدد − 1)
   const ID_GROUPS = 4;
 
