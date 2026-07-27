@@ -152,13 +152,15 @@
   }
 
   /* ───────────────── (١) كارت البيت ─────────────────
-     model: { name, palmSVG, doneCount, totalCount, progressPct, hasNext, allDone } */
+     model: { name, palmSVG, doneCount, totalCount, progressPct, hasNext, allDone, canReport }
+     allDone  = إضاءة الخريطة (اكتمال المرايا المفتوحة)
+     canReport = ظهور زرّ التقرير (قواعد الإتاحة في fouad-app.js) */
   function homeCard(m){
     m = m || {};
     var greet = m.name ? ('مرحبًا، ' + esc(m.name)) : 'مرحبًا بك';
     var actions = '';
     if(m.hasNext) actions += '<button class="btn primary" id="homeContinue">تابِع رحلتك</button>';
-    if(m.allDone) actions += '<button class="btn primary" id="homeReport">صورتك المتكاملة</button>';
+    if(m.canReport) actions += '<button class="btn primary" id="homeReport">صورتك المتكاملة</button>';
 
     return ''
       + '<div class="home-head">'
