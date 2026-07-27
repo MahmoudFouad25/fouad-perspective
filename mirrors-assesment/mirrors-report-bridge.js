@@ -37,8 +37,14 @@
     var id = (mirror && mirror.id) || "";
     return /^mirror\d$/.test(id) ? id.replace("mirror", "m") : null;
   }
-  function aKey(axisId) {
-    return /^module\d$/.test(axisId || "") ? String(axisId).replace("module", "a") : null;
+  /* ترتيب الباب داخل مرآته (١ أو ٢ أو ٣)، يُقرأ من الكونفج لا من اسم الباب،
+     لأن أسماء الأبواب تتسلسل عبر المرايا: module1..module21 */
+  function aKey(mirror, axisId) {
+    var ax = (mirror && mirror.axes) || [];
+    for (var i = 0; i < ax.length; i++) {
+      if (ax[i] && ax[i].id === axisId) return "a" + (ax[i].order || (i + 1));
+    }
+    return null;
   }
 
   /* نص بالمفتاح، بلسان القارئ، مع السقوط للفصحى داخل MIRRORS_TEXT */
@@ -100,23 +106,20 @@
          +   '<div class="ranking">' + rows + '</div></div>';
   }
 
-  /* اسم الباب: الاسم الواضح أولًا، ثم اسم المصطلح، ثم سطر التوضيح */
-  var DOOR_NAMES = {
-    module1: ["تتحرك بعد إشارة", "الامتثال"],
-    module2: ["تتحرك أنت أولًا", "الحزم"],
-    module3: ["تأخذ مساحتك أولًا", "الانسحاب"]
-  };
+  /* اسم الباب: الاسم الواضح أولًا، ثم اسم المصطلح.
+     يُقرأ من المخزن بالمفتاح <base>.name = [الاسم الواضح، اسم المصطلح] */
   function axisNameOf(mirror, axisId) {
     var ax = (mirror && mirror.axes) || [];
     for (var i = 0; i < ax.length; i++) { if (ax[i] && ax[i].id === axisId) return ax[i].name || ""; }
     return "";
   }
-  function doorHead(axisId, fallbackName) {
-    var n = DOOR_NAMES[axisId];
-    if (!n) return '<div class="rb-door-head"><div class="rb-door-main">' + esc(fallbackName || "") + '</div></div>';
+  function doorHead(base, fallbackName) {
+    var n = txt(base + ".name");
+    var main = (n && n[0]) ? n[0] : (fallbackName || "");
+    var term = (n && n[1]) ? n[1] : "";
     return '<div class="rb-door-head">'
-         +   '<div class="rb-door-main">' + esc(n[0]) + '</div>'
-         +   '<div class="rb-door-term">واسمها في منظور الفؤاد: ' + esc(n[1]) + '</div>'
+         +   '<div class="rb-door-main">' + esc(main) + '</div>'
+         +   (term ? '<div class="rb-door-term">واسمها في منظور الفؤاد: ' + esc(term) + '</div>' : "")
          + '</div>';
   }
 
@@ -160,14 +163,14 @@
       var domAxis = res.dominantAxis || ((res.ranking && res.ranking[0]) ? res.ranking[0].axisId : null);
 
       Object.keys(res.spectrum).forEach(function (axisId) {
-        var ak = aKey(axisId);
+        var ak = aKey(mirror, axisId);
         if (!ak) return;
         var base = mk + "." + ak;
         var sp = res.spectrum[axisId] || {};
         var topType = topByAxis[axisId];
 
         h += '<div class="rb-door">';
-        h += doorHead(axisId, axisNameOf(mirror, axisId));
+        h += doorHead(base, axisNameOf(mirror, axisId));
 
         /* ٣ تعريف الباب */
         h += block(base + ".intro", "rb-intro");
