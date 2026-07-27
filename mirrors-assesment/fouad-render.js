@@ -135,9 +135,12 @@
     }
 
     // عند الاكتمال: توهج هادئ في أعمق طبقة
+    // pointer-events="none" ضرورة لا زينة: هذا المستطيل يُرسم بعد مناطق النقر،
+    // وفي SVG آخر عنصرٍ هو من يلتقط النقر. بدونها يبتلع نقرة أعمق طبقةٍ مكتملة
+    // فتبدو الطبقة مكتملةً ولا تُفتح مراجعتها.
     if(opts.allDone && n){
       var by = headH + (n - 1) * rowH;
-      body += '<rect x="12" y="' + (by + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="url(#layerGlow)" opacity="0.16"/>';
+      body += '<rect x="12" y="' + (by + 2) + '" width="' + (W - 24) + '" height="' + (rowH - 6) + '" rx="10" fill="url(#layerGlow)" opacity="0.16" pointer-events="none"/>';
     }
 
     return ''
