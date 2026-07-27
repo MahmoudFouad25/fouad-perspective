@@ -842,7 +842,7 @@
     model.blocks = blocks;
     model.spectra = spectra;
 
-    setHTML(`<div class="card review">${RND().mirrorReviewCard(model)}</div>`);
+    setHTML(`<div class="card review">${_reviewHTML(mirror, res, model)}</div>`);
     wireReviewBack();
   }
 
