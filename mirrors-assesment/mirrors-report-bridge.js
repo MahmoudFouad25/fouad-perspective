@@ -292,7 +292,7 @@
     if (!weak) h += deferredHTML(mk, bases, model);
     h += block(mk + ".bridge", "rb-bridge");
 
-    h += '<details class="rb-recall"><summary>تذكير بمعنى الباب والأسلوب والطيف</summary>'
+    h += '<details class="rb-recall"><summary>افتح من هنا شرح الباب والأسلوب والطيف</summary>'
       + '<div class="rb-recall-body">' + prefaceBody(mk) + "</div></details>";
 
     if (global.MIRRORS_FEEDBACK && global.MIRRORS_FEEDBACK.html) {
@@ -486,8 +486,12 @@
       + ".rb-def-btn.ghost{background:transparent;opacity:.8}"
       + ".rb-def-block{margin-top:14px}"
       + ".rb-recall{margin:26px 0 8px;border-top:1px solid rgba(180,150,90,.22);padding-top:14px}"
-      + ".rb-recall summary{cursor:pointer;font-size:15px;opacity:.75;list-style:none}"
-      + ".rb-recall summary::-webkit-details-marker{display:none}"
+      + ".rb-recall summary{cursor:pointer;font-size:15px;opacity:.9;list-style:none;"
++ "display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(180,150,90,.5);"
++ "border-radius:999px;padding:8px 18px}"
++ ".rb-recall summary::-webkit-details-marker{display:none}"
++ ".rb-recall summary::before{content:'▾';font-size:12px;transition:transform .2s}"
++ ".rb-recall[open] summary::before{transform:rotate(180deg)}"
       + ".rb-recall-body{margin-top:16px}"
       + ".rb-bridge p{opacity:.88}";
     var s = document.createElement("style");
