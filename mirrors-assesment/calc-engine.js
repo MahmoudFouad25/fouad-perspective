@@ -110,37 +110,54 @@
       return (b.raw - a.raw) || (maps.orderIndex[a.type] - maps.orderIndex[b.type]);
     });
 
-    const dominantAxis = ranking[0] ? ranking[0].axisId : null;
-
-    const first  = ranking[0] || null;
-    const second = ranking[1] || null;
-    const third  = ranking[2] || null;
-
     // ── العتبتان الوحيدتان (مؤسَّستان على بنية likert، لا على تكرارات) ──
     const PRESENCE = 24;  // متوسط ٤×٦ = نقطة الحياد = نصف المدى (٦..٤٢)
     const DIFF     = 3;   // فرق متوسط ٠٫٥×٦ = أصغر فرقٍ ذي دلالة عمليّة
 
-    let absent           = false; // (أ) عدم الحضور — حتى الأبرز تحت الحياد
-    let undifferentiated = false; // (ب) عدم التمييز — الأعلون متّصلون بلا فجوة
+    let absent           = false; // (أ) عدم الحضور — لا محور فوق الحياد
+    let undifferentiated = false; // (ب) عدم التمييز — المحاور الثلاثة متّصلة
     let dualAxis         = null;  // (ج) بابان — محوران متمايزان متقاربان
-    let sameAxisCloseness= false; // (د) تقارب داخل المحور الواحد
+    let sameAxisCloseness= false; // (د) الباب واضح والأسلوب داخله لا
 
-    if (first) {
-      const gap12 = second ? (first.raw  - second.raw) : Infinity;
-      const gap23 = third  ? (second.raw - third.raw)  : Infinity;
+    /* ── درجات المحاور: أعلى طابع في كلّ محور، وهو نفسه ما يعرضه التقرير ── */
+    const axisRaw = {};
+    ranking.forEach(function (r) {
+      if (!r.axisId) return;
+      if (axisRaw[r.axisId] === undefined || r.raw > axisRaw[r.axisId]) axisRaw[r.axisId] = r.raw;
+    });
+    const axisRank = Object.keys(axisRaw).map(function (id) {
+      return { axisId: id, raw: axisRaw[id] };
+    }).sort(function (a, b) { return b.raw - a.raw; });
 
-      if (first.raw <= PRESENCE) {
-        absent = true;                                              // (أ)
-      } else if (gap12 >= DIFF) {
-        /* (هـ) واضح — الأوّل متمايزٌ بفجوةٍ معنويّة: لا علم */
-      } else if (gap23 >= DIFF) {
-        // الأوّل والثاني مجموعةٌ متمايزةٌ عمّا تحتها
-        if (first.axisId !== second.axisId) dualAxis = [first.axisId, second.axisId]; // (ج)
-        else sameAxisCloseness = true;                                                // (د)
+    /* ── القرار الأوّل على مستوى المحور لا على مستوى الطابع ──
+       فالتقرير يبني على الباب، والباب محورٌ لا طابع. وقياس الفجوة على
+       الطبائع التسعة المسطّحة يرفع إشارةً ضعيفة حتّى حين يكون محوران
+       متقدّمين بفارقٍ كبير على الثالث. */
+    if (axisRank.length) {
+      const a1 = axisRank[0];
+      const a2 = axisRank[1] || null;
+      const a3 = axisRank[2] || null;
+      const gapA12 = a2 ? (a1.raw - a2.raw) : Infinity;
+      const gapA23 = a3 ? (a2.raw - a3.raw) : Infinity;
+
+      if (a1.raw <= PRESENCE) {
+        absent = true;                                          // (أ)
+      } else if (gapA12 >= DIFF) {
+        /* (هـ) المحور واضح. والفرز الآن داخله: أثمّ أسلوبٌ متقدّم؟ */
+        const inAxis = ranking.filter(function (r) { return r.axisId === a1.axisId; });
+        if (inAxis.length >= 2 && (inAxis[0].raw - inAxis[1].raw) < DIFF) {
+          sameAxisCloseness = true;                             // (د)
+        }
+      } else if (gapA23 >= DIFF) {
+        dualAxis = [a1.axisId, a2.axisId];                      // (ج)
       } else {
-        undifferentiated = true;                                    // (ب)
+        undifferentiated = true;                                // (ب)
       }
     }
+
+    /* المحور الغالب يُقرأ من ترتيب المحاور، لا من أوّل طابع في القائمة */
+    const dominantAxis = axisRank.length ? axisRank[0].axisId
+                       : (ranking[0] ? ranking[0].axisId : null);
 
     return {
       mirrorId: mirrorId,
