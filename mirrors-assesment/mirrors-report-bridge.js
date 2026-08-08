@@ -1,35 +1,14 @@
 /* ============================================================
    mirrors-report-bridge.js
-   جسر قراءة المرآة — النسخة الثالثة
+   جسر قراءة المرآة — النسخة الرابعة
    ------------------------------------------------------------
    المكان: mirrors-assesment/mirrors-report-bridge.js
 
-   يعتمد على:
-     mirrors-report-content.js       (الفصحى)
-     mirrors-report-content-eg.js    (العامية)
-     mirrors-report-deferred.js      (المؤجّل — اختياريّ)
-     mirrors-feedback.js             (زرّ الاعتراض — اختياريّ)
-
-   ────────────────────────────────────────────────────────────
-   شاشتان لا شاشة واحدة:
-
-   الأولى تمهيد: ما الذي قيس، ومعنى الباب والأسلوب والطيف،
-   والأبواب الثلاثة موصوفة. تقرأ مرة، وينتقل منها بزرّ.
-
-   والثانية التقرير. والتمهيد يبقى فيه مطويّا، فمن رجع بعد
-   شهر وجد الشرح معه ولم يحتج أن يبحث عنه.
-
-   ────────────────────────────────────────────────────────────
-   وبنيتان تعملان معا:
-
-   • الثانية (مرآة السلوك): تمهيد، ومشهد لكل أسلوب، وبلوك
-     تمييز لكل باب، ومكسب وثمن، وأثر في اليوم، وتجربة، وطيف
-     بستّ حالات مربوطة بمخرج المحرّك.
-
-   • الأولى (المرايا التي لم تعد كتابتها بعد): تعمل بالترتيب
-     القديم كما كانت، فلا يتوقّف شيء عن الناس أثناء البناء.
-
-   الكشف آليّ بمفتاح <mk>.preface.opening. لا إعداد يدويّ.
+   الجديد في هذه النسخة:
+   ١. أسماء الأبواب في التمهيد تقرأ من المحتوى، لا من الجسر.
+      فكل مرآة تعرض أسماء أبوابها هي، بلا تعديل في الكود.
+   ٢. بلوك التأصيل رجع إلى البنية الثانية، بعد الحركة المركزية
+      وقبل التمييز، ويظهر للمحور الغالب وحده.
    ============================================================ */
 
 (function (global) {
@@ -173,13 +152,23 @@
   }
 
   /* ─────────── التمهيد ─────────── */
+  /* عناوين الأبواب تبنى من المحتوى، فكل مرآة تعرض أسماءها هي */
+
+  var ORD = ["الأول", "الثاني", "الثالث"];
+
+  function doorLabel(mk, n) {
+    var v = txt(mk + ".a" + n + ".name");
+    var main = (v && v[0]) ? v[0] : "";
+    return "الباب " + ORD[n - 1] + (main ? " · " + main : "");
+  }
+
   var PREFACE_KEYS = [
     ["opening", null],
     ["why", null],
     ["doorMeaning", null],
-    ["door.a1", "الباب الأول · الوقفة"],
-    ["door.a2", "الباب الثاني · القفزة"],
-    ["door.a3", "الباب الثالث · البُعد"],
+    ["door.a1", 1],
+    ["door.a2", 2],
+    ["door.a3", 3],
     ["scene", "الثلاثة في لحظة واحدة"],
     ["styleMeaning", "الأسلوب داخل الباب"],
     ["spectrumMeaning", "معنى الطيف"]
@@ -189,7 +178,8 @@
     var h = "";
     PREFACE_KEYS.forEach(function (p) {
       var key = mk + ".preface." + p[0];
-      h += p[1] ? labeled(key, p[1], "rb-pre") : block(key, "rb-pre");
+      var lbl = (typeof p[1] === "number") ? doorLabel(mk, p[1]) : p[1];
+      h += lbl ? labeled(key, lbl, "rb-pre") : block(key, "rb-pre");
     });
     return h;
   }
@@ -272,6 +262,12 @@
         h += '<div class="rb-door">';
         h += doorHead(base, axisNameOf(mirror, axisId));
         h += block(base + ".intro", "rb-intro");
+
+        /* التأصيل: للمحور الغالب وحده، بعد الحركة المركزية */
+        if (axisId === domAxis) {
+          h += labeled(base + ".rooting", "في الأصل", "rb-rooting");
+        }
+
         if (t) h += labeled(base + ".door." + t, "أسلوبك داخل الباب", "rb-persona");
         h += labeled(base + ".distinguish", "كيف تفرق بين الثلاثة", "rb-distinction");
         if (t) h += labeled(base + ".daily." + t, "كيف يظهر في يومك", "rb-daily");
@@ -469,6 +465,9 @@
       + ".rb-door-head{margin-bottom:16px}"
       + ".rb-door-main{font-size:21px;font-weight:600}"
       + ".rb-door-term{font-size:14px;opacity:.65;margin-top:3px}"
+      + ".rb-rooting{border-top:1px dashed rgba(180,150,90,.28);border-bottom:1px dashed rgba(180,150,90,.28);"
+      + "padding:16px 0;margin:20px 0}"
+      + ".rb-rooting p{opacity:.86;font-size:16px}"
       + ".rb-distinction{background:rgba(180,150,90,.06);border-radius:10px;padding:14px 16px}"
       + ".rb-spectrum{margin-top:20px}"
       + ".rb-seed,.rb-gift{background:rgba(180,150,90,.08);border-radius:10px;padding:14px 16px}"
