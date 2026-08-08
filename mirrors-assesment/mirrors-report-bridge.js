@@ -87,8 +87,8 @@
   function gapKey(mk, res) {
     if (!res) return mk + ".gap.clear";
     var f = res.flags || {};
-    if (res.scenario === "weak" || f.weakSignal) return mk + ".gap.weak";
     if (res.dualAxis && res.dualAxis.length === 2) return mk + ".gap.dual";
+    if (res.scenario === "weak" || f.weakSignal) return mk + ".gap.weak";
     if (f.sameAxisCloseness || res.scenario === "closeness") return mk + ".gap.closeness";
     return mk + ".gap.clear";
   }
@@ -246,6 +246,16 @@
 
     h += rankingHTML(model);
     h += block(gapKey(mk, res), "rb-gap");
+
+     /* الإشارة الضعيفة: يقرأ الأبواب الثلاثة كلها، فهو أحوج الناس إليها */
+    if (weak) {
+      h += '<div class="rb-doors-open">'
+        + '<div class="rb-label">الأبواب الثلاثة، اقرأها كلها ولا تستعجل</div>'
+        + labeled(mk + ".preface.door.a1", doorLabel(mk, 1), "rb-pre")
+        + labeled(mk + ".preface.door.a2", doorLabel(mk, 2), "rb-pre")
+        + labeled(mk + ".preface.door.a3", doorLabel(mk, 3), "rb-pre")
+        + "</div>";
+    }
 
     var bases = [];
     var RND = global.FOUAD_RENDER || null;
