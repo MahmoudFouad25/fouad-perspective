@@ -454,7 +454,7 @@
     saveField("ownership", o, st);
   }, true);
 
-  (function styles() {
+(function styles() {
     if (document.getElementById("rb-styles")) return;
     var css = ""
       + ".rb-lang{display:flex;align-items:center;gap:8px;margin:10px 0 18px;flex-wrap:wrap}"
@@ -495,20 +495,22 @@
       + "border-radius:999px;padding:8px 18px;font-family:inherit;font-size:15px;cursor:pointer}"
       + ".rb-def-btn.ghost{background:transparent;opacity:.8}"
       + ".rb-def-block{margin-top:14px}"
+      + ".rb-doors-open{margin:6px 0 22px;padding:18px 0;"
+      + "border-top:1px dashed rgba(180,150,90,.28);border-bottom:1px dashed rgba(180,150,90,.28)}"
       + ".rb-recall{margin:26px 0 8px;border-top:1px solid rgba(180,150,90,.22);padding-top:14px}"
-      + ".rb-recall summary{cursor:pointer;font-size:15px;opacity:.9;list-style:none;"
-+ "display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(180,150,90,.5);"
-+ "border-radius:999px;padding:8px 18px}"
-+ ".rb-recall summary::-webkit-details-marker{display:none}"
-+ ".rb-recall summary::before{content:'▾';font-size:12px;transition:transform .2s}"
-+ ".rb-recall[open] summary::before{transform:rotate(180deg)}"
+      + ".rb-recall summary{cursor:pointer;font-size:15px;opacity:.92;list-style:none;"
+      + "display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(180,150,90,.5);"
+      + "border-radius:999px;padding:8px 18px}"
+      + ".rb-recall summary::-webkit-details-marker{display:none}"
+      + ".rb-recall summary::before{content:'▾';font-size:12px;transition:transform .2s}"
+      + ".rb-recall[open] summary::before{transform:rotate(180deg)}"
       + ".rb-recall-body{margin-top:16px}"
       + ".rb-bridge p{opacity:.88}";
     var s = document.createElement("style");
     s.id = "rb-styles"; s.textContent = css;
     document.head.appendChild(s);
   })();
-
+   
   global.MIRRORS_REPORT_BRIDGE = {
     canRender: canRender,
     render: render,
