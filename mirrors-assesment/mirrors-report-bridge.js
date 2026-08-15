@@ -292,7 +292,8 @@
         }
 
         h += labeled(base + ".giftCost", "مكسب الباب وثمنه", "rb-gift");
-        if (t) h += labeled(base + ".experiment." + t, "تجربة واحدة حتى المرآة القادمة", "rb-seed");
+        if (t) h += labeled(base + ".experiment." + t,
+          (mk === "m7" ? "تجربة واحدة تأخذها معك" : "تجربة واحدة حتى المرآة القادمة"), "rb-seed");
         h += "</div>";
       });
     }
@@ -300,7 +301,7 @@
     h += ownershipHTML(mk, model.ownershipSaved || "");
     h += block(mk + ".convergence", "rb-convergence");
     if (!weak) h += deferredHTML(mk, bases, model);
-    h += block(mk + ".bridge", "rb-bridge");
+    h += block(mk + ".closing", "rb-bridge") || block(mk + ".bridge", "rb-bridge");
 
     h += '<details class="rb-recall"><summary>افتح من هنا شرح الباب والأسلوب والطيف</summary>'
       + '<div class="rb-recall-body">' + prefaceBody(mk) + "</div></details>";
