@@ -63,6 +63,8 @@
   function STORE(){ return window.FOUAD_STORE; }
   // طبقة العرض المطوّرة (fouad-render.js) — بنّاؤون أنقياء، لا حالة فيها
   function RND(){   return (typeof FOUAD_RENDER !== 'undefined') ? FOUAD_RENDER : window.FOUAD_RENDER; }
+  // طبقة الرسالة المكتوبة (اختياريّة: لو غاب الملفّ يعمل المقياس كما هو تمامًا)
+  function WR(){    return window.FOUAD_WRITTEN || null; }
   function PAUSES(){
     var p = (typeof REFLECTION_PAUSES !== 'undefined') ? REFLECTION_PAUSES : window.REFLECTION_PAUSES;
     if(!p) return null;
@@ -748,6 +750,9 @@
     });
     setHTML(`<div class="card home">${card}</div>`);
 
+    // زرّ الرسالة المكتوبة — يظهر وحده حين يكون للعميل رسالةٌ مُفعَّلة
+    try{ if(WR()) WR().injectHome(renderWritten); }catch(e){}
+
     // «تابِع» → المرآة التالية غير المكتملة (تستأنف الجاريّة إن وُجد تقدّم)
     const cont = document.getElementById('homeContinue');
     if(cont) cont.addEventListener('click', function(){
@@ -842,7 +847,12 @@
     model.blocks = blocks;
     model.spectra = spectra;
 
-    setHTML(`<div class="card review">${_reviewHTML(mirror, res, model)}</div>`);
+    // ما كُتب لهذه المرآة يأتي في بطاقةٍ مستقلّة تحتها، لا داخلها:
+    // فبطاقة القراءة يُعاد بناؤها عند تبديل اللسان، والفصل يحفظ الحدّ
+    // بين ما قاسه المقياس وما كتبه المدرّب.
+    let _wrCard = '';
+    try{ if(WR()) _wrCard = WR().mirrorCardHTML(mirrorId) || ''; }catch(e){ _wrCard = ''; }
+    setHTML(`<div class="card review">${_reviewHTML(mirror, res, model)}</div>` + _wrCard);
     wireReviewBack();
   }
 
@@ -877,6 +887,18 @@
       e.preventDefault();
       renderHome();
     });
+  }
+
+  /* ════════════════════ شاشة الرسالة المكتوبة ════════════════════
+     ما كتبه المدرّب لهذا العميل بعينه. شاشةٌ مستقلّة بإطارٍ مختلف،
+     حتى لا يلتبس على القارئ مصدرُ الكلام: هنا إنسانٌ يكتب، لا أداةٌ تقيس. */
+  function renderWritten(){
+    if(!WR() || !WR().ready()){ renderHome(); return; }
+    state.stage = 'written';   // لا نكتبها في مسودّة المرآة: ليست مرحلةً من مراحل الحلّ
+    setHTML(WR().screenHTML(clientName()));
+    const b = document.getElementById('wrBack');  if(b) b.addEventListener('click', renderHome);
+    const p = document.getElementById('wrPrint'); if(p) p.addEventListener('click', function(){ window.print(); });
+    window.scrollTo(0,0);
   }
 
   /* ════════════════════ شاشة التقرير الذاتيّ المتكامل ════════════════════ */
@@ -1040,6 +1062,9 @@
     let assessment = null;
     try{ assessment = await STORE().loadAssessment(user.id); }catch(e){ assessment=null; }
     state.assessment = assessment;        // null = عميل جديد
+
+    // ٢-أ) الرسالة المكتوبة: قراءة واحدة. فشلُها لا يمسّ شيئًا.
+    try{ if(WR()) await WR().load(user.id); }catch(e){ console.warn('[FOUAD_APP] الرسالة المكتوبة:', e); }
 
     // ٢-ب) إعدادات الإتاحة: الوضع العامّ من Firestore + استثناء هذا العميل.
     //      قراءة واحدة لكلّ تحميل صفحة. أيّ فشلٍ هنا يُبقي الافتراضيّ،
