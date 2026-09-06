@@ -9,6 +9,28 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../assets/day.css">
+<style>
+  /* ── نافذة «وريني اللي على الشاشة» ──
+     نفس مكوّنات شاشة العرض بالظبط، متقاسة للموبايل. */
+  #pk{position:fixed;inset:0;z-index:60;display:none}
+  #pk.on{display:block}
+  #pk .stage{align-items:flex-start;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  #pk .sg{padding:calc(env(safe-area-inset-top) + 62px) 6vw calc(env(safe-area-inset-bottom) + 78px)}
+  #pk .sg .in > *{max-width:100%}
+  #pk .eyebrow{top:calc(env(safe-area-inset-top) + 14px);right:18px;z-index:62}
+  #pk .pk-x{position:fixed;z-index:63;left:16px;top:calc(env(safe-area-inset-top) + 10px);
+    background:rgba(255,255,255,.08);border:1px solid var(--line);color:var(--ink);
+    border-radius:999px;padding:9px 16px;font:inherit;font-size:.86rem}
+  #pk .pk-note{position:fixed;z-index:63;left:0;right:0;bottom:0;text-align:center;
+    padding:14px 20px calc(env(safe-area-inset-bottom) + 14px);font-size:.78rem;color:var(--ink-4);
+    background:linear-gradient(transparent,rgba(5,5,9,.9) 45%)}
+  .lv-peek{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);
+    color:var(--ink-2);border-radius:14px;padding:13px;font:inherit;font-size:.92rem;margin-bottom:10px}
+  .lv-peek[disabled]{opacity:.42}
+  .lv-net{position:fixed;left:0;right:0;top:0;z-index:70;text-align:center;font-size:.78rem;
+    padding:calc(env(safe-area-inset-top) + 7px) 12px 7px;background:#5a2318;color:#ffd9cf;display:none}
+  .lv-net.on{display:block}
+</style>
 </head>
 <body>
 
@@ -16,8 +38,18 @@
   <div class="lv-top" id="top"></div>
   <div class="lv-body" id="body"></div>
   <div class="lv-foot no-print">
+    <button class="lv-peek" id="peek" hidden>وريني اللي على الشاشة</button>
     <button class="lv-minute" id="minute" hidden>محتاج دقيقة</button>
   </div>
+</div>
+
+<div class="lv-net" id="net"></div>
+
+<div id="pk">
+  <div class="stage" id="pkstage"><div class="grain"></div><div class="sg" id="pksg"></div></div>
+  <div class="eyebrow" id="pkeyebrow"></div>
+  <button class="pk-x" id="pkx">اقفل</button>
+  <div class="pk-note">هتقفل لوحدها بعد شوية. ارفع عينك للقاعة.</div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -49,6 +81,8 @@
   var body = document.getElementById("body");
   var top_ = document.getElementById("top");
   var minuteBtn = document.getElementById("minute");
+  var peekBtn   = document.getElementById("peek");
+  var netBar    = document.getElementById("net");
 
   var me = null, slug = null, uid = null, session = null;
   var lastRendered = "", lastTheme = "";
@@ -57,10 +91,10 @@
   /* اللي اتعمل خلاص على الجهاز ده — محلّي بحت.
      ⚑ «أعدّي» بيتحفظ هنا وبس. مبيتبعتش لأي مكان، ولا بيتسجّل إنه حصل. */
   var localDone = {};
-  try { localDone = JSON.parse(localStorage.getItem(LS + "done") || "{}"); } catch (e) {}
+  try { localDone = JSON.parse(Day.store.get(LS + "done") || "{}"); } catch (e) {}
   function markDone(id) {
     localDone[id] = 1;
-    try { localStorage.setItem(LS + "done", JSON.stringify(localDone)); } catch (e) {}
+    Day.store.set(LS + "done", JSON.stringify(localDone));
   }
 
   var PERSISTENT = { lock: 1, guide: 1, pair: 1, exchange: 1 };
@@ -69,7 +103,7 @@
 
   Day.signInSilently().then(function (u) {
     uid = u.uid;
-    slug = Day.qs("u") || localStorage.getItem(LS + "slug");
+    slug = Day.qs("u") || Day.store.get(LS + "slug");
     if (!slug) return showJoin();
     Day.pRef(SID, slug).get().then(function (d) {
       if (!d.exists) return showJoin();
@@ -78,9 +112,23 @@
       start();
     }).catch(function (e) {
       if (e && e.code === "permission-denied") return showForeign();
-      msg("فيه حاجة مش راضية تفتح. كلّم المساعد."); console.warn(e);
+      failScreen(e);
     });
-  }).catch(function (e) { msg("مفيش اتصال دلوقتي. سيب الصفحة مفتوحة."); console.warn(e); });
+  }).catch(failScreen);
+
+  /* شاشة العطل: بتقول السبب وبتدّي فعل — مش «مفيش اتصال» وخلاص */
+  function failScreen(e) {
+    console.warn("[live]", e && (e.code || e.message), e);
+    top_.innerHTML = "";
+    body.innerHTML =
+      '<div class="lv-idle">' +
+      '<div class="h">' + Day.esc(Day.errText(e)) + "</div>" +
+      '<div class="s">إجاباتك محفوظة. مش هتضيع حاجة.</div>' +
+      '<button class="lv-send" id="rt" style="margin-top:8px">جرّب تاني</button>' +
+      '<div class="s" style="opacity:.5;margin-top:14px;direction:ltr">' +
+        Day.esc((e && e.code) || "unknown") + "</div></div>";
+    document.getElementById("rt").onclick = function () { location.reload(); };
+  }
 
   /* الشاشة متطفّيش طول اليوم — الموبايل اللي بينام بيقطع الحالة */
   var wake = null;
@@ -99,21 +147,30 @@
 
   function start() {
     keepAwake();
-    localStorage.setItem(LS + "slug", slug);
+    Day.store.set(LS + "slug", slug);
     history.replaceState({}, "", "?s=" + encodeURIComponent(SID) + "&u=" + encodeURIComponent(slug));
     minuteBtn.hidden = false;
     minuteBtn.onclick = needMinute;
 
-    Day.pRef(SID, slug).onSnapshot(function (d) { me = d.data() || null; render(); });
+    Day.pRef(SID, slug).onSnapshot({ includeMetadataChanges: true }, function (d) {
+      if (!d.metadata.fromCache) { Day.touch(); netOK(); }
+      me = d.data() || null; render();
+    }, function (e) { netDown(e); });
+
     Day.watchSession(SID, function (s) {
+      netOK();
       var changed = !session || (s && s.stateSeq !== session.stateSeq);
       session = s;
       if (changed) lastRendered = "";
       render();
-    });
+    }, netDown);
+
+    /* النبضة: بتقول للوحة إن الجهاز عايش، وفشلها بيقول لنا إن القناة وقعت */
     setInterval(function () {
-      Day.pRef(SID, slug).update({ lastSeenAt: Day.TS() }).catch(function () {});
-    }, 60000);
+      Day.pRef(SID, slug).update({ lastSeenAt: Day.TS() })
+        .then(netOK)
+        .catch(function (e) { netDown(e); Day.reconnect(); });
+    }, 45000);
   }
 
   /* ══════════ الدخول ══════════ */
@@ -174,6 +231,22 @@
 
   function msg(t) { top_.innerHTML = ""; body.innerHTML = '<p class="lv-msg">' + Day.esc(t) + "</p>"; }
 
+  /* شريط الاتصال — بيظهر بعد ما نتأكد فعلاً، مش من أول ثانية */
+  var netTimer = null;
+  function netOK() {
+    clearTimeout(netTimer); netTimer = null;
+    netBar.classList.remove("on");
+  }
+  function netDown(e) {
+    console.warn("[net]", e && (e.code || e.message));
+    if (netTimer) return;
+    netTimer = setTimeout(function () {
+      netBar.textContent = "الاتصال اتقطع — بنحاول نرجّعه. إجاباتك محفوظة.";
+      netBar.classList.add("on");
+      Day.reconnect();
+    }, 6000);
+  }
+
   function topbar(st) {
     var mv = dayMovementNo(st);
     top_.innerHTML =
@@ -186,10 +259,69 @@
     topbar(st || dayState(session ? session.state : "S00"));
     body.innerHTML =
       '<div class="lv-idle"><div class="pulse"><span></span></div>' +
-      '<div class="h">' + Day.esc(line || "الشاشة نايمة.") + "</div>" +
-      '<div class="s">' + Day.esc(sub || "هتصحى لوحدها لمّا ييجي دورها. ارفع عينك للقاعة.") + "</div></div>";
+      '<div class="h">' + Day.esc(line || "الشاشة دي هتشتغل لما ييجي دورك.") + "</div>" +
+      '<div class="s">' + Day.esc(sub === undefined || sub === null
+          ? "ولو عايز تقرا اللي على الشاشة الكبيرة، الزرار تحت." : sub) + "</div></div>";
     fade();
   }
+
+  /* ══════════ «وريني اللي على الشاشة» ══════════
+     سحب مش دفع: الشريحة ما بتظهرش لوحدها، بتظهر لما هو يطلبها،
+     وبتقفل لوحدها بعد دقيقة ونص. ونفس مكوّنات شاشة العرض بالظبط —
+     مفيش نسخة تانية من المحتوى تتكتب وتقع من التحديث. */
+
+  var PEEK_MS = 90000, peekOn = false, peekTimer = null;
+  var pkBox = document.getElementById("pk");
+
+  function currentSlide() {
+    if (!session) return null;
+    var st = dayState(session.state);
+    var sl = dayStageOf(st, session.sub || 0);
+    if (st.reveal && !session.revealed) sl = st.hold || null;   /* مش هنكشف قبل المرشد */
+    return { st: st, sl: sl };
+  }
+
+  function peekAllowed(st) {
+    if (!st || !session) return false;
+    if (typeof DAY_NO_PEEK !== "undefined" && DAY_NO_PEEK.indexOf(st.id) !== -1) return false;
+    if (st.live && st.live.k === "lock") return false;
+    var c = currentSlide();
+    return !!(c && c.sl);
+  }
+
+  function updatePeek(st) {
+    var ok = peekAllowed(st);
+    peekBtn.hidden = false;
+    peekBtn.disabled = !ok;
+    peekBtn.textContent = ok ? "وريني اللي على الشاشة" : "دي على الشاشة الكبيرة بس دلوقتي";
+    if (!ok && peekOn) return closePeek();
+    if (peekOn) drawPeek();
+  }
+
+  function drawPeek() {
+    var c = currentSlide();
+    if (!c || !c.sl) return;
+    DayRender.render({
+      state: c.st, slide: c.sl, payload: (session && session.stagePayload) || {},
+      stage: document.getElementById("pkstage"), holder: document.getElementById("pksg"),
+      eyebrow: document.getElementById("pkeyebrow"), rail: null,
+      expected: DAY_SETTINGS.expectedCount
+    });
+  }
+
+  function armPeek() { clearTimeout(peekTimer); peekTimer = setTimeout(closePeek, PEEK_MS); }
+
+  function openPeek()  { peekOn = true;  pkBox.classList.add("on");    drawPeek(); armPeek(); }
+  function closePeek() {
+    peekOn = false; clearTimeout(peekTimer); pkBox.classList.remove("on");
+    lastTheme = "";                       /* رجّع جوّ شاشة الموبايل */
+    var c = currentSlide(); if (c) syncTheme(c.st, c.sl);
+  }
+
+  peekBtn.onclick = function () { if (peekBtn.disabled) return; peekOn ? closePeek() : openPeek(); };
+  document.getElementById("pkx").onclick = closePeek;
+  pkBox.addEventListener("touchstart", armPeek, { passive: true });
+  pkBox.addEventListener("scroll", armPeek, { passive: true });
 
   /* دخول واحد هادي — عشان تغيّر الشاشة ما يبقاش قفزة في وسط الصمت */
   function fade() {
@@ -201,6 +333,7 @@
   function render() {
     if (!me) return;
     if (!session) {
+      peekBtn.hidden = true;
       top_.innerHTML = "";
       body.innerHTML = '<div class="lv-idle"><div class="pulse"><span></span></div>' +
         '<div class="h">مستنّي المرشد يفتح الجلسة.</div></div>';
@@ -211,6 +344,7 @@
     var sl = dayStageOf(st, session.sub || 0);
     var live = st.live;
     syncTheme(st, sl);
+    updatePeek(st);
 
     /* حالة مقفولة: الشاشة كلها بتتشال */
     if (live && live.k === "lock") {
@@ -219,6 +353,8 @@
                        '<div class="d"></div></div>';
       document.title = live.line;
       minuteBtn.hidden = true;
+      peekBtn.hidden = true;
+      closePeek();
       return;
     }
     minuteBtn.hidden = false;
@@ -226,10 +362,11 @@
     if (!live) return silent(st);
     if (st.target && me.activeAsk !== st.id) return silent(st, "الجزء ده مش ليك دلوقتي.", "استنّى دورك.");
 
+
     var answered = me.answers && me.answers[st.id] !== undefined;
     if (!PERSISTENT[live.k] && (localDone[st.id] || answered)) {
-      return silent(st, live.k === "threshold" ? live.done : "تمام. وصلت.",
-                    "الشاشة هتصحى لوحدها لمّا ييجي دورها.");
+      return silent(st, live.k === "threshold" ? live.done : "وصلت.",
+                    "ارفع عينك للقاعة.");
     }
 
     var key = st.id + ":" + live.k + ":" + (me.pairing ? JSON.stringify(me.pairing) : "");
