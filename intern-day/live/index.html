@@ -86,6 +86,7 @@
   var netBar    = document.getElementById("net");
 
   var me = null, slug = null, uid = null, session = null;
+  var unsubMe = null, unsubSess = null, beatTimer = null;
   var lastRendered = "", lastTheme = "";
   var LS = "day:" + SID + ":";
 
@@ -179,14 +180,16 @@
     minuteBtn.hidden = false;
     minuteBtn.onclick = needMinute;
 
-    Day.pRef(SID, slug).onSnapshot({ includeMetadataChanges: true }, function (d) {
+    unsubMe = Day.pRef(SID, slug).onSnapshot({ includeMetadataChanges: true }, function (d) {
       if (!d.metadata.fromCache) { Day.touch(); netOK(); }
+      /* الحساب اتمسح من اللوحة وإحنا شغّالين — الشاشة بتتحوّل لوحدها */
+      if (!d.exists && !d.metadata.fromCache) return wasRemoved();
       me = d.data() || null;
       syncMinute();
       render();
     }, function (e) { netDown(e); });
 
-    Day.watchSession(SID, function (s) {
+    unsubSess = Day.watchSession(SID, function (s) {
       netOK();
       var changed = !session || (s && s.stateSeq !== session.stateSeq);
       session = s;
@@ -195,7 +198,8 @@
     }, netDown);
 
     /* النبضة: بتقول للوحة إن الجهاز عايش، وفشلها بيقول لنا إن القناة وقعت */
-    setInterval(function () {
+    beatTimer = setInterval(function () {
+      if (!slug) return;
       Day.pRef(SID, slug).update({ lastSeenAt: Day.TS() })
         .then(netOK)
         .catch(function (e) { netDown(e); Day.reconnect(); });
@@ -239,8 +243,47 @@
     }
   }
 
+  /* المرشد مسح الحساب دلوقتي. مش هنسيبه قدّام شاشة واقفة —
+     بنفكّ كل الاشتراكات، بننسى الجهاز، وبنوّديه لسؤال الاسم. */
+  function wasRemoved() {
+    if (unsubMe) { unsubMe(); unsubMe = null; }
+    if (unsubSess) { unsubSess(); unsubSess = null; }
+    if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+    closePeek();
+    me = null; slug = null; lastRendered = "";
+    localDone = {};
+    Day.store.set(LS + "slug", "");
+    Day.store.set(LS + "done", "{}");
+    history.replaceState({}, "", "?s=" + encodeURIComponent(SID));
+    minuteBtn.hidden = true; peekBtn.hidden = true;
+    top_.innerHTML = "";
+    body.innerHTML =
+      '<div class="lv-idle">' +
+      '<div class="h">اتشال الاسم القديم.</div>' +
+      '<div class="s">اكتب اسمك من جديد وكمّل عادي. مش هتفوّت حاجة.</div>' +
+      '<button class="lv-send" id="rj" style="margin-top:8px">اكتب اسمي</button></div>';
+    document.getElementById("rj").onclick = showJoin;
+    fade();
+  }
+
+  /* الرابط بتاع حد تاني — أو حساب اتمسح والاسم اتحجز من جديد.
+     فيه مخرج بضغطة، عشان محدّش يقف مستنّي حد يفكّ له حاجة. */
   function showForeign() {
-    msg("الرابط ده مفتوح على جهاز تاني. كلّم المساعد وهو هيفكّه لك في ثانية.");
+    top_.innerHTML = "";
+    body.innerHTML =
+      '<div class="lv-idle">' +
+      '<div class="h">الرابط ده مفتوح على جهاز تاني.</div>' +
+      '<div class="s">لو ده مش رابطك، ابدأ من الأول واكتب اسمك.</div>' +
+      '<button class="lv-send" id="fresh" style="margin-top:8px">ده مش أنا — ابدأ من الأول</button>' +
+      '<div class="s" style="margin-top:12px">ولو ده رابطك فعلاً، قول للمساعد يفكّه لك في ثانية.</div></div>';
+    document.getElementById("fresh").onclick = function () {
+      Day.store.set(LS + "slug", "");
+      Day.store.set(LS + "done", "{}");
+      localDone = {};
+      slug = null;
+      history.replaceState({}, "", "?s=" + encodeURIComponent(SID));
+      showJoin();
+    };
   }
 
   /* ══════════ الجوّ — بيمشي مع الشاشة الكبيرة ══════════ */
