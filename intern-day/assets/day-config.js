@@ -5,21 +5,22 @@
    ده الملف الوحيد اللي بيتعدّل قبل التشغيل. باقي الملفات متلمسهاش.
    ===================================================================== */
 
-/* ١) مفاتيح المشروع — انسخها زي ما هي من أي ملف شغّال في الريبو
-      (مثلاً BOW/journey.html). المشروع: fouad-perspective */
+/* ١) مفاتيح المشروع — منقولة زي ما هي من profile.html في نفس الريبو.
+      المشروع: fouad-perspective */
 var DAY_FIREBASE = {
-  apiKey:            "PASTE_API_KEY",
+  apiKey:            "AIzaSyDj0bV5gsyRbqpxzW0Zd9wjYmq53-Xdj3w",
   authDomain:        "fouad-perspective.firebaseapp.com",
   projectId:         "fouad-perspective",
-  storageBucket:     "fouad-perspective.appspot.com",
-  messagingSenderId: "PASTE_SENDER_ID",
-  appId:             "PASTE_APP_ID"
+  storageBucket:     "fouad-perspective.firebasestorage.app",
+  messagingSenderId: "1068763865336",
+  appId:             "1:1068763865336:web:b791abcd22d536aedd5b0d"
 };
 
 /* ٢) إيميلات الأدمن — اللي بيفتحوا لوحة التحكّم.
-      لازم تبقى نفس القايمة الموجودة في firestore.rules بالحرف. */
+      لازم تبقى نفس القايمة الموجودة في firestore.rules بالحرف،
+      ولازم يكون ليها حساب فعلي في Firebase Authentication. */
 var DAY_ADMINS = [
-  "PASTE_ADMIN_EMAIL"
+  "admin@fouad-academy.com"
 ];
 
 /* ٣) إعدادات اليوم */
