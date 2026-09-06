@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#07070a">
 <title>إنت بتردّ على إيه؟</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,29 +26,44 @@
 <script src="../assets/day-config.js"></script>
 <script src="../assets/day-content.js"></script>
 <script src="../assets/day-core.js"></script>
+<script src="../assets/day-render.js"></script>
 <script>
 (function () {
   "use strict";
+
+  /* ═══════════════════════════════════════════════════════════
+     شاشة المشارك
+     -----------------------------------------------------------
+     ⚑ القاعدة اللي مش بتتكسر: الشاشة دي صامتة إلا لما ييجي دورها.
+        ٥٥ حالة من ٧٥ مفيش فيها حاجة، والجهاز بيشتغل ١٥ مرة في اليوم.
+        اللي اتغيّر في النسخة دي مش عدد اللحظات — الشكل:
+          · نفس ألوان شاشة العرض، وبتتغيّر مع الحركة، فالموبايل
+            بيبقى «في نفس الأوضة» مع الشاشة الكبيرة.
+          · الحالة الصامتة بقت مصمّمة (نبضة + اسم الحركة) بدل «استنّى.»
+          · الاختيارات بقى عليها حروف بألوان الأركان اللي في القاعة.
+        ومفيش ولا شريحة من شرايح العرض بتتنقل هنا — ده مقصود:
+        اللي بيبصّ على موبايله مش بيبصّ على القاعة.
+     ═══════════════════════════════════════════════════════════ */
 
   var SID  = Day.qs("s", DAY_SETTINGS.sessionId);
   var body = document.getElementById("body");
   var top_ = document.getElementById("top");
   var minuteBtn = document.getElementById("minute");
 
-  var me = null;        // مستند المشارك
-  var slug = null;
-  var uid = null;
-  var session = null;
-  var lastRendered = "";
+  var me = null, slug = null, uid = null, session = null;
+  var lastRendered = "", lastTheme = "";
   var LS = "day:" + SID + ":";
 
   /* اللي اتعمل خلاص على الجهاز ده — محلّي بحت.
      ⚑ «أعدّي» بيتحفظ هنا وبس. مبيتبعتش لأي مكان، ولا بيتسجّل إنه حصل. */
   var localDone = {};
   try { localDone = JSON.parse(localStorage.getItem(LS + "done") || "{}"); } catch (e) {}
-  function markDone(id) { localDone[id] = 1; try { localStorage.setItem(LS + "done", JSON.stringify(localDone)); } catch (e) {} }
+  function markDone(id) {
+    localDone[id] = 1;
+    try { localStorage.setItem(LS + "done", JSON.stringify(localDone)); } catch (e) {}
+  }
 
-  var PERSISTENT = { lock: 1, guide: 1, pair: 1 };
+  var PERSISTENT = { lock: 1, guide: 1, pair: 1, exchange: 1 };
 
   /* ══════════ التشغيل ══════════ */
 
@@ -91,9 +106,9 @@
 
     Day.pRef(SID, slug).onSnapshot(function (d) { me = d.data() || null; render(); });
     Day.watchSession(SID, function (s) {
-      var changed = !session || s && (s.stateSeq !== session.stateSeq);
+      var changed = !session || (s && s.stateSeq !== session.stateSeq);
       session = s;
-      if (changed) { lastRendered = ""; }
+      if (changed) lastRendered = "";
       render();
     });
     setInterval(function () {
@@ -104,8 +119,9 @@
   /* ══════════ الدخول ══════════ */
 
   function showJoin() {
-    top_.textContent = "";
+    top_.innerHTML = "";
     body.innerHTML =
+      '<p class="lv-kick">أهلاً بيك</p>' +
       '<p class="lv-q">اكتب اسمك.</p>' +
       '<p class="lv-hint">الرابط ده بتاعك إنت لوحدك، وهيفضل معاك اليوم كله. متقفلوش.</p>' +
       '<input class="lv-in" id="nm" autocomplete="name" enterkeyhint="done">' +
@@ -141,13 +157,37 @@
     msg("الرابط ده مفتوح على جهاز تاني. كلّم المساعد وهو هيفكّه لك في ثانية.");
   }
 
+  /* ══════════ الجوّ — بيمشي مع الشاشة الكبيرة ══════════ */
+
+  function syncTheme(st, sl) {
+    var mv = dayMovementNo(st);
+    var door = (sl && sl.door) || null;
+    var t = (door && DayRender.DOOR_TINT[door]) || DayRender.THEMES[mv] || DayRender.THEMES[0];
+    var key = t.h1 + t.accent;
+    if (key === lastTheme) return;
+    lastTheme = key;
+    var r = document.documentElement.style;
+    r.setProperty("--h2", t.h2); r.setProperty("--glow", t.glow); r.setProperty("--accent", t.accent);
+  }
+
   /* ══════════ العرض ══════════ */
 
-  function msg(t) { top_.textContent = ""; body.innerHTML = '<p class="lv-msg">' + Day.esc(t) + "</p>"; }
+  function msg(t) { top_.innerHTML = ""; body.innerHTML = '<p class="lv-msg">' + Day.esc(t) + "</p>"; }
 
-  function silent(extra) {
-    top_.textContent = me ? me.name : "";
-    body.innerHTML = '<p class="lv-wait">' + Day.esc(extra || "استنّى.") + "</p>";
+  function topbar(st) {
+    var mv = dayMovementNo(st);
+    top_.innerHTML =
+      '<span class="who"><i></i>' + Day.esc(me ? me.name : "") + "</span>" +
+      '<span class="mv">' + (mv ? Day.esc(DAY_MOVEMENTS[mv - 1] || "") : "") + "</span>";
+  }
+
+  /* الحالة الصامتة — مصمّمة، مش ميّتة. ومفيش فيها ولا حرف من الشرح. */
+  function silent(st, line, sub) {
+    topbar(st || dayState(session ? session.state : "S00"));
+    body.innerHTML =
+      '<div class="lv-idle"><div class="pulse"><span></span></div>' +
+      '<div class="h">' + Day.esc(line || "الشاشة نايمة.") + "</div>" +
+      '<div class="s">' + Day.esc(sub || "هتصحى لوحدها لمّا ييجي دورها. ارفع عينك للقاعة.") + "</div></div>";
     fade();
   }
 
@@ -160,27 +200,36 @@
 
   function render() {
     if (!me) return;
-    if (!session) return silent("مستنّي المرشد يفتح الجلسة.");
+    if (!session) {
+      top_.innerHTML = "";
+      body.innerHTML = '<div class="lv-idle"><div class="pulse"><span></span></div>' +
+        '<div class="h">مستنّي المرشد يفتح الجلسة.</div></div>';
+      return;
+    }
 
     var st = dayState(session.state);
+    var sl = dayStageOf(st, session.sub || 0);
     var live = st.live;
+    syncTheme(st, sl);
 
     /* حالة مقفولة: الشاشة كلها بتتشال */
     if (live && live.k === "lock") {
-      top_.textContent = "";
-      body.innerHTML = '<div class="lv-lock">' + Day.esc(live.line) + "</div>";
+      top_.innerHTML = "";
+      body.innerHTML = '<div class="lv-lock"><div class="l">' + Day.esc(live.line) + "</div>" +
+                       '<div class="d"></div></div>';
       document.title = live.line;
       minuteBtn.hidden = true;
       return;
     }
     minuteBtn.hidden = false;
 
-    if (!live) return silent();
-    if (st.target && me.activeAsk !== st.id) return silent();
+    if (!live) return silent(st);
+    if (st.target && me.activeAsk !== st.id) return silent(st, "الجزء ده مش ليك دلوقتي.", "استنّى دورك.");
 
     var answered = me.answers && me.answers[st.id] !== undefined;
     if (!PERSISTENT[live.k] && (localDone[st.id] || answered)) {
-      return silent(live.k === "threshold" ? live.done : "تمام.");
+      return silent(st, live.k === "threshold" ? live.done : "تمام. وصلت.",
+                    "الشاشة هتصحى لوحدها لمّا ييجي دورها.");
     }
 
     var key = st.id + ":" + live.k + ":" + (me.pairing ? JSON.stringify(me.pairing) : "");
@@ -188,15 +237,16 @@
     lastRendered = key;
     Day.vibrate();
 
-    top_.textContent = me.name;
+    topbar(st);
     ({
       threshold: rThreshold, word: rWord, text: rText, choice: rChoice,
       corner: rCorner, "card-view": rCardView, manual: rManual,
       pair: rPair, exchange: rExchange, speaker3: rSpeaker3, guide: rGuide
-    }[live.k] || silent)(live, st);
+    }[live.k] || function () { silent(st); })(live, st);
   }
 
-  /* زرار «أعدّي» — بيتبني هنا مرّة واحدة، فمستحيل تنساه في سؤال */
+  /* زرار «أعدّي» — بيتبني هنا مرّة واحدة، فمستحيل تنساه في سؤال.
+     ⚑ وما بيتسجّلش في أي مكان — ولا حتى إنه عدّى. */
   function skipBtn(stateId) {
     var b = document.createElement("button");
     b.className = "lv-skip"; b.textContent = "أعدّي";
@@ -221,13 +271,15 @@
     Day.pRef(SID, slug).update(u).then(function () {
       markDone(id); lastRendered = ""; if (then) then(); else render();
     }).catch(function (e) {
-      console.warn(e); body.innerHTML = '<p class="lv-msg">مش راضي يتبعت. جرّب تاني، أو كلّم المساعد.</p>';
+      console.warn(e);
+      body.innerHTML = '<p class="lv-msg">مش راضي يتبعت. جرّب تاني، أو كلّم المساعد.</p>';
     });
   }
 
   /* ─── بطاقة العتبة — بتتخزن في مجموعة مجهولة تماماً ─── */
   function rThreshold(l, st) {
     frame(st.id,
+      '<p class="lv-kick">قبل ما تدخل</p>' +
       '<p class="lv-q">' + Day.esc(l.head) + "</p>" +
       '<p class="lv-hint">' + Day.esc(l.prompt) + "</p>" +
       '<p class="lv-lab">' + Day.esc(l.f1) + "</p><textarea class='lv-ta' id='a'></textarea>" +
@@ -240,13 +292,14 @@
         Day.cardsCol(SID).add({
           said: said, replied: rep, hourBucket: Day.hourBucket(), flag: null, shown: false
         }).then(function () {
-          markDone(st.id); lastRendered = ""; silent(l.done);
+          markDone(st.id); lastRendered = ""; silent(st, l.done, "");
         }).catch(function (e) { btn.disabled = false; console.warn(e); });
       }, "ابعت وادخل");
   }
 
   function rWord(l, st) {
     frame(st.id,
+      '<p class="lv-kick">كلمة واحدة</p>' +
       '<p class="lv-q">' + Day.esc(l.prompt) + "</p>" +
       '<p class="lv-hint">' + Day.esc(l.hint || "") + "</p>" +
       "<input class='lv-in' id='w' maxlength='" + (l.max || 24) + "' enterkeyhint='send'>",
@@ -270,14 +323,16 @@
       });
   }
 
+  /* اختيارات — والحروف بتاخد لون الركن اللي في القاعة */
   function rChoice(l, st) {
-    var h = '<p class="lv-q">' + Day.esc(l.prompt) + "</p><div id='opts'></div>";
-    frame(st.id, h, null);
+    frame(st.id, '<p class="lv-q">' + Day.esc(l.prompt) + "</p><div id='opts'></div>", null);
     var box = document.getElementById("opts");
     l.options.forEach(function (o, i) {
+      var v = l.values[i], d = /^[ABC]/.test(v) ? v[0] : null;
       var b = document.createElement("button");
-      b.className = "lv-opt"; b.textContent = o;
-      b.onclick = function () { saveAnswer(st.id, l.values[i]); };
+      b.className = "lv-opt" + (d ? " d" + d : "");
+      b.innerHTML = '<i>' + (d ? DAY_CORNERS[d] : Day.toAr(i + 1)) + "</i><span>" + Day.esc(o) + "</span>";
+      b.onclick = function () { saveAnswer(st.id, v); };
       box.appendChild(b);
     });
   }
@@ -286,7 +341,8 @@
   function rCorner(l, st) {
     var pick = { corner: null, reading: null };
     frame(st.id,
-      '<p class="lv-q">' + Day.esc(l.prompt) + "</p>" +
+      '<p class="lv-kick">' + Day.esc(l.prompt) + "</p>" +
+      '<p class="lv-q">سجّل اللي حصل منك.</p>' +
       '<p class="lv-lab">إنت واقف في أنهي ركن؟</p><div id="c1"></div>' +
       '<p class="lv-lab">والموقف ده — في نظرك إنت — كان عن إيه؟</p><div id="c2"></div>',
       function (btn) {
@@ -294,14 +350,16 @@
         saveAnswer(st.id, pick);
       }, "سجّل");
 
-    mk("c1", ["أ", "ب", "ج"], ["A", "B", "C"], "corner");
-    mk("c2", [DAY_READINGS["1"], DAY_READINGS["2"], DAY_READINGS["3"]], ["1", "2", "3"], "reading");
+    mk("c1", ["أ", "ب", "ج"], ["A", "B", "C"], "corner", true);
+    mk("c2", [DAY_READINGS["1"], DAY_READINGS["2"], DAY_READINGS["3"]], ["1", "2", "3"], "reading", false);
 
-    function mk(id, labels, vals, field) {
+    function mk(id, labels, vals, field, doors) {
       var box = document.getElementById(id);
       labels.forEach(function (t, i) {
         var b = document.createElement("button");
-        b.className = "lv-opt"; b.textContent = t;
+        b.className = "lv-opt" + (doors ? " d" + vals[i] : "");
+        b.innerHTML = '<i>' + (doors ? labels[i] : Day.toAr(i + 1)) + "</i><span>" +
+                      Day.esc(doors ? "الركن " + t : t) + "</span>";
         b.onclick = function () {
           pick[field] = vals[i];
           [].forEach.call(box.children, function (c) { c.classList.remove("on"); });
@@ -314,22 +372,25 @@
 
   /* ─── بطاقتك: بتعرض ومبتستنتجش ─── */
   function rCardView(l, st) {
-    fade();
+    topbar(st); fade();
     var a = me.answers || {};
     var rows = [["الجولة ١", "S25"], ["الجولة ٢", "S26"], ["الجولة ٣", "S27"]].map(function (r) {
       var v = a[r[1]] || {};
-      return "<tr><td>" + r[0] + "</td><td>" + (v.corner ? DAY_CORNERS[v.corner] : "—") +
-             "</td><td>" + (v.reading ? DAY_READINGS[v.reading] : "—") + "</td></tr>";
+      var c = v.corner ? '<span class="cn ' + v.corner + '">' + DAY_CORNERS[v.corner] + "</span>" : "—";
+      return "<tr><td>" + r[0] + "</td><td>" + c + "</td><td>" +
+             (v.reading ? DAY_READINGS[v.reading] : "—") + "</td></tr>";
     }).join("");
     body.innerHTML =
-      '<p class="lv-hint">اللي إنت كتبته النهاردة:</p>' +
+      '<p class="lv-kick">بطاقتك</p>' +
+      '<p class="lv-hint">اللي إنت كتبته النهاردة، زي ما كتبته بالظبط:</p>' +
       "<table class='lv-table'><tr><th></th><th>الركن</th><th>القراءة</th></tr>" + rows + "</table>";
     /* ⚑ ولا كلمة استنتاج. مفيش «حرفك» ولا «إنت باب كذا». هو اللي بيشوف. */
   }
 
   function rManual(l, st) {
     var saved = (me.manual || {});
-    var h = '<p class="lv-q">دليل التشغيل بتاعك</p><p class="lv-hint">خمس سطور. والسطر التاني والتالت أهمّهم — خد فيهم وقتك.</p>';
+    var h = '<p class="lv-kick">المخرَج</p><p class="lv-q">دليل التشغيل بتاعك</p>' +
+            '<p class="lv-hint">خمس سطور. والسطر التاني والتالت أهمّهم — خد فيهم وقتك.</p>';
     DAY_MANUAL_LINES.forEach(function (t, i) {
       h += '<p class="lv-lab">' + Day.esc(t) + "</p><textarea class='lv-ta' id='m" + i + "'></textarea>";
     });
@@ -339,7 +400,8 @@
       d.updatedAt = Day.TS();
       if (saved.publish) d.publish = saved.publish;
       Day.pRef(SID, slug).set({ manual: d }, { merge: true }).then(function () {
-        markDone(st.id); lastRendered = ""; silent("اتحفظت. وهي معاك على الرابط ده للأبد.");
+        markDone(st.id); lastRendered = "";
+        silent(st, "اتحفظت.", "وهي معاك على الرابط ده للأبد.");
       }).catch(function (e) { btn.disabled = false; console.warn(e); });
     }, "احفظ");
     for (var i = 0; i < 5; i++) {
@@ -350,22 +412,32 @@
 
   function rPair(l, st) {
     var p = (me.pairing || {})[l.round];
-    if (!p) return silent("ثانية واحدة.");
-    body.innerHTML = '<p class="lv-hint">إنت مع</p><p class="lv-pair">' + Day.esc(p.name) +
-      "<small>استنّاه عند الركن " + Day.esc(p.corner || "") + "</small></p>";
+    if (!p) return silent(st, "ثانية واحدة.", "بنظبّط الأزواج.");
+    topbar(st); fade();
+    body.innerHTML =
+      '<p class="lv-kick">إنت مع</p>' +
+      '<div class="lv-pair"><div class="nm">' + Day.esc(p.name) + "</div>" +
+      (p.corner ? '<div class="wh"><b>' + Day.esc(p.corner) + "</b><span>استنّاه عند الركن</span></div>" : "") +
+      "<small>والشريك بتاعك من باب غير بابك. وده مقصود.</small></div>";
   }
 
   function rExchange(l, st) {
     var list = (me.pairing || {}).exchange;
-    if (!list || !list.length) return silent("ثانية واحدة.");
-    body.innerHTML = '<p class="lv-hint">روح للتلاتة دول، واوريه ورقتك واقرا ورقته:</p>' +
-      '<p class="lv-pair">' + list.map(function (x) { return Day.esc(x.name); }).join("<br>") +
-      "<small>وجملة واحدة بس: «الحركة دي، أنا كنت هفسّرها إزاي قبل النهاردة؟»</small></p>";
+    if (!list || !list.length) return silent(st, "ثانية واحدة.", "بنظبّط الثلاثيّات.");
+    topbar(st); fade();
+    body.innerHTML =
+      '<p class="lv-kick">التبادل</p>' +
+      '<p class="lv-hint">روح للتلاتة دول، واوريه ورقتك واقرا ورقته:</p>' +
+      '<div class="lv-names">' + list.map(function (x, i) {
+        return "<div><i>" + Day.toAr(i + 1) + "</i>" + Day.esc(x.name) + "</div>";
+      }).join("") + "</div>" +
+      '<p class="lv-hint" style="margin-top:18px">وجملة واحدة بس: «الحركة دي، أنا كنت هفسّرها إزاي قبل النهاردة؟»</p>';
   }
 
   function rSpeaker3(l, st) {
     frame(st.id,
-      '<p class="lv-q">إنت متحدّث الركن.</p><p class="lv-hint">اكتبوا إجاباتكم مع بعض، وإنت اللي بتسجّل.</p>' +
+      '<p class="lv-kick">إنت متحدّث الركن</p>' +
+      '<p class="lv-q">اكتبوا إجاباتكم مع بعض، وإنت اللي بتسجّل.</p>' +
       '<p class="lv-lab">الباب ده أدّانا إيه؟</p><textarea class="lv-ta" id="g"></textarea>' +
       '<p class="lv-lab">الباب ده بياخد مننا إيه؟</p><textarea class="lv-ta" id="c"></textarea>' +
       '<p class="lv-lab">إحنا بنفوّت إيه؟</p><textarea class="lv-ta" id="m"></textarea>',
@@ -378,10 +450,13 @@
       }, "سجّل");
   }
 
-  function rGuide() {
+  function rGuide(l, st) {
     var m = me.manual || {};
-    if (!m.line1) return silent("مفيش دليل تشغيل محفوظ على الرابط ده.");
-    body.innerHTML = '<p class="lv-hint">دليل التشغيل بتاعك · ' + Day.esc(me.name) + "</p><div class='lv-guide'>" +
+    topbar(st);
+    if (!m.line1) return silent(st, "مفيش دليل تشغيل محفوظ على الرابط ده.", "");
+    body.innerHTML =
+      '<p class="lv-kick">دليل التشغيل بتاعك</p>' +
+      '<p class="lv-hint">' + Day.esc(me.name) + "</p><div class='lv-guide'>" +
       [1, 2, 3, 4, 5].map(function (i) {
         return m["line" + i] ? "<p>" + Day.esc(m["line" + i]) + "</p>" : "";
       }).join("") + "</div>";
