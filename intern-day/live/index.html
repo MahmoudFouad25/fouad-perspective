@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>إنت بتردّ على إيه؟</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/day.css">
+</head>
+<body>
+
+<div class="live">
+  <div class="lv-top" id="top"></div>
+  <div class="lv-body" id="body"></div>
+  <div class="lv-foot no-print">
+    <button class="lv-minute" id="minute" hidden>محتاج دقيقة</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="../assets/day-config.js"></script>
+<script src="../assets/day-content.js"></script>
+<script src="../assets/day-core.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var SID  = Day.qs("s", DAY_SETTINGS.sessionId);
+  var body = document.getElementById("body");
+  var top_ = document.getElementById("top");
+  var minuteBtn = document.getElementById("minute");
+
+  var me = null;        // مستند المشارك
+  var slug = null;
+  var uid = null;
+  var session = null;
+  var lastRendered = "";
+  var LS = "day:" + SID + ":";
+
+  /* اللي اتعمل خلاص على الجهاز ده — محلّي بحت.
+     ⚑ «أعدّي» بيتحفظ هنا وبس. مبيتبعتش لأي مكان، ولا بيتسجّل إنه حصل. */
+  var localDone = {};
+  try { localDone = JSON.parse(localStorage.getItem(LS + "done") || "{}"); } catch (e) {}
+  function markDone(id) { localDone[id] = 1; try { localStorage.setItem(LS + "done", JSON.stringify(localDone)); } catch (e) {} }
+
+  var PERSISTENT = { lock: 1, guide: 1, pair: 1 };
+
+  /* ══════════ التشغيل ══════════ */
+
+  Day.signInSilently().then(function (u) {
+    uid = u.uid;
+    slug = Day.qs("u") || localStorage.getItem(LS + "slug");
+    if (!slug) return showJoin();
+    Day.pRef(SID, slug).get().then(function (d) {
+      if (!d.exists) return showJoin();
+      if (d.data().uid && d.data().uid !== uid) return showForeign();
+      if (!d.data().uid) Day.pRef(SID, slug).update({ uid: uid });
+      start();
+    }).catch(function (e) {
+      if (e && e.code === "permission-denied") return showForeign();
+      msg("فيه حاجة مش راضية تفتح. كلّم المساعد."); console.warn(e);
+    });
+  }).catch(function (e) { msg("مفيش اتصال دلوقتي. سيب الصفحة مفتوحة."); console.warn(e); });
+
+  function start() {
+    localStorage.setItem(LS + "slug", slug);
+    history.replaceState({}, "", "?s=" + encodeURIComponent(SID) + "&u=" + encodeURIComponent(slug));
+    minuteBtn.hidden = false;
+    minuteBtn.onclick = needMinute;
+
+    Day.pRef(SID, slug).onSnapshot(function (d) { me = d.data() || null; render(); });
+    Day.watchSession(SID, function (s) {
+      var changed = !session || s && (s.stateSeq !== session.stateSeq);
+      session = s;
+      if (changed) { lastRendered = ""; }
+      render();
+    });
+    setInterval(function () {
+      Day.pRef(SID, slug).update({ lastSeenAt: Day.TS() }).catch(function () {});
+    }, 60000);
+  }
+
+  /* ══════════ الدخول ══════════ */
+
+  function showJoin() {
+    top_.textContent = "";
+    body.innerHTML =
+      '<p class="lv-q">اكتب اسمك.</p>' +
+      '<p class="lv-hint">الرابط ده بتاعك إنت لوحدك، وهيفضل معاك اليوم كله. متقفلوش.</p>' +
+      '<input class="lv-in" id="nm" autocomplete="name" enterkeyhint="done">' +
+      '<button class="lv-send" id="go">ادخل</button>' +
+      '<p class="lv-hint" id="je" style="color:#b4472e;margin-top:14px"></p>';
+    var nm = document.getElementById("nm"); nm.focus();
+    document.getElementById("go").onclick = doJoin;
+    nm.addEventListener("keydown", function (e) { if (e.key === "Enter") doJoin(); });
+
+    function doJoin() {
+      var name = nm.value.trim();
+      if (name.length < 2) { document.getElementById("je").textContent = "اكتب اسمك الأول."; return; }
+      var base = Day.slugify(name), tryS = base, n = 1;
+      var btn = document.getElementById("go"); btn.disabled = true; btn.textContent = "ثانية...";
+      /* ⚑ مفيش قراءة لبيانات حدّ تاني هنا خالص. لو الاسم محجوز، القواعد
+         بترفض الكتابة، وإحنا بنجرّب لاحقة رقمية — والباقي يفضل مقفول. */
+      (function attempt() {
+        Day.pRef(SID, tryS).set({
+          slug: tryS, name: name, uid: uid,
+          joinedAt: Day.TS(), lastSeenAt: Day.TS(), answers: {}
+        }, { merge: true }).then(function () { slug = tryS; start(); })
+        .catch(function (e) {
+          if (e && e.code === "permission-denied" && n < 12) { n++; tryS = base + "-" + n; return attempt(); }
+          btn.disabled = false; btn.textContent = "ادخل";
+          document.getElementById("je").textContent = "مش راضي يدخل. كلّم اللي واقف على الباب.";
+          console.warn(e);
+        });
+      })();
+    }
+  }
+
+  function showForeign() {
+    msg("الرابط ده مفتوح على جهاز تاني. كلّم المساعد وهو هيفكّه لك في ثانية.");
+  }
+
+  /* ══════════ العرض ══════════ */
+
+  function msg(t) { top_.textContent = ""; body.innerHTML = '<p class="lv-msg">' + Day.esc(t) + "</p>"; }
+
+  function silent(extra) {
+    top_.textContent = me ? me.name : "";
+    body.innerHTML = '<p class="lv-wait">' + Day.esc(extra || "استنّى.") + "</p>";
+  }
+
+  function render() {
+    if (!me) return;
+    if (!session) return silent("مستنّي المرشد يفتح الجلسة.");
+
+    var st = dayState(session.state);
+    var live = st.live;
+
+    /* حالة مقفولة: الشاشة كلها بتتشال */
+    if (live && live.k === "lock") {
+      top_.textContent = "";
+      body.innerHTML = '<div class="lv-lock">' + Day.esc(live.line) + "</div>";
+      minuteBtn.hidden = true;
+      return;
+    }
+    minuteBtn.hidden = false;
+
+    if (!live) return silent();
+    if (st.target && me.activeAsk !== st.id) return silent();
+
+    var answered = me.answers && me.answers[st.id] !== undefined;
+    if (!PERSISTENT[live.k] && (localDone[st.id] || answered)) {
+      return silent(live.k === "threshold" ? live.done : "تمام.");
+    }
+
+    var key = st.id + ":" + live.k + ":" + (me.pairing ? JSON.stringify(me.pairing) : "");
+    if (key === lastRendered) return;
+    lastRendered = key;
+    Day.vibrate();
+
+    top_.textContent = me.name;
+    ({
+      threshold: rThreshold, word: rWord, text: rText, choice: rChoice,
+      corner: rCorner, "card-view": rCardView, manual: rManual,
+      pair: rPair, exchange: rExchange, speaker3: rSpeaker3, guide: rGuide
+    }[live.k] || silent)(live, st);
+  }
+
+  /* زرار «أعدّي» — بيتبني هنا مرّة واحدة، فمستحيل تنساه في سؤال */
+  function skipBtn(stateId) {
+    var b = document.createElement("button");
+    b.className = "lv-skip"; b.textContent = "أعدّي";
+    b.onclick = function () { markDone(stateId); lastRendered = ""; render(); };
+    return b;
+  }
+  function frame(stateId, html, onSend, sendLabel) {
+    body.innerHTML = html;
+    if (onSend) {
+      var s = document.createElement("button");
+      s.className = "lv-send"; s.textContent = sendLabel || "ابعت";
+      s.onclick = function () { s.disabled = true; onSend(s); };
+      body.appendChild(s);
+    }
+    body.appendChild(skipBtn(stateId));
+  }
+
+  function saveAnswer(id, value, then) {
+    var u = { lastSeenAt: Day.TS() };
+    u["answers." + id] = value;
+    Day.pRef(SID, slug).update(u).then(function () {
+      markDone(id); lastRendered = ""; if (then) then(); else render();
+    }).catch(function (e) {
+      console.warn(e); body.innerHTML = '<p class="lv-msg">مش راضي يتبعت. جرّب تاني، أو كلّم المساعد.</p>';
+    });
+  }
+
+  /* ─── بطاقة العتبة — بتتخزن في مجموعة مجهولة تماماً ─── */
+  function rThreshold(l, st) {
+    frame(st.id,
+      '<p class="lv-q">' + Day.esc(l.head) + "</p>" +
+      '<p class="lv-hint">' + Day.esc(l.prompt) + "</p>" +
+      '<p class="lv-lab">' + Day.esc(l.f1) + "</p><textarea class='lv-ta' id='a'></textarea>" +
+      '<p class="lv-lab">' + Day.esc(l.f2) + "</p><textarea class='lv-ta' id='b'></textarea>" +
+      '<p class="lv-hint" style="margin-top:18px">' + Day.esc(l.note) + "</p>",
+      function (btn) {
+        var said = document.getElementById("a").value.trim();
+        var rep  = document.getElementById("b").value.trim();
+        if (!said && !rep) { btn.disabled = false; return; }
+        Day.cardsCol(SID).add({
+          said: said, replied: rep, hourBucket: Day.hourBucket(), flag: null, shown: false
+        }).then(function () {
+          markDone(st.id); lastRendered = ""; silent(l.done);
+        }).catch(function (e) { btn.disabled = false; console.warn(e); });
+      }, "ابعت وادخل");
+  }
+
+  function rWord(l, st) {
+    frame(st.id,
+      '<p class="lv-q">' + Day.esc(l.prompt) + "</p>" +
+      '<p class="lv-hint">' + Day.esc(l.hint || "") + "</p>" +
+      "<input class='lv-in' id='w' maxlength='" + (l.max || 24) + "' enterkeyhint='send'>",
+      function (btn) {
+        var v = document.getElementById("w").value.trim();
+        if (!v) { btn.disabled = false; return; }
+        saveAnswer(st.id, v);
+      });
+    document.getElementById("w").focus();
+  }
+
+  function rText(l, st) {
+    frame(st.id,
+      '<p class="lv-q">' + Day.esc(l.prompt) + "</p>" +
+      '<p class="lv-hint">' + Day.esc(l.hint || "") + "</p>" +
+      "<textarea class='lv-ta' id='t' style='min-height:130px'></textarea>",
+      function (btn) {
+        var v = document.getElementById("t").value.trim();
+        if (!v) { btn.disabled = false; return; }
+        saveAnswer(st.id, v);
+      });
+  }
+
+  function rChoice(l, st) {
+    var h = '<p class="lv-q">' + Day.esc(l.prompt) + "</p><div id='opts'></div>";
+    frame(st.id, h, null);
+    var box = document.getElementById("opts");
+    l.options.forEach(function (o, i) {
+      var b = document.createElement("button");
+      b.className = "lv-opt"; b.textContent = o;
+      b.onclick = function () { saveAnswer(st.id, l.values[i]); };
+      box.appendChild(b);
+    });
+  }
+
+  /* ─── الأركان: حرف + قراءة، والسؤال التاني مش أقلّ أهمية ─── */
+  function rCorner(l, st) {
+    var pick = { corner: null, reading: null };
+    frame(st.id,
+      '<p class="lv-q">' + Day.esc(l.prompt) + "</p>" +
+      '<p class="lv-lab">إنت واقف في أنهي ركن؟</p><div id="c1"></div>' +
+      '<p class="lv-lab">والموقف ده — في نظرك إنت — كان عن إيه؟</p><div id="c2"></div>',
+      function (btn) {
+        if (!pick.corner || !pick.reading) { btn.disabled = false; return; }
+        saveAnswer(st.id, pick);
+      }, "سجّل");
+
+    mk("c1", ["أ", "ب", "ج"], ["A", "B", "C"], "corner");
+    mk("c2", [DAY_READINGS["1"], DAY_READINGS["2"], DAY_READINGS["3"]], ["1", "2", "3"], "reading");
+
+    function mk(id, labels, vals, field) {
+      var box = document.getElementById(id);
+      labels.forEach(function (t, i) {
+        var b = document.createElement("button");
+        b.className = "lv-opt"; b.textContent = t;
+        b.onclick = function () {
+          pick[field] = vals[i];
+          [].forEach.call(box.children, function (c) { c.classList.remove("on"); });
+          b.classList.add("on");
+        };
+        box.appendChild(b);
+      });
+    }
+  }
+
+  /* ─── بطاقتك: بتعرض ومبتستنتجش ─── */
+  function rCardView(l, st) {
+    var a = me.answers || {};
+    var rows = [["الجولة ١", "S25"], ["الجولة ٢", "S26"], ["الجولة ٣", "S27"]].map(function (r) {
+      var v = a[r[1]] || {};
+      return "<tr><td>" + r[0] + "</td><td>" + (v.corner ? DAY_CORNERS[v.corner] : "—") +
+             "</td><td>" + (v.reading ? DAY_READINGS[v.reading] : "—") + "</td></tr>";
+    }).join("");
+    body.innerHTML =
+      '<p class="lv-hint">اللي إنت كتبته النهاردة:</p>' +
+      "<table class='lv-table'><tr><th></th><th>الركن</th><th>القراءة</th></tr>" + rows + "</table>";
+    /* ⚑ ولا كلمة استنتاج. مفيش «حرفك» ولا «إنت باب كذا». هو اللي بيشوف. */
+  }
+
+  function rManual(l, st) {
+    var saved = (me.manual || {});
+    var h = '<p class="lv-q">دليل التشغيل بتاعك</p><p class="lv-hint">خمس سطور. والسطر التاني والتالت أهمّهم — خد فيهم وقتك.</p>';
+    DAY_MANUAL_LINES.forEach(function (t, i) {
+      h += '<p class="lv-lab">' + Day.esc(t) + "</p><textarea class='lv-ta' id='m" + i + "'></textarea>";
+    });
+    frame(st.id, h, function (btn) {
+      var d = {};
+      for (var i = 0; i < 5; i++) d["line" + (i + 1)] = document.getElementById("m" + i).value.trim();
+      d.updatedAt = Day.TS();
+      if (saved.publish) d.publish = saved.publish;
+      Day.pRef(SID, slug).set({ manual: d }, { merge: true }).then(function () {
+        markDone(st.id); lastRendered = ""; silent("اتحفظت. وهي معاك على الرابط ده للأبد.");
+      }).catch(function (e) { btn.disabled = false; console.warn(e); });
+    }, "احفظ");
+    for (var i = 0; i < 5; i++) {
+      var v = saved["line" + (i + 1)];
+      if (v) document.getElementById("m" + i).value = v;
+    }
+  }
+
+  function rPair(l, st) {
+    var p = (me.pairing || {})[l.round];
+    if (!p) return silent("ثانية واحدة.");
+    body.innerHTML = '<p class="lv-hint">إنت مع</p><p class="lv-pair">' + Day.esc(p.name) +
+      "<small>استنّاه عند الركن " + Day.esc(p.corner || "") + "</small></p>";
+  }
+
+  function rExchange(l, st) {
+    var list = (me.pairing || {}).exchange;
+    if (!list || !list.length) return silent("ثانية واحدة.");
+    body.innerHTML = '<p class="lv-hint">روح للتلاتة دول، واوريه ورقتك واقرا ورقته:</p>' +
+      '<p class="lv-pair">' + list.map(function (x) { return Day.esc(x.name); }).join("<br>") +
+      "<small>وجملة واحدة بس: «الحركة دي، أنا كنت هفسّرها إزاي قبل النهاردة؟»</small></p>";
+  }
+
+  function rSpeaker3(l, st) {
+    frame(st.id,
+      '<p class="lv-q">إنت متحدّث الركن.</p><p class="lv-hint">اكتبوا إجاباتكم مع بعض، وإنت اللي بتسجّل.</p>' +
+      '<p class="lv-lab">الباب ده أدّانا إيه؟</p><textarea class="lv-ta" id="g"></textarea>' +
+      '<p class="lv-lab">الباب ده بياخد مننا إيه؟</p><textarea class="lv-ta" id="c"></textarea>' +
+      '<p class="lv-lab">إحنا بنفوّت إيه؟</p><textarea class="lv-ta" id="m"></textarea>',
+      function (btn) {
+        saveAnswer(st.id, {
+          gift:   document.getElementById("g").value.trim(),
+          cost:   document.getElementById("c").value.trim(),
+          missed: document.getElementById("m").value.trim()
+        });
+      }, "سجّل");
+  }
+
+  function rGuide() {
+    var m = me.manual || {};
+    if (!m.line1) return silent("مفيش دليل تشغيل محفوظ على الرابط ده.");
+    body.innerHTML = '<p class="lv-hint">دليل التشغيل بتاعك · ' + Day.esc(me.name) + "</p><div class='lv-guide'>" +
+      [1, 2, 3, 4, 5].map(function (i) {
+        return m["line" + i] ? "<p>" + Day.esc(m["line" + i]) + "</p>" : "";
+      }).join("") + "</div>";
+  }
+
+  /* ─── محتاج دقيقة: بيروح للمساعد بس ─── */
+  function needMinute() {
+    minuteBtn.disabled = true;
+    Day.pRef(SID, slug).update({ needsMinuteAt: Day.TS(), needsMinuteHandled: false }).then(function () {
+      minuteBtn.textContent = "وصلت. المساعد جايلك.";
+      minuteBtn.classList.add("sent");
+      setTimeout(function () {
+        minuteBtn.textContent = "محتاج دقيقة"; minuteBtn.classList.remove("sent"); minuteBtn.disabled = false;
+      }, 600000);
+    }).catch(function () { minuteBtn.disabled = false; });
+  }
+
+})();
+</script>
+</body>
+</html>
