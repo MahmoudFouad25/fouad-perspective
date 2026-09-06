@@ -12,6 +12,33 @@ var Day = (function () {
   var auth = firebase.auth();
   var TS   = firebase.firestore.FieldValue.serverTimestamp;
 
+  /* ───────── النقل: long-polling إجباري ─────────
+     Firestore بيفتح القناة الحيّة بـ WebChannel + fetch streams.
+     ده بيتقفل على شبكات المحمول وعلى Safari وفي متصفحات التطبيقات
+     (واتساب/إنستجرام)، فـ onSnapshot ما بيوصلوش أول رد أبداً —
+     والشاشة تفضل واقفة والكمبيوتر ماشي. الإعداد ده بيحلّ ده.
+     ⚑ لازم يتنادى قبل أول قراءة أو كتابة. */
+  try {
+    db.settings({
+      experimentalForceLongPolling: true,
+      useFetchStreams: false,
+      merge: true
+    });
+  } catch (e) { console.warn("[day] firestore settings:", e && e.message); }
+
+  /* ───────── تخزين آمن ─────────
+     localStorage بيرمي استثناء في التصفح الخاص وفي متصفح واتساب
+     على iOS. سطر واحد من غير حماية كان كفيل يوقف الصفحة كلها. */
+  var store = (function () {
+    var mem = {}, can = false;
+    try { localStorage.setItem("__d", "1"); localStorage.removeItem("__d"); can = true; } catch (e) {}
+    return {
+      available: can,
+      get: function (k) { try { return can ? localStorage.getItem(k) : (mem.hasOwnProperty(k) ? mem[k] : null); } catch (e) { return mem[k] || null; } },
+      set: function (k, v) { try { if (can) localStorage.setItem(k, v); else mem[k] = v; } catch (e) { mem[k] = v; } }
+    };
+  })();
+
   /* ───────── أدوات عامة ───────── */
 
   function qs(k, dflt) {
@@ -56,14 +83,96 @@ var Day = (function () {
 
   /* المشارك: دخول مجهول صامت. مفيش حساب، ومفيش إيميل، ومفيش خطوة زيادة
      على الباب. الـuid ده هو اللي بيحمي بياناته في قواعد الأمان. */
-  function signInSilently() {
+  var lastAuthError = null;
+
+  /* الثبات: LOCAL ← SESSION ← NONE. لو المتصفح مقفّل التخزين (تصفح خاص،
+     «امنع كل الكوكيز»، متصفح واتساب) الأولى بترمي — وبنكمّل بالذاكرة. */
+  function pickPersistence() {
+    var P = firebase.auth.Auth.Persistence;
+    return auth.setPersistence(P.LOCAL)
+      .catch(function () { return auth.setPersistence(P.SESSION); })
+      .catch(function () { return auth.setPersistence(P.NONE); })
+      .catch(function () { return null; });
+  }
+
+  function signInSilently(opts) {
+    opts = opts || {};
+    var maxTries = opts.retries === undefined ? 3 : opts.retries;
+    var timeoutMs = opts.timeoutMs === undefined ? 20000 : opts.timeoutMs;
+
     return new Promise(function (resolve, reject) {
-      auth.onAuthStateChanged(function (u) {
-        if (u) return resolve(u);
-        auth.signInAnonymously().catch(reject);
-      });
+      var settled = false, tries = 0, unsub = null, timer = null;
+
+      function done(u) {
+        if (settled) return; settled = true;
+        clearTimeout(timer); if (unsub) try { unsub(); } catch (e) {}
+        resolve(u);
+      }
+      function fail(e) {
+        if (settled) return; settled = true;
+        clearTimeout(timer); if (unsub) try { unsub(); } catch (e) {}
+        lastAuthError = e; reject(e);
+      }
+
+      unsub = auth.onAuthStateChanged(function (u) { if (u) done(u); },
+                                      function (e) { fail(e); });
+
+      timer = setTimeout(function () {
+        if (auth.currentUser) return done(auth.currentUser);
+        fail({ code: "day/timeout", message: "auth timeout" });
+      }, timeoutMs);
+
+      pickPersistence().then(attempt);
+
+      function attempt() {
+        if (settled || auth.currentUser) return;
+        tries++;
+        auth.signInAnonymously().catch(function (e) {
+          lastAuthError = e;
+          var retriable = e && (e.code === "auth/network-request-failed" ||
+                                e.code === "auth/internal-error" ||
+                                e.code === "auth/too-many-requests");
+          if (!settled && retriable && tries < maxTries) {
+            return setTimeout(attempt, 1000 * tries);
+          }
+          fail(e);
+        });
+      }
     });
   }
+
+  /* رسالة بالعربي لكل كود خطأ — عشان اللي واقف في القاعة يعرف يتصرّف */
+  function errText(e) {
+    var c = (e && e.code) || "";
+    if (c === "auth/network-request-failed")
+      return "الشبكة مش سايبة الاتصال يعدّي. جرّب تقفل الواي فاي وتشتغل بالبيانات.";
+    if (c === "auth/web-storage-unsupported" || c === "auth/operation-not-supported-in-this-environment")
+      return "المتصفح مقفّل التخزين. افتح الرابط في سفاري أو كروم مباشرة، مش من جوّه واتساب.";
+    if (c === "auth/operation-not-allowed" || c === "auth/admin-restricted-operation")
+      return "الدخول المجهول مقفول في إعدادات المشروع. ده إعداد عند المرشد.";
+    if (c === "day/timeout")
+      return "الاتصال أخد وقت طويل. اضغط «جرّب تاني».";
+    if (c === "permission-denied")
+      return "الرابط ده مش مفتوح لك. كلّم المساعد.";
+    return "فيه حاجة مش راضية تفتح. كلّم المساعد.";
+  }
+
+  /* ───────── إعادة فتح القناة ─────────
+     iOS بيجمّد الصفحة لما الشاشة تتقفل أو تبدّل تطبيق، والقناة بتموت
+     من غير خطأ ومحدّش بيفتحها تاني. دي كانت أكبر حتّة ناقصة. */
+  var lastSnapAt = Date.now();
+  function touch() { lastSnapAt = Date.now(); }
+  function reconnect() {
+    return db.disableNetwork()
+      .then(function () { return db.enableNetwork(); })
+      .then(function () { touch(); })
+      .catch(function (e) { console.warn("[day] reconnect:", e && e.message); });
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && Date.now() - lastSnapAt > 12000) reconnect();
+  });
+  window.addEventListener("online", function () { reconnect(); });
+  window.addEventListener("pageshow", function (e) { if (e.persisted) reconnect(); });
 
   function isAdminUser(u) {
     return !!(u && u.email && DAY_ADMINS.indexOf(u.email) !== -1);
@@ -79,10 +188,19 @@ var Day = (function () {
 
   /* ───────── الاشتراك في الحالة ───────── */
 
-  function watchSession(sid, cb) {
-    return sRef(sid).onSnapshot(function (snap) {
+  function watchSession(sid, cb, onErr) {
+    var settled = false;
+    /* لو أول رد من السيرفر ما جاش في ١٠ ثواني، القناة مقفولة — نعيد فتحها */
+    var guard = setTimeout(function () { if (!settled) reconnect(); }, 10000);
+    return sRef(sid).onSnapshot({ includeMetadataChanges: true }, function (snap) {
+      if (!snap.metadata.fromCache) { settled = true; clearTimeout(guard); touch(); }
       cb(snap.exists ? snap.data() : null);
-    }, function (err) { console.warn("session watch:", err.message); });
+    }, function (err) {
+      clearTimeout(guard);
+      console.warn("session watch:", err.code, err.message);
+      if (onErr) onErr(err);
+      setTimeout(reconnect, 2000);
+    });
   }
 
   /* ───────── اشتقاق الباب والقراءة (يشتغل على اللوحة بس) ───────── */
@@ -168,6 +286,8 @@ var Day = (function () {
     db: db, auth: auth, TS: TS,
     qs: qs, toAr: toAr, slugify: slugify, vibrate: vibrate, esc: esc, hourBucket: hourBucket,
     signInSilently: signInSilently, isAdminUser: isAdminUser,
+    store: store, errText: errText, reconnect: reconnect, touch: touch,
+    lastAuthError: function () { return lastAuthError; },
     sRef: sRef, pRef: pRef, pCol: pCol, cardsCol: cardsCol, derivedRef: derivedRef,
     watchSession: watchSession, derive: derive, makeGroups: makeGroups, shuffle: shuffle
   };
