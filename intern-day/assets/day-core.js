@@ -148,8 +148,10 @@ var Day = (function () {
       return "الشبكة مش سايبة الاتصال يعدّي. جرّب تقفل الواي فاي وتشتغل بالبيانات.";
     if (c === "auth/web-storage-unsupported" || c === "auth/operation-not-supported-in-this-environment")
       return "المتصفح مقفّل التخزين. افتح الرابط في سفاري أو كروم مباشرة، مش من جوّه واتساب.";
-    if (c === "auth/operation-not-allowed" || c === "auth/admin-restricted-operation")
-      return "الدخول المجهول مقفول في إعدادات المشروع. ده إعداد عند المرشد.";
+    if (c === "auth/operation-not-allowed")
+      return "الدخول المجهول مش مفتوح في المشروع. ده إعداد عند المرشد — دقيقة واحدة.";
+    if (c === "auth/admin-restricted-operation")
+      return "فتح حساب جديد مقفول في المشروع دلوقتي. ده إعداد عند المرشد — دقيقة واحدة.";
     if (c === "day/timeout")
       return "الاتصال أخد وقت طويل. اضغط «جرّب تاني».";
     if (c === "permission-denied")
