@@ -6,14 +6,15 @@
 <title>شاشة العرض · إنت بتردّ على إيه؟</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../assets/day.css">
 <style>html,body{overflow:hidden;cursor:none}</style>
 </head>
 <body>
 
 <div class="stage" id="stage"><div class="grain"></div><div class="sg" id="sg"></div></div>
-<div class="mvt" id="mvt"></div>
+<div class="eyebrow" id="eyebrow"></div>
+<div class="rail" id="rail"></div>
 <button class="fs" id="fs">ملء الشاشة</button>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -22,236 +23,55 @@
 <script src="../assets/day-config.js"></script>
 <script src="../assets/day-content.js"></script>
 <script src="../assets/day-core.js"></script>
+<script src="../assets/day-render.js"></script>
 <script>
 (function () {
   "use strict";
 
-  var SID   = Day.qs("s", DAY_SETTINGS.sessionId);
-  var stage = document.getElementById("stage");
-  var sg    = document.getElementById("sg");
-  var mvt   = document.getElementById("mvt");
-  var lastKey = "", lastTheme = "", wallTimer = null, wallIdx = 0, wallData = [];
+  var SID     = Day.qs("s", DAY_SETTINGS.sessionId);
+  var stage   = document.getElementById("stage");
+  var sg      = document.getElementById("sg");
+  var eyebrow = document.getElementById("eyebrow");
+  var rail    = document.getElementById("rail");
+  var lastKey = "";
 
   document.getElementById("fs").onclick = function () {
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen();
   };
 
-  /* ═══════════ جوّ كل حركة ═══════════
-     لكل حركة من العشرة عمق ولون خاص بيها. الشاشة بتتنقّل بينهم لوحدها
-     على مدى اليوم، فالقاعة بتحسّ إن اليوم بيتحرّك حتى وهي ساكتة. */
-  var THEMES = {
-    "1": { h1:"#0e1930", h2:"#1c2c4c", glow:"#3f63a4", accent:"#7fb2e8", name:"العتبة" },
-    "2": { h1:"#161029", h2:"#271b46", glow:"#6a49a8", accent:"#b294e8", name:"الافتتاح" },
-    "3": { h1:"#26101a", h2:"#3d1a2b", glow:"#8f3355", accent:"#ef7a9a", name:"الصندوق" },
-    "4": { h1:"#0b2321", h2:"#134039", glow:"#2b8578", accent:"#63d6c0", name:"التلات حوارات" },
-    "5": { h1:"#241a0e", h2:"#3d2c14", glow:"#9a6a1e", accent:"#e8b93f", name:"الأركان" },
-    "6": { h1:"#0f1c26", h2:"#173242", glow:"#2d6c8c", accent:"#63b3e0", name:"جوّه الباب" },
-    "7": { h1:"#10241a", h2:"#1a4030", glow:"#2f8a58", accent:"#7fc98a", name:"المعمل" },
-    "8": { h1:"#26180f", h2:"#3f2a18", glow:"#a05a2c", accent:"#f0a068", name:"الهبة والكُلفة" },
-    "9": { h1:"#111a30", h2:"#1c2b4e", glow:"#3f5aa8", accent:"#8fa8ee", name:"دليل التشغيل" },
-    "10":{ h1:"#0a0a0e", h2:"#141018", glow:"#3a2c44", accent:"#e8d4a0", name:"الختام" },
-    "0": { h1:"#0b0b12", h2:"#151520", glow:"#33334a", accent:"#c9c2b8", name:"" }
-  };
-  /* جوّه الحركة السادسة، الجوّ بياخد لون الباب اللي بنتكلّم فيه */
-  var DOOR_TINT = {
-    A:{ h1:"#241a0e", h2:"#3d2c14", glow:"#9a6a1e", accent:"#e8b93f" },
-    B:{ h1:"#26140e", h2:"#41231a", glow:"#a04a2c", accent:"#ef7a5f" },
-    C:{ h1:"#0f2418", h2:"#183d29", glow:"#2f8a52", accent:"#7fc98a" }
-  };
-  function doorOfState(id) {
-    var n = parseInt(id.slice(1), 10);
-    if (n >= 36 && n <= 40) return "A";
-    if (n >= 41 && n <= 45) return "B";
-    if (n >= 46 && n <= 50) return "C";
-    return null;
-  }
-  /* السواد الحقيقي — أربع لحظات مكتوبة بالاسم في السكربت */
-  var VOID = { S07:1, S68:1, S69:1, S71:1 };
-
-  var AR = ["٠","١","٢","٣","٤","٥","٦","٧","٨","٩"];
-  function ar(n){ return String(n).replace(/[0-9]/g, function(d){ return AR[+d]; }); }
-  function esc(s){ return Day.esc(s); }
-
-  function theme(st) {
-    var d = doorOfState(st.id);
-    var t = d ? DOOR_TINT[d] : null;
-    if (!t) {
-      var m = (st.mv || "").match(/[٠-٩]+/);
-      var num = m ? String(m[0]).replace(/[٠-٩]/g, function(c){ return "٠١٢٣٤٥٦٧٨٩".indexOf(c); }) : "0";
-      t = THEMES[num] || THEMES["0"];
-    }
-    var key = t.h1 + t.accent;
-    if (key !== lastTheme) {
-      lastTheme = key;
-      var r = document.documentElement.style;
-      r.setProperty("--h1", t.h1); r.setProperty("--h2", t.h2);
-      r.setProperty("--glow", t.glow); r.setProperty("--accent", t.accent);
-    }
-    mvt.textContent = /^\d|—/.test(st.mv) || !st.mv ? "" : st.mv;
-  }
+  /* السكّة السفلية — عشر خانات، واحدة لكل حركة */
+  (function () {
+    var h = "";
+    for (var i = 0; i < DAY_MOVEMENTS.length; i++) h += "<i></i>";
+    rail.innerHTML = h;
+  })();
 
   /* ═══════════ الاشتراك ═══════════ */
 
   Day.signInSilently().then(function () {
     Day.watchSession(SID, draw);
-  }).catch(function () { blank(); });
-
-  function blank(){ sg.innerHTML = ""; }
-  function wrap(inner, wide){ sg.className = "sg" + (wide ? " wide" : ""); sg.innerHTML = '<div class="in">' + inner + "</div>"; }
+  }).catch(function () { DayRender.blank(sg); });
 
   function draw(s) {
-    if (!s) return blank();
-    var st = dayState(s.state), sgd = dayStageOf(st, s.sub || 0), pl = s.stagePayload || {};
+    if (!s) return DayRender.blank(sg);
+
+    var st  = dayState(s.state);
+    var sgd = dayStageOf(st, s.sub || 0);
+    var pl  = s.stagePayload || {};
+
+    /* قبل ضغطة «اعرض» — بنعرض شاشة الانتظار المصمّمة، مش سواد ميّت */
+    if (st.reveal && !s.revealed) sgd = st.hold || { k: "hold", ic: "⋯", h: "" };
 
     var key = s.state + "|" + (s.sub || 0) + "|" + (s.revealed ? 1 : 0) + "|" + (s.payloadSeq || 0);
     if (key === lastKey) return;
     lastKey = key;
 
-    if (wallTimer) { clearInterval(wallTimer); wallTimer = null; }
-
-    theme(st);
-    var isVoid = !!VOID[st.id];
-    stage.classList.toggle("void", isVoid);
-    mvt.style.opacity = isVoid ? 0 : "";
-
-    if (!sgd) return blank();
-    if (st.reveal && !s.revealed) return blank();
-
-    switch (sgd.k) {
-
-      /* الشاشة الهادية: مفيش كلام، بس مفيش سواد ميّت كمان.
-         الجوّ الملوّن بيفضل شغّال، والقاعة بتحسّ إن فيه مكان. */
-      case "black": return blank();
-
-      case "lines":
-        wrap('<div class="rule"></div><div class="ln sz-' + (sgd.size || "lg") + (sgd.lines.length > 2 ? " wide" : "") + '">' +
-          sgd.lines.map(function (t, i) {
-            return '<div style="animation-delay:' + (i * .18) + 's" class="in">' + esc(t) + "</div>";
-          }).join("") + "</div>", sgd.lines.length > 2);
-        break;
-
-      case "counter": {
-        var c = pl.count || 0, seats = "";
-        for (var i = 0; i < DAY_SETTINGS.expectedCount; i++) seats += '<i class="' + (i < c ? "f" : "") + '"></i>';
-        wrap('<div class="counter"><div class="ring"><div class="n">' + ar(c) + "</div></div>" +
-             "<small>اللي دخلوا</small>" +
-             '<div class="seats">' + seats + "</div></div>");
-        break;
-      }
-
-      case "chain": {
-        var n = sgd.n || 0, parts = [];
-        DAY_CHAIN.forEach(function (w, i) {
-          if (i) parts.push("<i>←</i>");
-          var cl = i < n ? (i === n - 1 && n === DAY_CHAIN.length ? "on last" : "on") : "";
-          parts.push('<span class="' + cl + '">' + w + "</span>");
-        });
-        wrap('<div class="chain">' + parts.join(" ") + "</div>", true);
-        break;
-      }
-
-      case "card": {
-        var cd = pl.card || {};
-        if (!cd.said) return blank();
-        var h = '<div class="part"><div class="lab">اللي قلته</div><div class="txt">' + esc(cd.said) + "</div></div>";
-        if (sgd.mode === "full" && cd.replied)
-          h += '<div class="part rep in"><div class="lab">واللي رجع لي</div><div class="txt">' + esc(cd.replied) + "</div></div>";
-        wrap('<div class="card">' + h + "</div>", true);
-        break;
-      }
-
-      case "cloud": {
-        var w = (pl.cloud || []).slice();
-        if (!w.length) return blank();
-        Day.shuffle(w);
-        var sizes = [3.9, 2.7, 5.1, 3.2, 2.3, 4.4, 2.9, 3.6];
-        var tints = ["#ffffff", "var(--accent)", "#ffffff", "#d8d2ea", "#ffffff", "var(--accent)"];
-        wrap('<div class="cloud">' + w.map(function (x, i) {
-          var sz = sizes[i % sizes.length];
-          return "<b style=\"font-size:clamp(1.35rem," + sz + "vw," + (sz * 1.05) + "rem);" +
-                 "color:" + tints[i % tints.length] + ";animation-delay:" + (i * .06) + 's">' + esc(x) + "</b>";
-        }).join("") + "</div>", true);
-        break;
-      }
-
-      case "big": {
-        var bn = pl.bigN || 0, bo = pl.bigOf || DAY_SETTINGS.expectedCount;
-        wrap('<div class="big"><div class="n">' + ar(bn) + "</div>" +
-             "<small>من " + ar(bo) + "</small>" +
-             '<div class="bar"><u style="width:' + (bo ? (bn / bo * 100) : 0) + '%"></u></div></div>');
-        break;
-      }
-
-      case "scene":
-        wrap('<div class="scene"><h2 class="in">' + esc(sgd.title) + "</h2>" +
-          '<div class="opts">' + sgd.opts.map(function (o, i) {
-            var d = ["A", "B", "C"][i] || "A";
-            return '<div class="opt d-' + d + ' in" style="animation-delay:' + (.15 + i * .12) + 's">' +
-                   "<b>" + o.c + "</b><span>" + esc(o.t) + "</span></div>";
-          }).join("") + "</div></div>", true);
-        break;
-
-      case "steps":
-        wrap('<div class="steps">' + sgd.items.map(function (t, i) {
-          return '<div class="in" style="animation-delay:' + (i * .16) + 's"><i>' + ar(i + 1) + "</i><span>" +
-                 esc(String(t).replace(/^[٠-٩0-9]+[.．]\s*/, "")) + "</span></div>";
-        }).join("") + "</div>", true);
-        break;
-
-      case "tables": {
-        var t = pl.tables || [];
-        if (!t.length) return blank();
-        wrap('<div class="tables">' + t.map(function (x, i) {
-          return '<div class="d-' + x.door + ' in" style="animation-delay:' + (i * .14) + 's">' +
-            "<h3>" + (DAY_CORNERS[x.door] || "") + " · " + (DAY_DOOR_NAMES[x.door] || "") + "</h3>" +
-            "<p><b>أدّانا</b>" + esc(x.gift) + "</p>" +
-            "<p><b>بياخد مننا</b>" + esc(x.cost) + "</p>" +
-            "<p><b>بنفوّت</b>" + esc(x.missed) + "</p></div>";
-        }).join("") + "</div>", true);
-        break;
-      }
-
-      case "wall":
-        wallData = pl.wall || [];
-        if (!wallData.length) return blank();
-        wallIdx = 0; showWall();
-        wallTimer = setInterval(showWall, 9000);
-        break;
-
-      case "ayah":
-        wrap('<div class="ayah">﴿ وَلَقَدْ كَرَّمْنَا بَنِي آدَمَ ﴾</div>');
-        break;
-
-      case "dots":
-        wrap('<div class="circles"><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i></div>' +
-             '<div class="note">اللي شفناه النهاردة: مرآة واحدة.</div>');
-        break;
-
-      case "models":
-        wrap('<div class="models">' + DAY_MODELS.map(function (m, i) {
-          var d = ["A", "B", "C"][i];
-          return '<div class="d-' + d + ' in" style="animation-delay:' + (i * .14) + 's">' +
-            m.map(function (l, j) { return j === 0 ? "<b>" + esc(l) + "</b>" : esc(l); }).join("<br>") + "</div>";
-        }).join("") + "</div>", true);
-        break;
-
-      default: blank();
-    }
-  }
-
-  function showWall() {
-    var w = wallData[wallIdx % wallData.length];
-    var dots = wallData.slice(0, 14).map(function (x, i) {
-      return '<i class="' + (i === (wallIdx % wallData.length) ? "on" : "") + '"></i>';
-    }).join("");
-    wallIdx++;
-    sg.className = "sg wide";
-    sg.innerHTML = '<div class="in"><div class="wall"><div class="who">' +
-      esc(w.name || "من الدفعة") + "</div>" +
-      w.lines.filter(Boolean).map(function (l) { return "<p>" + esc(l) + "</p>"; }).join("") +
-      '</div><div class="wall-dots dots" style="display:flex;gap:6px;justify-content:center;margin-top:3vh">' +
-      dots + "</div></div>";
+    DayRender.render({
+      state: st, slide: sgd, payload: pl,
+      stage: stage, holder: sg, eyebrow: eyebrow, rail: rail,
+      expected: DAY_SETTINGS.expectedCount
+    });
   }
 
 })();
