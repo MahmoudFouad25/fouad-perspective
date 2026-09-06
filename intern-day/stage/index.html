@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>شاشة العرض</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/day.css">
+<style>
+  html,body{overflow:hidden;cursor:none}
+  #fs{position:fixed;inset:auto 12px 12px auto;opacity:.12;font-size:12px;color:#555;cursor:pointer;background:none;border:0}
+  #fs:hover{opacity:.6}
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage"></div>
+<button id="fs" class="no-print">ملء الشاشة</button>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="../assets/day-config.js"></script>
+<script src="../assets/day-content.js"></script>
+<script src="../assets/day-core.js"></script>
+<script>
+(function () {
+  "use strict";
+  var SID = Day.qs("s", DAY_SETTINGS.sessionId);
+  var el = document.getElementById("stage");
+  var wallTimer = null, wallIdx = 0, wallData = [];
+  var lastKey = "";
+
+  document.getElementById("fs").onclick = function () {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  };
+
+  Day.signInSilently().then(function () {
+    Day.watchSession(SID, draw);
+  }).catch(function () {
+    el.innerHTML = "";   // مفيش اتصال — سيب الشاشة سودا زي ما هي
+  });
+
+  function black() { el.innerHTML = ""; }
+
+  function wrap(inner, wide) {
+    el.innerHTML = '<div class="stage-in' + (wide ? " wide" : "") + '">' + inner + "</div>";
+  }
+
+  function draw(s) {
+    if (!s) return black();
+    var st = dayState(s.state);
+    var sg = dayStageOf(st, s.sub || 0);
+    var pl = s.stagePayload || {};
+
+    var key = s.state + "|" + (s.sub || 0) + "|" + (s.revealed ? 1 : 0) + "|" + (s.payloadSeq || 0);
+    if (key === lastKey) return;
+    lastKey = key;
+
+    if (wallTimer) { clearInterval(wallTimer); wallTimer = null; }
+    if (!sg) return black();
+    if (st.reveal && !s.revealed) return black();
+
+    switch (sg.k) {
+
+      case "black": return black();
+
+      case "lines": {
+        var cls = "st-" + (sg.size || "lg");
+        wrap(sg.lines.map(function (t) {
+          return '<div class="st-line ' + cls + '">' + Day.esc(t) + "</div>";
+        }).join(""), sg.lines.length > 2);
+        break;
+      }
+
+      case "counter":
+        wrap('<div class="st-counter">' + Day.toAr(pl.count || 0) +
+             "<small>اللي دخلوا</small></div>");
+        break;
+
+      case "chain": {
+        var parts = [];
+        DAY_CHAIN.forEach(function (w, i) {
+          if (i) parts.push("<i>←</i>");
+          parts.push('<span class="' + (i < (sg.n || 0) ? "on" : "") + '">' + w + "</span>");
+        });
+        wrap('<div class="st-chain">' + parts.join(" ") + "</div>", true);
+        break;
+      }
+
+      case "card": {
+        var c = pl.card || {};
+        if (!c.said) return black();
+        var h = '<div class="part"><div class="lab">اللي قلته:</div><div class="txt">' + Day.esc(c.said) + "</div></div>";
+        if (sg.mode === "full" && c.replied)
+          h += '<div class="part"><div class="lab">واللي رجع لي:</div><div class="txt">' + Day.esc(c.replied) + "</div></div>";
+        el.innerHTML = '<div class="st-card">' + h + "</div>";
+        break;
+      }
+
+      case "cloud": {
+        var w = (pl.cloud || []).slice();
+        if (!w.length) return black();
+        Day.shuffle(w);
+        el.innerHTML = '<div class="st-cloud">' + w.map(function (x, i) {
+          var size = [3.4, 2.6, 4.2, 3, 2.2, 3.8][i % 6];
+          return "<b style='font-size:clamp(1.3rem," + size + "vw," + (size * 1.1) + "rem)'>" + Day.esc(x) + "</b>";
+        }).join("") + "</div>";
+        break;
+      }
+
+      case "big":
+        wrap('<div class="st-big">' + Day.toAr(pl.bigN || 0) +
+             "<small>من " + Day.toAr(pl.bigOf || DAY_SETTINGS.expectedCount) + "</small></div>");
+        break;
+
+      case "scene":
+        el.innerHTML = '<div class="st-scene"><h2>' + Day.esc(sg.title) + "</h2>" +
+          sg.opts.map(function (o) {
+            return '<div class="opt"><b>' + o.c + "</b><span>" + Day.esc(o.t) + "</span></div>";
+          }).join("") + "</div>";
+        break;
+
+      case "steps":
+        el.innerHTML = '<div class="st-steps">' + sg.items.map(function (t) {
+          return "<div>" + Day.esc(t) + "</div>";
+        }).join("") + "</div>";
+        break;
+
+      case "tables": {
+        var t = pl.tables || [];
+        if (!t.length) return black();
+        el.innerHTML = '<div class="st-tables">' + t.map(function (x) {
+          return "<div><h3>" + (DAY_CORNERS[x.door] || "") + " · " + (DAY_DOOR_NAMES[x.door] || "") + "</h3>" +
+            "<p><b>أدّانا</b>" + Day.esc(x.gift) + "</p>" +
+            "<p><b>بياخد مننا</b>" + Day.esc(x.cost) + "</p>" +
+            "<p><b>بنفوّت</b>" + Day.esc(x.missed) + "</p></div>";
+        }).join("") + "</div>";
+        break;
+      }
+
+      case "wall":
+        wallData = pl.wall || [];
+        if (!wallData.length) return black();
+        wallIdx = 0; showWall();
+        wallTimer = setInterval(showWall, 9000);
+        break;
+
+      case "ayah":
+        wrap('<div class="st-ayah">﴿ وَلَقَدْ كَرَّمْنَا بَنِي آدَمَ ﴾</div>');
+        break;
+
+      case "dots":
+        wrap('<div class="st-dots">● ○ ○ ○ ○ ○ ○</div>' +
+             '<div class="st-note">اللي شفناه النهاردة: مرآة واحدة.</div>');
+        break;
+
+      case "models":
+        el.innerHTML = '<div class="st-models">' + DAY_MODELS.map(function (m) {
+          return "<div>" + m.map(function (l, i) {
+            return (i === 0 ? "<b>" + Day.esc(l) + "</b>" : Day.esc(l));
+          }).join("<br>") + "</div>";
+        }).join("") + "</div>";
+        break;
+
+      default: black();
+    }
+  }
+
+  function showWall() {
+    var w = wallData[wallIdx % wallData.length]; wallIdx++;
+    el.innerHTML = '<div class="st-wall"><div class="who">' + Day.esc(w.name || "من الدفعة") + "</div>" +
+      w.lines.filter(Boolean).map(function (l) { return "<p>" + Day.esc(l) + "</p>"; }).join("") + "</div>";
+  }
+})();
+</script>
+</body>
+</html>
