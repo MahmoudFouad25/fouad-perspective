@@ -3,21 +3,99 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>شاشة العرض</title>
+<title>لوحة التحكّم · إنت بتردّ على إيه؟</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../assets/day.css">
-<style>
-  html,body{overflow:hidden;cursor:none}
-  #fs{position:fixed;inset:auto 12px 12px auto;opacity:.12;font-size:12px;color:#555;cursor:pointer;background:none;border:0}
-  #fs:hover{opacity:.6}
-</style>
 </head>
-<body>
+<body class="console">
 
-<div class="stage" id="stage"></div>
-<button id="fs" class="no-print">ملء الشاشة</button>
+<div id="login" class="cs-login" hidden>
+  <p style="font-size:1.1rem;margin-bottom:18px">لوحة التحكّم</p>
+  <input id="em" type="email" placeholder="الإيميل" autocomplete="username">
+  <input id="pw" type="password" placeholder="كلمة السر" autocomplete="current-password">
+  <button class="b main" id="in" style="width:100%;margin:0">ادخل</button>
+  <p class="cs-err" id="lerr"></p>
+</div>
+
+<div id="app" hidden>
+
+  <div class="cs-bar">
+    <div class="cs-now" id="now">—<small id="mv"></small></div>
+    <div class="cs-sp"></div>
+    <div class="cs-chip" id="conn">—</div>
+    <div class="cs-chip" id="ansChip">—</div>
+    <div class="cs-chip" id="clock">٠:٠٠</div>
+  </div>
+
+  <div class="cs-grid">
+
+    <div>
+      <div class="cs-box">
+        <div class="cs-say" id="say"></div>
+        <div class="cs-next" id="next"></div>
+        <div>
+          <button class="b main" id="bNext">التالي ◀</button>
+          <button class="b" id="bPrev">▶ السابق</button>
+          <button class="b" id="bReveal">اعرض</button>
+          <select class="b" id="jump" style="min-width:220px"></select>
+        </div>
+        <div class="cs-meter"><i id="meter" style="width:0"></i></div>
+      </div>
+
+      <div class="cs-box" style="margin-top:12px">
+        <h3>أزرار اللحظة</h3>
+        <button class="b" id="bPair1">كوّن الأزواج (جولة ١)</button>
+        <button class="b" id="bPair2">أزواج الجولة ٢</button>
+        <button class="b" id="bTrio">كوّن الثلاثيّات</button>
+        <button class="b" id="bSpeakers">عيّن متحدّثين</button>
+        <button class="b danger" id="bLock">اقفل الموبايلات</button>
+      </div>
+
+      <div class="cs-box" style="margin-top:12px">
+        <h3>بطاقات العتبة <span id="cardsN" style="color:#8d8880"></span></h3>
+        <p style="color:#8d8880;font-size:.9rem;margin:0 0 8px">
+          اقراها قبل الجلسة بنصّ ساعة. الحمرا مش هتتعرض خالص — والنظام مش هيعرضها حتى لو دوست غلط.
+        </p>
+        <div class="cs-list" id="cards"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="cs-box">
+        <h3>🔔 محتاج دقيقة</h3>
+        <div id="minutes" style="color:#8d8880">مفيش.</div>
+      </div>
+
+      <div class="cs-box" style="margin-top:12px">
+        <h3>التوزيع</h3>
+        <div class="cs-internal" id="dist">داخلي فقط — متعرضهوش على الشاشة الكبيرة.</div>
+      </div>
+
+      <div class="cs-box" style="margin-top:12px">
+        <h3>سجّل نيابةً</h3>
+        <select class="b" id="whoSel" style="width:100%;margin:0 0 8px"></select>
+        <div id="proxy"></div>
+      </div>
+
+      <div class="cs-box" style="margin-top:12px">
+        <h3>الحاضرين <span id="pN" style="color:#8d8880"></span></h3>
+        <div class="cs-list" id="people"></div>
+      </div>
+
+      <div class="cs-box" style="margin-top:12px">
+        <h3>بعد اليوم</h3>
+        <button class="b sm" id="bPrint">اطبع بطاقات دليل التشغيل</button>
+        <button class="b sm" id="bReport">التقرير التجميعي (بلا أسماء)</button>
+        <hr style="border:0;border-top:1px solid #201e1c;margin:12px 0">
+        <button class="b sm" id="bSeed">بروفة: ولّد ٣٦ اسم وهمي</button>
+        <button class="b sm danger" id="bWipe">امسح بيانات البروفة</button>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -28,153 +106,412 @@
 <script>
 (function () {
   "use strict";
+
   var SID = Day.qs("s", DAY_SETTINGS.sessionId);
-  var el = document.getElementById("stage");
-  var wallTimer = null, wallIdx = 0, wallData = [];
-  var lastKey = "";
+  var $ = function (id) { return document.getElementById(id); };
+  var S = null, people = [], cards = [], t0 = Date.now();
+  var FV = firebase.firestore.FieldValue;
 
-  document.getElementById("fs").onclick = function () {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen();
+  /* ══════════ الدخول ══════════ */
+  Day.auth.onAuthStateChanged(function (u) {
+    if (Day.isAdminUser(u)) { $("login").hidden = true; $("app").hidden = false; boot(); }
+    else { $("login").hidden = false; $("app").hidden = true; }
+  });
+  $("in").onclick = function () {
+    $("lerr").textContent = "";
+    Day.auth.signInWithEmailAndPassword($("em").value.trim(), $("pw").value)
+      .catch(function (e) { $("lerr").textContent = "مش راضي يدخل: " + e.code; });
   };
+  $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") $("in").click(); });
 
-  Day.signInSilently().then(function () {
-    Day.watchSession(SID, draw);
-  }).catch(function () {
-    el.innerHTML = "";   // مفيش اتصال — سيب الشاشة سودا زي ما هي
+  /* ══════════ التشغيل ══════════ */
+  var booted = false;
+  function boot() {
+    if (booted) return; booted = true;
+
+    DAY_STATES.forEach(function (st, i) {
+      var o = document.createElement("option");
+      o.value = i; o.textContent = st.id + " — " + st.name;
+      $("jump").appendChild(o);
+    });
+
+    Day.sRef(SID).get().then(function (d) {
+      if (!d.exists) Day.sRef(SID).set({
+        title: "إنت بتردّ على إيه؟", state: "S00", sub: 0, stateSeq: 1,
+        revealed: false, isOpen: true, stagePayload: {}, payloadSeq: 1,
+        lockedAt: null, updatedAt: Day.TS()
+      });
+    });
+
+    Day.watchSession(SID, function (s) { S = s; paint(); });
+    Day.pCol(SID).onSnapshot(function (q) {
+      people = q.docs.map(function (d) { return d.data(); });
+      paint(); autoCount();
+      if (S && cur().target) syncTargets(cur());   // لو حد دخل متأخّر أو باب اتحسب دلوقتي
+    });
+    Day.cardsCol(SID).onSnapshot(function (q) {
+      cards = q.docs.map(function (d) { var x = d.data(); x._id = d.id; return x; });
+      paintCards();
+    });
+    setInterval(tick, 1000);
+  }
+
+  function tick() {
+    var s = Math.floor((Date.now() - t0) / 1000);
+    $("clock").textContent = Day.toAr(Math.floor(s / 60)) + ":" + Day.toAr(("0" + (s % 60)).slice(-2));
+  }
+
+  /* ══════════ الرسم ══════════ */
+  function cur() { return S ? dayState(S.state) : DAY_STATES[0]; }
+  function idx() { return DAY_INDEX[S ? S.state : "S00"] || 0; }
+
+  function paint() {
+    if (!S) return;
+    var st = cur(), n = daySlideCount(st);
+    $("now").firstChild.nodeValue = st.id + " · " + st.name + (n > 1 ? "  (" + ((S.sub || 0) + 1) + "/" + n + ")" : "");
+    $("mv").textContent = st.mv;
+    $("say").textContent = st.say || "";
+    var nx = DAY_STATES[idx() + 1];
+    $("next").textContent = nx ? "الجاية: " + nx.id + " — " + nx.name : "آخر حالة.";
+    $("jump").value = idx();
+    $("bReveal").disabled = !st.reveal;
+    $("bReveal").classList.toggle("main", !!st.reveal && !S.revealed);
+
+    var live = seen();
+    $("conn").textContent = "متصل " + Day.toAr(live.length) + "/" + Day.toAr(people.length);
+
+    var answering = st.live && ["word","text","choice","corner","manual","speaker3"].indexOf(st.live.k) !== -1;
+    var expected = st.target ? people.filter(function (p) { return targetMatch(p, st); }).length : people.length;
+    var got = people.filter(function (p) { return p.answers && p.answers[st.id] !== undefined; }).length;
+    if (st.live && st.live.k === "manual") got = people.filter(function (p) { return p.manual && p.manual.line1; }).length;
+    $("ansChip").textContent = answering ? ("إجابات " + Day.toAr(got) + "/" + Day.toAr(expected)) : "—";
+    $("ansChip").className = "cs-chip" + (answering && expected && got >= expected * 0.85 ? " ok" : "");
+    $("meter").style.width = (answering && expected ? Math.round(got / expected * 100) : 0) + "%";
+
+    paintDist(); paintMinutes(); paintPeople(); paintProxy();
+  }
+
+  function seen() {
+    var lim = Date.now() - DAY_SETTINGS.offlineGraceMin * 60000;
+    return people.filter(function (p) {
+      var t = p.lastSeenAt && p.lastSeenAt.toMillis ? p.lastSeenAt.toMillis() : 0;
+      return t > lim;
+    });
+  }
+
+  function derivedOf(p) { return Day.derive(p.answers || {}); }
+
+  function paintDist() {
+    var c = { A: 0, B: 0, C: 0, X: 0 };
+    people.forEach(function (p) { var d = derivedOf(p).door; c[d || "X"]++; });
+    $("dist").innerHTML = "داخلي فقط — متعرضهوش على الشاشة الكبيرة.<br>" +
+      "أ " + Day.toAr(c.A) + " · ب " + Day.toAr(c.B) + " · ج " + Day.toAr(c.C) + " · ؟ " + Day.toAr(c.X);
+  }
+
+  function paintMinutes() {
+    var list = people.filter(function (p) { return p.needsMinuteAt && p.needsMinuteHandled === false; });
+    if (!list.length) { $("minutes").textContent = "مفيش."; return; }
+    $("minutes").innerHTML = "";
+    list.forEach(function (p) {
+      var mins = p.needsMinuteAt.toMillis ? Math.round((Date.now() - p.needsMinuteAt.toMillis()) / 60000) : 0;
+      var row = document.createElement("div"); row.className = "cs-row";
+      row.innerHTML = '<div class="g"><b>' + Day.esc(p.name) + "</b><em>من " + Day.toAr(mins) + " دقيقة</em></div>";
+      var b = document.createElement("button"); b.className = "b sm"; b.textContent = "تمّت المتابعة";
+      b.onclick = function () { Day.pRef(SID, p.slug).update({ needsMinuteHandled: true }); };
+      row.appendChild(b); $("minutes").appendChild(row);
+    });
+  }
+
+  function paintPeople() {
+    $("pN").textContent = Day.toAr(people.length);
+    var box = $("people"); box.innerHTML = "";
+    people.slice().sort(function (a, b) { return a.name > b.name ? 1 : -1; }).forEach(function (p) {
+      var d = derivedOf(p);
+      var row = document.createElement("div"); row.className = "cs-row";
+      row.innerHTML = '<div class="g">' + Day.esc(p.name) +
+        '<em>' + (d.door ? DAY_CORNERS[d.door] : "؟") + (d.sub ? " · " + d.sub : "") +
+        (p.speaker ? " · متحدّث" : "") + "</em></div>";
+      var b = document.createElement("button"); b.className = "b sm"; b.textContent = "فكّ الجهاز";
+      b.title = "لو فتح الرابط على موبايل تاني";
+      b.onclick = function () {
+        if (confirm("تفكّ ربط " + p.name + " بالجهاز الحالي؟")) Day.pRef(SID, p.slug).update({ uid: FV.delete() });
+      };
+      row.appendChild(b); box.appendChild(row);
+    });
+
+    var sel = $("whoSel"); var keep = sel.value;
+    sel.innerHTML = '<option value="">— اختار مشارك —</option>';
+    people.forEach(function (p) {
+      var o = document.createElement("option"); o.value = p.slug; o.textContent = p.name; sel.appendChild(o);
+    });
+    sel.value = keep;
+  }
+
+  function paintCards() {
+    $("cardsN").textContent = "(" + Day.toAr(cards.length) + ")";
+    var box = $("cards"); box.innerHTML = "";
+    cards.forEach(function (c, i) {
+      var row = document.createElement("div"); row.className = "cs-row";
+      row.innerHTML = '<div class="g">' + Day.esc((c.said || "").slice(0, 90)) +
+        "<em>" + Day.esc((c.replied || "").slice(0, 90)) + "</em></div>";
+      ["green", "red", null].forEach(function (f) {
+        var b = document.createElement("button");
+        b.className = "b sm" + (c.flag === f ? " main" : "");
+        b.textContent = f === "green" ? "✓" : (f === "red" ? "✕" : "—");
+        b.title = f === "green" ? "صالحة للعرض" : (f === "red" ? "مش هتتعرض خالص" : "بلا علامة");
+        b.onclick = function () { Day.cardsCol(SID).doc(c._id).update({ flag: f }); };
+        row.appendChild(b);
+      });
+      var s = document.createElement("button");
+      s.className = "b sm"; s.textContent = "اعرض دي"; s.disabled = (c.flag === "red");
+      s.onclick = function () { setPayload({ card: { said: c.said, replied: c.replied } }); };
+      row.appendChild(s);
+      box.appendChild(row);
+    });
+  }
+
+  /* ══════════ التنقّل ══════════ */
+  function go(i, sub) {
+    i = Math.max(0, Math.min(i, DAY_STATES.length - 1));
+    var st = DAY_STATES[i];
+    Day.sRef(SID).update({
+      state: st.id, sub: sub || 0, revealed: false,
+      stateSeq: FV.increment(1), updatedAt: Day.TS()
+    }).then(function () { syncTargets(st); });
+  }
+  $("bNext").onclick = function () {
+    var st = cur(), n = daySlideCount(st), s = S.sub || 0;
+    if (s < n - 1) Day.sRef(SID).update({ sub: s + 1, stateSeq: FV.increment(1), updatedAt: Day.TS() });
+    else go(idx() + 1, 0);
+  };
+  $("bPrev").onclick = function () {
+    var s = S.sub || 0;
+    if (s > 0) Day.sRef(SID).update({ sub: s - 1, stateSeq: FV.increment(1), updatedAt: Day.TS() });
+    else { var p = idx() - 1; go(p, daySlideCount(DAY_STATES[Math.max(0, p)]) - 1); }
+  };
+  $("jump").onchange = function () { go(+this.value, 0); };
+  document.addEventListener("keydown", function (e) {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.key === "ArrowLeft") $("bNext").click();
+    if (e.key === "ArrowRight") $("bPrev").click();
   });
 
-  function black() { el.innerHTML = ""; }
-
-  function wrap(inner, wide) {
-    el.innerHTML = '<div class="stage-in' + (wide ? " wide" : "") + '">' + inner + "</div>";
+  /* الحالات الموجّهة: الموبايل بيصحى عند المستهدَفين بس */
+  function targetMatch(p, st) {
+    if (!st.target) return true;
+    if (st.target === "speakers") return !!p.speaker;
+    return derivedOf(p).door === st.target;
+  }
+  function syncTargets(st) {
+    var batch = Day.db.batch(), n = 0;
+    people.forEach(function (p) {
+      var want = (st.target && targetMatch(p, st)) ? st.id : null;
+      var has = p.activeAsk || null;
+      if (want === has) return;
+      batch.update(Day.pRef(SID, p.slug), { activeAsk: want || FV.delete() });
+      n++;
+    });
+    if (n) batch.commit().catch(function (e) { console.warn(e); });
   }
 
-  function draw(s) {
-    if (!s) return black();
-    var st = dayState(s.state);
-    var sg = dayStageOf(st, s.sub || 0);
-    var pl = s.stagePayload || {};
+  /* ══════════ الكشف والحمولة ══════════ */
+  function setPayload(patch) {
+    var pl = Object.assign({}, (S && S.stagePayload) || {}, patch);
+    Day.sRef(SID).update({ stagePayload: pl, payloadSeq: FV.increment(1), updatedAt: Day.TS() });
+  }
 
-    var key = s.state + "|" + (s.sub || 0) + "|" + (s.revealed ? 1 : 0) + "|" + (s.payloadSeq || 0);
-    if (key === lastKey) return;
-    lastKey = key;
+  $("bReveal").onclick = function () {
+    var st = cur();
+    if (st.id === "S10") {
+      setPayload({ cloud: people.map(function (p) { return p.answers && p.answers.S09; }).filter(Boolean) });
+    }
+    if (st.id === "S57") {
+      var ans = people.map(function (p) { return p.answers && p.answers.S56; }).filter(Boolean);
+      setPayload({ bigN: ans.filter(function (x) { return x === "y"; }).length, bigOf: ans.length || people.length });
+    }
+    if (st.id === "S59") {
+      var t = [];
+      ["A", "B", "C"].forEach(function (d) {
+        var sp = people.filter(function (p) { return p.speaker && derivedOf(p).door === d; })[0];
+        var a = sp && sp.answers && sp.answers.S58;
+        if (a) t.push({ door: d, gift: a.gift, cost: a.cost, missed: a.missed });
+      });
+      setPayload({ tables: t });
+    }
+    if (st.id === "S67") {
+      setPayload({ wall: people.filter(function (p) { return p.manual && p.manual.publish && p.manual.publish !== "no" && p.manual.line1; })
+        .map(function (p) {
+          return { name: p.manual.publish === "named" ? p.name : "", lines: [1,2,3,4,5].map(function (i) { return p.manual["line" + i]; }) };
+        }) });
+    }
+    Day.sRef(SID).update({ revealed: true, stateSeq: FV.increment(1), updatedAt: Day.TS() });
+  };
 
-    if (wallTimer) { clearInterval(wallTimer); wallTimer = null; }
-    if (!sg) return black();
-    if (st.reveal && !s.revealed) return black();
+  /* عدّاد الحضور بيتحدّث لوحده وهو على العتبة بس */
+  function autoCount() {
+    if (!S || S.state !== "S01") return;
+    var n = people.length;
+    if (((S.stagePayload || {}).count || 0) !== n) setPayload({ count: n });
+  }
 
-    switch (sg.k) {
+  /* ══════════ الإقران والمتحدّثين ══════════ */
+  function pool() {
+    return seen().map(function (p) { return { slug: p.slug, name: p.name, door: derivedOf(p).door }; });
+  }
+  function byslug(s) { return people.filter(function (p) { return p.slug === s; })[0] || {}; }
 
-      case "black": return black();
+  function writeGroups(round, groups) {
+    var batch = Day.db.batch();
+    groups.forEach(function (g) {
+      var corner = DAY_CORNERS[derivedOf(byslug(g[0])).door] || "أ";
+      g.forEach(function (s) {
+        var others = g.filter(function (x) { return x !== s; })
+                      .map(function (x) { return { slug: x, name: byslug(x).name }; });
+        var patch = {};
+        if (round === "exchange") patch["pairing.exchange"] = others;
+        else patch["pairing." + round] = { name: others.map(function (o) { return o.name; }).join(" و "), corner: corner };
+        batch.update(Day.pRef(SID, s), patch);
+      });
+    });
+    batch.commit().then(function () { alert("اتوزّعوا: " + Day.toAr(groups.length) + " مجموعة."); })
+      .catch(function (e) { alert("مش راضي: " + e.message); });
+  }
 
-      case "lines": {
-        var cls = "st-" + (sg.size || "lg");
-        wrap(sg.lines.map(function (t) {
-          return '<div class="st-line ' + cls + '">' + Day.esc(t) + "</div>";
-        }).join(""), sg.lines.length > 2);
-        break;
-      }
+  var lab1Keys = [];
+  $("bPair1").onclick = function () {
+    var g = Day.makeGroups(pool(), [], 2);
+    lab1Keys = g.map(function (x) { return x.slice(0, 2).sort().join("|"); });
+    writeGroups("lab1", g);
+  };
+  $("bPair2").onclick = function () { writeGroups("lab2", Day.makeGroups(pool(), lab1Keys, 2)); };
+  $("bTrio").onclick  = function () { writeGroups("exchange", Day.makeGroups(pool(), [], 3)); };
 
-      case "counter":
-        wrap('<div class="st-counter">' + Day.toAr(pl.count || 0) +
-             "<small>اللي دخلوا</small></div>");
-        break;
+  $("bSpeakers").onclick = function () {
+    var batch = Day.db.batch();
+    people.forEach(function (p) { if (p.speaker) batch.update(Day.pRef(SID, p.slug), { speaker: FV.delete() }); });
+    ["A", "B", "C"].forEach(function (d) {
+      var c = seen().filter(function (p) { return derivedOf(p).door === d; });
+      if (c.length) batch.update(Day.pRef(SID, c[Math.floor(Math.random() * c.length)].slug), { speaker: true });
+    });
+    batch.commit().then(function () { syncTargets(cur()); alert("اتعيّنوا. قول لكل ركن مين المتحدّث."); });
+  };
 
-      case "chain": {
-        var parts = [];
-        DAY_CHAIN.forEach(function (w, i) {
-          if (i) parts.push("<i>←</i>");
-          parts.push('<span class="' + (i < (sg.n || 0) ? "on" : "") + '">' + w + "</span>");
-        });
-        wrap('<div class="st-chain">' + parts.join(" ") + "</div>", true);
-        break;
-      }
+  $("bLock").onclick = function () {
+    if (!confirm("تقفل كل الموبايلات؟")) return;
+    Day.sRef(SID).update({ lockedAt: Day.TS() });
+    go(DAY_INDEX["S68"], 0);
+  };
 
-      case "card": {
-        var c = pl.card || {};
-        if (!c.said) return black();
-        var h = '<div class="part"><div class="lab">اللي قلته:</div><div class="txt">' + Day.esc(c.said) + "</div></div>";
-        if (sg.mode === "full" && c.replied)
-          h += '<div class="part"><div class="lab">واللي رجع لي:</div><div class="txt">' + Day.esc(c.replied) + "</div></div>";
-        el.innerHTML = '<div class="st-card">' + h + "</div>";
-        break;
-      }
-
-      case "cloud": {
-        var w = (pl.cloud || []).slice();
-        if (!w.length) return black();
-        Day.shuffle(w);
-        el.innerHTML = '<div class="st-cloud">' + w.map(function (x, i) {
-          var size = [3.4, 2.6, 4.2, 3, 2.2, 3.8][i % 6];
-          return "<b style='font-size:clamp(1.3rem," + size + "vw," + (size * 1.1) + "rem)'>" + Day.esc(x) + "</b>";
-        }).join("") + "</div>";
-        break;
-      }
-
-      case "big":
-        wrap('<div class="st-big">' + Day.toAr(pl.bigN || 0) +
-             "<small>من " + Day.toAr(pl.bigOf || DAY_SETTINGS.expectedCount) + "</small></div>");
-        break;
-
-      case "scene":
-        el.innerHTML = '<div class="st-scene"><h2>' + Day.esc(sg.title) + "</h2>" +
-          sg.opts.map(function (o) {
-            return '<div class="opt"><b>' + o.c + "</b><span>" + Day.esc(o.t) + "</span></div>";
-          }).join("") + "</div>";
-        break;
-
-      case "steps":
-        el.innerHTML = '<div class="st-steps">' + sg.items.map(function (t) {
-          return "<div>" + Day.esc(t) + "</div>";
-        }).join("") + "</div>";
-        break;
-
-      case "tables": {
-        var t = pl.tables || [];
-        if (!t.length) return black();
-        el.innerHTML = '<div class="st-tables">' + t.map(function (x) {
-          return "<div><h3>" + (DAY_CORNERS[x.door] || "") + " · " + (DAY_DOOR_NAMES[x.door] || "") + "</h3>" +
-            "<p><b>أدّانا</b>" + Day.esc(x.gift) + "</p>" +
-            "<p><b>بياخد مننا</b>" + Day.esc(x.cost) + "</p>" +
-            "<p><b>بنفوّت</b>" + Day.esc(x.missed) + "</p></div>";
-        }).join("") + "</div>";
-        break;
-      }
-
-      case "wall":
-        wallData = pl.wall || [];
-        if (!wallData.length) return black();
-        wallIdx = 0; showWall();
-        wallTimer = setInterval(showWall, 9000);
-        break;
-
-      case "ayah":
-        wrap('<div class="st-ayah">﴿ وَلَقَدْ كَرَّمْنَا بَنِي آدَمَ ﴾</div>');
-        break;
-
-      case "dots":
-        wrap('<div class="st-dots">● ○ ○ ○ ○ ○ ○</div>' +
-             '<div class="st-note">اللي شفناه النهاردة: مرآة واحدة.</div>');
-        break;
-
-      case "models":
-        el.innerHTML = '<div class="st-models">' + DAY_MODELS.map(function (m) {
-          return "<div>" + m.map(function (l, i) {
-            return (i === 0 ? "<b>" + Day.esc(l) + "</b>" : Day.esc(l));
-          }).join("<br>") + "</div>";
-        }).join("") + "</div>";
-        break;
-
-      default: black();
+  /* ══════════ سجّل نيابةً ══════════ */
+  function paintProxy() {
+    var box = $("proxy"); var slug = $("whoSel").value;
+    var st = cur();
+    if (!slug || !st.live || ["word","text","choice","corner"].indexOf(st.live.k) === -1) {
+      box.innerHTML = '<p style="color:#8d8880;font-size:.9rem;margin:0">اختار مشارك والحالة تكون فيها سؤال.</p>';
+      return;
+    }
+    box.innerHTML = "";
+    if (st.live.k === "choice") {
+      st.live.options.forEach(function (o, i) {
+        var b = document.createElement("button"); b.className = "b sm"; b.textContent = o;
+        b.onclick = function () { proxySave(slug, st.id, st.live.values[i]); };
+        box.appendChild(b);
+      });
+    } else if (st.live.k === "corner") {
+      var c = document.createElement("select"); c.className = "b sm";
+      ["A","B","C"].forEach(function (v) { c.add(new Option(DAY_CORNERS[v], v)); });
+      var r = document.createElement("select"); r.className = "b sm";
+      ["1","2","3"].forEach(function (v) { r.add(new Option(DAY_READINGS[v], v)); });
+      var b = document.createElement("button"); b.className = "b sm main"; b.textContent = "سجّل";
+      b.onclick = function () { proxySave(slug, st.id, { corner: c.value, reading: r.value }); };
+      box.appendChild(c); box.appendChild(r); box.appendChild(b);
+    } else {
+      var t = document.createElement("input"); t.className = "b sm"; t.style.width = "60%";
+      var b2 = document.createElement("button"); b2.className = "b sm main"; b2.textContent = "سجّل";
+      b2.onclick = function () { if (t.value.trim()) proxySave(slug, st.id, t.value.trim()); };
+      box.appendChild(t); box.appendChild(b2);
     }
   }
-
-  function showWall() {
-    var w = wallData[wallIdx % wallData.length]; wallIdx++;
-    el.innerHTML = '<div class="st-wall"><div class="who">' + Day.esc(w.name || "من الدفعة") + "</div>" +
-      w.lines.filter(Boolean).map(function (l) { return "<p>" + Day.esc(l) + "</p>"; }).join("") + "</div>";
+  $("whoSel").onchange = paintProxy;
+  function proxySave(slug, id, v) {
+    var u = {}; u["answers." + id] = v; u.lastSeenAt = Day.TS();
+    Day.pRef(SID, slug).update(u).then(function () { alert("اتسجّلت."); });
   }
+
+  /* ══════════ بعد اليوم ══════════ */
+  $("bPrint").onclick = function () {
+    var w = window.open("", "_blank");
+    var css = "body{font-family:'IBM Plex Sans Arabic',Tahoma,sans-serif;direction:rtl;margin:0;padding:10mm}" +
+      ".c{border:1px solid #222;border-radius:6px;padding:8mm;margin-bottom:6mm;page-break-inside:avoid}" +
+      ".c h4{margin:0 0 4mm;font-size:12pt}.c p{margin:0 0 2mm;font-size:10pt;line-height:1.6}";
+    var html = people.filter(function (p) { return p.manual && p.manual.line1; }).map(function (p) {
+      return '<div class="c"><h4>' + Day.esc(p.name) + "</h4>" +
+        [1,2,3,4,5].map(function (i) { return p.manual["line"+i] ? "<p>" + Day.esc(p.manual["line"+i]) + "</p>" : ""; }).join("") +
+        "</div>";
+    }).join("");
+    w.document.write("<html dir='rtl'><head><meta charset='utf-8'><title>بطاقات دليل التشغيل</title><style>" +
+      css + "</style></head><body>" + html + "</body></html>");
+    w.document.close();
+  };
+
+  $("bReport").onclick = function () {
+    var c = { A:0, B:0, C:0, X:0 }, r = { "1":0, "2":0, "3":0, X:0 }, heard = { y:0, n:0, m:0 };
+    people.forEach(function (p) {
+      var d = derivedOf(p); c[d.door || "X"]++; r[d.reading || "X"]++;
+      var h = p.answers && p.answers.S56; if (h) heard[h]++;
+    });
+    var lines = [
+      "يوم الاستقبال — «إنت بتردّ على إيه؟»",
+      "تقرير تجميعي بلا أسماء · " + new Date().toLocaleDateString("ar-EG"),
+      "",
+      "الحضور: " + people.length,
+      "",
+      "توزيع الأبواب:",
+      "  باب الإذن: " + c.A, "  باب المبادرة: " + c.B, "  باب الإخلاء: " + c.C, "  غير محسوم: " + c.X,
+      "",
+      "توزيع القراءات:",
+      "  «الموضوع ده عن إيه؟»: " + r["1"],
+      "  «إحنا حاسّين بإيه؟»: " + r["2"],
+      "  «إحنا مين لبعض؟»: " + r["3"],
+      "  غير محسوم: " + r.X,
+      "",
+      "إثبات السماع — «حسّيت إنك اتسمعت؟»:",
+      "  آه: " + heard.y + " · نصّ نصّ: " + heard.m + " · لأ: " + heard.n,
+      "",
+      "أوراق دليل التشغيل المكتوبة: " + people.filter(function (p) { return p.manual && p.manual.line1; }).length,
+      "",
+      "— ولا نتيجة فردية تخرج من هذا اليوم لأي جهة."
+    ].join("\n");
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines], { type: "text/plain;charset=utf-8" }));
+    a.download = "تقرير-الدفعة.txt"; a.click();
+  };
+
+  /* ══════════ البروفة ══════════ */
+  $("bSeed").onclick = function () {
+    if (!confirm("تولّد ٣٦ مشارك وهمي للبروفة؟")) return;
+    var names = ["بروفة"], batch = Day.db.batch();
+    for (var i = 1; i <= 36; i++) {
+      var slug = "test-" + i, pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
+      var mk = function () { return { corner: pick(["A","B","C"]), reading: pick(["1","2","3"]) }; };
+      batch.set(Day.pRef(SID, slug), {
+        slug: slug, name: names[0] + " " + Day.toAr(i), uid: "seed", test: true,
+        joinedAt: Day.TS(), lastSeenAt: Day.TS(),
+        answers: { S09: pick(["مساعدة","تعبان","بيشتكي","عايز حد يقدّره","عايز يخلص","زهقان"]),
+                   S25: mk(), S26: mk(), S27: mk(), S28: pick(["A","B","C"]),
+                   S56: pick(["y","y","y","m","n"]) }
+      }, { merge: true });
+    }
+    batch.commit().then(function () { alert("اتولّدوا. جرّب الإقران دلوقتي."); });
+  };
+
+  $("bWipe").onclick = function () {
+    if (!confirm("تمسح كل اللي عليه علامة بروفة؟")) return;
+    var batch = Day.db.batch(), n = 0;
+    people.forEach(function (p) { if (p.test) { batch.delete(Day.pRef(SID, p.slug)); n++; } });
+    if (n) batch.commit().then(function () { alert("اتمسحوا."); }); else alert("مفيش بيانات بروفة.");
+  };
+
 })();
 </script>
 </body>
