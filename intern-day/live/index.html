@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/day.css">
+<link rel="stylesheet" href="../assets/day.css?v=3">
 <style>
   /* ── نافذة «وريني اللي على الشاشة» ──
      نفس مكوّنات شاشة العرض بالظبط، متقاسة للموبايل. */
@@ -30,6 +30,7 @@
   .lv-net{position:fixed;left:0;right:0;top:0;z-index:70;text-align:center;font-size:.78rem;
     padding:calc(env(safe-area-inset-top) + 7px) 12px 7px;background:#5a2318;color:#ffd9cf;display:none}
   .lv-net.on{display:block}
+  .lv-minute.ack{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -55,10 +56,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="../assets/day-config.js"></script>
-<script src="../assets/day-content.js"></script>
-<script src="../assets/day-core.js"></script>
-<script src="../assets/day-render.js"></script>
+<script src="../assets/day-config.js?v=3"></script>
+<script src="../assets/day-content.js?v=3"></script>
+<script src="../assets/day-core.js?v=3"></script>
+<script src="../assets/day-render.js?v=3"></script>
 <script>
 (function () {
   "use strict";
@@ -101,7 +102,16 @@
 
   /* ══════════ التشغيل ══════════ */
 
-  Day.signInSilently().then(function (u) {
+  var bootTries = 0, bootTimer = null;
+
+  function bootUp() {
+    bootTries++;
+    Day.signInSilently().then(onUser).catch(failScreen);
+  }
+  bootUp();
+
+  function onUser(u) {
+    if (bootTimer) { clearTimeout(bootTimer); bootTimer = null; }
     uid = u.uid;
     slug = Day.qs("u") || Day.store.get(LS + "slug");
     if (!slug) return showJoin();
@@ -114,20 +124,37 @@
       if (e && e.code === "permission-denied") return showForeign();
       failScreen(e);
     });
-  }).catch(failScreen);
+  }
 
-  /* شاشة العطل: بتقول السبب وبتدّي فعل — مش «مفيش اتصال» وخلاص */
+  /* شاشة العطل — وبتحاول لوحدها.
+     ⚑ الدخول مش بوّابة يقف عندها حد لآخر اليوم. لو وقع، الصفحة بتفضل
+        بتعيد المحاولة في الخلفية كل شوية، فلو العطل عابر بترجع من غير
+        ما المشارك يعمل حاجة ولا يروح للمساعد. */
   function failScreen(e) {
     console.warn("[live]", e && (e.code || e.message), e);
+    var wait = Math.min(5 + bootTries * 3, 20);
     top_.innerHTML = "";
     body.innerHTML =
       '<div class="lv-idle">' +
       '<div class="h">' + Day.esc(Day.errText(e)) + "</div>" +
-      '<div class="s">إجاباتك محفوظة. مش هتضيع حاجة.</div>' +
-      '<button class="lv-send" id="rt" style="margin-top:8px">جرّب تاني</button>' +
-      '<div class="s" style="opacity:.5;margin-top:14px;direction:ltr">' +
+      '<div class="s" id="rw">بنحاول نرجّعه لوحدنا. ثانية.</div>' +
+      '<button class="lv-send" id="rt" style="margin-top:8px">جرّب دلوقتي</button>' +
+      '<div class="s" style="opacity:.45;margin-top:14px;direction:ltr">' +
         Day.esc((e && e.code) || "unknown") + "</div></div>";
-    document.getElementById("rt").onclick = function () { location.reload(); };
+    document.getElementById("rt").onclick = function () {
+      if (bootTimer) clearTimeout(bootTimer);
+      document.getElementById("rt").disabled = true;
+      bootUp();
+    };
+    var left = wait;
+    (function tick() {
+      var w = document.getElementById("rw");
+      if (!w) return;
+      w.textContent = left > 0 ? ("بنحاول نرجّعه لوحدنا — " + Day.toAr(left) + " ثانية.")
+                               : "بنحاول دلوقتي…";
+      if (left-- > 0) bootTimer = setTimeout(tick, 1000);
+      else bootTimer = setTimeout(bootUp, 400);
+    })();
   }
 
   /* الشاشة متطفّيش طول اليوم — الموبايل اللي بينام بيقطع الحالة */
@@ -154,7 +181,9 @@
 
     Day.pRef(SID, slug).onSnapshot({ includeMetadataChanges: true }, function (d) {
       if (!d.metadata.fromCache) { Day.touch(); netOK(); }
-      me = d.data() || null; render();
+      me = d.data() || null;
+      syncMinute();
+      render();
     }, function (e) { netDown(e); });
 
     Day.watchSession(SID, function (s) {
@@ -599,16 +628,52 @@
       }).join("") + "</div>";
   }
 
-  /* ─── محتاج دقيقة: بيروح للمساعد بس ─── */
+  /* ─── محتاج دقيقة ───
+     الزرار بقى بيتقرا من الوثيقة نفسها، مش من مؤقّت محلّي.
+     يعني أوّل ما المساعد يدوس «تمّت المتابعة» على اللوحة، الشاشة
+     بتتغيّر في نفس اللحظة عند صاحبها. تلات حالات وبس:
+       محتاج دقيقة → وصلت. المساعد جايلك. → المساعد شافك. (خمس ثواني)
+  */
+  var minuteWas = false, minuteAckTill = 0, minuteLocal = false;
+
+  function minuteFace(txt, dis, cls) {
+    minuteBtn.textContent = txt;
+    minuteBtn.disabled = !!dis;
+    minuteBtn.className = "lv-minute" + (cls ? " " + cls : "");
+  }
+
+  function syncMinute() {
+    if (!me) return;
+    var serverPending = !!(me.needsMinuteAt && !me.needsMinuteHandled);
+    if (serverPending) minuteLocal = false;      /* وصل للسيرفر — نسيب التفاؤل */
+    var pending = serverPending || minuteLocal;
+
+    if (pending) { minuteWas = true; return minuteFace("وصلت. المساعد جايلك.", true, "sent"); }
+
+    if (minuteWas) {                              /* اللوحة قفلت الطلب */
+      minuteWas = false;
+      minuteAckTill = Date.now() + 5000;
+      Day.vibrate();
+    }
+    if (Date.now() < minuteAckTill) {
+      minuteFace("المساعد شافك.", true, "ack");
+      setTimeout(syncMinute, 5200);
+      return;
+    }
+    minuteFace("محتاج دقيقة", false, "");
+  }
+
   function needMinute() {
-    minuteBtn.disabled = true;
-    Day.pRef(SID, slug).update({ needsMinuteAt: Day.TS(), needsMinuteHandled: false }).then(function () {
-      minuteBtn.textContent = "وصلت. المساعد جايلك.";
-      minuteBtn.classList.add("sent");
-      setTimeout(function () {
-        minuteBtn.textContent = "محتاج دقيقة"; minuteBtn.classList.remove("sent"); minuteBtn.disabled = false;
-      }, 600000);
-    }).catch(function () { minuteBtn.disabled = false; });
+    minuteLocal = true;
+    minuteFace("بنبعت…", true, "sent");
+    Day.pRef(SID, slug).update({ needsMinuteAt: Day.TS(), needsMinuteHandled: false })
+      .then(syncMinute)
+      .catch(function (e) {
+        minuteLocal = false;
+        console.warn("[minute]", e && e.code);
+        minuteFace("مش راضي يتبعت. جرّب تاني.", false, "");
+        Day.reconnect();
+      });
   }
 
 })();
