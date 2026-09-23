@@ -27,7 +27,7 @@ window.WQ_BOOK = {
   author: 'كوتش محمود فؤاد',
 
   /* رقم نسخة الفهرس كله — زوّده (+1) عند أي تعديل لأي شيء هنا */
-  version: 2,
+  version: 3,
 
   /* مجلّد ملفات الفصول على الجيت هوب (نسبةً لمكان course-view.html) */
   contentPath: 'content/',
@@ -42,7 +42,7 @@ window.WQ_BOOK = {
       chapters: [
         { id:'ch-1', number:1, title:'الفراغ الساكن',        file:'ch-1.js', v:1, status:'published' },
         { id:'ch-2', number:2, title:'السؤال الذي لا يسكت',  file:'ch-2.js', v:2, status:'published' },
-        { id:'ch-3', number:3, title:'ما لا يُمحى',           file:'ch-3.js', v:1, status:'draft' }
+        { id:'ch-3', number:3, title:'ما لا يُمحى',           file:'ch-3.js', v:1, status:'published' }
       ]
     },
 
@@ -51,11 +51,11 @@ window.WQ_BOOK = {
       title: 'الخريطة',
       gate: 'هنا تنزل في بنيتك طبقةً طبقة، وترى الخريطة وهي تتحرّك في حياتك.',
       chapters: [
-        { id:'ch-4', number:4, title:'الخريطة الداخليّة — الفؤاد والقلب', file:'ch-4.js', v:1, status:'draft' },
-        { id:'ch-5', number:5, title:'الخريطة الداخليّة — النفس',          file:'ch-5.js', v:1, status:'draft' },
-        { id:'ch-6', number:6, title:'الخريطة الداخليّة — الصدر والمنظومة', file:'ch-6.js', v:1, status:'draft' },
-        { id:'ch-7', number:7, title:'حين تتحرّك الخريطة',                  file:'ch-7.js', v:1, status:'draft' },
-        { id:'ch-8', number:8, title:'خريطةٌ رآها كثيرون',                  file:'ch-8.js', v:1, status:'draft' }
+        { id:'ch-4', number:4, title:'الخريطة الداخليّة — الفؤاد والقلب', file:'ch-4.js', v:1, status:'published' },
+        { id:'ch-5', number:5, title:'الخريطة الداخليّة — النفس',          file:'ch-5.js', v:1, status:'published' },
+        { id:'ch-6', number:6, title:'الخريطة الداخليّة — الصدر والمنظومة', file:'ch-6.js', v:1, status:'published' },
+        { id:'ch-7', number:7, title:'حين تتحرّك الخريطة',                  file:'ch-7.js', v:1, status:'published' },
+        { id:'ch-8', number:8, title:'خريطةٌ رآها كثيرون',                  file:'ch-8.js', v:1, status:'published' }
       ]
     },
 
