@@ -84,7 +84,7 @@ window.WQ_BOOK = {
       chapters: [
         /* number:0 يظهر «مدخل» بدل الترتيب */
         { id:'m-0', number:0, title:'بين يدَي المرايا',        file:'m-0.js', v:1, status:'draft' },
-        { id:'m-1', number:1, title:'السلوك',                 file:'m-1.js', v:1, status:'review' },
+        { id:'m-1', number:1, title:'السلوك',                 file:'m-1.js', v:1, status:'published' },
         { id:'m-2', number:2, title:'الانتباه',               file:'m-2.js', v:1, status:'draft' },
         { id:'m-3', number:3, title:'المشاعر',                file:'m-3.js', v:1, status:'draft' },
         { id:'m-4', number:4, title:'النموذج الإدراكيّ',       file:'m-4.js', v:1, status:'draft' },
