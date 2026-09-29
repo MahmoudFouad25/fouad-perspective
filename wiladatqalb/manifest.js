@@ -13,6 +13,10 @@
  *    وملاحظاته محفوظة بالـ id لا بالترتيب، فلن يضيع شيء.
  *  • فصل لسه شغّال عليه؟  خلّي status:'draft' فيظهر في الفهرس «قريبًا»
  *    ولا يُفتح.
+ *  • عايز تراجع فصل قبل ما العملاء يشوفوه؟  خلّي status:'review'
+ *    وافتح الكتاب مرّة بالرابط:  course-view.html?review=1
+ *    (يظهر لك وحدك في هذا المتصفّح، والعملاء يرونه «قريبًا»).
+ *    ولمّا توافق: غيّرها إلى 'published'.
  *  • كل محطّة تنتمي لجزء عن طريق part:'...' — والأجزاء معرّفة في parts.
  *
  *  ⚠ المهم: كلما عدّلت أي شيء هنا، زوّد version (+1).
@@ -29,7 +33,7 @@ window.WQ_BOOK = {
   /* الجملة التي تظهر تحت العنوان في واجهة الكتاب — من الفصل الأوّل */
   epigraph: 'لست مريضًا، ولا مكسورًا، ولا ناقصًا. القلب فيك على الأصل الذي خُلق له.',
 
-  version: 4,
+  version: 5,
 
   contentPath: 'content/',
 
@@ -80,13 +84,13 @@ window.WQ_BOOK = {
       chapters: [
         /* number:0 يظهر «مدخل» بدل الترتيب */
         { id:'m-0', number:0, title:'بين يدَي المرايا',        file:'m-0.js', v:1, status:'draft' },
-        { id:'m-1', number:1, title:'مرآة السلوك',             file:'m-1.js', v:1, status:'draft' },
-        { id:'m-2', number:2, title:'مرآة الانتباه',           file:'m-2.js', v:1, status:'draft' },
-        { id:'m-3', number:3, title:'مرآة المشاعر',            file:'m-3.js', v:1, status:'draft' },
-        { id:'m-4', number:4, title:'مرآة النموذج الإدراكيّ',   file:'m-4.js', v:1, status:'draft' },
-        { id:'m-5', number:5, title:'مرآة الدوافع',            file:'m-5.js', v:1, status:'draft' },
-        { id:'m-6', number:6, title:'مرآة المعتقدات',          file:'m-6.js', v:1, status:'draft' },
-        { id:'m-7', number:7, title:'مرآة الجروح',             file:'m-7.js', v:1, status:'draft' }
+        { id:'m-1', number:1, title:'السلوك',                 file:'m-1.js', v:1, status:'review' },
+        { id:'m-2', number:2, title:'الانتباه',               file:'m-2.js', v:1, status:'draft' },
+        { id:'m-3', number:3, title:'المشاعر',                file:'m-3.js', v:1, status:'draft' },
+        { id:'m-4', number:4, title:'النموذج الإدراكيّ',       file:'m-4.js', v:1, status:'draft' },
+        { id:'m-5', number:5, title:'الدوافع',                file:'m-5.js', v:1, status:'draft' },
+        { id:'m-6', number:6, title:'المعتقدات',              file:'m-6.js', v:1, status:'draft' },
+        { id:'m-7', number:7, title:'الجروح',                 file:'m-7.js', v:1, status:'draft' }
       ]
     }
 
