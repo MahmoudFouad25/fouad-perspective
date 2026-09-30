@@ -1,6 +1,6 @@
 /* ولادة قلب — محرّك القارئ المشترك (الكتاب + رابط المرايا)
    الإعدادات في WQ_CFG داخل صفحة كلّ رابط. */
-var MARKUP="<svg width=\"0\" height=\"0\" style=\"position:absolute\" aria-hidden=\"true\">\n  <symbol id=\"i-book\" viewBox=\"0 0 24 24\"><path d=\"M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z\"/><path d=\"M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5\"/></symbol>\n  <symbol id=\"i-list\" viewBox=\"0 0 24 24\"><path d=\"M9 6h11M9 12h11M9 18h11\"/><path d=\"M4 6h.01M4 12h.01M4 18h.01\"/></symbol>\n  <symbol id=\"i-search\" viewBox=\"0 0 24 24\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/></symbol>\n  <symbol id=\"i-type\" viewBox=\"0 0 24 24\"><path d=\"M4 7V5h11v2M9.5 5v14M7 19h5\"/><path d=\"M14 13v-1.5h7V13M17.5 11.5V19M16 19h3\"/></symbol>\n  <symbol id=\"i-moon\" viewBox=\"0 0 24 24\"><path d=\"M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z\"/></symbol>\n  <symbol id=\"i-sun\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\"/></symbol>\n  <symbol id=\"i-note\" viewBox=\"0 0 24 24\"><path d=\"M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z\"/><path d=\"M14 3v6h6M8 13h8M8 17h5\"/></symbol>\n  <symbol id=\"i-pen\" viewBox=\"0 0 24 24\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z\"/></symbol>\n  <symbol id=\"i-copy\" viewBox=\"0 0 24 24\"><rect x=\"9\" y=\"9\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1\"/></symbol>\n  <symbol id=\"i-share\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"3\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/><path d=\"m21 15-5-5L5 21\"/></symbol>\n  <symbol id=\"i-trash\" viewBox=\"0 0 24 24\"><path d=\"M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6\"/></symbol>\n  <symbol id=\"i-x\" viewBox=\"0 0 24 24\"><path d=\"M18 6 6 18M6 6l12 12\"/></symbol>\n  <symbol id=\"i-next\" viewBox=\"0 0 24 24\"><path d=\"m15 18-6-6 6-6\"/></symbol>\n  <symbol id=\"i-prev\" viewBox=\"0 0 24 24\"><path d=\"m9 18 6-6-6-6\"/></symbol>\n  <symbol id=\"i-play\" viewBox=\"0 0 24 24\"><path d=\"M7 4v16l13-8z\"/></symbol>\n  <symbol id=\"i-pause\" viewBox=\"0 0 24 24\"><path d=\"M7 4h3v16H7zM14 4h3v16h-3z\"/></symbol>\n  <symbol id=\"i-clock\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></symbol>\n  <symbol id=\"i-check\" viewBox=\"0 0 24 24\"><path d=\"M20 6 9 17l-5-5\"/></symbol>\n  <symbol id=\"i-lock\" viewBox=\"0 0 24 24\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M8 11V7a4 4 0 0 1 8 0v4\"/></symbol>\n  <symbol id=\"i-home\" viewBox=\"0 0 24 24\"><path d=\"M3 11 12 3l9 8\"/><path d=\"M5 10v10h14V10\"/></symbol>\n  <symbol id=\"i-back\" viewBox=\"0 0 24 24\"><path d=\"M9 18l6-6-6-6\"/></symbol>\n  <symbol id=\"i-leaf\" viewBox=\"0 0 24 24\"><path d=\"M12 21c-4.4 0-8-3.6-8-8 0-6 8-10 8-10s8 4 8 10c0 4.4-3.6 8-8 8z\"/><path d=\"M12 21V9\"/></symbol>\n  <symbol id=\"i-dl\" viewBox=\"0 0 24 24\"><path d=\"M12 3v12M7 10l5 5 5-5M5 21h14\"/></symbol>\n  <symbol id=\"i-orn\" viewBox=\"0 0 24 24\"><path d=\"M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z\"/></symbol>\n  <symbol id=\"g-idhn\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v9\"/></symbol>\n  <symbol id=\"g-mub\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M13.5 8 9.5 12l4 4\"/></symbol>\n  <symbol id=\"g-ikh\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-dasharray=\"2.5 3\"/><path d=\"m10.5 8 4 4-4 4\"/></symbol>\n  <symbol id=\"w-muw\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"11\" rx=\"2\"/><path d=\"M8 20h8M12 15v5\"/></symbol>\n  <symbol id=\"w-shab\" viewBox=\"0 0 24 24\"><rect x=\"6\" y=\"7\" width=\"12\" height=\"14\" rx=\"3\"/><path d=\"M9 7V5a3 3 0 0 1 6 0v2M9 13h6\"/></symbol>\n  <symbol id=\"w-sayy\" viewBox=\"0 0 24 24\"><path d=\"M4 10h16l-1.5 10h-13z\"/><path d=\"M8 10a4 4 0 0 1 8 0\"/></symbol>\n  <symbol id=\"w-shay\" viewBox=\"0 0 24 24\"><path d=\"M3 9h7v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM14 9h7v6a3 3 0 0 1-3 3h-1a3 3 0 0 1-3-3z\"/><path d=\"M6 4v2.5M17.5 4v2.5\"/></symbol>\n  <symbol id=\"w-milaf\" viewBox=\"0 0 24 24\"><path d=\"M3 6h6l2 2h10v11H3z\"/><path d=\"M7 13h10\"/></symbol>\n  <symbol id=\"i-bell\" viewBox=\"0 0 24 24\"><path d=\"M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z\"/><path d=\"M10 21h4\"/></symbol>\n  <symbol id=\"i-phone\" viewBox=\"0 0 24 24\"><rect x=\"7\" y=\"2\" width=\"10\" height=\"20\" rx=\"2\"/><path d=\"M11 18h2\"/></symbol>\n  <symbol id=\"i-card\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"M3 10h18M7 15h6\"/></symbol>\n  <symbol id=\"i-plus\" viewBox=\"0 0 24 24\"><path d=\"M12 5v14M5 12h14\"/></symbol>\n  <symbol id=\"a-back\" viewBox=\"0 0 24 24\"><path d=\"M4.5 12a7.5 7.5 0 1 0 2.6-5.7\"/><path d=\"M5 3.5v4h4\"/></symbol>\n  <symbol id=\"a-fwd\" viewBox=\"0 0 24 24\"><path d=\"M20 12H4M10 6l-6 6 6 6\"/></symbol>\n  <symbol id=\"a-away\" viewBox=\"0 0 24 24\"><path d=\"M7 17 17 7M9 7h8v8\"/><path d=\"M4 20h2\" stroke-dasharray=\"1 2\"/></symbol>\n  <symbol id=\"i-chat\" viewBox=\"0 0 24 24\"><path d=\"M4 5h16v11H9l-5 4z\"/><path d=\"M8 9h8M8 12h5\"/></symbol>\n  <symbol id=\"i-print\" viewBox=\"0 0 24 24\"><path d=\"M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z\"/></symbol>\n  <symbol id=\"i-sunrise\" viewBox=\"0 0 24 24\"><path d=\"M4 18h16M7 18a5 5 0 0 1 10 0M12 4v4M5 9l2 2M19 9l-2 2\"/></symbol>\n  <symbol id=\"i-eye\" viewBox=\"0 0 24 24\"><path d=\"M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></symbol>\n</svg>\n\n<div class=\"boot\" id=\"boot\"><div class=\"rings\"><i></i><i></i><i></i><i></i></div><p>ولادة قلب</p></div>\n\n<!-- ═══════════ الواجهة ═══════════ -->\n<div id=\"home\"></div>\n\n<!-- ═══════════ القارئ ═══════════ -->\n<div id=\"reader\">\n  <div class=\"pbar\"><i id=\"pfill\"></i></div>\n  <header class=\"tbar\"><div class=\"tbar-in\">\n    <button class=\"ib\" data-act=\"home\" aria-label=\"واجهة الكتاب\" title=\"واجهة الكتاب\"><svg class=\"i\"><use href=\"#i-book\"/></svg></button>\n    <button class=\"ib\" data-act=\"toc\" aria-label=\"فهرس الفصل\" title=\"الفهرس\"><svg class=\"i\"><use href=\"#i-list\"/></svg></button>\n    <div class=\"tbar-c\"><b id=\"tTitle\"></b><span id=\"tCrumb\"></span></div>\n    <button class=\"ib\" data-act=\"search\" aria-label=\"البحث في الكتاب\" title=\"بحث\"><svg class=\"i\"><use href=\"#i-search\"/></svg></button>\n    <button class=\"ib\" data-act=\"settings\" aria-label=\"إعدادات القراءة\" title=\"إعدادات القراءة\"><svg class=\"i\"><use href=\"#i-type\"/></svg></button>\n  </div><div class=\"rail\" id=\"rail\" hidden></div></header>\n\n  <main class=\"page\" id=\"page\"></main>\n\n  <footer class=\"bbar\"><div class=\"bbar-in\">\n    <button class=\"navb\" id=\"bPrev\" data-act=\"prev\" aria-label=\"الفصل السابق\"><svg class=\"i\"><use href=\"#i-prev\"/></svg><span id=\"bPrevT\"></span></button>\n    <div class=\"bbar-mid\">\n      <button class=\"ib\" data-act=\"notebook\" aria-label=\"دفتري\" title=\"تظليلاتي وملاحظاتي\"><svg class=\"i\"><use href=\"#i-note\"/></svg><span class=\"badge\" id=\"nbBadge\" hidden></span></button>\n      <div class=\"left-info\" id=\"leftInfo\"></div>\n      <button class=\"ib\" data-act=\"autoscroll\" id=\"asBtn\" aria-label=\"تمرير تلقائي\" title=\"تمرير تلقائي\"><svg class=\"i\"><use href=\"#i-play\"/></svg></button>\n      <button class=\"ib\" data-act=\"theme\" id=\"thBtn\" aria-label=\"الوضع الليلي\" title=\"الوضع الليلي\"><svg class=\"i\"><use href=\"#i-moon\"/></svg></button>\n    </div>\n    <button class=\"navb\" id=\"bNext\" data-act=\"next\" aria-label=\"الفصل التالي\"><span id=\"bNextT\"></span><svg class=\"i\"><use href=\"#i-next\"/></svg></button>\n  </div></footer>\n</div>\n\n<div class=\"scrim\" id=\"scrim\" data-act=\"close\"></div>\n\n<aside class=\"drawer r\" id=\"dToc\" aria-label=\"الفهرس\">\n  <div class=\"dh\"><h3>الفهرس</h3><button class=\"ib\" data-act=\"close\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"tabs\"><button class=\"tab on\" data-tab=\"toc-ch\">هذا الفصل</button><button class=\"tab\" data-tab=\"toc-bk\">الكتاب كلّه</button></div>\n  <div class=\"db\" id=\"tocBody\"></div>\n</aside>\n\n<aside class=\"drawer r\" id=\"dNb\" aria-label=\"دفتري\">\n  <div class=\"dh\"><h3>دفتري</h3><button class=\"ib\" data-act=\"close\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"tabs\"><button class=\"tab on\" data-tab=\"nb-ch\">هذا الفصل</button><button class=\"tab\" data-tab=\"nb-all\">الكتاب كلّه</button><button class=\"tab\" data-tab=\"nb-ref\">تأمّلاتي</button></div>\n  <div class=\"db\" id=\"nbBody\"></div>\n</aside>\n\n<aside class=\"drawer l\" id=\"dSet\" aria-label=\"إعدادات القراءة\">\n  <div class=\"dh\"><h3>إعدادات القراءة</h3><button class=\"ib\" data-act=\"close\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"db\" id=\"setBody\"></div>\n</aside>\n\n<div class=\"selbar\" id=\"selbar\" role=\"toolbar\" aria-label=\"أدوات النصّ المحدّد\">\n  <button class=\"sw sw-yellow\" data-hl=\"yellow\" aria-label=\"أصفر\"></button>\n  <button class=\"sw sw-green\" data-hl=\"green\" aria-label=\"أخضر\"></button>\n  <button class=\"sw sw-red\" data-hl=\"red\" aria-label=\"أحمر\"></button>\n  <button class=\"sw sw-blue\" data-hl=\"blue\" aria-label=\"أزرق\"></button>\n  <span class=\"sep\"></span>\n  <button class=\"ac\" data-sel=\"note\"><svg class=\"i\"><use href=\"#i-pen\"/></svg>ملاحظة</button>\n  <button class=\"ac\" data-sel=\"copy\" aria-label=\"نسخ\"><svg class=\"i\"><use href=\"#i-copy\"/></svg></button>\n  <button class=\"ac\" data-sel=\"share\" aria-label=\"اقتباس كصورة\"><svg class=\"i\"><use href=\"#i-share\"/></svg></button>\n  <button class=\"ac\" data-sel=\"del\" id=\"selDel\" aria-label=\"إزالة التظليل\"><svg class=\"i\"><use href=\"#i-trash\"/></svg></button>\n</div>\n\n<div class=\"modal\" id=\"mNote\"><div class=\"mbox\">\n  <div class=\"mh\"><h3>ملاحظتي</h3><button class=\"ib\" data-act=\"mclose\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"mb\"><blockquote id=\"noteQ\"></blockquote><textarea id=\"noteT\" placeholder=\"اكتب ما حرّكته فيك هذه الكلمات…\"></textarea></div>\n  <div class=\"mf\"><button class=\"btn\" id=\"noteSave\">حفظ</button><button class=\"btn sec\" data-act=\"mclose\">إلغاء</button></div>\n</div></div>\n\n<div class=\"modal\" id=\"mSearch\"><div class=\"mbox\" style=\"height:80vh\">\n  <div class=\"srch\"><svg class=\"i\"><use href=\"#i-search\"/></svg><input id=\"sIn\" type=\"search\" placeholder=\"ابحث في الكتاب…\" autocomplete=\"off\"><button class=\"ib\" data-act=\"mclose\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"sres\" id=\"sRes\"></div>\n</div></div>\n\n<div class=\"modal\" id=\"mShare\"><div class=\"mbox\">\n  <div class=\"mh\"><h3>اقتباس للمشاركة</h3><button class=\"ib\" data-act=\"mclose\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"mb\"><img id=\"shareImg\" class=\"share-prev\" alt=\"صورة الاقتباس\"></div>\n  <div class=\"mf\"><button class=\"btn\" id=\"shareGo\">مشاركة</button><button class=\"btn sec\" id=\"shareDl\">تنزيل الصورة</button></div>\n</div></div>\n\n<div class=\"toast\" id=\"toast\" role=\"status\"></div>";
+var MARKUP="<svg width=\"0\" height=\"0\" style=\"position:absolute\" aria-hidden=\"true\">\n  <symbol id=\"i-book\" viewBox=\"0 0 24 24\"><path d=\"M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z\"/><path d=\"M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5\"/></symbol>\n  <symbol id=\"i-list\" viewBox=\"0 0 24 24\"><path d=\"M9 6h11M9 12h11M9 18h11\"/><path d=\"M4 6h.01M4 12h.01M4 18h.01\"/></symbol>\n  <symbol id=\"i-search\" viewBox=\"0 0 24 24\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/></symbol>\n  <symbol id=\"i-type\" viewBox=\"0 0 24 24\"><path d=\"M4 7V5h11v2M9.5 5v14M7 19h5\"/><path d=\"M14 13v-1.5h7V13M17.5 11.5V19M16 19h3\"/></symbol>\n  <symbol id=\"i-moon\" viewBox=\"0 0 24 24\"><path d=\"M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z\"/></symbol>\n  <symbol id=\"i-sun\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\"/></symbol>\n  <symbol id=\"i-note\" viewBox=\"0 0 24 24\"><path d=\"M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z\"/><path d=\"M14 3v6h6M8 13h8M8 17h5\"/></symbol>\n  <symbol id=\"i-pen\" viewBox=\"0 0 24 24\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z\"/></symbol>\n  <symbol id=\"i-copy\" viewBox=\"0 0 24 24\"><rect x=\"9\" y=\"9\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1\"/></symbol>\n  <symbol id=\"i-share\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"3\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/><path d=\"m21 15-5-5L5 21\"/></symbol>\n  <symbol id=\"i-trash\" viewBox=\"0 0 24 24\"><path d=\"M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6\"/></symbol>\n  <symbol id=\"i-x\" viewBox=\"0 0 24 24\"><path d=\"M18 6 6 18M6 6l12 12\"/></symbol>\n  <symbol id=\"i-next\" viewBox=\"0 0 24 24\"><path d=\"m15 18-6-6 6-6\"/></symbol>\n  <symbol id=\"i-prev\" viewBox=\"0 0 24 24\"><path d=\"m9 18 6-6-6-6\"/></symbol>\n  <symbol id=\"i-play\" viewBox=\"0 0 24 24\"><path d=\"M7 4v16l13-8z\"/></symbol>\n  <symbol id=\"i-pause\" viewBox=\"0 0 24 24\"><path d=\"M7 4h3v16H7zM14 4h3v16h-3z\"/></symbol>\n  <symbol id=\"i-clock\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></symbol>\n  <symbol id=\"i-check\" viewBox=\"0 0 24 24\"><path d=\"M20 6 9 17l-5-5\"/></symbol>\n  <symbol id=\"i-lock\" viewBox=\"0 0 24 24\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M8 11V7a4 4 0 0 1 8 0v4\"/></symbol>\n  <symbol id=\"i-home\" viewBox=\"0 0 24 24\"><path d=\"M3 11 12 3l9 8\"/><path d=\"M5 10v10h14V10\"/></symbol>\n  <symbol id=\"i-back\" viewBox=\"0 0 24 24\"><path d=\"M9 18l6-6-6-6\"/></symbol>\n  <symbol id=\"i-leaf\" viewBox=\"0 0 24 24\"><path d=\"M12 21c-4.4 0-8-3.6-8-8 0-6 8-10 8-10s8 4 8 10c0 4.4-3.6 8-8 8z\"/><path d=\"M12 21V9\"/></symbol>\n  <symbol id=\"i-dl\" viewBox=\"0 0 24 24\"><path d=\"M12 3v12M7 10l5 5 5-5M5 21h14\"/></symbol>\n  <symbol id=\"i-orn\" viewBox=\"0 0 24 24\"><path d=\"M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z\"/></symbol>\n  <symbol id=\"g-idhn\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v9\"/></symbol>\n  <symbol id=\"g-mub\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M13.5 8 9.5 12l4 4\"/></symbol>\n  <symbol id=\"g-ikh\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-dasharray=\"2.5 3\"/><path d=\"m10.5 8 4 4-4 4\"/></symbol>\n  <symbol id=\"w-muw\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"11\" rx=\"2\"/><path d=\"M8 20h8M12 15v5\"/></symbol>\n  <symbol id=\"w-shab\" viewBox=\"0 0 24 24\"><rect x=\"6\" y=\"7\" width=\"12\" height=\"14\" rx=\"3\"/><path d=\"M9 7V5a3 3 0 0 1 6 0v2M9 13h6\"/></symbol>\n  <symbol id=\"w-sayy\" viewBox=\"0 0 24 24\"><path d=\"M4 10h16l-1.5 10h-13z\"/><path d=\"M8 10a4 4 0 0 1 8 0\"/></symbol>\n  <symbol id=\"w-shay\" viewBox=\"0 0 24 24\"><path d=\"M3 9h7v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM14 9h7v6a3 3 0 0 1-3 3h-1a3 3 0 0 1-3-3z\"/><path d=\"M6 4v2.5M17.5 4v2.5\"/></symbol>\n  <symbol id=\"w-milaf\" viewBox=\"0 0 24 24\"><path d=\"M3 6h6l2 2h10v11H3z\"/><path d=\"M7 13h10\"/></symbol>\n  <symbol id=\"i-bell\" viewBox=\"0 0 24 24\"><path d=\"M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z\"/><path d=\"M10 21h4\"/></symbol>\n  <symbol id=\"i-phone\" viewBox=\"0 0 24 24\"><rect x=\"7\" y=\"2\" width=\"10\" height=\"20\" rx=\"2\"/><path d=\"M11 18h2\"/></symbol>\n  <symbol id=\"i-card\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"M3 10h18M7 15h6\"/></symbol>\n  <symbol id=\"i-plus\" viewBox=\"0 0 24 24\"><path d=\"M12 5v14M5 12h14\"/></symbol>\n  <symbol id=\"a-back\" viewBox=\"0 0 24 24\"><path d=\"M4.5 12a7.5 7.5 0 1 0 2.6-5.7\"/><path d=\"M5 3.5v4h4\"/></symbol>\n  <symbol id=\"a-fwd\" viewBox=\"0 0 24 24\"><path d=\"M20 12H4M10 6l-6 6 6 6\"/></symbol>\n  <symbol id=\"a-away\" viewBox=\"0 0 24 24\"><path d=\"M7 17 17 7M9 7h8v8\"/><path d=\"M4 20h2\" stroke-dasharray=\"1 2\"/></symbol>\n  <symbol id=\"i-bm\" viewBox=\"0 0 24 24\"><path d=\"M6 3h12v18l-6-4-6 4z\"/></symbol>\n  <symbol id=\"i-bmf\" viewBox=\"0 0 24 24\"><path d=\"M6 3h12v18l-6-4-6 4z\" fill=\"currentColor\"/></symbol>\n  <symbol id=\"i-chat\" viewBox=\"0 0 24 24\"><path d=\"M4 5h16v11H9l-5 4z\"/><path d=\"M8 9h8M8 12h5\"/></symbol>\n  <symbol id=\"i-print\" viewBox=\"0 0 24 24\"><path d=\"M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z\"/></symbol>\n  <symbol id=\"i-sunrise\" viewBox=\"0 0 24 24\"><path d=\"M4 18h16M7 18a5 5 0 0 1 10 0M12 4v4M5 9l2 2M19 9l-2 2\"/></symbol>\n  <symbol id=\"i-eye\" viewBox=\"0 0 24 24\"><path d=\"M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></symbol>\n</svg>\n\n<div class=\"boot\" id=\"boot\"><div class=\"rings\"><i></i><i></i><i></i><i></i></div><p>ولادة قلب</p></div>\n\n<!-- ═══════════ الواجهة ═══════════ -->\n<div id=\"home\"></div>\n\n<!-- ═══════════ القارئ ═══════════ -->\n<div id=\"reader\">\n  <div class=\"pbar\"><i id=\"pfill\"></i></div>\n  <header class=\"tbar\"><div class=\"tbar-in\">\n    <button class=\"ib\" data-act=\"home\" aria-label=\"واجهة الكتاب\" title=\"واجهة الكتاب\"><svg class=\"i\"><use href=\"#i-book\"/></svg></button>\n    <button class=\"ib\" data-act=\"toc\" aria-label=\"فهرس الفصل\" title=\"الفهرس\"><svg class=\"i\"><use href=\"#i-list\"/></svg></button>\n    <div class=\"tbar-c\"><b id=\"tTitle\"></b><span id=\"tCrumb\"></span></div>\n    <button class=\"ib\" data-act=\"search\" aria-label=\"البحث في الكتاب\" title=\"بحث\"><svg class=\"i\"><use href=\"#i-search\"/></svg></button>\n    <button class=\"ib\" data-act=\"settings\" aria-label=\"إعدادات القراءة\" title=\"إعدادات القراءة\"><svg class=\"i\"><use href=\"#i-type\"/></svg></button>\n  </div><div class=\"rail\" id=\"rail\" hidden></div></header>\n\n  <main class=\"page\" id=\"page\"></main>\n\n  <footer class=\"bbar\"><div class=\"bbar-in\">\n    <button class=\"navb\" id=\"bPrev\" data-act=\"prev\" aria-label=\"الفصل السابق\"><svg class=\"i\"><use href=\"#i-prev\"/></svg><span id=\"bPrevT\"></span></button>\n    <div class=\"bbar-mid\">\n      <button class=\"ib\" data-act=\"notebook\" aria-label=\"دفتري\" title=\"تظليلاتي وملاحظاتي\"><svg class=\"i\"><use href=\"#i-note\"/></svg><span class=\"badge\" id=\"nbBadge\" hidden></span></button>\n      <button class=\"ib\" data-act=\"bookmark\" id=\"bmBtn\" aria-label=\"ضع علامة هنا\" title=\"ضع علامة هنا\"><svg class=\"i\"><use href=\"#i-bm\"/></svg></button>\n      <div class=\"left-info\" id=\"leftInfo\"></div>\n      <button class=\"ib\" data-act=\"autoscroll\" id=\"asBtn\" aria-label=\"تمرير تلقائي\" title=\"تمرير تلقائي\"><svg class=\"i\"><use href=\"#i-play\"/></svg></button>\n      <button class=\"ib\" data-act=\"theme\" id=\"thBtn\" aria-label=\"الوضع الليلي\" title=\"الوضع الليلي\"><svg class=\"i\"><use href=\"#i-moon\"/></svg></button>\n    </div>\n    <button class=\"navb\" id=\"bNext\" data-act=\"next\" aria-label=\"الفصل التالي\"><span id=\"bNextT\"></span><svg class=\"i\"><use href=\"#i-next\"/></svg></button>\n  </div></footer>\n</div>\n\n<div class=\"scrim\" id=\"scrim\" data-act=\"close\"></div>\n\n<aside class=\"drawer r\" id=\"dToc\" aria-label=\"الفهرس\">\n  <div class=\"dh\"><h3>الفهرس</h3><button class=\"ib\" data-act=\"close\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"tabs\"><button class=\"tab on\" data-tab=\"toc-ch\">هذا الفصل</button><button class=\"tab\" data-tab=\"toc-bk\">الكتاب كلّه</button></div>\n  <div class=\"db\" id=\"tocBody\"></div>\n</aside>\n\n<aside class=\"drawer r\" id=\"dNb\" aria-label=\"دفتري\">\n  <div class=\"dh\"><h3>دفتري</h3><button class=\"ib\" data-act=\"close\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"tabs\"><button class=\"tab on\" data-tab=\"nb-ch\">هذا الفصل</button><button class=\"tab\" data-tab=\"nb-all\">الكتاب كلّه</button><button class=\"tab\" data-tab=\"nb-ref\">تأمّلاتي</button><button class=\"tab\" data-tab=\"nb-bm\">علاماتي</button></div>\n  <div class=\"db\" id=\"nbBody\"></div>\n</aside>\n\n<aside class=\"drawer l\" id=\"dSet\" aria-label=\"إعدادات القراءة\">\n  <div class=\"dh\"><h3>إعدادات القراءة</h3><button class=\"ib\" data-act=\"close\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"db\" id=\"setBody\"></div>\n</aside>\n\n<div class=\"selbar\" id=\"selbar\" role=\"toolbar\" aria-label=\"أدوات النصّ المحدّد\">\n  <button class=\"sw sw-yellow\" data-hl=\"yellow\" aria-label=\"أصفر\"></button>\n  <button class=\"sw sw-green\" data-hl=\"green\" aria-label=\"أخضر\"></button>\n  <button class=\"sw sw-red\" data-hl=\"red\" aria-label=\"أحمر\"></button>\n  <button class=\"sw sw-blue\" data-hl=\"blue\" aria-label=\"أزرق\"></button>\n  <span class=\"sep\"></span>\n  <button class=\"ac\" data-sel=\"note\"><svg class=\"i\"><use href=\"#i-pen\"/></svg>ملاحظة</button>\n  <button class=\"ac\" data-sel=\"copy\" aria-label=\"نسخ\"><svg class=\"i\"><use href=\"#i-copy\"/></svg></button>\n  <button class=\"ac\" data-sel=\"share\" aria-label=\"اقتباس كصورة\"><svg class=\"i\"><use href=\"#i-share\"/></svg></button>\n  <button class=\"ac\" data-sel=\"del\" id=\"selDel\" aria-label=\"إزالة التظليل\"><svg class=\"i\"><use href=\"#i-trash\"/></svg></button>\n</div>\n\n<div class=\"modal\" id=\"mNote\"><div class=\"mbox\">\n  <div class=\"mh\"><h3>ملاحظتي</h3><button class=\"ib\" data-act=\"mclose\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"mb\"><blockquote id=\"noteQ\"></blockquote><textarea id=\"noteT\" placeholder=\"اكتب ما حرّكته فيك هذه الكلمات…\"></textarea></div>\n  <div class=\"mf\"><button class=\"btn\" id=\"noteSave\">حفظ</button><button class=\"btn sec\" data-act=\"mclose\">إلغاء</button></div>\n</div></div>\n\n<div class=\"modal\" id=\"mSearch\"><div class=\"mbox\" style=\"height:80vh\">\n  <div class=\"srch\"><svg class=\"i\"><use href=\"#i-search\"/></svg><input id=\"sIn\" type=\"search\" placeholder=\"ابحث في الكتاب…\" autocomplete=\"off\"><button class=\"ib\" data-act=\"mclose\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"sres\" id=\"sRes\"></div>\n</div></div>\n\n<div class=\"modal\" id=\"mShare\"><div class=\"mbox\">\n  <div class=\"mh\"><h3>اقتباس للمشاركة</h3><button class=\"ib\" data-act=\"mclose\" aria-label=\"إغلاق\"><svg class=\"i\"><use href=\"#i-x\"/></svg></button></div>\n  <div class=\"mb\"><img id=\"shareImg\" class=\"share-prev\" alt=\"صورة الاقتباس\"></div>\n  <div class=\"mf\"><button class=\"btn\" id=\"shareGo\">مشاركة</button><button class=\"btn sec\" id=\"shareDl\">تنزيل الصورة</button></div>\n</div></div>\n\n<div class=\"rpill\" id=\"resumePill\" role=\"status\"><svg class=\"i\"><use href=\"#i-bmf\"/></svg><span id=\"rpText\"></span><button data-act=\"fromTop\">من أوّل الفصل</button><button class=\"rpx\" data-act=\"rpClose\" aria-label=\"إغلاق\">×</button></div>\n<div class=\"toast\" id=\"toast\" role=\"status\"></div>";
 (function(){
 'use strict';
 
@@ -126,12 +126,16 @@ function start(){
   });
 }
 function mergeProg(a,b){
-  var out={chapterId:b.chapterId||a.chapterId,chapters:Object.assign({},a.chapters||{})};
-  var bc=b.chapters||{};
+  var out={chapterId:a.chapterId||b.chapterId,chapters:Object.assign({},a.chapters||{})};
+  var bc=b.chapters||{},lastT=0,lastId=null;
   Object.keys(bc).forEach(function(k){
-    var x=out.chapters[k]||{},y=bc[k]||{};
-    out.chapters[k]={pct:Math.max(x.pct||0,y.pct||0),done:!!(x.done||y.done),b:(y.t||0)>(x.t||0)?y.b:x.b,t:Math.max(x.t||0,y.t||0)};
+    var x=out.chapters[k]||{},y=bc[k]||{},nw=(y.t||0)>(x.t||0)?y:x;
+    out.chapters[k]={pct:Math.max(x.pct||0,y.pct||0),done:!!(x.done||y.done),b:nw.b,n:nw.n||x.n||y.n,h:nw.h,t:Math.max(x.t||0,y.t||0)};
   });
+  Object.keys(out.chapters).forEach(function(k){var t=out.chapters[k].t||0;if(t>lastT){lastT=t;lastId=k}});
+  if(lastId)out.chapterId=lastId;
+  var ab=a.bookmarks||[],bb=b.bookmarks||[];
+  out.bookmarks=(b.bmT||0)>(a.bmT||0)?bb:ab;out.bmT=Math.max(a.bmT||0,b.bmT||0);
   return out;
 }
 function hideBoot(){$('#boot').classList.add('gone')}
@@ -197,11 +201,12 @@ function showHome(){
   h+='<div class="blabel">'+esc(book.bookLabel||'')+'</div><div class="auth">'+esc(book.author||'')+'</div>';
   if(book.epigraph)h+='<p class="epi">'+esc(book.epigraph)+'</p>';else h+='<div style="height:34px"></div>';
   if(lc&&last.started){
-    h+='<button class="cta" data-open="'+lc.fi+'" data-resume="1"><span class="ct"><small>تابع من حيث توقّفت</small>'+esc(lc.label)+' — '+esc(lc.title)+'</span><svg class="i"><use href="#i-next"/></svg></button>';
+    h+='<button class="cta" data-open="'+lc.fi+'"'+(last.fresh?' data-fresh="1"':'')+'><span class="ct"><small>'+(last.fresh?'تابع إلى ما بعده':'تابع من حيث توقّفت')+'</small>'+esc(lc.label)+' — '+esc(lc.title)+(last.p&&last.p.h?'<em class="cta-at">عند «'+esc(last.p.h)+'»</em>':'')+'</span><svg class="i"><use href="#i-next"/></svg></button>';
   }else if(flat.length){
     h+='<button class="cta" data-open="0"><span class="ct">ابدأ القراءة</span><svg class="i"><use href="#i-next"/></svg></button>';
   }
-  h+='<div class="hero-links"><button class="ghost" data-act="scrollToc"><svg class="i"><use href="#i-list"/></svg>فهرس الرحلة</button><button class="ghost" data-act="notebookHome"><svg class="i"><use href="#i-note"/></svg>دفتري</button></div>';
+  var nbm=(prog.bookmarks||[]).length;
+  h+='<div class="hero-links">'+(nbm?'<button class="ghost" data-act="bookmarksHome"><svg class="i"><use href="#i-bm"/></svg>علاماتي ('+ar(nbm)+')</button>':'')+'<button class="ghost" data-act="scrollToc"><svg class="i"><use href="#i-list"/></svg>فهرس الرحلة</button><button class="ghost" data-act="notebookHome"><svg class="i"><use href="#i-note"/></svg>دفتري</button></div>';
   h+='</div></section>';
 
   h+='<section class="stats">';
@@ -249,12 +254,14 @@ function refreshHomeTimes(){
     if(d){tot+=d._min;if(el)el.textContent=c.label+' · '+minutes(d._min)}else all=false});
   var t=$('#totTime');if(t&&all){var hrs=tot/60;t.textContent=hrs>=1?ar(Math.round(hrs*10)/10).replace('.','٫')+' س':minutes(tot)}
 }
+function atEnd(p){return p.done&&(!p.n||p.b==null||p.b>=p.n-8)}
+function resumable(p){return p&&p.b!=null&&p.b>2&&!atEnd(p)}
 function lastChapter(){
   var id=prog.chapterId;var i=id?flat.findIndex(function(c){return c.id===id}):-1;
   if(i<0)return null;
   var p=prog.chapters[id]||{};
-  if(p.done&&i<flat.length-1)return{i:i+1,started:true};
-  return{i:i,started:true};
+  if(atEnd(p)&&i<flat.length-1)return{i:i+1,started:true,fresh:true};
+  return{i:i,started:true,p:resumable(p)?p:null};
 }
 
 /* ══════════════════════════════════════════════
@@ -275,10 +282,12 @@ function openChapter(i,opt){
   load(c).then(function(d){
     if(cur!==i)return;
     render(c,d);
-    var target=opt.block;
-    if(target==null&&opt.resume!==false){var p=prog.chapters[c.id];if(p&&!p.done&&p.b>2)target=p.b}
+    var target=opt.block,resumed=false;
+    if(target==null&&opt.resume!==false){var p=prog.chapters[c.id];if(resumable(p)){target=p.b;resumed=true}}
     requestAnimationFrame(function(){
       if(target!=null){jumpBlock(target,opt.block!=null)}else window.scrollTo(0,0);
+      if(target!=null)settleJump(target,i);
+      if(resumed)showResume(prog.chapters[c.id]);
     });
     loadChapterData(c);
     saveProg(true);
@@ -318,6 +327,7 @@ function render(c,d){
   cacheLayout();
   observeReveal();
   fbFill();
+  paintBms();
 }
 function block(s,i){
   var a=' id="b'+i+'" data-b="'+i+'"';
@@ -738,7 +748,8 @@ function curBlock(){
 var trackPos=function(pct){
   var c=flat[cur];if(!c)return;
   var p=prog.chapters[c.id]||(prog.chapters[c.id]={pct:0});
-  var b=curBlock();if(b!=null)p.b=b;
+  var b=curBlock();if(b!=null){p.b=b;var d=content[c.id];if(d){p.n=d.sections.length;p.h=secName(d,b)}}
+  updateBmBtn(b);
   if(pct>p.pct)p.pct=pct;
   p.t=Date.now();
   if(pct>=100&&!p.done){p.done=true;p.pct=100;saveProg(true);toast('أتممت '+c.label+' ✓');return}
@@ -753,6 +764,51 @@ function saveProg(remote){
   if(!uid)return;
   var chs={};chs[c.id]=prog.chapters[c.id]||{pct:0};
   db.collection(C_PROG).doc(uid+'_'+BOOK_KEY).set({book:BOOK_KEY,chapterId:c.id,chapterTitle:c.title,stationId:c.station.id,chapters:chs,updatedAt:FV.serverTimestamp()},{merge:true}).catch(function(){});
+}
+function saveBms(){
+  prog.bmT=Date.now();ls(BOOK_KEY+'-prog',prog);
+  if(uid)db.collection(C_PROG).doc(uid+'_'+BOOK_KEY).set({bookmarks:prog.bookmarks||[],bmT:prog.bmT},{merge:true}).catch(function(){});
+}
+function secName(d,b){var h='';for(var k=0;k<d._secs.length;k++){if(d._secs[k].i<=b)h=plain(d._secs[k].t);else break}return h.length>48?h.slice(0,46)+'…':h}
+/* بعد القفز: نعيد الضبط حين تكتمل الخطوط والتخطيط، ما لم يتحرّك القارئ بنفسه */
+var jumpGuard=0;
+function settleJump(target,ci){
+  var my=++jumpGuard,moved=false;
+  var stop=function(){moved=true};
+  ['wheel','touchmove','keydown','mousedown'].forEach(function(ev){window.addEventListener(ev,stop,{once:true,passive:true})});
+  var again=function(){if(!moved&&my===jumpGuard&&cur===ci)jumpBlock(target,false)};
+  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){setTimeout(again,60)});
+  setTimeout(again,500);setTimeout(again,1400);
+}
+function showResume(p){
+  var el=$('#resumePill');if(!el)return;
+  $('#rpText').textContent='رجعتُ بك إلى حيث توقّفت'+(p&&p.h?' · «'+p.h+'»':'');
+  el.classList.add('on');clearTimeout(showResume._t);showResume._t=setTimeout(function(){el.classList.remove('on')},7000);
+}
+/* ─── العلامات اليدويّة ─── */
+function bmsHere(){var c=flat[cur];return(prog.bookmarks||[]).filter(function(x){return c&&x.ch===c.id})}
+function paintBms(){
+  $$('#art .bm-rib').forEach(function(e){e.parentNode.classList.remove('has-bm');e.remove()});
+  bmsHere().forEach(function(x){var el=document.getElementById('b'+x.b);if(el&&!$('.bm-rib',el)){el.classList.add('has-bm');el.insertAdjacentHTML('afterbegin','<i class="bm-rib" aria-hidden="true"></i>')}});
+}
+function updateBmBtn(b){
+  var btn=$('#bmBtn');if(!btn)return;
+  if(b==null)b=curBlock();
+  var on=bmsHere().some(function(x){return Math.abs(x.b-b)<=1});
+  btn.classList.toggle('on',on);btn.innerHTML='<svg class="i"><use href="#i-bm'+(on?'f':'')+'"/></svg>';
+}
+function toggleBm(){
+  var c=flat[cur],d=c&&content[c.id];if(!d)return;
+  var b=curBlock();if(b==null)return;
+  var L=prog.bookmarks=prog.bookmarks||[];
+  var ex=L.filter(function(x){return x.ch===c.id&&Math.abs(x.b-b)<=1});
+  if(ex.length){prog.bookmarks=L.filter(function(x){return ex.indexOf(x)<0});toast('أُزيلت العلامة')}
+  else{
+    var s=d.sections[b]||{},t=plain(s.content||'').replace(/\s+/g,' ');
+    L.push({id:Date.now(),ch:c.id,b:b,t:t.length>90?t.slice(0,88)+'…':t,h:secName(d,b),at:new Date().toISOString()});
+    toast('وُضعت علامة هنا — تجدها في «دفتري»');
+  }
+  saveBms();paintBms();updateBmBtn(b);
 }
 document.addEventListener('visibilitychange',function(){if(document.hidden&&cur>=0)flushPos()});
 window.addEventListener('pagehide',function(){if(cur>=0)flushPos()});
@@ -1023,6 +1079,15 @@ function renderNb(){
   if(cur<0&&nbTab==='nb-ch')nbTab='nb-all';
   $$('#dNb .tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===nbTab);if(t.dataset.tab==='nb-ch')t.style.display=cur>=0?'':'none'});
   var body=$('#nbBody');
+  if(nbTab==='nb-bm'){
+    var L=(prog.bookmarks||[]).slice().sort(function(a,b){var ia=flat.findIndex(function(c){return c.id===a.ch}),ib=flat.findIndex(function(c){return c.id===b.ch});return(ia-ib)||(a.b-b.b)});
+    var hb='',last=null;
+    L.forEach(function(x){var c=flat.find(function(z){return z.id===x.ch});if(!c)return;
+      if(x.ch!==last){last=x.ch;hb+='<div class="nb-chh">'+esc(c.label+' · '+c.title)+'</div>'}
+      hb+='<div class="nb-item bm-item" data-goto="'+c.fi+'" data-gb="'+x.b+'"><div class="bm-h"><svg class="i"><use href="#i-bmf"/></svg>'+esc(x.h||c.title)+'</div><div class="bm-t">'+esc(x.t)+'</div><div class="nb-m"><span>'+new Date(x.at).toLocaleDateString('ar-EG',{day:'numeric',month:'long'})+'</span><span class="sp"></span><button data-bmdel="'+x.id+'">إزالة</button></div></div>'});
+    body.innerHTML=hb||'<div class="empty"><svg class="i"><use href="#i-bm"/></svg><br>لا علامات بعد.<br>اضغط زرّ العلامة في الشريط السفليّ لتضع علامةً عند أيّ موضعٍ تريد الرجوع إليه.<br><small>وموضعك الأخير يُحفظ وحده دائمًا.</small></div>';
+    return;
+  }
   if(nbTab==='nb-ch'){
     var c=flat[cur];var inner=chapterNb(c,{hls:hls,notes:notes});
     body.innerHTML='<div class="nb-tools"><button class="ghost" data-act="freeNote"><svg class="i"><use href="#i-pen"/></svg>ملاحظة عامّة</button></div>'+(inner||'<div class="empty"><svg class="i"><use href="#i-pen"/></svg><br>حدّد أيّ جملة في الفصل لتظلّلها أو تكتب عليها ملاحظة.</div>');
@@ -1163,7 +1228,8 @@ function stopAS(){if(!asOn)return;asOn=false;cancelAnimationFrame(asRaf);var b=$
    ١١. توزيع النقرات
    ══════════════════════════════════════════════ */
 document.addEventListener('click',function(e){
-  var t=tc(e,'[data-act],[data-open],[data-jump],[data-goto],[data-tab],[data-nbdel],[data-nbnote]');if(!t)return;
+  var t=tc(e,'[data-act],[data-open],[data-jump],[data-goto],[data-tab],[data-nbdel],[data-nbnote],[data-bmdel]');if(!t)return;
+  if(t.dataset.bmdel){var bid=+t.dataset.bmdel;prog.bookmarks=(prog.bookmarks||[]).filter(function(x){return x.id!==bid});saveBms();paintBms();updateBmBtn();renderNb();e.stopPropagation();return}
   if(t.dataset.open!=null){var fi=+t.dataset.open;var fresh=t.dataset.fresh;closeModal();openChapter(fi,{resume:!fresh});return}
   if(t.dataset.jump!=null){closeAll();jumpBlock(+t.dataset.jump,false);return}
   if(t.dataset.goto!=null){var gi=+t.dataset.goto,gb=t.dataset.gb===''?null:+t.dataset.gb;closeAll();closeModal();
@@ -1183,6 +1249,10 @@ document.addEventListener('click',function(e){
     case'prev':if(cur>0)openChapter(cur-1,{});break;
     case'next':if(cur<flat.length-1)openChapter(cur+1,{});break;
     case'close':closeAll();break;
+    case'bookmark':toggleBm();break;
+    case'bookmarksHome':nbTab='nb-bm';renderNb();openDrawer('dNb');break;
+    case'fromTop':$('#resumePill').classList.remove('on');window.scrollTo({top:0,behavior:'smooth'});break;
+    case'rpClose':$('#resumePill').classList.remove('on');break;
     case'fbGeneral':window.__openFb&&window.__openFb({kind:'general'});break;
     case'mclose':closeModal();break;
     case'scrollToc':$('#tocAnchor').scrollIntoView({behavior:'smooth'});break;
