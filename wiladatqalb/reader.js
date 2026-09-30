@@ -764,6 +764,9 @@ function saveProg(remote){
   prog.chapterId=c.id;
   ls(BOOK_KEY+'-prog',prog);
   if(!uid)return;
+  /* الموضع يُحفظ على الجهاز دائمًا، ويُرسل للسحابة عند الخروج أو تغيير الفصل أو كلّ ٥ دقائق فقط — توفيرًا للكتابات */
+  if(!remote&&Date.now()-(saveProg._last||0)<300000)return;
+  saveProg._last=Date.now();
   var chs={};chs[c.id]=prog.chapters[c.id]||{pct:0};
   db.collection(C_PROG).doc(uid+'_'+BOOK_KEY).set({book:BOOK_KEY,chapterId:c.id,chapterTitle:c.title,stationId:c.station.id,chapters:chs,updatedAt:FV.serverTimestamp()},{merge:true}).catch(function(){});
 }
