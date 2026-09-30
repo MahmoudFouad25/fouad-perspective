@@ -190,7 +190,7 @@
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var db = window.db, auth = window.auth;
+  var db = window.db;
   var TOKEN = new URLSearchParams(location.search).get('t') || '';
   var ORDER = ['1', '2', '3', '4', '5a', '5b', '6', '7'];
   var POS_LABEL = ['الوصف الأول', 'الوصف الثاني', 'الوصف الثالث'];
@@ -264,14 +264,31 @@
 
   /* ---------- البدء ---------- */
   if (!TOKEN || !/^[A-Za-z0-9]{6,40}$/.test(TOKEN)) { fail(null, 'bad-token'); return; }
-  if (!db || !auth) { fail('الصفحة ماتحمّلتش كويس. جرّب تفتح الرابط تاني.', 'no-firebase'); return; }
+  if (!db) { fail('الصفحة ماتحمّلتش كويس. جرّب تفتح الرابط تاني.', 'no-firebase'); return; }
 
-  var started = false;
-  auth.onAuthStateChanged(function (user) {
-    if (!user) { auth.signInAnonymously().catch(function (e) { console.error(e); fail('مش قادر أبدأ دلوقتي. جرّب تاني بعد شوية.', 'auth: ' + (e.code || e.message)); }); return; }
-    if (started) return; started = true;
-    boot(user);
-  });
+  /* ---------- هويّة الجهاز ----------
+     لا نعتمد على Firebase Auth إطلاقًا: كل جهاز ياخد رمز عشوائي طويل
+     يتحفظ في المتصفّح، ومنه يتكوّن رقم الإجابة. فمفيش تسجيل دخول ممكن يفشل. */
+  function newCid() {
+    var a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', out = '', b;
+    try { b = new Uint8Array(28); (window.crypto || window.msCrypto).getRandomValues(b); }
+    catch (e) { b = []; for (var i = 0; i < 28; i++) b.push(Math.floor(Math.random() * 256)); }
+    for (var j = 0; j < 28; j++) out += a[b[j] % 62];
+    return out;
+  }
+  function readCid() {
+    var v = null;
+    try { v = localStorage.getItem('rt_cid'); } catch (e) {}
+    if (!v) { var m = document.cookie.match(/(?:^|; )rt_cid=([A-Za-z0-9]{20,40})/); if (m) v = m[1]; }
+    return (v && /^[A-Za-z0-9]{20,40}$/.test(v)) ? v : null;
+  }
+  function saveCid(v) {
+    try { localStorage.setItem('rt_cid', v); } catch (e) {}
+    try { document.cookie = 'rt_cid=' + v + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/; SameSite=Lax'; } catch (e) {}
+  }
+  var CID = readCid();
+  if (!CID) { CID = newCid(); saveCid(CID); }
+  boot({ uid: CID });
 
   function boot(user) {
     RID = user.uid + '_' + TOKEN;
@@ -307,7 +324,7 @@
     guard($('b1'), 'e1', start);
   }
   function start() {
-    var user = auth.currentUser, t1in = now();
+    var user = { uid: CID }, t1in = now();
     var envRef = db.collection('rt_envelopes').doc(LINK.letter);
     var pplRef = db.collection('rt_people').doc(RID);
     return db.runTransaction(function (tx) {

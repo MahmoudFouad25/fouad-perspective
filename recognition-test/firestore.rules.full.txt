@@ -102,40 +102,35 @@ service cloud.firestore {
     }
 
     // ═══════════════ 5) اختبار التعرّف — /rt_* ═══════════════
-    function rtSigned() { return request.auth != null; }
-    function rtOwnId(rid) { return rtSigned() && rid.split('_')[0] == request.auth.uid; }
+    // صفحة العميل لا تستعمل تسجيل دخول. كل جهاز له رمز عشوائي (٢٠–٤٠ حرف)
+    // ورقم الإجابة = الرمز + '_' + رمز الرابط. لا أحد يقدر يعمل list،
+    // فمن غير ما يعرف الرقم العشوائي مستحيل يوصل لإجابة غيره.
+    function rtRid(rid) { return rid.matches('^[A-Za-z0-9]{20,40}_[A-Za-z0-9]{6,40}$'); }
 
     match /rt_links/{token} {
-      allow get: if rtSigned();
+      allow get: if true;
       allow list, write: if isAdmin();
-      // الأسماء: لا تُقرأ إلا بعد حفظ كلمة العميل
       match /private/{doc} {
-        allow get: if isAdmin() || (
-          rtSigned() && doc == 'names'
-          && exists(/databases/$(database)/documents/rt_responses/$(request.auth.uid + '_' + token))
-          && get(/databases/$(database)/documents/rt_responses/$(request.auth.uid + '_' + token)).data.get('ownWord', '') != ''
-        );
+        allow get: if true;
         allow list, write: if isAdmin();
       }
     }
     match /rt_envelopes/{letter} {
-      allow get: if rtSigned();
+      allow get: if true;
       allow update: if isAdmin() || (
-        rtSigned()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['next'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['next'])
         && request.resource.data.next == resource.data.next + 1
       );
       allow list, create, delete: if isAdmin();
     }
     match /rt_responses/{rid} {
-      allow get: if isAdmin() || rtOwnId(rid);
-      allow create: if rtOwnId(rid)
-        && request.resource.data.uid == request.auth.uid
-        && rid == request.auth.uid + '_' + request.resource.data.token
+      allow get: if isAdmin() || rtRid(rid);
+      allow create: if rtRid(rid)
+        && rid == request.resource.data.uid + '_' + request.resource.data.token
         && exists(/databases/$(database)/documents/rt_links/$(request.resource.data.token))
         && request.resource.data.letter == get(/databases/$(database)/documents/rt_links/$(request.resource.data.token)).data.letter;
       allow update: if isAdmin() || (
-        rtOwnId(rid)
+        rtRid(rid)
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.token == resource.data.token
         && request.resource.data.letter == resource.data.letter
@@ -143,14 +138,17 @@ service cloud.firestore {
       allow list, delete: if isAdmin();
     }
     match /rt_people/{rid} {
-      allow create: if rtOwnId(rid);
+      allow create: if rtRid(rid)
+        && request.resource.data.keys().hasOnly(['uid','token','letter','name','contact','createdAt','linkedTo'])
+        && request.resource.data.name is string && request.resource.data.name.size() < 200
+        && request.resource.data.contact is string && request.resource.data.contact.size() < 200;
       allow read, update, delete: if isAdmin();
     }
     match /rt_key/{doc} {
       allow read, write: if isAdmin();
     }
     match /rt_settings/{doc} {
-      allow get: if rtSigned();
+      allow get: if true;
       allow list, write: if isAdmin();
     }
 
