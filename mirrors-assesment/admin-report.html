@@ -558,7 +558,7 @@
   /* ════════════════ عرض تقرير عميل ════════════════ */
   function openClient(uid) {
     var c = CLIENTS.filter(function (x) { return x.id === uid; })[0];
-    if (!c) { renderPicker(); return; }
+    if (!c) { ensurePicker(); return; }
 
     var data  = c.data || {};
     var meta  = data.meta || {};
@@ -620,7 +620,7 @@
         posColor: function (pos, key) { return RND().posColor(pos, key); },
         spectrumBar: function (sp) { return RND().spectrumBar(sp); },
         setHTML: setHTML,
-        onExit: function () { renderPicker(); }
+        onExit: function () { ensurePicker(); }
       });
     } catch (e) {
       setHTML('<div class="gatecard"><div class="ic">⚠️</div><h3>تعذّر عرض التقرير</h3>' +
@@ -659,7 +659,9 @@
     $('shell').style.display = 'block';
 
     $('btnBack').addEventListener('click', function () {
-      if ($('admBar').style.display !== 'none' && document.querySelector('.jr, .gatecard')) renderPicker();
+      // المفتوح من اللوحة بمعرّف عميل يرجع إلى اللوحة مباشرةً — لا داعي لقراءة الجميع
+      var fromPanel = !!new URLSearchParams(window.location.search).get('uid');
+      if (!fromPanel && $('admBar').style.display !== 'none' && document.querySelector('.jr, .gatecard')) ensurePicker();
       else window.location.href = PANEL_PATH;
     });
     $('btnPrint').addEventListener('click', function () { window.print(); });
@@ -672,20 +674,44 @@
       ? S.loadReleaseSettings({ force: true }).catch(function () { return null; })
       : Promise.resolve(null);
 
-    Promise.all([pSettings, db.collection(COLLECTION).get()])
+    /* توفير القراءات: لو جاء الرابط بمعرّف عميل (من اللوحة) نقرأ وثيقته وحدها
+       — قراءة واحدة بدل قراءة كلّ العملاء. القائمة الكاملة لا تُقرأ إلّا إن
+       طلبها الأدمن بالرجوع إلى المنتقي. */
+    var uid = new URLSearchParams(window.location.search).get('uid');
+    var pClients = uid
+      ? db.collection(COLLECTION).doc(uid).get().then(function (d) {
+          return d.exists ? [{ id: d.id, data: d.data() || {} }] : [];
+        })
+      : loadAllClients();
+
+    Promise.all([pSettings, pClients])
       .then(function (r) {
         SETTINGS = r[0];
-        CLIENTS = r[1].docs.map(function (d) { return { id: d.id, data: d.data() || {} }; });
-
-        var uid = new URLSearchParams(window.location.search).get('uid');
+        CLIENTS = r[1];
         if (uid) openClient(uid); else renderPicker();
       })
-      .catch(function (err) {
-        console.error('[ADMIN-REPORT] فشل التحميل:', err);
-        setHTML('<div class="gatecard"><div class="ic">⚠️</div><h3>تعذّر التحميل</h3>' +
-                '<p>' + esc(err && err.message || err) + '</p></div>');
-      });
+      .catch(showLoadError);
   });
+
+  var ALL_LOADED = false;
+  function loadAllClients() {
+    return db.collection(COLLECTION).get().then(function (snap) {
+      ALL_LOADED = true;
+      return snap.docs.map(function (d) { return { id: d.id, data: d.data() || {} }; });
+    });
+  }
+  function showLoadError(err) {
+    console.error('[ADMIN-REPORT] فشل التحميل:', err);
+    setHTML('<div class="gatecard"><div class="ic">⚠️</div><h3>تعذّر التحميل</h3>' +
+            '<p>' + esc(err && err.message || err) + '</p></div>');
+  }
+  // المنتقي يحتاج القائمة كاملة: نقرؤها مرّةً واحدة عند أوّل حاجة فقط
+  function ensurePicker() {
+    if (ALL_LOADED) { renderPicker(); return; }
+    setHTML('<div class="card centered"><div class="spinner"></div>' +
+            '<div class="saving">نحمّل قائمة العملاء…</div></div>');
+    loadAllClients().then(function (list) { CLIENTS = list; renderPicker(); }).catch(showLoadError);
+  }
 })();
 </script>
 </body>
