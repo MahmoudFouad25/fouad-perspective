@@ -1,0 +1,174 @@
+rules_version = '2';
+
+/* =====================================================================
+   قواعد Firestore — الملف الكامل بعد الدمج
+   ---------------------------------------------------------------------
+   يشمل:
+     1) منظومة يوم الاستقبال «إنت بتردّ على إيه؟»  → /sessions
+     2) نظام Reignite                              → /training
+     3) محادثات التليجرام والردود السريعة           → أدمن فقط
+     4) باقي مجموعات «منظور الفؤاد»                 → مفتوحة كما كانت
+     5) اختبار التعرّف                              → /rt_* (محمية)
+
+   ⚑ مهم: Firestore بيجمع القواعد بمنطق OR — أي match بيسمح بالوصول
+     بيغلب أي match تاني بيمنعه. فقاعدة الـ fallback القديمة
+     (allow read, write: if true) كانت هتلغي حماية /sessions بالكامل.
+     عشان كده اتشال الـ fallback المكرّر، واتحطّ استثناء صريح لـ sessions
+     في القاعدة الوحيدة الشاملة تحت.
+
+   ⚑ الإيميلات في isAdmin() لازم تبقى نفس اللي في DAY_ADMINS
+     في ملف day-config.js بالحرف.
+   ===================================================================== */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────────────────── دوال مشتركة ─────────────────────────
+    function isAdmin() {
+      return request.auth != null
+             && request.auth.token.email in [
+     'admin@fouad-academy.com'
+   ];
+    }
+
+    // ═══════════════ 1) يوم الاستقبال — /sessions ═══════════════
+    match /sessions/{sid} {
+
+      // حالة الجلسة عامة للقراءة: دي اللي شاشة العرض وموبايلات المشاركين
+      // بيتفرّجوا عليها. ومفيهاش ولا معلومة عن أي فرد.
+      allow read: if true;
+      allow write: if isAdmin();
+
+      match /participants/{slug} {
+        function ownerUid()  { return resource.data.get('uid', ''); }
+        function isOwner()   { return request.auth != null
+                               && (ownerUid() == '' || ownerUid() == request.auth.uid); }
+        function safeFields() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['answers','manual','lastSeenAt','needsMinuteAt',
+                           'needsMinuteHandled','uid','name']);
+        }
+
+        // الدخول: الاسم المحجوز مبيتقراش — الكتابة عليه بترفض، والواجهة
+        // بتجرّب اسم بلاحقة. يعني مفيش قراءة لبيانات حدّ تاني خالص.
+        allow create: if request.auth != null
+                      && request.resource.data.uid == request.auth.uid
+                      && request.resource.data.slug == slug;
+        allow read:   if isAdmin() || isOwner();
+        allow update: if isAdmin() || (isOwner() && safeFields());
+        allow delete: if isAdmin();
+      }
+
+      // ⚑ الصندوق: أي حد يكتب، والأدمن بس يقرا.
+      //    والحقول محصورة — فمستحيل تتسرّب هوية جوّه البطاقة.
+      match /thresholdCards/{cid} {
+        allow create: if request.auth != null
+                      && request.resource.data.keys()
+                         .hasOnly(['said','replied','hourBucket','flag','shown'])
+                      && request.resource.data.said is string
+                      && request.resource.data.said.size() < 4000
+                      && request.resource.data.replied is string
+                      && request.resource.data.replied.size() < 4000;
+        allow read, update, delete: if isAdmin();
+      }
+
+      // لو احتجنا نخزّن أي حاجة مشتقّة بعدين — الأدمن بس.
+      match /derived/{doc} {
+        allow read, write: if isAdmin();
+      }
+
+      // أي مجموعة فرعية تانية تحت الجلسة: مرفوضة افتراضيًا (مفيش match ليها).
+    }
+
+    // ═══════════════ 2) نظام Reignite — /training ═══════════════
+    match /training/{sessionId} {
+      // اللقاء التدريبي مفتوح أثناء التدريب
+      allow read, write: if true;
+
+      match /participants/{participantId} {
+        allow read, write: if true;
+        match /responses/{responseId} {
+          allow read, write: if true;
+        }
+      }
+
+      match /groups/{groupId} {
+        allow read, write: if true;
+      }
+
+      match /charters/{charterId} {
+        allow read, write: if true;
+      }
+    }
+
+    // ═══════════════ 5) اختبار التعرّف — /rt_* ═══════════════
+    function rtSigned() { return request.auth != null; }
+    function rtOwnId(rid) { return rtSigned() && rid.split('_')[0] == request.auth.uid; }
+
+    match /rt_links/{token} {
+      allow get: if rtSigned();
+      allow list, write: if isAdmin();
+      // الأسماء: لا تُقرأ إلا بعد حفظ كلمة العميل
+      match /private/{doc} {
+        allow get: if isAdmin() || (
+          rtSigned() && doc == 'names'
+          && exists(/databases/$(database)/documents/rt_responses/$(request.auth.uid + '_' + token))
+          && get(/databases/$(database)/documents/rt_responses/$(request.auth.uid + '_' + token)).data.get('ownWord', '') != ''
+        );
+        allow list, write: if isAdmin();
+      }
+    }
+    match /rt_envelopes/{letter} {
+      allow get: if rtSigned();
+      allow update: if isAdmin() || (
+        rtSigned()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['next'])
+        && request.resource.data.next == resource.data.next + 1
+      );
+      allow list, create, delete: if isAdmin();
+    }
+    match /rt_responses/{rid} {
+      allow get: if isAdmin() || rtOwnId(rid);
+      allow create: if rtOwnId(rid)
+        && request.resource.data.uid == request.auth.uid
+        && rid == request.auth.uid + '_' + request.resource.data.token
+        && exists(/databases/$(database)/documents/rt_links/$(request.resource.data.token))
+        && request.resource.data.letter == get(/databases/$(database)/documents/rt_links/$(request.resource.data.token)).data.letter;
+      allow update: if isAdmin() || (
+        rtOwnId(rid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.token == resource.data.token
+        && request.resource.data.letter == resource.data.letter
+      );
+      allow list, delete: if isAdmin();
+    }
+    match /rt_people/{rid} {
+      allow create: if rtOwnId(rid);
+      allow read, update, delete: if isAdmin();
+    }
+    match /rt_key/{doc} {
+      allow read, write: if isAdmin();
+    }
+    match /rt_settings/{doc} {
+      allow get: if rtSigned();
+      allow list, write: if isAdmin();
+    }
+
+    // ═══════════════ 3) + 4) باقي المشروع (منظور الفؤاد) ═══════════════
+    // محادثات التليجرام (بكل ما تحتها) والردود السريعة: للأدمن فقط.
+    // sessions مستثناة هنا عشان قواعدها فوق تفضل هي الحاكمة.
+    // كل باقي المجموعات مفتوحة مؤقتًا كما كانت — لا يتغير فيها شيء.
+    // rt_ (اختبار التعرّف) مستثناة هنا كمان، عشان قواعدها فوق هي الحاكمة.
+    match /{collection}/{doc=**} {
+      allow read, write: if (collection == 'sessions' || collection.matches('rt_.*'))
+                            ? false
+                            : ((collection != 'telegramChats'
+                                && collection != 'quickReplies')
+                               || isAdmin());
+    }
+
+    // ملاحظة: القاعدة اللي فوق بتغطّي كل مستندات المشروع (أي مجموعة أساسية
+    // وكل ما تحتها)، فمفيش داعي لـ match /{document=**} تاني —
+    // ووجوده كان بيفتح /sessions على مصراعيه.
+  }
+}
