@@ -97,6 +97,7 @@
       <h2 style="margin-top:0">استيراد البيانات (مرة واحدة)</h2>
       <p class="muted">ارفع ملف recognition-seed.json. الملف ده فيه المفتاح: مايترفعش على GitHub.</p>
       <div class="row"><input type="file" id="seedFile" accept=".json,application/json"><button class="btn" id="importBtn">استيراد</button></div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="textsOnly" checked> تحديث النصوص بس (البطاقات والأسماء والأسئلة) من غير ما ألمس الظروف — ده الصح بعد ما العملاء يبدأوا</label>
       <div id="importMsg" style="margin-top:8px"></div>
     </div>
   </section>
@@ -371,8 +372,15 @@
       var s; try { s = JSON.parse(txt); } catch (e) { throw new Error('الملف مش JSON صالح.'); }
       var errs = validate(s); if (errs.length) throw new Error(errs.join(' · '));
       return db.collection('rt_key').doc('main').get().then(function (d) {
-        if (d.exists && !confirm('البيانات اتستوردت قبل كده. الاستيراد تاني هيكتب فوق النصوص والأسماء، ويرجّع عدّاد الظروف للأول. متأكد؟')) throw new Error('اتلغى.');
-        if (d.exists && !confirm('تأكيد أخير: الاستيراد تاني ممكن يدّي عميل جديد ظرف اتاخد قبل كده. تكمّل؟')) throw new Error('اتلغى.');
+        var textsOnly = $('textsOnly').checked && d.exists;
+        if (textsOnly) {
+          var oldTokens = ((d.data() || {}).links || []).map(function (l) { return l.letter + ':' + l.token; }).sort().join(',');
+          var newTokens = s.links.map(function (l) { return l.letter + ':' + l.token; }).sort().join(',');
+          if (oldTokens !== newTokens) throw new Error('الروابط في الملف ده مختلفة عن الروابط الحالية، فتحديث النصوص بس مش هينفع. اتأكد إنك رافع النسخة الصح.');
+        } else {
+          if (d.exists && !confirm('البيانات اتستوردت قبل كده. الاستيراد الكامل هيكتب فوق النصوص والأسماء، ويرجّع عدّاد الظروف للأول. متأكد؟')) throw new Error('اتلغى.');
+          if (d.exists && !confirm('تأكيد أخير: الاستيراد الكامل ممكن يدّي عميل جديد ظرف اتاخد قبل كده. تكمّل؟')) throw new Error('اتلغى.');
+        }
         var b = db.batch();
         s.links.forEach(function (l) {
           var L = l.letter, letters = [L].concat(s.companions[L] || []), cards = {};
@@ -382,7 +390,7 @@
             exploration: (s.exploration_general || []).concat(s.exploration_by_letter[L] || [])
           });
           b.set(db.collection('rt_links').doc(l.token).collection('private').doc('names'), { names: s.names[L] });
-          b.set(db.collection('rt_envelopes').doc(L), { list: s.envelopes[L] || [], next: 0 });
+          if (!textsOnly) b.set(db.collection('rt_envelopes').doc(L), { list: s.envelopes[L] || [], next: 0 });
         });
         b.set(db.collection('rt_key').doc('main'), { key: s.key, links: s.links, importedAt: new Date().toISOString() });
         return b.commit();
