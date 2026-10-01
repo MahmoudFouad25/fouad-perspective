@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>منظور الفؤاد</title>
+  <meta name="description" content="تطبيق منظور الفؤاد — رحلاتك التحويلية في مكان واحد">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="منظور الفؤاد">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+
+  <!-- شاشة البداية: تظهر أثناء فحص الجلسة -->
+  <div class="splash" id="splash">
+    <img src="./icons/icon-192.png" alt="">
+    <p id="splashText">لحظة…</p>
+  </div>
+
+  <main class="auth-screen">
+    <div class="auth-inner">
+      <div class="brand">
+        <img class="brand-mark" src="./icons/icon-192.png" alt="منظور الفؤاد">
+        <h1>منظور الفؤاد</h1>
+        <p>أهلًا بك بين الرحماء</p>
+      </div>
+
+      <form id="loginForm" novalidate>
+        <div class="form-error hidden" id="formError">
+          <i class="fas fa-circle-exclamation" style="margin-top:3px"></i>
+          <span id="formErrorText"></span>
+        </div>
+
+        <div class="field">
+          <label for="email">البريد الإلكتروني</label>
+          <div class="input-wrap">
+            <i class="fas fa-envelope ico"></i>
+            <input type="email" id="email" dir="ltr" autocomplete="username" inputmode="email"
+                   autocapitalize="off" spellcheck="false" placeholder="name@example.com">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="password">كلمة المرور</label>
+          <div class="input-wrap">
+            <i class="fas fa-key ico"></i>
+            <input type="password" id="password" dir="ltr" class="with-toggle"
+                   autocomplete="current-password" placeholder="••••••••">
+            <button type="button" class="toggle" id="togglePass" aria-label="إظهار كلمة المرور">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-gold btn-block" id="loginBtn" style="margin-top:8px">
+          <span>دخول</span>
+        </button>
+      </form>
+
+      <div class="auth-foot">
+        نسيت كلمة المرور أو ليس لديك حساب؟
+        <button type="button" id="contactBtn">تواصل معنا</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script src="./core.js"></script>
+
+  <script>
+  (function () {
+    'use strict';
+    const { auth, db, PATHS, Session, isBlocked, isAdmin, decodeTempPassword, openExternal, SUPPORT_WHATSAPP } = FP;
+
+    const $ = id => document.getElementById(id);
+    const splash = $('splash');
+
+    // ── واجهة ──
+    function hideSplash() {
+      splash.classList.add('fade');
+      setTimeout(() => splash.classList.add('hidden'), 400);
+    }
+    function showSplash(text) {
+      $('splashText').textContent = text || 'لحظة…';
+      splash.classList.remove('hidden', 'fade');
+    }
+    function showError(msg) {
+      $('formErrorText').textContent = msg;
+      $('formError').classList.remove('hidden');
+    }
+    function clearError() { $('formError').classList.add('hidden'); }
+
+    function setLoading(on) {
+      const btn = $('loginBtn');
+      btn.disabled = on;
+      btn.innerHTML = on ? '<span class="spinner"></span><span>جاري الدخول…</span>' : '<span>دخول</span>';
+    }
+
+    function go(email, userData) {
+      location.replace(isAdmin(email, userData) ? PATHS.admin : PATHS.home);
+    }
+
+    $('togglePass').addEventListener('click', () => {
+      const inp = $('password');
+      const show = inp.type === 'password';
+      inp.type = show ? 'text' : 'password';
+      $('togglePass').innerHTML = `<i class="fas fa-eye${show ? '-slash' : ''}"></i>`;
+    });
+
+    $('contactBtn').addEventListener('click', () => openExternal(SUPPORT_WHATSAPP));
+
+    // ═══════════════════════════════════════════════
+    // الدخول بالبريد وكلمة المرور — نفس منطق الموقع
+    // ═══════════════════════════════════════════════
+    async function login(email, password) {
+      const q = await db.collection('users').where('personalInfo.email', '==', email).limit(1).get();
+      if (q.empty) throw new Error('البيانات غير صحيحة… حاول مرة أخرى');
+
+      const userDoc = q.docs[0];
+      const userData = userDoc.data();
+      const userId = userDoc.id;
+
+      if (isBlocked(userData)) throw new Error('روحك محجوبة عن الدخول… تواصل مع الحكماء');
+
+      let authMethod = null;
+
+      // المحاولة 1: Firebase Auth مباشرة
+      try {
+        await auth.signInWithEmailAndPassword(email, password);
+        authMethod = 'direct-auth';
+      } catch (authError) {
+        // المحاولة 2: كلمة المرور المخزّنة في Firestore
+        const temp = userData.auth?.tempPassword;
+        if (temp && password === decodeTempPassword(temp)) {
+          try {
+            await auth.createUserWithEmailAndPassword(email, password);
+            authMethod = 'created-new-auth';
+          } catch (createError) {
+            if (createError.code === 'auth/too-many-requests') {
+              throw new Error('تم حظر الدخول مؤقتًا بسبب المحاولات الكثيرة — انتظر ٥ دقائق وحاول مرة أخرى');
+            } else if (createError.code === 'auth/network-request-failed') {
+              throw new Error('مشكلة في الاتصال بالإنترنت — تحقق من اتصالك');
+            } else if (createError.code === 'auth/email-already-in-use') {
+              authMethod = 'firestore-only';
+            } else {
+              authMethod = 'firestore-fallback';
+            }
+          }
+        }
+
+        if (!authMethod) {
+          if (authError.code === 'auth/too-many-requests') {
+            throw new Error('تم حظر الدخول مؤقتًا — انتظر ٥ دقائق وحاول مرة أخرى');
+          }
+          if (authError.code === 'auth/network-request-failed') {
+            throw new Error('مشكلة في الاتصال بالإنترنت — تحقق من اتصالك');
+          }
+          throw new Error('الطريق مغلق… تأكد من مفتاحك');
+        }
+      }
+
+      await db.collection('users').doc(userId).update({
+        'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+        'auth.loginCount': firebase.firestore.FieldValue.increment(1),
+        'auth.lastAuthMethod': authMethod,
+        'auth.lastLoginSource': 'app'
+      }).catch(() => {});
+
+      Session.save(userId, email, userData);
+      return { email, userData };
+    }
+
+    $('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearError();
+
+      const email = $('email').value.trim().toLowerCase();
+      const password = $('password').value;
+      if (!email || !password) { showError('املأ كل الحقول يا باحث'); return; }
+
+      setLoading(true);
+      try {
+        const r = await login(email, password);
+        showSplash('أهلًا بك…');
+        go(r.email, r.userData);
+      } catch (err) {
+        console.error(err);
+        showError(err.message || 'حدث خطأ في فتح البوابة');
+        setLoading(false);
+      }
+    });
+
+    // ═══════════════════════════════════════════════
+    // الدخول التلقائي من رابط تليجرام (?uid=&token=)
+    // ═══════════════════════════════════════════════
+    async function telegramAutoLogin(userId, token) {
+      showSplash('جاري تسجيل دخولك…');
+      const snap = await db.collection('users').doc(userId).get();
+      if (!snap.exists) throw new Error('المستخدم غير موجود');
+      const userData = snap.data();
+
+      if (!userData.auth?.telegramAutoLoginToken || userData.auth.telegramAutoLoginToken !== token) {
+        throw new Error('رابط غير صالح أو منتهي الصلاحية');
+      }
+      if (isBlocked(userData)) throw new Error('الحساب محجوب — تواصل مع الدعم');
+
+      const email = userData.personalInfo?.email;
+      const temp = userData.auth?.tempPassword;
+      if (!email || !temp) throw new Error('بيانات تسجيل الدخول غير مكتملة');
+      const password = decodeTempPassword(temp);
+
+      let ok = false;
+      try { await auth.signInWithEmailAndPassword(email, password); ok = true; }
+      catch (e) {
+        try { await auth.createUserWithEmailAndPassword(email, password); ok = true; } catch (e2) {}
+      }
+      if (!ok) throw new Error('فشل في تسجيل الدخول');
+
+      await db.collection('users').doc(userId).update({
+        'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
+        'auth.loginCount': firebase.firestore.FieldValue.increment(1),
+        'auth.lastLoginSource': 'telegram-auto-app'
+      }).catch(() => {});
+
+      Session.save(userId, email, userData);
+      go(email, userData);
+    }
+
+    // ═══════════════════════════════════════════════
+    // فحص الجلسة عند الفتح: الداخل قبل كده يروح لرحلاته مباشرة
+    // ═══════════════════════════════════════════════
+    function waitForAuth() {
+      return new Promise(resolve => {
+        let done = false;
+        const unsub = auth.onAuthStateChanged(u => { if (!done) { done = true; unsub(); resolve(u); } });
+        setTimeout(() => { if (!done) { done = true; unsub(); resolve(auth.currentUser); } }, 2500);
+      });
+    }
+
+    async function resumeSession() {
+      const user = await waitForAuth();
+      const existingId = Session.userId();
+
+      if (existingId) {
+        const snap = await db.collection('users').doc(existingId).get();
+        if (!snap.exists) { await Session.clear(); return false; }
+        const userData = snap.data();
+        if (isBlocked(userData)) {
+          await Session.clear();
+          showError('روحك محجوبة عن الدخول… تواصل مع الحكماء');
+          return false;
+        }
+        const email = userData.personalInfo?.email || user?.email || '';
+        Session.save(existingId, email, userData); // تجديد الجلسة
+        go(email, userData);
+        return true;
+      }
+
+      if (user && user.email) {
+        const q = await db.collection('users').where('personalInfo.email', '==', user.email.toLowerCase()).limit(1).get();
+        if (!q.empty) {
+          const d = q.docs[0];
+          const userData = d.data();
+          if (isBlocked(userData)) { await Session.clear(); return false; }
+          Session.save(d.id, user.email, userData);
+          go(user.email, userData);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    (async function start() {
+      const params = new URLSearchParams(location.search);
+      const uid = params.get('uid');
+      const token = params.get('token');
+
+      try {
+        if (uid && token) {
+          await telegramAutoLogin(uid, token);
+          return;
+        }
+        const resumed = await resumeSession();
+        if (!resumed) hideSplash();
+      } catch (err) {
+        console.error(err);
+        hideSplash();
+        if (uid && token) history.replaceState(null, '', location.pathname);
+        showError(err.message || 'تعذّر فحص الجلسة — سجّل دخولك');
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>
