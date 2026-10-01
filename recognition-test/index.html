@@ -195,6 +195,8 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var db = window.db;
+  // شبكات الموبايل وبعض المتصفّحات جوّه التطبيقات بتقطع الاتصال المفتوح؛ ده بيخلّي Firestore يكتشف ده ويتحوّل لطريقة أبسط.
+  try { if (db && db.settings) db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) { console.warn('[settings]', e); }
   var TOKEN = new URLSearchParams(location.search).get('t') || '';
   var ORDER = ['1', '2', '3', '4', '5a', '5b', '6', '7'];
   var POS_LABEL = ['الوصف الأول', 'الوصف الثاني', 'الوصف الثالث'];
@@ -251,7 +253,10 @@
       busy(btn, true); $(errEl).textContent = '';
       Promise.resolve().then(fn).catch(function (e) {
         console.error(e); busy(btn, false);
-        $(errEl).textContent = 'حصلت مشكلة في الحفظ. اتأكد من النت وجرّب تاني.';
+        $(errEl).textContent = 'حصلت مشكلة في الحفظ. جرّب تضغط تاني بعد ثواني. ولو فضلت، ابعت صورة الرسالة دي لمحمود.';
+        var code = document.createElement('div'); code.className = 'muted'; code.style.fontSize = '13px';
+        code.textContent = 'كود للمتابعة: ' + ((e && (e.code || e.message)) || 'unknown');
+        $(errEl).appendChild(code);
       });
     });
   }
@@ -328,31 +333,50 @@
     guard($('b1'), 'e1', start);
   }
   function start() {
-    var user = { uid: CID }, t1in = now();
+    var t1in = now();
     var envRef = db.collection('rt_envelopes').doc(LINK.letter);
     var pplRef = db.collection('rt_people').doc(RID);
-    return db.runTransaction(function (tx) {
-      return tx.get(envRef).then(function (ed) {
-        var e = ed.data() || { list: [], next: 0 };
-        var next = e.next || 0, env, order, extra = false;
-        if (next < (e.list || []).length) { env = e.list[next].envelope; order = e.list[next].order.slice(); }
-        else { extra = true; env = null; order = shuffle(LINK.cardLetters); }
-        tx.update(envRef, { next: next + 1 });
-        var doc = {
-          uid: user.uid, token: TOKEN, letter: LINK.letter, envelope: env, extraEnvelope: extra,
-          cardOrder: order, startedAt: now(), finishedAt: null, lastScreen: '2', consent: true,
-          screens: { '1': { 'in': t1in, out: now() } }, cardOpens: [], secondExposure: false,
-          ownCardReply: { similar: '', notSimilar: '' }, wordCounts: {}
-        };
-        tx.set(REF, doc);
-        tx.set(pplRef, {
-          uid: user.uid, token: TOKEN, letter: LINK.letter,
-          name: $('inName').value.trim(), contact: $('inContact').value.trim(),
-          createdAt: now(), linkedTo: ''
+    var envErr = null;
+    // ١) الظرف: زيادة العدّاد ثم قراءته. لو فشل لأي سبب، العميل مايتوقفش:
+    //    ياخد ترتيب عشوائي ويتسجّل إن الظرف إضافي.
+    var pickEnvelope = withRetry(function () {
+      return envRef.update({ next: firebase.firestore.FieldValue.increment(1) })
+        .then(function () { return envRef.get(); });
+    }, 2).then(function (ed) {
+      var e = ed.data() || {}, idx = (e.next || 1) - 1, list = e.list || [];
+      if (idx >= 0 && idx < list.length) return { env: list[idx].envelope, order: list[idx].order.slice(), extra: false };
+      return null;
+    }).catch(function (e) { envErr = (e && (e.code || e.message)) || 'unknown'; console.error('[envelope]', e); return null; });
+
+    return pickEnvelope.then(function (pick) {
+      if (!pick) pick = { env: null, order: shuffle(LINK.cardLetters), extra: true };
+      var doc = {
+        uid: CID, token: TOKEN, letter: LINK.letter, envelope: pick.env, extraEnvelope: pick.extra,
+        cardOrder: pick.order, startedAt: now(), finishedAt: null, lastScreen: '2', consent: true,
+        screens: { '1': { 'in': t1in, out: now() } }, cardOpens: [], secondExposure: false,
+        ownCardReply: { similar: '', notSimilar: '' }, wordCounts: {}
+      };
+      if (envErr) doc.envelopeError = String(envErr).slice(0, 200);
+      // ٢) الإجابة أولًا (لازم تنجح)، ثم بيانات الاسم.
+      return withRetry(function () { return REF.set(doc); }, 3).then(function () {
+        return withRetry(function () {
+          return pplRef.set({
+            uid: CID, token: TOKEN, letter: LINK.letter,
+            name: $('inName').value.trim().slice(0, 190), contact: $('inContact').value.trim().slice(0, 190),
+            createdAt: now(), linkedTo: ''
+          });
+        }, 3).catch(function (e) {
+          console.error('[people]', e);
+          return REF.update({ peopleError: String(e.code || e.message).slice(0, 200), nameFallback: $('inName').value.trim().slice(0, 190), contactFallback: $('inContact').value.trim().slice(0, 190) }).catch(function () {});
         });
-        return doc;
-      });
-    }).then(function (doc) { R = doc; go2(); });
+      }).then(function () { R = doc; go2(); });
+    });
+  }
+  function withRetry(fn, times) {
+    return fn().catch(function (e) {
+      if (times <= 1 || (e && e.code === 'permission-denied')) throw e;
+      return new Promise(function (r) { setTimeout(r, 800); }).then(function () { return withRetry(fn, times - 1); });
+    });
   }
 
   /* ---------- ٢ ---------- */
