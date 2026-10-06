@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>الميزان · فحص قبل اليوم</title>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/base.css?v=1">
+<style>
+  body{font-size:16px}
+  .w{max-width:720px;margin:0 auto;padding:22px 18px 60px}
+  .row{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:8px 0}
+  .ic{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;background:#bbb;font-size:.85rem}
+  .ok .ic{background:var(--ok)} .bad .ic{background:var(--danger)} .warn .ic{background:var(--gold)} .run .ic{animation:pulse 1s infinite}
+  .t b{display:block} .t small{color:var(--ink-2);display:block;line-height:1.7}
+  .fix{color:var(--danger)}
+  button,.btn{border:none;border-radius:12px;padding:11px 16px;background:var(--ink);color:#fff;font:inherit;margin:6px 0}
+  input{border:1px solid var(--line);border-radius:10px;padding:10px;width:100%;margin:4px 0;font:inherit}
+  code{background:#f1e9dc;border-radius:6px;padding:1px 6px;direction:ltr;display:inline-block}
+  textarea{width:100%;min-height:80px;border:1px solid var(--line);border-radius:10px;padding:8px;direction:ltr;font-size:.75rem}
+  .box{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin:18px 0}
+</style>
+</head>
+<body><div class="w">
+  <div class="eyebrow">الميزان</div>
+  <h2 style="margin:0">فحص قبل اليوم</h2>
+  <p class="sub">افتح الصفحة دي قبل اليوم بيوم <b>على موبايل</b> (ويُفضل كمان على اللابتوب). كل سطر لازم يبقى أخضر. ولو فيه أحمر، الحل مكتوب تحته.</p>
+  <p class="meta">الجلسة: <code id="sid"></code></p>
+  <div id="list"></div>
+  <button id="again">افحص تاني</button>
+
+  <div class="box">
+    <b>فحص الأدمن (من اللابتوب اللي هيمسك اللوحة)</b>
+    <p class="meta">بيتأكد إن الإيميل ده يقدر يكتب في الجلسة ويقرا الحضور.</p>
+    <input id="em" type="email" placeholder="الإيميل"><input id="pw" type="password" placeholder="كلمة السر">
+    <button id="adm">افحص الأدمن</button>
+    <div id="admList"></div>
+  </div>
+
+  <div class="box">
+    <b>الروابط</b>
+    <p class="meta">المشارك (ده اللي في الـQR):<br><code id="lLive"></code></p>
+    <p class="meta">شاشة العرض:<br><code id="lStage"></code></p>
+    <p class="meta">لوحة التحكم:<br><code id="lCon"></code></p>
+  </div>
+
+  <div class="box">
+    <b>كود صفحتي (للميسّر)</b>
+    <p class="meta">لو عملت التمارين على موبايلك من صفحة المشارك، انسخ الكود ده وحطه في اللوحة (الإعدادات ← «استعمل صفحتي»)، عشان صفحتك إنت تتعرض في «نقرا صفحتي سوا».</p>
+    <textarea id="code" readonly></textarea>
+    <button id="copy">انسخ</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="../assets/config.js?v=1"></script>
+<script src="../assets/core.js?v=1"></script>
+<script src="../assets/content.js?v=1"></script>
+<script>
+(function () {
+  var SID = MZ.sid(), esc = MZ.esc;
+  document.getElementById("sid").textContent = SID;
+  var base = location.href.split("?")[0].replace(/\/check\/(index\.html)?$/, "/");
+  document.getElementById("lLive").textContent = base + "live/?s=" + SID;
+  document.getElementById("lStage").textContent = base + "stage/?s=" + SID;
+  document.getElementById("lCon").textContent = base + "console/?s=" + SID;
+
+  function row(host, title) {
+    var el = document.createElement("div"); el.className = "row run";
+    el.innerHTML = '<span class="ic">…</span><span class="t"><b>' + esc(title) + "</b><small></small></span>";
+    host.appendChild(el);
+    return function (state, msg, fix) {
+      el.className = "row " + state;
+      el.querySelector(".ic").textContent = state === "ok" ? "✓" : state === "warn" ? "!" : "✕";
+      el.querySelector("small").innerHTML = esc(msg || "") + (fix ? '<br><span class="fix">الحل: ' + esc(fix) + "</span>" : "");
+    };
+  }
+  function timeout(p, ms) { return Promise.race([p, new Promise(function (_, r) { setTimeout(function () { r({ code: "mz/timeout" }); }, ms); })]); }
+
+  function run() {
+    var L = document.getElementById("list"); L.innerHTML = "";
+    var r1 = row(L, "مكتبة فايربيز اتحمّلت");
+    if (!MZ.hasFb()) { r1("bad", MZ.errText({ code: "mz/no-sdk" }), "جرّب شبكة تانية. ولو مكتبة جوجل مقفولة في المكان، اليوم هيمشي «مع الشاشة» من اللابتوب (تشغيل محلي)."); return; }
+    r1("ok", "تمام");
+    var r2 = row(L, "التخزين على الموبايل");
+    MZ.store.available ? r2("ok", "تمام — الإجابات الشخصية هتتحفظ على الجهاز") : r2("warn", "المتصفح ده مقفّل التخزين. الصفحة هتشتغل، بس لو اتقفلت الإجابات هتضيع.", "افتح الرابط في كروم أو سفاري مباشرة، مش من جوّه واتساب/فيسبوك.");
+    var r3 = row(L, "المزامنة على نفس الجهاز (اللوحة ← الشاشة)");
+    "BroadcastChannel" in window ? r3("ok", "تمام") : r3("warn", "المتصفح قديم. الشاشة هتسمع اللوحة عن طريق التخزين بدل كده.", "استعمل كروم على اللابتوب.");
+    var r4 = row(L, "الدخول المجهول (للمشاركين)");
+    var t0 = Date.now(), uid = null;
+    timeout(MZ.signInAnon(15000), 16000).then(function (u) {
+      uid = u.uid; r4("ok", "تمام — " + Math.round((Date.now() - t0) / 100) / 10 + " ثانية");
+      var r5 = row(L, "قراية مستند الجلسة");
+      return timeout(MZ.sRef(SID).get({ source: "server" }), 12000).then(function (d) {
+        r5(d.exists ? "ok" : "warn", d.exists ? "تمام — الجلسة موجودة والشاشة الحالية: " + (mzState(d.data().state).label || "") : "الجلسة لسه ما اتعملتش. ده عادي: هتتعمل لوحدها أول ما الأدمن يفتح اللوحة. والموبايلات مش بتستناها.");
+      }).catch(function (e) { r5("bad", MZ.errText(e), e.code === "permission-denied" ? "انشر ملف mizan/firestore.rules (ادمجه مع قواعد المشروع)." : "اتأكد من النت."); });
+    }).then(function () {
+      if (!uid) return;
+      var r6 = row(L, "المشارك يقدر يسجل نفسه");
+      var ref = MZ.pRef(SID, uid);
+      return timeout(ref.set({ check: Date.now() }, { merge: true }), 12000).then(function () { return ref.delete(); })
+        .then(function () { r6("ok", "تمام"); })
+        .catch(function (e) { r6("bad", MZ.errText(e), "انشر ملف mizan/firestore.rules."); });
+    }).then(function () {
+      if (!uid) return;
+      var r7 = row(L, "التصويت المجهول بيوصل");
+      var ref = MZ.vRef(SID, uid);
+      return timeout(ref.set({ check: Date.now() }, { merge: true }), 12000).then(function () { return ref.delete(); })
+        .then(function () { r7("ok", "تمام"); })
+        .catch(function (e) { r7("bad", MZ.errText(e), "انشر ملف mizan/firestore.rules."); });
+    }).then(function () {
+      var r8 = row(L, "الأعداد المجمّعة (شاشة العرض)");
+      return timeout(MZ.aggRef(SID).get(), 12000).then(function () { r8("ok", "تمام"); })
+        .catch(function (e) { r8("bad", MZ.errText(e), "انشر ملف mizan/firestore.rules."); });
+    }).catch(function (e) {
+      r4("bad", MZ.errText(e), e.code === "auth/operation-not-allowed" || e.code === "auth/admin-restricted-operation"
+        ? "في Firebase Console ← Authentication ← Sign-in method: فعّل Anonymous."
+        : "جرّب شبكة تانية (بيانات الموبايل بدل الواي فاي). ولو فضل أحمر، اليوم هيمشي «مع الشاشة».");
+    });
+  }
+  run();
+  document.getElementById("again").onclick = run;
+
+  document.getElementById("adm").onclick = function () {
+    var L = document.getElementById("admList"); L.innerHTML = "";
+    var em = document.getElementById("em").value.trim().toLowerCase(), pw = document.getElementById("pw").value;
+    var a1 = row(L, "الإيميل في قايمة الأدمن");
+    if (MZ_ADMINS.indexOf(em) < 0) { a1("bad", MZ.errText({ code: "mz/not-admin" }), "ضيف الإيميل في mizan/assets/config.js وفي mizan/firestore.rules بنفس الحروف."); return; }
+    a1("ok", "تمام");
+    var a2 = row(L, "دخول الأدمن");
+    MZ.auth.signInWithEmailAndPassword(em, pw).then(function () {
+      a2("ok", "تمام");
+      var a3 = row(L, "الأدمن يكتب في الجلسة");
+      return MZ.sRef(SID).set({ checkedAt: Date.now() }, { merge: true }).then(function () { a3("ok", "تمام"); })
+        .catch(function (e) { a3("bad", MZ.errText(e), "الإيميل لازم يبقى في firestore.rules، والقواعد تكون منشورة."); });
+    }).then(function () {
+      var a4 = row(L, "الأدمن يقرا الحضور");
+      return MZ.pCol(SID).limit(1).get().then(function () { a4("ok", "تمام"); }).catch(function (e) { a4("bad", MZ.errText(e), "انشر ملف القواعد."); });
+    }).then(function () { return MZ.auth.signOut(); })
+      .catch(function (e) { a2("bad", MZ.errText(e), e.code === "auth/operation-not-allowed" ? "فعّل Email/Password في Firebase Authentication." : "اتأكد من الإيميل وكلمة السر، أو اعمل الحساب في Firebase Authentication ← Users."); });
+  };
+
+  /* كود صفحة الميسّر */
+  var me = MZ.store.getJ("mz:" + SID + ":me", {}), pick = {};
+  ["name", "sit1", "sit2", "sit3", "k1", "k2", "k3", "k4", "felt", "override", "B1", "B2", "B3", "V1", "V2", "V3", "H1", "H2", "H3", "cyB", "cyV", "cyH"].forEach(function (k) { if (me[k] !== undefined) pick[k] = me[k]; });
+  var code = Object.keys(pick).length > 2 ? btoa(unescape(encodeURIComponent(JSON.stringify(pick)))) : "";
+  document.getElementById("code").value = code || "مفيش بيانات على الموبايل ده لسه. افتح صفحة المشارك (نفس الجلسة) واعمل التمارين الأول.";
+  document.getElementById("copy").onclick = function () { var t = document.getElementById("code"); t.select(); try { document.execCommand("copy"); } catch (e) {} };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>الميزان · شاشة العرض</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/base.css?v=1">
+<link rel="stylesheet" href="stage.css?v=1">
+</head>
+<body>
+<div class="stage"><div class="in" id="in"><div class="idle s-big">الميزان<small>بنوصل…</small></div></div></div>
+<div class="code"><span class="no" id="no">–</span><span id="joined"></span></div>
+<div class="status" id="st"></div>
+<div class="blackout" id="black"></div>
+<button class="fs" id="fs">ملء الشاشة</button>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="../assets/config.js?v=1"></script>
+<script src="../assets/core.js?v=1"></script>
+<script src="../assets/content.js?v=1"></script>
+<script src="../assets/mizani.js?v=1"></script>
+<script src="../assets/render.js?v=1"></script>
+<script>
+/* شاشة العرض: بتقرا مستند الجلسة (عام) + الأعداد المجمّعة.
+   ومن نفس اللابتوب، بتسمع لوحة التحكم مباشرة — فلو النت وقع، الشاشة لسه شغالة. */
+(function () {
+  var SID = MZ.sid();
+  var $in = document.getElementById("in"), $no = document.getElementById("no"), $st = document.getElementById("st"),
+      $joined = document.getElementById("joined"), $black = document.getElementById("black");
+  var remote = null, local = null, agg = {}, lastKey = "";
+  var bus = MZ.localBus(SID);
+  if (MZ.qs("theme") === "light") document.body.classList.add("light");
+
+  function pick() {                 /* الأحدث يكسب: اللوحة على الجهاز ده أو السيرفر */
+    if (remote && local) return (local.rev || 0) > (remote.rev || 0) ? local : remote;
+    return remote || local;
+  }
+  function joinUrl() {
+    var u = location.href.split("?")[0].replace(/\/stage\/(index\.html)?$/, "/live/");
+    return u + "?s=" + encodeURIComponent(SID);
+  }
+
+  function draw() {
+    var S = pick();
+    if (!S || !S.state) {
+      var url = joinUrl();
+      $in.innerHTML = MZR.screen(MZ_STATES[0], 0, { S: S || {}, agg: agg });
+      putQR(url); $no.textContent = MZ.ar(1); return;
+    }
+    document.body.classList.toggle("light", S.theme === "light" || MZ.qs("theme") === "light");
+    $black.classList.toggle("on", !!S.black);
+    var st = mzState(S.state), idx = mzIndex(S.state);
+    $no.textContent = MZ.ar(idx + 1);
+    var aggKey = JSON.stringify((st.items || []).filter(function (i) { return i.k === "bars" || i.k === "hist" || i.k === "qr"; }).map(function (i) { return agg.counts && agg.counts[i.key]; }).concat([agg.n]));
+    var circ = (st.items || []).some(function (i) { return i.k === "circles"; }) ? JSON.stringify([S.groups, S.roster]) : "";
+    var key = [S.state, S.step, S.stepAt, S.theme, S.breakMsg, aggKey, circ, JSON.stringify(S.demo || "")].join("|");
+    if (key === lastKey) return;
+    lastKey = key;
+    $in.innerHTML = MZR.screen(st, S.step || 0, { S: S, agg: agg, stepAt: S.stepAt });
+    if (document.getElementById("qrbox")) putQR(joinUrl());
+  }
+  function putQR(url) {
+    var box = document.getElementById("qrbox"), u = document.getElementById("qrurl");
+    if (u) u.textContent = url;
+    if (!box) return;
+    box.innerHTML = "";
+    try { new QRCode(box, { text: url, width: 512, height: 512, correctLevel: QRCode.CorrectLevel.M }); }
+    catch (e) { box.innerHTML = '<div style="color:#000;padding:1em;direction:ltr;font-size:1.2em;max-width:12em;word-break:break-all">' + MZ.esc(url) + "</div>"; }
+  }
+  setInterval(function () { MZR.tickTimers($in); }, 500);
+
+  bus.on(function (d) { if (d && d.S) { local = d.S; draw(); } if (d && d.agg) { agg = d.agg; lastKey = ""; draw(); } });
+  var l0 = bus.last(); if (l0 && l0.S) local = l0.S;
+
+  function status(t) { $st.textContent = t; }
+  if (MZ.hasFb()) {
+    /* القراءة من غير دخول (القواعد بتسمح بقراءة مستند الجلسة للكل).
+       وبنحاول دخول مجهول بس عشان لو القواعد عندك أضيق. */
+    MZ.signInAnon(8000).catch(function () {});
+    MZ.watchDoc(MZ.sRef(SID), function (d, server) { remote = d; status(server ? "" : "مش متصل بالسيرفر · بيعرض آخر حاجة وصلت"); draw(); },
+      function (e) { status(MZ.errText(e)); });
+    MZ.watchDoc(MZ.aggRef(SID), function (d) { agg = d || {}; $joined.textContent = agg.n ? "وصل " + MZ.ar(agg.n) : ""; lastKey = ""; draw(); }, function () {});
+  } else status("مكتبة الاتصال ما اتحمّلتش · الشاشة بتسمع لوحة التحكم على نفس الجهاز بس");
+  draw();
+
+  document.getElementById("fs").onclick = function () { try { document.documentElement.requestFullscreen(); } catch (e) {} };
+  document.addEventListener("keydown", function (e) { if (e.key === "f") document.getElementById("fs").click(); });
+})();
+</script>
+</body>
+</html>
