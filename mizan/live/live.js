@@ -186,11 +186,12 @@
     var stepsInfo = mzSteps(st);
     var at = st.phoneAt === undefined ? 0 : Math.min(st.phoneAt, stepsInfo.steps.length - 1);
     var showPhone = c.manual || c.step >= at;
-    var ph = showPhone ? (st.phone || { t: "listen" }) : { t: "listen" };
+    var ph = showPhone ? (st.phone || { t: "listen" }) : { t: "listen" };   /* قبل وقت التفاعل: نسخة الشاشة */
     $ses.textContent = (MZ_SESSIONS[st.ses] || "الميزان") + (c.manual ? " · شاشة " + ar(mzIndex(st.id) + 1) : "");
     if (!c.manual && !c.notStarted) me.lastIdx = mzIndex(st.id);
     /* ما نعيدش الرسم لو مفيش تغيير حقيقي — عشان اللي بيكتبه ما يضيعش */
     var dyn = (ph.t === "circle" || ph.t === "rafiq" || ph.t === "break") ? JSON.stringify([session && session.groups && session.groups[uid], session && session.pairs && session.pairs[uid], session && session.roster && Object.keys(session.roster).length, session && session.breakMsg]) : "";
+    if (ph.t === "listen") dyn += "|" + (c.manual ? 999 : c.step) + "|" + mirrorOff() + "|" + JSON.stringify((session && session.demo) || "");
     var key = st.id + "|" + ph.t + "|" + (ph.key || "") + "|" + dyn + "|" + (c.notStarted ? "ns" : "");
     if (!force && key === lastViewKey) return;
     lastViewKey = key;
@@ -200,6 +201,12 @@
     $main.innerHTML = "";
     $main.onclick = null; $main.oninput = null;     // ما نسيبش handlers من شاشة قديمة
     V(ph, st, c);
+    /* في أي شاشة فيها تفاعل: زرار يوري اللي على الشاشة الكبيرة */
+    if (ph.t !== "listen" && ph.t !== "break" && ph.t !== "after" && !c.notStarted && !st.quiet && (st.items || []).length) {
+      var pb = document.createElement("button"); pb.className = "peek-btn"; pb.textContent = "📺 وريني اللي على الشاشة الكبيرة";
+      pb.onclick = function () { openSheet('<div class="mir">' + mirrorHtml(st, c.manual ? 999 : c.step) + '</div><button class="btn ghost" data-h="close">رجوع</button>'); };
+      $main.appendChild(pb);
+    }
   }
 
   function html(h) { $main.innerHTML = h; }
@@ -207,7 +214,37 @@
   /* ───────────── الشاشات ───────────── */
   var VIEWS = {};
 
+  /* ───── نسخة الشاشة الكبيرة على الموبايل ─────
+     عشان اللي قاعد بعيد يقرا، واللي عايز يحتفظ بشريحة يحفظها. */
+  function mirrorOff() { return !!(session && session.noMirror); }
+  function mirrorHtml(st, step) {
+    var info = mzSteps(st), last = Math.min(step, info.steps.length - 1), h = "", noted = false;
+    var ctx = { S: session || {}, agg: {}, step: last, phone: true };
+    function one(it) {
+      if (it.k === "timer" || it.k === "qr") return "";
+      if (it.k === "bars" || it.k === "hist") { if (noted) return ""; noted = true; return '<div class="mir-note">📊 النتيجة بتظهر على الشاشة الكبيرة.</div>'; }
+      return MZR.item(it, ctx);
+    }
+    h += info.pins.map(function (it) { return '<div class="blk">' + one(it) + "</div>"; }).join("");
+    for (var i = 0; i <= last; i++) h += '<div class="blk' + (i < last - 1 ? " old" : "") + '">' + info.steps[i].map(one).join("") + "</div>";
+    return h;
+  }
+  function savedKey(st, step) { return st.id + ":" + Math.min(step, mzSteps(st).steps.length - 1); }
+
   VIEWS.listen = function (ph, st, c) {
+    if (!(c && c.notStarted) && !st.quiet && !mirrorOff() && (st.items || []).length) {
+      var step = c.manual ? 999 : c.step, k = savedKey(st, step);
+      me.saved = me.saved || {};
+      html((ph.line ? '<div class="mir-top">' + esc(ph.line) + (ph.sub ? " · " + esc(ph.sub) : "") + "</div>" : "") +
+        '<div class="mir" style="margin-top:10px">' + mirrorHtml(st, step) + "</div>" +
+        '<div class="mir-save noprint"><button id="svb" class="' + (me.saved[k] ? "on" : "") + '">' + (me.saved[k] ? "⭐ محفوظة عندك" : "☆ احفظ الشاشة دي") + "</button></div>");
+      document.getElementById("svb").onclick = function () {
+        if (me.saved[k]) delete me.saved[k]; else me.saved[k] = Date.now();
+        save(); this.classList.toggle("on", !!me.saved[k]); this.textContent = me.saved[k] ? "⭐ محفوظة عندك" : "☆ احفظ الشاشة دي";
+        toast(me.saved[k] ? "اتحفظت ⭐ هتلاقيها في «اللي حفظته» بعد اليوم" : "اتشالت");
+      };
+      return;
+    }
     var line = ph.line || "بص على الشاشة الكبيرة… واسمع 🙂";
     var sub = ph.sub || "";
     if (c && c.notStarted) { line = "أهلًا يا " + firstName() + " 🌿"; sub = "اليوم لسه ما بدأش. أول ما يبدأ، الشاشة دي هتتغير لوحدها."; }
@@ -604,13 +641,19 @@
     var due = prompts.filter(function (p) { return days >= p.d && !(me.follow && me.follow[p.k]); }).pop();
     var h = '<div class="eyebrow">بعد يوم الميزان</div><div class="big">أهلًا يا ' + esc(firstName()) + " 🌿</div>";
     if (due) h += '<div class="card ax ax-B"><b>' + esc(due.t) + '</b><div class="seg" style="margin-top:10px"><button data-f="' + due.k + '">عملتها ✓</button><button data-f="' + due.k + ':later">لسه</button></div></div>';
-    h += '<div class="seg noprint" style="margin:10px 0"><button data-tab="miz">ميزاني</button><button data-tab="com">التزاماتي</button><button data-tab="raf">رفيقي</button></div><div id="tab"></div>';
+    h += '<div class="seg noprint" style="margin:10px 0"><button data-tab="miz">ميزاني</button><button data-tab="com">التزاماتي</button><button data-tab="raf">رفيقي</button><button data-tab="sav">اللي حفظته</button></div><div id="tab"></div>';
     html(h);
     function tab(t) {
       var el = document.getElementById("tab");
       if (t === "miz") { el.innerHTML = mizaniHtml(me).html + '<button class="btn noprint" id="pr">احفظ PDF / اطبع</button>'; document.getElementById("pr").onclick = function () { window.print(); }; bindNotes(); var o = document.getElementById("ovr"); if (o) o.remove(); }
       if (t === "com") el.innerHTML = commitsSummary() || '<div class="card">ما كتبتش التزامات. ولسه ممكن: اكتب واحد صغير النهارده 🙂</div>';
       if (t === "raf") { el.innerHTML = rafiqBlock(); bindRafiq(); }
+      if (t === "sav") {
+        var ks = Object.keys(me.saved || {}).sort(function (a, b) { return mzIndex(a.split(":")[0]) - mzIndex(b.split(":")[0]) || a.split(":")[1] - b.split(":")[1]; });
+        el.innerHTML = ks.length ? ks.map(function (k) { var p = k.split(":"), st = mzState(p[0]);
+          return '<div class="card"><div class="eyebrow">' + esc(MZ_SESSIONS[st.ses] || "") + " · " + esc(st.label) + '</div><div class="mir">' + mirrorHtml(st, +p[1]) + "</div></div>"; }).join("")
+          : '<div class="card">ما حفظتش شرايح. وإنت في اليوم، أي شاشة عجبتك دوس تحتها «☆ احفظ الشاشة دي».</div>';
+      }
       [].forEach.call($main.querySelectorAll("[data-tab]"), function (b) { b.classList.toggle("on", b.dataset.tab === t); });
     }
     $main.onclick = function (e) {

@@ -140,20 +140,28 @@
       '<div class="grid"><div class="panel"><div class="eyebrow" id="cses"></div><div class="cur-label" id="clab"></div>' +
         '<div class="meta" id="cmeta"></div><div class="cue" id="ccue"></div>' +
         '<div class="nav"><button class="prev" id="bprev">→ السابق</button><button class="next" id="bnext">التالي ←</button></div>' +
-        '<div class="tools"><button id="bblack">شاشة سودا</button><button id="btimer">ابدأ العداد من جديد</button><button id="btheme">شاشة فاتحة/غامقة</button>' +
+        '<div class="tools"><button id="bblack">شاشة سودا</button><button id="btimer">ابدأ العداد من جديد</button><button id="btheme">شاشة فاتحة/غامقة</button><button id="bmir">نسخة الشاشة على الموبايلات: شغالة</button>' +
         '<a class="b" target="_blank" id="lstage">افتح شاشة العرض ↗</a><a class="b" target="_blank" id="llive">افتح صفحة المشارك ↗</a></div>' +
         '<div class="next-peek" id="cnext"></div></div>' +
       '<div class="panel"><div class="pv" id="pv"><iframe id="pvf" title="معاينة"></iframe></div><div class="meta">معاينة شاشة العرض · الرقم في الركن هو اللي الموبايلات بتمشي بيه لو النت وقع</div></div></div>' +
+      '<div class="panel" id="scp" style="margin-top:16px"><div class="ctr" style="justify-content:space-between"><b>📜 سكريبت الميسّر</b>' +
+        '<span class="ctr"><span class="tabs" id="sctabs" style="margin:0"><button data-st="now" class="on">دلوقتي</button><button data-st="ifs">لو حصل</button><button data-st="tot">ملاحظات المدرب</button><button data-st="head">قبل الجلسة</button></span>' +
+        '<button class="b" id="scfold">إخفاء</button><a class="b" target="_blank" id="lscript">افتحه في شاشة لوحده ↗</a></span></div>' +
+        '<div class="sc" id="scbody" style="margin-top:10px"></div></div>' +
       '<div class="tabs" id="tabs"><button data-t="people">الناس والحلقات</button><button data-t="nums">الأرقام</button><button data-t="set">الإعدادات والبروفة</button></div>' +
       '<div class="panel tab" id="t-people"></div><div class="panel tab" id="t-nums"></div><div class="panel tab" id="t-set"></div></main></div>';
     var base = location.href.split("?")[0].replace(/\/console\/(index\.html)?$/, "/");
     document.getElementById("lstage").href = base + "stage/?s=" + encodeURIComponent(SID);
     document.getElementById("llive").href = base + "live/?s=" + encodeURIComponent(SID);
     document.getElementById("pvf").src = base + "stage/?s=" + encodeURIComponent(SID);
+    document.getElementById("lscript").href = base + "script/?s=" + encodeURIComponent(SID);
+    document.getElementById("sctabs").onclick = function (e) { var b = e.target.closest("button"); if (!b) return; scTab = b.dataset.st; paintScript(true); };
+    document.getElementById("scfold").onclick = function () { scOpen = !scOpen; MZ.store.set("mz:scOpen", scOpen ? "1" : "0"); paintScript(true); };
     document.getElementById("bnext").onclick = next;
     document.getElementById("bprev").onclick = prev;
     document.getElementById("bblack").onclick = function () { push({ black: !S.black }); };
     document.getElementById("btimer").onclick = function () { push({ stepAt: Date.now() }); };
+    document.getElementById("bmir").onclick = function () { push({ noMirror: !S.noMirror }); };
     document.getElementById("btheme").onclick = function () { push({ theme: S.theme === "light" ? "dark" : "light" }); };
     document.getElementById("tabs").onclick = function (e) { var b = e.target.closest("button"); if (!b) return; tabNow = b.dataset.t; paintTab(); };
     document.getElementById("tl").onclick = function (e) { var b = e.target.closest("button[data-id]"); if (!b) return;
@@ -208,11 +216,36 @@
     var nx = MZ_STATES[cur + 1];
     document.getElementById("cnext").textContent = (S.step || 0) < steps - 1 ? "«التالي» يكشف الخطوة الجاية في نفس الشاشة." : (nx ? "بعدها: " + nx.label : "دي آخر شاشة.");
     document.getElementById("bblack").classList.toggle("on", !!S.black);
+    var bm = document.getElementById("bmir"); bm.textContent = "نسخة الشاشة على الموبايلات: " + (S.noMirror ? "مقفولة" : "شغالة"); bm.classList.toggle("on", !!S.noMirror);
     var needCircles = ["g1-circles", "g1-circle-talk"].indexOf(st.id) >= 0 && !(S.groups && Object.keys(S.groups).length);
     var needPairs = st.id === "g6-rafiq" && !(S.pairs && Object.keys(S.pairs).length);
     if (needCircles) cue.textContent = "⚑ الحلقات لسه ما اتوزعتش! تبويب «الناس والحلقات» ← «وزّع الحلقات». · " + cue.textContent;
     if (needPairs) cue.textContent = "⚑ الرفقة لسه ما اتعملتش! تبويب «الناس والحلقات» ← «اعمل الرفقة». · " + cue.textContent;
-    paintHelp(); paintTab();
+    paintHelp(); paintTab(); paintScript();
+  }
+
+  /* سكريبت الميسّر جوّه اللوحة: بيتغيّر مع كل شاشة */
+  var scTab = "now", scOpen = MZ.store.get("mz:scOpen") !== "0", scLast = "";
+  function paintScript(force) {
+    var el = document.getElementById("scbody"); if (!el) return;
+    var st = mzState(S.state), key = S.state + "|" + scTab + "|" + scOpen;
+    if (!force && key === scLast) return; scLast = key;
+    [].forEach.call(document.getElementById("sctabs").children, function (b) { b.classList.toggle("on", b.dataset.st === scTab); });
+    document.getElementById("scfold").textContent = scOpen ? "إخفاء" : "إظهار";
+    document.getElementById("sctabs").style.display = scOpen ? "" : "none";
+    el.style.display = scOpen ? "" : "none";
+    if (!scOpen) return;
+    var h = "";
+    if (scTab === "now") {
+      var lines = MZS.state(st.id);
+      h = lines.length ? MZS.lines(lines) : "";
+      if (st.id === MZ_STATES[0].id) h += '<div class="sc-h">قبل ج١</div>' + MZS.lines((MZS.ses(1) || {}).head || []);
+      if (!h) h = '<p class="sc-empty">مفيش كلام في الشاشة دي. (استراحة)</p>';
+    } else {
+      var part = (MZS.ses(st.ses) || {})[scTab];
+      h = part && part.length ? MZS.lines(part) : '<p class="sc-empty">مفيش حاجة هنا للجلسة دي.</p>';
+    }
+    el.innerHTML = h; el.scrollTop = 0;
   }
   function phoneLabel(ph) {
     return ({ listen: "اسمع", vote: "تصويت", slider: "سلايدر خاص", cycle: "الدايرة", note: "دفتري", map: "خريطة الدايرة", hours: "كام ساعة", circle: "الحلقة", rank: "ترتيب",
