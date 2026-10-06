@@ -17,6 +17,40 @@
   var me = MZ.store.getJ(KEY, {});            // كل حاجة تخص المشارك على الجهاز ده
   function save() { MZ.store.setJ(KEY, me); }
 
+  /* ───── رابطي الشخصي ─────
+     نفس الموبايل ونفس المتصفح = بيكمّل لوحده (حتى لو قفل وفتح بعد أيام).
+     لو غيّر الموبايل أو المتصفح: «رابطي الشخصي» بيشيل بياناته جوّه الرابط نفسه،
+     فيفتحه على الجهاز الجديد ويرجع كل حاجة — من غير ما حاجة شخصية تتخزن على السيرفر. */
+  var SKIP = { pending: 1, registered: 1, _sentMz: 1, helpAt: 1 };
+  function packMe() {
+    var o = {}; Object.keys(me).forEach(function (k) { if (!SKIP[k]) o[k] = me[k]; });
+    var b = btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+    return b.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function unpack(code) {
+    var b = code.replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "=";
+    return JSON.parse(decodeURIComponent(escape(atob(b))));
+  }
+  function personalLink() {
+    return location.href.split("?")[0] + "?s=" + encodeURIComponent(SID) + "&r=" + packMe();
+  }
+  var restoreMsg = null;
+  (function () {
+    var r = MZ.qs("r"); if (!r) return;
+    try {
+      var d = unpack(r);
+      if (d && d.name) {
+        var keepUid = me.uid;
+        if (!me.name || me.name === d.name || confirm("الموبايل ده عليه بيانات باسم «" + me.name + "». نستبدلها ببيانات «" + d.name + "»؟")) {
+          var prev = d.uid; me = d; if (prev && prev !== keepUid) me.prev = prev; if (keepUid) me.uid = keepUid;
+          me.registered = false; save();
+          restoreMsg = "أهلًا يا " + (d.name || "").split(" ")[0] + " 🌿 رجعنا كل حاجة بتاعتك على الموبايل ده.";
+        }
+      }
+    } catch (e) { restoreMsg = "الرابط ده مش كامل. اطلب من صاحبه يبعته تاني."; }
+    try { history.replaceState(null, "", location.pathname + "?s=" + encodeURIComponent(SID) + (MZ.qs("as") ? "&as=" + MZ.qs("as") : "")); } catch (e) {}
+  })();
+
   var $main = document.getElementById("main"), $bar = document.getElementById("bar"),
       $dot = document.getElementById("dot"), $ses = document.getElementById("ses"),
       $help = document.getElementById("helpBtn"), $sheet = document.getElementById("sheet"),
@@ -102,6 +136,15 @@
 
   /* ───────────── «محتاج حد يكلمني» ───────────── */
   function supportName() { return (session && session.support) || MZ_SETTINGS.supportName; }
+  var $link = document.getElementById("linkBtn");
+  $link.onclick = function () {
+    var L = personalLink();
+    openSheet('<div class="big">رابطك الشخصي 🔗</div>' +
+      '<p class="sub">لو قفلت الصفحة وفتحتها تاني <b>من نفس الموبايل ونفس المتصفح</b>، هتلاقي كل حاجة زي ما هي، من غير أي حاجة.</p>' +
+      '<p class="sub">الرابط ده للحالات التانية: لو غيّرت الموبايل، أو فتحت من متصفح تاني، أو مسحت بيانات المتصفح. افتحه هناك، وهترجع صفحتك وإجاباتك ورفيقك.</p>' +
+      '<p class="muted">⚠️ الرابط فيه إجاباتك الشخصية. ما تبعتهوش لحد غيرك. والأفضل تبعته لنفسك.</p>' +
+      '<button class="btn" data-h="wa">ابعته لنفسك على واتساب</button><button class="btn ghost" data-h="copy">انسخ الرابط</button><button class="btn ghost" data-h="close">رجوع</button>');
+  };
   $help.onclick = function () {
     if (me.helpAt) {
       openSheet('<div class="big">طلبك وصل 🤍</div><p class="sub">' + esc(supportName()) + ' جاي لك. خليك مكانك.</p>' +
@@ -120,6 +163,12 @@
     var b = e.target.closest("button"); if (!b) return;
     var h = b.getAttribute("data-h");
     if (h === "close") closeSheet();
+    if (h === "wa") { location.href = "https://wa.me/?text=" + encodeURIComponent("رابطي الشخصي في يوم الميزان 🌿 (ما تبعتهوش لحد):\n" + personalLink()); }
+    if (h === "copy") {
+      var L = personalLink(), ok = false;
+      try { navigator.clipboard.writeText(L).then(function () { toast("اتنسخ ✓"); }, function () { prompt("انسخ الرابط:", L); }); ok = true; } catch (e) {}
+      if (!ok) prompt("انسخ الرابط:", L);
+    }
     if (h === "send") {
       me.helpAt = Date.now(); save(); syncHelp(true);
       $help.classList.add("on");
@@ -136,7 +185,8 @@
 
   /* ───────────── الدخول (الاسم مرة واحدة) ───────────── */
   function renderJoin() {
-    $help.hidden = true;
+    $help.hidden = true; $link.hidden = true;
+    if (restoreMsg) { toast(restoreMsg); restoreMsg = null; }
     var ten = me.ten || "", g = me.g || "";
     $main.innerHTML =
       '<div class="eyebrow">صناع الحياة · منظور الفؤاد</div>' +
@@ -169,6 +219,7 @@
   function register() {
     if (!uid || !MZ.db || !me.name) return;
     var d = { n: me.name, ten: me.ten || "", g: me.g || "", seen: MZ.TS() };
+    if (me.prev && me.prev !== uid) d.prev = me.prev;      /* اللوحة بتنقل حلقته ورفيقه للجهاز الجديد */
     if (!me.registered) d.at = MZ.TS();
     MZ.pRef(SID, uid).set(d, { merge: true }).then(function () { me.registered = true; save(); flushVotes(); })
       .catch(function (e) { lastErr = e; status(); });
@@ -181,7 +232,8 @@
   /* ───────────── الرسم ───────────── */
   function render(force) {
     if (!me.name) return renderJoin();
-    $help.hidden = false; $help.classList.toggle("on", !!me.helpAt);
+    $help.hidden = false; $help.classList.toggle("on", !!me.helpAt); $link.hidden = false;
+    if (restoreMsg) { toast(restoreMsg); restoreMsg = null; }
     var c = current(), st = c.st;
     var stepsInfo = mzSteps(st);
     var at = st.phoneAt === undefined ? 0 : Math.min(st.phoneAt, stepsInfo.steps.length - 1);
@@ -301,8 +353,9 @@
   VIEWS.chars = function () {
     html('<div class="eyebrow">تلات أصحاب هيمشوا معانا طول اليوم</div>' + ["H", "V", "B"].map(function (a) {
       var A = MZ_AX[a];
-      return '<div class="card ax ax-' + a + '"><b style="color:var(--ax)">' + esc(A.who) + "</b> · " + esc(A.q) +
-        '<div class="muted">' + esc(A.name) + "</div></div>";
+      return '<div class="card ax ax-' + a + '" style="display:flex;gap:12px;align-items:center">' +
+        (A.img ? '<img src="../assets/img/' + A.img + '.jpg" alt="" style="width:64px;height:128px;object-fit:cover;object-position:top;border-radius:12px;border:2px solid var(--ax)">' : "") +
+        '<div><b style="color:var(--ax)">' + esc(A.who) + "</b> · " + esc(A.q) + '<div class="muted">' + esc(A.name) + "</div></div></div>";
     }).join(""));
   };
 
@@ -641,6 +694,7 @@
     var due = prompts.filter(function (p) { return days >= p.d && !(me.follow && me.follow[p.k]); }).pop();
     var h = '<div class="eyebrow">بعد يوم الميزان</div><div class="big">أهلًا يا ' + esc(firstName()) + " 🌿</div>";
     if (due) h += '<div class="card ax ax-B"><b>' + esc(due.t) + '</b><div class="seg" style="margin-top:10px"><button data-f="' + due.k + '">عملتها ✓</button><button data-f="' + due.k + ':later">لسه</button></div></div>';
+    h += '<button class="btn ghost noprint" id="plink" style="margin-top:0">🔗 رابطي الشخصي (لو غيّرت الموبايل)</button>';
     h += '<div class="seg noprint" style="margin:10px 0"><button data-tab="miz">ميزاني</button><button data-tab="com">التزاماتي</button><button data-tab="raf">رفيقي</button><button data-tab="sav">اللي حفظته</button></div><div id="tab"></div>';
     html(h);
     function tab(t) {
@@ -657,6 +711,7 @@
       [].forEach.call($main.querySelectorAll("[data-tab]"), function (b) { b.classList.toggle("on", b.dataset.tab === t); });
     }
     $main.onclick = function (e) {
+      if (e.target.closest("#plink")) return $link.onclick();
       var b = e.target.closest("[data-tab]"); if (b) tab(b.dataset.tab);
       var f = e.target.closest("[data-f]");
       if (f) { var k = f.dataset.f; if (k.indexOf(":later") < 0) { me.follow = me.follow || {}; me.follow[k] = Date.now(); save(); toast("ربنا يباركلك 🌿"); } else toast("ولا يهمك… الأسبوع ده 🙂"); render(true); }
@@ -672,6 +727,7 @@
     started = true;
     MZ.signInAnon(15000).then(function (u) {
       uid = u.uid; lastErr = null;
+      if (me.uid !== uid) { if (me.uid && me.name && !me.prev) me.prev = me.uid; me.uid = uid; save(); }
       if (me.name) register();
       if (me.helpAt) syncHelp(true);
       flushVotes();

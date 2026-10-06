@@ -3,6 +3,7 @@
    ===================================================================== */
 var MZR = (function () {
   var esc = MZ.esc, ar = MZ.ar;
+  var IMG = "../assets/img/";   /* كل الصفحات على نفس العمق */
 
   function axOf(a) { return a && MZ_AX[a] ? " ax-" + a : ""; }
 
@@ -97,11 +98,13 @@ var MZR = (function () {
       case "p": return '<div class="s-p">' + esc(it.t) + "</div>";
       case "q": return '<div class="s-q">' + esc(it.t) + (it.ref ? "<cite>" + esc(it.ref) + "</cite>" : "") + "</div>";
       case "list": return '<ul class="s-list">' + it.items.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
-      case "card": return '<div class="s-card' + axOf(it.ax) + '">' + (it.h ? "<b>" + esc(it.h) + "</b>" : "") + esc(it.t) + (it.tongue ? '<span class="tg">«' + esc(it.tongue) + "»</span>" : "") + "</div>";
+      case "card":
+        var who = it.ax && MZ_AX[it.ax] && MZ_AX[it.ax].img && it.h === MZ_AX[it.ax].who;
+        return '<div class="s-card' + axOf(it.ax) + (who ? " has-mini" : "") + '">' + (who ? '<img class="mini" src="' + IMG + MZ_AX[it.ax].img + '.jpg" alt="">' : "") + (it.h ? "<b>" + esc(it.h) + "</b>" : "") + esc(it.t) + (it.tongue ? '<span class="tg">«' + esc(it.tongue) + "»</span>" : "") + "</div>";
       case "axq": var A = MZ_AX[it.ax]; return '<div class="s-axq' + (it.small ? " small" : "") + axOf(it.ax) + '"><div class="t">' + esc(A.q) + '</div><div class="n">' + esc(A.name) + "</div></div>";
       case "corners": return '<div class="row3">' + ["H", "V", "B"].map(function (a) { return item({ k: "axq", ax: a, small: it.small }, ctx); }).join("") + "</div>";
       case "char": var C = MZ_AX[it.ax];
-        return '<div class="s-char' + axOf(it.ax) + '"><div class="av">' + esc(C.who[0]) + '</div><div><div class="nm">' + esc(C.who) + ' <span class="meta">· ' + esc(C.q) + " · " + esc(C.name) + "</span></div>" +
+        return '<div class="s-char' + axOf(it.ax) + '">' + (C.img ? '<img class="ph" src="' + IMG + C.img + '.jpg" alt="' + esc(C.who) + '">' : '<div class="av">' + esc(C.who[0]) + "</div>") + '<div><div class="nm">' + esc(C.who) + ' <span class="meta">· ' + esc(C.q) + " · " + esc(C.name) + "</span></div>" +
           (it.lines || []).map(function (l) { return '<div class="ln">' + esc(l) + "</div>"; }).join("") + "</div></div>";
       case "table":
         return '<table class="s-table"><tr>' + it.head.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") + "</tr>" +

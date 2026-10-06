@@ -92,12 +92,28 @@
     }, function (e) { remoteOk = false; lastErr = e; head(); }));
     unsubs.push(MZ.pCol(SID).onSnapshot(function (q) {
       people = {}; q.forEach(function (d) { var x = d.data(); if (x && x.n) people[d.id] = x; });   // صفحة الفحص بتكتب مستند من غير اسم وبتمسحه
-      checkHelp(); recompute(); paint();
+      checkHelp(); migrate(); recompute(); paint();
     }, function (e) { lastErr = e; head(); }));
     unsubs.push(MZ.vCol(SID).onSnapshot(function (q) {
       votes = {}; q.forEach(function (d) { votes[d.id] = d.data(); });
       recompute(); paintTab();
     }, function (e) { lastErr = e; head(); }));
+  }
+
+  /* حد رجع من «رابطه الشخصي» على جهاز جديد: ننقل حلقته ورفيقه، ونشيل القديم من الكشف */
+  function migrate() {
+    var G = Object.assign({}, S.groups || {}), P = JSON.parse(JSON.stringify(S.pairs || {})), changed = false;
+    Object.keys(people).forEach(function (u) {
+      var old = people[u].prev; if (!old || old === u) return;
+      if (G[old] && !G[u]) { G[u] = G[old]; delete G[old]; changed = true; }
+      if (P[old] && !P[u]) {
+        P[u] = P[old]; delete P[old];
+        P[u].forEach(function (x) { P[x] = (P[x] || []).map(function (y) { return y === old ? u : y; }); });
+        changed = true;
+      }
+      if (people[old] && user) { MZ.pRef(SID, old).delete().catch(function () {}); delete people[old]; }
+    });
+    if (changed && user) push({ groups: G, pairs: P, roster: rosterOf() });
   }
 
   /* الأعداد المجمّعة: بتتحسب هنا وبتتكتب في مستند عام فيه أرقام بس */
