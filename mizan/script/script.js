@@ -36,21 +36,21 @@
       h += '<div class="stepbar">' + (browseId ? "" : "الخطوة " + ar(step + 1) + " من " + ar(steps) + " ") +
         Array.apply(null, Array(steps)).map(function (_, i) { return '<i class="' + (!browseId && i <= step ? "on" : "") + '"></i>'; }).join("") + "</div>";
       if (st.cue) h += '<div class="cue">' + esc(st.cue) + "</div>";
-      var lines = MZS.state(id);
-      if (lines.length) h += MZS.lines(lines);
-      else if (id !== MZ_STATES[0].id) h += '<p class="sc-empty">مفيش كلام في الشاشة دي. (استراحة)</p>';
+      h += MZS.state(id, { step: browseId ? -1 : step, next: MZ_STATES[idx + 1] });
       if (id === MZ_STATES[0].id) h += '<div class="sc-h">قبل ج١</div>' + MZS.lines((MZS.ses(1) || {}).head || []);
-      var nx = MZ_STATES[idx + 1];
-      if (nx) {
-        var pk = MZS.peek(nx.id, 2);
-        h += '<div class="next">اللي جاي: <b>' + esc(nx.label) + "</b>" + (pk.length ? "<br>«" + esc(pk.join(" ").replace(/^«/, "").slice(0, 160)) + "…»" : "") + "</div>";
-      }
     } else {
       var part = ses && ses[tab];
       h += part && part.length ? MZS.lines(part) : '<p class="sc-empty">مفيش حاجة هنا للجلسة دي.</p>';
     }
     $("body").innerHTML = h;
-    if (draw._last !== id + "|" + tab) { window.scrollTo(0, 0); draw._last = id + "|" + tab; }
+    /* السكرول بيروح للمقطع اللي إنت فيه — بس لما الشاشة أو الخطوة تتغير، مش كل ثانية */
+    var fk = id + "|" + tab + "|" + step;
+    if (draw._last !== fk) {
+      var sameState = draw._last && draw._last.split("|")[0] === id;
+      if (tab === "now" && !browseId && step > 0) MZS.focus($("body"), sameState, false, document.querySelector(".top").offsetHeight + 8);
+      else window.scrollTo(0, 0);
+      draw._last = fk;
+    }
     drawCtl();
   }
 

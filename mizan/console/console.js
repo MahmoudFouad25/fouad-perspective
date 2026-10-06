@@ -244,8 +244,10 @@
   var scTab = "now", scOpen = MZ.store.get("mz:scOpen") !== "0", scLast = "";
   function paintScript(force) {
     var el = document.getElementById("scbody"); if (!el) return;
-    var st = mzState(S.state), key = S.state + "|" + scTab + "|" + scOpen;
-    if (!force && key === scLast) return; scLast = key;
+    var st = mzState(S.state), key = S.state + "|" + scTab + "|" + scOpen + "|" + (S.step || 0);
+    if (!force && key === scLast) return;
+    var sameState = scLast.split("|")[0] === S.state && scLast.split("|")[1] === scTab;
+    scLast = key;
     [].forEach.call(document.getElementById("sctabs").children, function (b) { b.classList.toggle("on", b.dataset.st === scTab); });
     document.getElementById("scfold").textContent = scOpen ? "إخفاء" : "إظهار";
     document.getElementById("sctabs").style.display = scOpen ? "" : "none";
@@ -253,15 +255,14 @@
     if (!scOpen) return;
     var h = "";
     if (scTab === "now") {
-      var lines = MZS.state(st.id);
-      h = lines.length ? MZS.lines(lines) : "";
+      h = MZS.state(st.id, { step: S.step || 0, next: MZ_STATES[mzIndex(st.id) + 1] });
       if (st.id === MZ_STATES[0].id) h += '<div class="sc-h">قبل ج١</div>' + MZS.lines((MZS.ses(1) || {}).head || []);
-      if (!h) h = '<p class="sc-empty">مفيش كلام في الشاشة دي. (استراحة)</p>';
     } else {
       var part = (MZS.ses(st.ses) || {})[scTab];
       h = part && part.length ? MZS.lines(part) : '<p class="sc-empty">مفيش حاجة هنا للجلسة دي.</p>';
     }
-    el.innerHTML = h; el.scrollTop = 0;
+    el.innerHTML = h;
+    if (scTab === "now" && (S.step || 0) > 0) MZS.focus(el, sameState, true); else el.scrollTop = 0;
   }
   function phoneLabel(ph) {
     return ({ listen: "اسمع", vote: "تصويت", slider: "سلايدر خاص", cycle: "الدايرة", note: "دفتري", map: "خريطة الدايرة", hours: "كام ساعة", circle: "الحلقة", rank: "ترتيب",
