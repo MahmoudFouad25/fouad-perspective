@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>مقياس المحاور · أدمن التجربة</title>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1">
+<style>
+  .wrap{max-width:1100px}
+  .login{max-width:380px;margin:12vh auto 0}
+  .login label{display:block;margin-bottom:12px;font-size:.92rem}
+  .login input{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fff;margin-top:4px;font-size:1rem;direction:ltr;text-align:left}
+  .err{color:var(--danger);font-size:.88rem;margin-top:10px;min-height:1.4em}
+  .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0 14px}
+  .bar .sp{flex:1}
+  .b{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-size:.9rem}
+  .b.dark{background:var(--ink);border-color:var(--ink);color:#fff}
+  select{font:inherit;border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:#fff}
+  .stats{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 14px;font-size:.88rem;color:var(--ink-2)}
+  .stat b{font-size:1.15rem;color:var(--ink);margin-left:4px}
+  .tbl{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:14px}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:720px}
+  th,td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{font-weight:500;color:var(--ink-3);font-size:.8rem;background:#fbf8f3}
+  tr:last-child td{border-bottom:none}
+  .st-done{color:var(--ok);font-weight:500}
+  .st-run{color:var(--warn)}
+  .meta{color:var(--ink-3);font-size:.82rem}
+  .note{color:var(--ink-3);font-size:.82rem;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="top"><span class="brand">مقياس المحاور · أدمن التجربة</span><span class="sync" id="who"></span></div>
+<main class="wrap" id="root"><p class="loading">لحظة…</p></main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js?v=1"></script>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root"), who = document.getElementById("who");
+  var AR = ["٠","١","٢","٣","٤","٥","٦","٧","٨","٩"];
+  function ar(n) { return String(n).replace(/[0-9]/g, function (d) { return AR[+d]; }); }
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  var ERR = {
+    "auth/invalid-credential": "الإيميل أو كلمة السر غلط.",
+    "auth/invalid-login-credentials": "الإيميل أو كلمة السر غلط.",
+    "auth/wrong-password": "كلمة السر غلط.",
+    "auth/user-not-found": "الإيميل ده مالوش حساب في فايربيز.",
+    "auth/too-many-requests": "محاولات كتير. استنى دقيقة وجرّب تاني.",
+    "auth/network-request-failed": "النت مش واصل.",
+    "permission-denied": "قواعد الأمان رافضة القراءة. غالبًا قواعد التجربة لسه ما اتنشرتش، أو الإيميل مش في قايمة الأدمن في القواعد.",
+    "not-admin": "الإيميل ده مش في قايمة الأدمن (config.js و firestore.rules).",
+    "no-sdk": "مكتبة فايربيز ما اتحمّلتش. اتأكد من النت."
+  };
+  function errText(e) { var c = (e && e.code) || e || ""; return ERR[c] || ("حصلت مشكلة: " + c + " " + ((e && e.message) || "")); }
+
+  /* تطبيق فايربيز باسم منفصل، علشان دخول الأدمن ما يبوّظش الدخول المجهول
+     لو نفس الجهاز اتجرّب عليه كمشارك. */
+  var app = null, auth = null, db = null;
+  try {
+    app = firebase.initializeApp(AXP_FIREBASE, "axpAdmin");
+    auth = app.auth(); db = app.firestore();
+    try { db.settings({ experimentalForceLongPolling: true, useFetchStreams: false, merge: true }); } catch (e) {}
+  } catch (e) { app = null; }
+
+  var rows = [], filter = "الكل";
+  try { filter = localStorage.getItem("axp:adminFilter") || "الكل"; } catch (e) {}
+
+  function loginView(msg) {
+    who.textContent = "";
+    root.innerHTML = '<section class="card login"><h2>دخول الأدمن</h2>' +
+      '<label>الإيميل<input id="em" type="email" autocomplete="username" value="' + esc(AXP_ADMINS[0] || "") + '"></label>' +
+      '<label>كلمة السر<input id="pw" type="password" autocomplete="current-password"></label>' +
+      '<button class="next" id="go">دخول</button><div class="err" id="er">' + esc(msg || "") + "</div></section>";
+    document.getElementById("go").onclick = doLogin;
+    document.getElementById("pw").onkeydown = function (e) { if (e.key === "Enter") doLogin(); };
+  }
+  function doLogin() {
+    var em = document.getElementById("em").value.trim().toLowerCase(), pw = document.getElementById("pw").value, er = document.getElementById("er");
+    if (!app) { er.textContent = errText("no-sdk"); return; }
+    if (AXP_ADMINS.indexOf(em) === -1) { er.textContent = errText("not-admin"); return; }
+    er.textContent = "بندخل…";
+    auth.signInWithEmailAndPassword(em, pw).catch(function (e) { er.textContent = errText(e); });
+  }
+
+  function fmtDur(ms) {
+    if (!ms || ms < 0) return "—";
+    var m = Math.round(ms / 60000);
+    return m < 60 ? ar(m) + " د" : ar(Math.floor(m / 60)) + " س " + ar(m % 60) + " د";
+  }
+  function fmtDate(ms) {
+    if (!ms) return "—";
+    var d = new Date(ms);
+    return ar(d.getDate()) + "/" + ar(d.getMonth() + 1) + " " + ar(("0" + d.getHours()).slice(-2)) + ":" + ar(("0" + d.getMinutes()).slice(-2));
+  }
+  var SCREEN_NAME = { intro: "الاسم", welcome: "الترحيب", period: "سؤال الفترة", periodThanks: "سؤال الفترة", closing: "سؤالين الختام", done: "خلص" };
+  function reached(d) {
+    var s = d.screen || "";
+    if (SCREEN_NAME[s]) return SCREEN_NAME[s];
+    var m = /^([st])(\d)$/.exec(s);
+    if (!m) return s;
+    return m[1] === "s" ? "المحطة " + ar(m[2]) : "خلّص المحطة " + ar(m[2]);
+  }
+  function plain(v) {
+    if (v && typeof v.toMillis === "function") return new Date(v.toMillis()).toISOString();
+    if (Array.isArray(v)) return v.map(plain);
+    if (v && typeof v === "object") { var o = {}; Object.keys(v).forEach(function (k) { o[k] = plain(v[k]); }); return o; }
+    return v;
+  }
+
+  function load() {
+    root.innerHTML = '<p class="loading">بنجيب المشاركين…</p>';
+    db.collection(AXP_COLLECTION).get().then(function (snap) {
+      rows = [];
+      snap.forEach(function (doc) { var d = plain(doc.data()); d._id = doc.id; rows.push(d); });
+      rows.sort(function (a, b) { return (b.startedAt || 0) - (a.startedAt || 0); });
+      view();
+    }).catch(function (e) { root.innerHTML = '<section class="card"><h2>ما قدرتش أقرا المشاركين</h2><p>' + esc(errText(e)) + '</p><button class="b" id="again">جرّب تاني</button></section>'; document.getElementById("again").onclick = load; });
+  }
+  function shown() { return filter === "الكل" ? rows : rows.filter(function (r) { return (r.cohort || "بدون") === filter; }); }
+  function exportObj() {
+    return { exportedAt: new Date().toISOString(), collection: AXP_COLLECTION, filter: filter, count: shown().length, participants: shown() };
+  }
+
+  function view() {
+    var cohorts = {};
+    rows.forEach(function (r) { cohorts[r.cohort || "بدون"] = 1; });
+    var list = shown(), done = list.filter(function (r) { return r.status === "خلص"; }).length;
+    var h = '<div class="bar"><h2 style="margin:0">المشاركين</h2><span class="sp"></span>';
+    h += '<label class="meta">الدفعة <select id="flt"><option>الكل</option>' + Object.keys(cohorts).sort().map(function (c) { return "<option" + (c === filter ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</select></label>";
+    h += '<button class="b" id="rel">تحديث</button><button class="b" id="cp">انسخ الكل</button><button class="b dark" id="dl">نزّل الكل (JSON)</button></div>';
+    h += '<div class="stats"><span class="stat"><b>' + ar(list.length) + "</b>مشارك</span><span class=\"stat\"><b>" + ar(done) + "</b>خلصوا</span><span class=\"stat\"><b>" + ar(list.length - done) + "</b>لسه</span></div>";
+    h += '<div class="tbl"><table><thead><tr><th>الاسم</th><th>الدفعة</th><th>وصل لفين</th><th>الحالة</th><th>الوقت الكلي</th><th>العلامات</th><th>بدأ</th><th>الجهاز</th><th>نسخة الأسئلة</th></tr></thead><tbody>';
+    if (!list.length) h += '<tr><td colspan="9" class="meta">مفيش مشاركين لسه.</td></tr>';
+    list.forEach(function (r) {
+      var end = r.finishedAt || r.updatedAtMs;
+      h += "<tr><td>" + esc(r.name || "—") + "</td><td>" + esc(r.cohort || "بدون") + "</td><td>" + esc(reached(r)) + "</td>";
+      h += '<td class="' + (r.status === "خلص" ? "st-done" : "st-run") + '">' + esc(r.status || "—") + "</td>";
+      h += "<td>" + fmtDur(end - r.startedAt) + "</td><td>" + ar(Object.keys(r.flags || {}).length) + "</td><td>" + fmtDate(r.startedAt) + "</td><td>" + esc(r.device || "—") + '</td><td class="meta">' + esc((r.qVersion && r.qVersion.hash) || "—") + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+    h += '<p class="note">الوقت الكلي = من أول ما كتب اسمه لحد ما خلّص (أو لحد آخر مرة اتحفظ لو لسه). والملف اللي بيتنزّل فيه المشاركين اللي ظاهرين حسب فلتر الدفعة.</p>';
+    root.innerHTML = h;
+    document.getElementById("flt").onchange = function () { filter = this.value; try { localStorage.setItem("axp:adminFilter", filter); } catch (e) {} view(); };
+    document.getElementById("rel").onclick = load;
+    document.getElementById("dl").onclick = function () {
+      var blob = new Blob([JSON.stringify(exportObj(), null, 1)], { type: "application/json" });
+      var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+      a.download = "axes-v2-pilot-" + (filter === "الكل" ? "all" : filter) + "-" + new Date().toISOString().slice(0, 10) + ".json";
+      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    };
+    document.getElementById("cp").onclick = function () {
+      var t = JSON.stringify(exportObj()), btn = this;
+      function ok() { btn.textContent = "اتنسخ ✓"; setTimeout(function () { btn.textContent = "انسخ الكل"; }, 1800); }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(ok, fallback); else fallback();
+      function fallback() { var ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); ok(); } catch (e) {} ta.remove(); }
+    };
+  }
+
+  if (!app) { loginView(errText("no-sdk")); return; }
+  auth.onAuthStateChanged(function (u) {
+    if (u && u.email && AXP_ADMINS.indexOf(u.email.toLowerCase()) !== -1) {
+      who.innerHTML = esc(u.email) + ' · <button class="mini ghost" id="out">خروج</button>';
+      document.getElementById("out").onclick = function () { auth.signOut(); };
+      load();
+    } else if (u) { auth.signOut(); loginView(errText("not-admin")); }
+    else loginView();
+  }, function (e) { loginView(errText(e)); });
+})();
+</script>
+</body>
+</html>
