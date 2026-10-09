@@ -34,16 +34,21 @@ def toks(t): return norm(t).split()
 # ---------- ١. النفي ----------
 NEG = {'ما', 'مش', 'مفيش', 'مافيش', 'لا', 'محدش', 'ماحدش', 'ولا', 'مابقدرش'}
 NOT_NEG_BEFORE = {'بعد', 'لحد', 'زي', 'قبل', 'أول', 'اول', 'على', 'كل'}
-neg = []
+neg = []; fitra_ok = []
 for lab, t, m in S:
     w = toks(t)
+    isf = m.get('type', '').startswith('الفطرة')
+    if isf and 'من غير ما' in norm(t):
+        fitra_ok.append(lab)  # قاعدة ل: «من غير ما…» في الفطرة بتسمّي الغايب، مش نفي
     for i, x in enumerate(w):
         if x in NEG:
             if x == 'ما' and i > 0 and w[i-1] in NOT_NEG_BEFORE:
                 continue
+            if x == 'ما' and isf and i > 1 and w[i-2:i] == ['من', 'غير']:
+                continue
             ctx = ' '.join(w[max(0, i-2):i+3])
             neg.append((lab, x, ctx, m.get('type', '')))
-    if 'من غير' in norm(t):
+    if 'من غير' in norm(t) and not (isf and 'من غير ما' in norm(t)):
         neg.append((lab, 'من غير', norm(t)[max(0, norm(t).find('من غير')-12):norm(t).find('من غير')+20], m.get('type', '')))
 
 # ---------- ٢. كلمات التكرار والتعميم ----------
@@ -117,7 +122,7 @@ for it in D['items']:
     if mm: types['تفريط'] += 1; faces[mm.group(1)] += 1
     elif ty.startswith('الفطرة'): types[ty] += 1
     elif ty.startswith('دائرة'): types['دائرة'] += 1
-    elif ty.startswith('توتر'): types['توتر'] += 1
+    elif ty.startswith('توتر'): types['توتر (طرف في سؤال بين طرفين)'] += 1
     elif ty.startswith('خوف وقودًا'): types['خوف وقودًا'] += 1
     elif ty.startswith('تجمّد'): types['تجمّد'] += 1
     elif ty.startswith('استبدال'): types['استبدال متكيّف (مكان)'] += 1
@@ -131,7 +136,7 @@ def table(h, rows):
     L.append('| ' + ' | '.join(h) + ' |'); L.append('|' + '---|' * len(h))
     for r in rows: L.append('| ' + ' | '.join(str(x) for x in r) + ' |')
     L.append('')
-L.append('## ١. النفي'); table(['العبارة', 'الكلمة', 'السياق', 'النوع'], neg or [['—', 'مفيش', '', '']])
+L.append('## ١. النفي'); L.append(f'عبارات الفطرة اللي فيها «من غير ما…» (استثناء قاعدة ل، مش بتتعد هنا): {an(len(fitra_ok))} من ١٨: ' + '، '.join(fitra_ok)); L.append(''); table(['العبارة', 'الكلمة', 'السياق', 'النوع'], neg or [['—', 'مفيش', '', '']])
 L.append('## ٢. كلمات التكرار والتعميم'); table(['العبارة', 'الكلمة', 'النوع'], freq or [['—', 'مفيش', '']])
 L.append('## ٣. «و» و«أو» (من غير «وأنا» و«وبعدها» وأخواتهم)'); table(['العبارة', 'السياق', 'الأداة', 'عبارة دايرة؟', 'النوع'], [(a, b, c, 'أيوه' if d else '—', e) for a, b, c, d, e in conj])
 L.append('## ٤. الكلمات الممنوعة في نص العميل'); table(['الفئة', 'الكلمة', 'المكان', 'النص'], banned or [['—', 'مفيش', '', '']])
