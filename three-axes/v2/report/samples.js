@@ -102,3 +102,10 @@ out.forEach(function (o) {
   console.log("ما ظهرش: " + (o.meta.hidden.join(" | ") || "—"));
   console.log("مشاكل: " + (o.meta.problems.join(" | ") || "—"));
 });
+
+/* ورقة الكوتش لتقرير محمود */
+var CT = require("./coach_texts.json"), Co = require("./coach.js");
+var mA = cases[0].answers, mR = E.score(mA, items, C);
+var coachBlocks = Co.renderCoach(mR, E.normalize(mA), items, CT, { mode: "insight", name: "محمود" });
+fs.writeFileSync(path.join(__dirname, "coach_sample.json"), JSON.stringify(coachBlocks, null, 1));
+console.log("\nورقة الكوتش (محمود): " + coachBlocks.length + " سطر");

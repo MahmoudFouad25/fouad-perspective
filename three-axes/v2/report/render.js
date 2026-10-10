@@ -16,7 +16,9 @@
   var AX = ["H", "V", "A"];
   var NAME = { H: "الحفظ", V: "الحيوية", A: "الانتماء" };
   var FREQ = ["عمري", "نادرًا", "أحيانًا", "كتير", "دايمًا"];
-  var DIM_TEXTS = { H1: "البدن (النموذج)" };   // الأبعاد اللي نصوصها اتكتبت. الباقي بيتكتب بعد اعتماد النموذج.
+  // عنوان القسم بتاع كل بُعد في الدوك
+  var DIM_TEXTS = { H1: "البدن (النموذج)", H2: "الموارد والبيئة", H3: "التنظيم الذاتي", V1: "الاشتعال", V2: "الجذب",
+                    V3: "الاتحاد", A1: "قراءة الحقل والتراحم", A2: "المكانة والدور", A3: "النفع والمسؤولية" };
   var STATE_H3 = { fitra: "متزن", excess: "ماسك فيه زيادة", deficit: "سايبه شوية",
                    silent: "سايبه شوية، والمسار كله هادي (سكوت المسار)", cycle: "بيعلى وينزل" };
   var TEMPLATE_H3 = { ambiguous: "إشارات متداخلة", lean_excess: "مايل شوية ناحية إنك تمسك فيه زيادة",
@@ -27,7 +29,7 @@
     var insight = opts.mode === "insight";
     var B = [], meta = { shown: [], hidden: [], quotes: [], problems: [] };
     var tx = T.texts;
-    function sec(h2) { var k = Object.keys(tx).filter(function (x) { return x.indexOf(h2) !== -1; })[0]; if (!k) meta.problems.push("قسم مش موجود في الدوك: " + h2); return tx[k] || {}; }
+    function sec(h2) { var k = tx[h2] ? h2 : Object.keys(tx).filter(function (x) { return x.indexOf(h2) !== -1; })[0]; if (!k) meta.problems.push("قسم مش موجود في الدوك: " + h2); return tx[k] || {}; }
     function part(s, h3) { var p = s[h3]; if (!p) meta.problems.push("جزء مش موجود في الدوك: " + h3); return p || { paras: [], bullets: [], insight: null, tables: [] }; }
     function secInsight(s) { var v = null; Object.keys(s).forEach(function (k) { if (s[k].insight) v = s[k].insight; }); return v && ins(v); }
     // السطر الأخضر في الدوك فيه وصف المكان، والنص نفسه بين «…»
@@ -117,17 +119,22 @@
 
     /* ───── ٢. خريطتك ───── */
     var F = R.final, weak = R.ranking.confidence === "ضعيفة" && F.source !== "الكوتش";
+    // الهادي غير محسوم باحتمالين: المساند كمان مش محسوم (هو الاحتمال التاني)
+    var undet2 = !weak && F.source !== "الكوتش" && R.suppressed.status === "غير محسوم" && R.suppressed.alternatives.length >= 2;
     var third = F.suppressed || R.ranking.order.filter(function (a) { return a !== F.main && a !== F.supporting; })[0];
     var s2 = sec("٢. خريطتك في سطر"), base = part(s2, "_");
     var AXLINE = {};
-    // جملة المحور القصيرة (لحد أول «:») علشان تتحط جوه جمل تانية من غير نقطتين ورا بعض
-    base.bullets.forEach(function (b) { AX.forEach(function (a) { if (b.indexOf(NAME[a] + ":") === 0) AXLINE[a] = b.slice(NAME[a].length + 1).trim().split(":")[0].replace(/\.$/, ""); }); });
+    // الجملة القصيرة لكل محور: مكتوبة مخصوص في الدوك (القسم ٢)
+    part(s2, "الجملة القصيرة لكل محور (للقوالب)").bullets.forEach(function (b) { AX.forEach(function (a) { if (b.indexOf(NAME[a] + ":") === 0) AXLINE[a] = b.slice(NAME[a].length + 1).trim().replace(/\.$/, ""); }); });
     add("h2", "خريطتك في سطر");
     add("p", base.paras[0]);
     base.bullets.forEach(function (b) { add("li", b); });
     if (weak) {
       fill(part(s2, "نسخة الثقة الضعيفة").paras, { "[الأول]": NAME[R.ranking.order[0]], "[التاني]": NAME[R.ranking.order[1]] }).forEach(function (p) { add("p", p); });
       shown("٢. خريطتك", "نسخة الثقة الضعيفة");
+    } else if (undet2) {
+      fill(part(s2, "نسخة الهادي غير محسوم").paras, { "[المحور]": NAME[F.main] }).forEach(function (p) { add("p", p); });
+      shown("٢. خريطتك", "نسخة الهادي غير محسوم: الأقوى، والاتنين التانيين قريبين");
     } else {
       fill([base.paras[1]], { "[الأقوى]": NAME[F.main], "[المساند]": NAME[F.supporting], "[الهادي]": NAME[third] }).forEach(function (p) { add("p", p); });
       shown("٢. خريطتك");
@@ -140,7 +147,11 @@
       if (weak) add("h3", NAME[ax]);
       fill(part(s3, NAME[ax]).paras, { quote: quoteS1(ax, "closest", third) }).forEach(function (p, k) {
         // الثقة الضعيفة: أول جملة بتقول «أقوى مسار عندك غالبًا هو …»، فبتتبدل علشان ما تتقالش لمحورين
-        if (weak && k === 0) p = p.replace("أقوى مسار عندك غالبًا هو " + NAME[ax] + ".", NAME[ax] + " غالبًا واحد من أقوى مسارين عندك.");
+        if (weak && k === 0) {
+          var first = "أقوى مسار عندك غالبًا هو " + NAME[ax] + ".";
+          if (p.indexOf(first) !== 0) meta.problems.push("أول جملة في نص «" + NAME[ax] + "» اتغيرت في الدوك، فالتبديل بتاع الثقة الضعيفة ما اشتغلش");
+          p = p.replace(first, fill(part(s3, "أول جملة في نسخة الثقة الضعيفة").paras, { "[المحور]": NAME[ax] })[0]);
+        }
         add("p", p);
       });
     });
@@ -149,6 +160,7 @@
 
     /* ───── ٤. المساند ───── */
     if (weak) hidden("٤. المساند", "الثقة ضعيفة، فالأقوى اتعرض لمسارين");
+    else if (undet2) hidden("٤. المساند", "الهادي غير محسوم باحتمالين، والمساند هو الاحتمال التاني");
     else {
       var s4 = sec("٤. مسارك المساند");
       add("h2", "مسارك المساند");
@@ -164,18 +176,17 @@
       fill(part(s5, "مؤكد: " + NAME[F.suppressed]).paras, { quote: quoteS1(F.suppressed, "farthest") }).forEach(function (p) { add("p", p); });
       shown("٥. الهادي", "مؤكد: " + NAME[F.suppressed]);
     } else if (st5 === "الأضعف بس") {
-      fill(part(s5, "الأضعف بس (للتلات محاور)").paras, { quote: quoteS1(R.suppressed.axis, "farthest"), "[اسم المحور]": NAME[R.suppressed.axis], "[جملة المحور من القسم ٢]": AXLINE[R.suppressed.axis] })
+      fill(part(s5, "الأضعف بس (للتلات محاور)").paras, { quote: quoteS1(R.suppressed.axis, "farthest"), "[اسم المحور]": NAME[R.suppressed.axis], "[الجملة القصيرة]": AXLINE[R.suppressed.axis] })
         .forEach(function (p) { add("p", p); });
       shown("٥. الهادي", "الأضعف بس: " + NAME[R.suppressed.axis]);
     } else if (R.suppressed.alternatives.length === 1) {
       // الدوك: لو الاحتمالات محور واحد بس، يتكتب «الأضعف بس» بالمحور ده
       var one = R.suppressed.alternatives[0];
-      fill(part(s5, "الأضعف بس (للتلات محاور)").paras, { quote: quoteS1(one, "farthest"), "[اسم المحور]": NAME[one], "[جملة المحور من القسم ٢]": AXLINE[one] })
+      fill(part(s5, "الأضعف بس (للتلات محاور)").paras, { quote: quoteS1(one, "farthest"), "[اسم المحور]": NAME[one], "[الجملة القصيرة]": AXLINE[one] })
         .forEach(function (p) { add("p", p); });
       shown("٥. الهادي", "غير محسوم باحتمال واحد، فاتكتب «الأضعف بس»: " + NAME[one]);
     } else {
       var alts = R.suppressed.alternatives.slice(0, 2), u = part(s5, "غير محسوم (الاحتمالين)");
-      if (!weak && alts.indexOf(F.supporting) !== -1) meta.problems.push("تعارض: «" + NAME[F.supporting] + "» اتقال إنه المساند في القسم ٤، وهو كمان واحد من احتمالين الهادي في القسم ٥. وجملة الترتيب في القسم ٢ قالت إن الأهدى «" + NAME[third] + "»");
       add("p", fill([u.paras[0]], { "[المحور الأول]": NAME[alts[0]], "[المحور التاني]": NAME[alts[1]] })[0]);
       u.bullets.forEach(function (b) { alts.forEach(function (a) { if (b.indexOf("لو " + (a === "V" ? "هي " : "هو ") + NAME[a]) === 0) add("li", b); }); });
       add("p", u.paras[1]);
@@ -195,8 +206,10 @@
     pick = pick.concat(rank(dims.filter(function (d) { return d.reportStatus === "deficit"; }), function (d) { return d.D; }));
     pick = pick.concat(rank(dims.filter(function (d) { return d.reportStatus === "fitra"; }), function (d) { return (d.T || 0) + (d.K || 0); }));
     pick = pick.slice(0, 3);
-    if (pick.length < 2) pick = pick.concat(rank(dims.filter(function (d) { return /^lean_(excess|deficit)$/.test(d.reportStatus); }), function (d) { return Math.abs(d.E - d.D); }).slice(0, 2 - pick.length));
-    if (!pick.length) pick = dims.filter(function (d) { return d.reportStatus === "ambiguous"; }).slice(0, 1);
+    var acq = R.quality.acquiescence.flag;
+    if (acq) pick = [];   // الدوك: لو «نمط إجابة»، الجدول بس
+    if (!acq && pick.length < 2) pick = pick.concat(rank(dims.filter(function (d) { return /^lean_(excess|deficit)$/.test(d.reportStatus); }), function (d) { return Math.abs(d.E - d.D); }).slice(0, 2 - pick.length));
+    if (!pick.length && !acq) pick = dims.filter(function (d) { return d.reportStatus === "ambiguous"; }).slice(0, 1);
     add("h2", "أبعادك");
     part(s6, "_").paras.forEach(function (p) { add("p", p); });
     var firstStep = null, dimShown = [];
@@ -224,9 +237,10 @@
     });
     add("h3", "الأبعاد التسعة في سطر");
     R.dimensions.forEach(function (d) { add("li", NAME[d.axis] + " · " + d.name + ": " + d.clientWord); });
+    if (acq) part(s6, "لو الإجابات كانت متقاربة (نمط إجابة)").paras.forEach(function (p) { add("p", p); });
     var ins6 = secInsight(tmpl) || secInsight(s6);
     if (insight && ins6) add("p", ins6);
-    shown("٦. الأبعاد", dimShown.join(" · "));
+    shown("٦. الأبعاد", acq ? "الجدول بس وسطر إعادة المقياس (نمط إجابة)" : dimShown.join(" · "));
 
     /* ───── ٧. الموجات والميل ───── */
     var s7 = sec("٧. موجاتك وميلك"), hiC = AX.filter(function (a) { return R.cycles[a].high; });
@@ -280,7 +294,7 @@
     /* ───── ٩. خطوة ───── */
     var s9 = sec("٩. خطوة واحدة للأسبوع ده"), why9 = "من أول بُعد بالتفصيل";
     if (!firstStep) {
-      why9 = "خطوة بديلة من المسار الأقوى (أول بُعد ما عندوش خطوة مكتوبة)";
+      why9 = acq ? "خطوة المسار الأقوى (نمط إجابة)" : "خطوة بديلة من المسار الأقوى (أول بُعد ما عندوش خطوة مكتوبة)";
       var alt = part(s9, "خطوات بديلة حسب المسار الأقوى").bullets.filter(function (b) { return b.indexOf(NAME[F.main] + ":") === 0; })[0];
       firstStep = alt ? alt.slice(NAME[F.main].length + 1).trim() : "";
     }
