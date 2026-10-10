@@ -97,6 +97,8 @@ var profiles = [
       eq("احتمال تجميل", r.quality.validity.label, "احتمال تجميل");
       eq("التناقضات (ترك عالي مع إفراط عالي، وأخذ عالي مع تفريط عالي، في الـ٩)", r.quality.contradictions.count, 18);
       eq("حال الأبعاد (الدايرة عالية فبتكسب على التباس)", r.dimensions.map(function (d) { return d.status; }).filter(function (s) { return s === "cycle"; }).length, 9);
+      eq("وفي التقرير: كل «دايرة» بتتقري «التباس» لأن فيه نمط إجابة", r.dimensions.map(function (d) { return d.reportStatus; }).filter(function (s) { return s === "ambiguous"; }).length, 9);
+      eq("والعميل يشوف «إشارات متداخلة»، والتقرير يقول ده في أوله", [r.dimensions[0].clientWord, r.quality.acquiescence.reportNote], ["إشارات متداخلة", true]);
       eq("التنبيهات", [r.alerts.depletion.on, r.alerts.mood.on, r.alerts.freeze.on], [true, true, true]);
     } },
   { name: "٥. متعادل (الترتيب صفر في الكل، وكل العبارات «أحيانًا»)",
@@ -107,6 +109,7 @@ var profiles = [
       eq("النقط", r.ranking.points, { H: 0, V: 0, A: 0 }); eq("الثقة", r.ranking.confidence, "ضعيفة"); eq("تعادل في الأول", r.ranking.tiedTop, true);
       eq("المكبوت", r.suppressed.status, "غير محسوم");
       eq("حال الأبعاد", r.dimensions.map(function (d) { return d.status; }).filter(function (s) { return s === "undetermined"; }).length, 9);
+      eq("والعميل يشوفها «منطقة وسط»", r.dimensions[0].clientWord, "منطقة وسط");
       eq("صيغة الاستبدال عامة", r.adaptive.computed.row, "عامة");
       eq("مفيش نمط إجابة", r.quality.acquiescence.flag, false);
     } },
@@ -165,6 +168,8 @@ function fromMahmoud(m) {
 var R = E.score(fromMahmoud(M), items, C), X = M.expected;
 console.log("\nالحالة الحقيقية: إجابات محمود");
 eq("الرئيسي", R.ranking.main, X.main); eq("الثقة", R.ranking.confidence, X.confidence);
+eq("بُعد مفيهوش نمط إجابة: الدايرة بتفضل دايرة في التقرير", R.dimensions.filter(function (x) { return x.id === "H3"; })[0].reportStatus, "cycle");
+eq("المكانة والدور: ميل بفرق الإفراط والتفريط", R.dimensions.filter(function (x) { return x.id === "A2"; })[0].leanBy, "فرق الإفراط والتفريط");
 eq("المكبوت", R.suppressed.axis, X.suppressed); eq("حالة المكبوت", R.suppressed.status, X.suppressedStatus);
 Object.keys(X.dims).forEach(function (d) { eq("البُعد " + d, R.dimensions.filter(function (x) { return x.id === d; })[0].status, X.dims[d]); });
 eq("تنبيه الانطفاء", R.alerts.depletion.on, X.alerts.depletion); eq("تقلب المزاج", R.alerts.mood.on, X.alerts.mood); eq("تنبيه الفترة", R.alerts.period.on, X.alerts.period);

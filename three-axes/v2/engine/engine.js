@@ -10,7 +10,7 @@
 (function (root) {
   "use strict";
 
-  var ENGINE_VERSION = "2.0.0";
+  var ENGINE_VERSION = "2.1.0";
   var AX = ["H", "V", "A"];
   var AX_NAME = { H: "الحفظ", V: "الحيوية", A: "الانتماء" };
 
@@ -224,6 +224,12 @@
     cycle: "دايرة في البُعد ده", ambiguous: "التباس", excess: "إفراط", deficit: "تفريط", fitra: "فطرة",
     lean_excess: "ميل ناحية الإفراط", lean_deficit: "ميل ناحية التفريط", lean_both: "ميل من الناحيتين", undetermined: "غير محسوم"
   };
+  /* الاسم اللي العميل بيشوفه (الاسم الداخلي فوق ما بيظهرش له) */
+  var CLIENT_WORD = {
+    fitra: "متزن", excess: "ماسك فيه زيادة", deficit: "سايبه شوية", cycle: "بيعلى وينزل", ambiguous: "إشارات متداخلة",
+    lean_excess: "مايل شوية ناحية إنك تمسك فيه زيادة", lean_deficit: "مايل شوية ناحية إنك تسيبه",
+    lean_both: "مايل شوية من الناحيتين", undetermined: "منطقة وسط"
+  };
   function dimensions(ans, items, C, cyc) {
     var hi = C.dims.high, lo = C.dims.low;
     return items.dims.map(function (d) {
@@ -243,7 +249,11 @@
       else if (Tl && Kl) code = "lean_both";
       else if (Tl) code = "lean_excess";
       else if (Kl) code = "lean_deficit";
+      // قبل «غير محسوم»: الإفراط والتفريط الاتنين مش عاليين، بس واحد أعلى من التاني بفرق واضح ← ميل ناحيته
+      else if (E != null && D != null && E - D >= C.dims.leanGap) code = "lean_excess";
+      else if (E != null && D != null && D - E >= C.dims.leanGap) code = "lean_deficit";
       else code = "undetermined";
+      var leanBy = /^lean/.test(code) ? ((Tl || Kl) ? "الترك والأخذ" : "فرق الإفراط والتفريط") : null;
       // الوش: وصف للعبارة اللي طلعت أعلى في التفريط (ولو متعادلين الاتنين)، مش نتيجة
       var dv = de.map(function (i) { return { face: i.face, v: ans.freq[i.id] }; }).filter(function (x) { return isNum(x.v) && x.v > 0; });
       var mx = Math.max.apply(null, dv.map(function (x) { return x.v; }).concat([-1]));
@@ -254,7 +264,7 @@
         E: r2(E), D: r2(D), T: T, K: K,
         status: code, label: STATUS[code], face: faces,
         contradictions: (Th && Eh ? 1 : 0) + (Kh && Dh ? 1 : 0),
-        bothHigh: Eh && Dh,
+        bothHigh: Eh && Dh, leanBy: leanBy,
         missing: ex.concat(de, [le, ta]).filter(function (i) { return !isNum(ans.freq[i.id]); }).map(function (i) { return i.id; })
       };
     });
@@ -340,6 +350,12 @@
     var s7 = station7(ans, items, C, shown || computedRow.row);
     var al = alerts(ans, items, C, s7);
     var q = quality(ans, items, C, dims);
+    dims.forEach(function (d) {
+      d.reportStatus = (q.acquiescence.flag && d.status === "cycle") ? "ambiguous" : d.status;
+      d.reportLabel = STATUS[d.reportStatus];
+      d.clientWord = CLIENT_WORD[d.reportStatus];
+    });
+    q.acquiescence.reportNote = q.acquiescence.flag;   // التقرير يقول في أوله بلطف إن الإجابات كانت متقاربة
 
     // تعديل الكوتش: الحساب الأصلي بيفضل زي ما هو، والنهائي بياخد التعديل
     var ov = opts.override || null;
@@ -373,7 +389,7 @@
     };
   }
 
-  var API = { ENGINE_VERSION: ENGINE_VERSION, AX_NAME: AX_NAME, STATUS: STATUS,
+  var API = { ENGINE_VERSION: ENGINE_VERSION, AX_NAME: AX_NAME, STATUS: STATUS, CLIENT_WORD: CLIENT_WORD,
               score: score, verifyIntegrity: verifyIntegrity, normalize: normalize, adaptiveRow: adaptiveRow };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.AxesV2Engine = API;
