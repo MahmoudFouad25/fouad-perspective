@@ -2,15 +2,18 @@
 """يولّد ملفات الأسئلة من دوك «مقياس المحاور ٢ — الأسئلة».
 
 الاستعمال:
-    python3 build_items.py doc.json
+    python3 build_items.py doc.json                  ← بنفس رقم النسخة المقفولة (بيرفض لو حاجة اتغيّرت)
+    python3 build_items.py doc.json --version 2.1    ← لما نص أو تصنيف يتغيّر
 
 doc.json = ناتج documents.get للدوك (Google Docs API، أو أداة read_doc) زي ما هو،
 أو المفتاح "content" بتاعه.
 
-بيكتب ملفين:
-  pilot/items.json   ← اللي صفحة المشاركين بتقراه. فيه نصوص العميل بس، ومفيش أي سطر داخلي،
+بيكتب ٣ ملفات:
+  engine/items.json  ← مصدر المحرك: كل عبارة وموقف بتصنيفه الداخلي كامل، ورقم نسخة الأسئلة.
+                       والنسخة متقفلة في engine/questions.lock.json.
+  pilot/items.json   ← للعرض بس. فيه نصوص العميل، ومفيش أي سطر داخلي،
                        ولا اسم محور ولا بُعد. المحاور مرموزة بحروف: H / V / A.
-  checks/items.json  ← اللي سكريبت الفحص (checks/check_items.py) بيقراه، بالتصنيف الداخلي كامل.
+  checks/items.json  ← اللي سكريبت الفحص (checks/check_items.py) بيقراه.
 
 النصوص الثابتة (الترحيب، وسؤال الفترة، وتعليمات كل محطة، ونصوص الانتقال) جاية من تاب «نسخة العميل».
 العبارات والمواقف وتصنيفها جاية من التاب الأساسي، والسكريبت بيتأكد إن الاتنين متطابقين.
@@ -21,6 +24,14 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 AR = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
 AXIS = {'الحفظ': 'H', 'الحيوية': 'V', 'الانتماء': 'A'}
+AXIS_NAME = {v: k for k, v in AXIS.items()}
+# الأبعاد التسعة بالترتيب، وكل بُعد تبع أنهي محور. الـ id بيتكتب في ملف المحرك.
+DIMS = [('H1', 'البدن', 'H'), ('H2', 'الموارد والبيئة', 'H'), ('H3', 'التنظيم الذاتي', 'H'),
+        ('V1', 'الاشتعال', 'V'), ('V2', 'الجذب', 'V'), ('V3', 'الاتحاد', 'V'),
+        ('A1', 'قراءة الحقل والتراحم', 'A'), ('A2', 'المكانة والدور', 'A'), ('A3', 'النفع والمسؤولية', 'A')]
+DIM_BY_NAME = {n: (i, a) for i, n, a in DIMS}
+ENGINE_DIR = os.path.join(HERE, '..', 'engine')
+LOCK = os.path.join(ENGINE_DIR, 'questions.lock.json')
 FREQ = ['عمري', 'نادرًا', 'أحيانًا', 'كتير', 'دايمًا']
 
 
@@ -106,6 +117,43 @@ def triad_axes(note):
     return out
 
 
+def classify(station, n, text, mm):
+    """تصنيف عبارة تكرارية (المحطات ٣ لـ٧) لملف المحرك."""
+    ty = mm['type']
+    out = {'id': f's{station}n{n}', 'station': station, 'n': n, 'text': text, 'typeLabel': ty, 'desirable': mm['desirable']}
+    dim = mm['dim']
+    if dim in DIM_BY_NAME:
+        out['dim'], out['axis'] = DIM_BY_NAME[dim]
+    elif dim in AXIS:
+        out['axis'] = AXIS[dim]
+    if ty == 'إفراط':
+        out['kind'] = 'excess'
+    elif ty.startswith('تفريط'):
+        out['kind'] = 'deficit'
+        out['face'] = re.match(r'تفريط \((.+)\)', ty).group(1)
+    elif ty == 'الفطرة: ترك بعد الفعل':
+        out['kind'] = 'leave'
+    elif ty == 'الفطرة: أخذ من غير ذنب':
+        out['kind'] = 'take'
+    elif ty == 'صدق':
+        out['kind'] = 'validity'
+    elif ty.startswith('دائرة'):
+        out['kind'] = 'cycle'
+        out['cycle'] = re.match(r'دائرة: ([^(]+)', ty).group(1).strip()
+    elif ty.startswith('خوف وقودًا'):
+        out['kind'] = 'fear'
+    elif ty.startswith('تجمّد'):
+        out['kind'] = 'freeze'
+    elif ty.startswith('استبدال متكيّف'):
+        out['kind'] = 'adaptive'
+        out['slot'] = int(re.search(r'مكان ([٠-٩])', ty).group(1).translate(AR))
+    elif ty.startswith('انطفاء'):
+        out['kind'] = 'depletion'
+    else:
+        raise SystemExit(f'نوع مش معروف: s{station}n{n} «{ty}»')
+    return out
+
+
 def strip_num(t):
     return re.sub(r'^[٠-٩]+\.\s*', '', t)
 
@@ -114,7 +162,7 @@ def strip_opt(t):
     return re.sub(r'^[أبج]\.\s*', '', t)
 
 
-def main(path):
+def main(path, version=None):
     doc = load(path)
     tabs = {t['tabProperties']['title']: t for t in doc['tabs']}
     main_tab = doc['tabs'][0]
@@ -180,6 +228,8 @@ def main(path):
     # نص الانتقال اللي بعد كل محطة = آخر فقرة عادية في قسمها في تاب العميل
     stations = []
 
+    full = {'station1': [], 'station2': [], 'freq': [], 'bipolar': []}
+
     # المحطة ١
     key, intro, outro, _ = client_station('المحطة ١')
     items = []
@@ -190,6 +240,10 @@ def main(path):
         light = 'الحالة: خفيف' in note
         opts = [{'id': f'o{k+1}', 'text': strip_opt(b[k+1]), 'axis': AXIS[ax[k][0]]} for k in range(3)]
         items.append({'id': f's1n{num(it["h"])}', 'n': num(it['h']), 'text': strip_num(b[0]), 'options': opts, 'light': light})
+        dom = re.search(r'الميدان: ([^·]+)', note)
+        full['station1'].append({'id': items[-1]['id'], 'n': items[-1]['n'], 'text': items[-1]['text'], 'light': light,
+                                 'domain': dom.group(1).strip() if dom else '',
+                                 'options': [dict(o, dim=DIM_BY_NAME[ax[k][1]][0]) for k, o in enumerate(opts)]})
     stations.append({'id': 1, 'kind': 'triad', 'title': key.split(': ', 1)[1], 'intro': intro, 'items': items, 'transition': outro})
 
     # المحطة ٢
@@ -200,6 +254,10 @@ def main(path):
         ax = triad_axes(note_of(b))
         opts = [{'id': f'o{k+1}', 'text': strip_opt(b[k+1]), 'axis': AXIS[ax[k][0]]} for k in range(3)]
         items.append({'id': f's2n{num(it["h"])}', 'n': num(it['h']), 'text': strip_num(b[0]), 'options': opts, 'light': False})
+        sign = re.search(r'العلامة: ([^·]+)', note_of(b))
+        full['station2'].append({'id': items[-1]['id'], 'n': items[-1]['n'], 'text': items[-1]['text'],
+                                 'sign': sign.group(1).strip() if sign else '',
+                                 'options': [dict(o, dim=DIM_BY_NAME[ax[k][1]][0]) for k, o in enumerate(opts)]})
     stations.append({'id': 2, 'kind': 'triad', 'reversed': True, 'title': key.split(': ', 1)[1], 'intro': intro, 'items': items, 'transition': outro})
 
     # المحطات ٣ لـ ٧
@@ -218,15 +276,21 @@ def main(path):
                 a = strip_opt(next(x for x in b if x.startswith('أ. ')))
                 bb = strip_opt(next(x for x in b if x.startswith('ب. ')))
                 bipolar.append({'id': f's6t{n}', 'n': n, 'text': b[0], 'a': a, 'b': bb})
+                poles = re.search(r'الطرف «أ» = قطب ([^،·]+)، والطرف «ب» = قطب ([^·]+)', note)
+                full['bipolar'].append({'id': f's6t{n}', 'n': n, 'axis': AXIS[mm['dim']], 'tension': mm['type'].split(': ', 1)[1],
+                                        'poleA': poles.group(1).strip(), 'poleB': poles.group(2).strip(),
+                                        'text': b[0], 'a': a, 'b': bb})
                 for pole, txt in (('أ', a), ('ب', bb)):
                     check_items.append({'station': 6, 'n': f'ط{n}{pole}', 'text': b[0] + ' ' + txt, **mm})
                 continue
             if b[0].startswith('['):
                 slot = int(re.search(r'مكان ([٠-٩])', b[0]).group(1).translate(AR))
                 items.append({'id': f's{k}n{n}', 'n': n, 'adaptive': slot})
+                full['freq'].append(classify(k, n, None, mm))
                 check_items.append({'station': k, 'n': n, 'text': None, **mm})
                 continue
             items.append({'id': f's{k}n{n}', 'n': n, 'text': b[0]})
+            full['freq'].append(classify(k, n, b[0], mm))
             check_items.append({'station': k, 'n': n, 'text': b[0], **mm})
         st = {'id': k, 'kind': 'freq', 'title': key.split(': ', 1)[1], 'intro': intro, 'scale': FREQ, 'items': items, 'transition': outro}
         if bipolar:
@@ -265,10 +329,45 @@ def main(path):
     counts = {st['id']: len(st['items']) + len(st.get('bipolar', {}).get('items', [])) for st in stations}
     assert counts == {1: 18, 2: 6, 3: 19, 4: 19, 5: 19, 6: 12, 7: 18}, counts
 
+    # ───────── ملف المحرك الكامل + قفل النسخة ─────────
+    closing_key = next(k for k in C if k.startswith('الختام'))
+    closing = [t for st, t, sz in C[closing_key] if t.strip() and st == 'NORMAL_TEXT']
+    full_body = {
+        'axes': {a: {'name': AXIS_NAME[a], 'dims': [d for d, n_, ax in DIMS if ax == a]} for a in ('H', 'V', 'A')},
+        'dims': [{'id': d, 'name': n_, 'axis': ax} for d, n_, ax in DIMS],
+        **full,
+        'adaptive': adaptive,
+        'client': {'welcome': {'title': title, 'paragraphs': welcome}, 'period': period, 'closing': closing,
+                   'stations': [{'id': st['id'], 'title': st['title'], 'intro': st['intro'], 'transition': st['transition'],
+                                 **({'bipolar': {k_: st['bipolar'][k_] for k_ in ('title', 'intro', 'scale')}} if st.get('bipolar') else {})}
+                                for st in stations]},
+    }
+    qhash = hashlib.sha1(json.dumps(full_body, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+    lock = json.load(open(LOCK, encoding='utf-8')) if os.path.exists(LOCK) else None
+    if version is None:
+        if not lock:
+            sys.exit('مفيش قفل لسه. أول مرة لازم تحدد النسخة: --version 2.0')
+        version = lock['version']
+    if lock and version == lock['version'] and qhash != lock['hash']:
+        sys.exit(f'الأسئلة أو تصنيفها اتغيّروا ({lock["hash"]} ← {qhash}) ورقم النسخة لسه {version}. '
+                 'ارفع الرقم (مثلًا --version ' + bump(version) + ')، علشان الإجابات القديمة تفضل مربوطة بنسختها.')
+    if lock and version != lock['version'] and qhash == lock['hash']:
+        sys.exit(f'رقم النسخة اتغيّر ({lock["version"]} ← {version}) والأسئلة زي ما هي. سيب الرقم زي ما هو.')
+    gen = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    os.makedirs(ENGINE_DIR, exist_ok=True)
+    json.dump({'version': version, 'hash': qhash, 'generated': gen, 'docRevision': doc.get('revisionId', '')[:16], **full_body},
+              open(os.path.join(ENGINE_DIR, 'items.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    if not lock or lock['version'] != version:
+        history = (lock or {}).get('history', [])
+        if lock:
+            history.append({'version': lock['version'], 'hash': lock['hash'], 'lockedAt': lock['lockedAt']})
+        json.dump({'version': version, 'hash': qhash, 'lockedAt': gen, 'history': history},
+                  open(LOCK, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+
     body = {'title': 'مقياس المحاور', 'welcome': {'title': title, 'paragraphs': welcome_pilot},
             'period': period, 'stations': stations, 'adaptive': adaptive}
     h = hashlib.sha1(json.dumps(body, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()[:10]
-    out = {'version': {'hash': h, 'generated': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
+    out = {'version': {'questions': version, 'hash': h, 'generated': gen,
                        'docRevision': doc.get('revisionId', '')[:16]}, **body}
     leak = re.findall(r'داخلي|الحفظ|الحيوية|الانتماء|محور|نقاط القوة|استبدال|إشارة سكوت', json.dumps(out, ensure_ascii=False))
     assert not leak, ('كلام داخلي اتسرّب لملف المشاركين', set(leak))
@@ -290,8 +389,19 @@ def main(path):
         'station2': [[it['text']] + [o['text'] for o in it['options']] for it in stations[1]['items']],
     }
     json.dump(chk, open(os.path.join(HERE, '..', 'checks', 'items.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    print('pilot/items.json', h, counts)
+    print(f'الأسئلة {version} ({qhash}) · engine/items.json · pilot/items.json ({h}) · checks/items.json', counts)
+
+
+def bump(v):
+    p = v.split('.')
+    p[-1] = str(int(p[-1]) + 1)
+    return '.'.join(p)
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('doc')
+    ap.add_argument('--version', default=None, help='رقم نسخة الأسئلة. لازم يترفع لو أي نص أو تصنيف اتغيّر.')
+    args = ap.parse_args()
+    main(args.doc, args.version)
