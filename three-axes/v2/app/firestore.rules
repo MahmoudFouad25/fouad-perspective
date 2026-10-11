@@ -1,0 +1,64 @@
+// =====================================================================
+// قواعد الأمان لـ«مقياس مسارات الطاقة» (النسخة ٢) — /maqyas_axes_v2/{userId}
+// ---------------------------------------------------------------------
+// ده مقطع بيتلصق جوّه قواعد المشروع الموجودة (مش ملف لوحده). الخطوات في README.md.
+//
+// • الوثيقة رقمها نفس رقم العميل في المنصة (users/{userId}).
+// • العميل يقرا ويكتب وثيقته بس: لازم يكون داخل بحساب فايربيز إيميله هو نفسه
+//   إيميل users/{userId}.personalInfo.email. يعني رقم العميل لوحده (ممكن يتخمّن) مش كفاية.
+// • العميل ما يقدرش يكتب حقول الكوتش، وبعد ما يخلّص ما يقدرش يغيّر إجاباته ولا نتيجته،
+//   يقدر بس يقيّم التقرير.
+// • الأدمن يقرا الكل، ويكتب حقول الكوتش وإعادة الحساب بس.
+// • محدش يمسح من الصفحات. المسح من Firebase Console بس.
+// =====================================================================
+
+// ─── (١) الصق ده فوق القاعدة العامة match /{collection}/{doc=**} مباشرة ───
+
+    function isAxv2Admin() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in ['admin@fouad-academy.com'];
+    }
+    function isAxv2Owner(userId) {
+      return request.auth != null
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.personalInfo.email.lower()
+             == request.auth.token.email.lower();
+    }
+
+    match /maqyas_axes_v2/{userId} {
+      allow get:    if isAxv2Admin() || isAxv2Owner(userId);
+      allow list:   if isAxv2Admin();
+
+      // أول حفظ: العميل لنفسه، ومن غير حقول الكوتش
+      allow create: if isAxv2Owner(userId)
+        && request.resource.data.userId == userId
+        && request.resource.data.authUid == request.auth.uid
+        && request.resource.data.status == 'شغال'
+        && !request.resource.data.keys().hasAny(['override', 'resultHistory', 'adminUpdatedAt', 'adminNote']);
+
+      allow update: if
+        // العميل وهو لسه بيجاوب (ويقدر يقفل ويحط نتيجته)
+        (isAxv2Owner(userId)
+          && resource.data.status == 'شغال'
+          && request.resource.data.userId == userId
+          && request.resource.data.authUid == request.auth.uid
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['override', 'resultHistory', 'adminUpdatedAt', 'adminNote']))
+        // العميل بعد ما خلّص: التقييم، وإمتى شاف التقرير، ونوع الشراء لو اتغيّر
+        || (isAxv2Owner(userId)
+          && resource.data.status == 'خلص'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'reportViewedAt', 'purchase', 'updatedAt']))
+        // الأدمن: تعديل الكوتش وإعادة الحساب بس، ومن غير ما يلمس الإجابات
+        || (isAxv2Admin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+               ['override', 'result', 'summary', 'resultHistory', 'engineVersion', 'configVersion', 'textsVersion', 'adminUpdatedAt', 'adminNote']));
+
+      allow delete: if false;
+    }
+
+// ─── (٢) جوّه القاعدة العامة match /{collection}/{doc=**} ───
+// زوّد المجموعة على الاستثناءات اللي القاعدة العامة ما بتفتحهاش. مثال (حسب شكل السطر عندك):
+//   allow read, write: if (collection == 'sessions' || ... || collection == 'maqyas_axes_v2_pilot'
+//                          || collection == 'maqyas_axes_v2') ...
+// من غير الخطوة دي، القاعدة العامة هتفتح المجموعة لأي حد، والقواعد اللي فوق مالهاش لازمة.

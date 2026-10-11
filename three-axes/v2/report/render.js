@@ -6,8 +6,8 @@
      answers = نفس الإجابات (شكل المحرك، أو بعد engine.normalize)
      items   = engine/items.json
      texts   = report/texts.json (بيتطلّع من الدوك بـ extract_texts.py)
-     opts    = { mode: "standalone" | "insight", name: "…", contact: "…" }
-   blocks: [{t:"title"|"h2"|"h3"|"p"|"li"|"pending", text}]   ← العميل بيشوف كل حاجة ما عدا "pending"
+     opts    = { mode: "standalone" | "insight", name: "…", contact: "…", contactLink: "https://wa.me/…", contactLabel: "…" }
+   blocks: [{t:"title"|"h2"|"h3"|"p"|"li"|"pending"|"btn", text, href?}]   ← "btn" زرار التواصل (النسخة المنفردة بس)   ← العميل بيشوف كل حاجة ما عدا "pending"
    meta:   الأقسام اللي ظهرت واللي ما ظهرتش وليه، والاقتباسات، والمشاكل اللي اتلقت وهو بيولّد.
    القواعد هنا هي نفس السطور الداخلية في الدوك (بيظهر إمتى). لو اتغيّرت هناك، تتغيّر هنا.
    ===================================================================== */
@@ -286,7 +286,10 @@
         var g = part(s8, "الرسالة الواحدة اللطيفة");
         add("p", g.paras[0]);
         if (insight) add("p", ins(g.insight));
-        else add("p", g.paras[1].replace("[النسخة المنفردة]", "").trim().split("[طريقة التواصل]").join(opts.contact || "(هنا هتظهر طريقة التواصل)"));
+        else {
+          add("p", g.paras[1].replace("[النسخة المنفردة]", "").trim().split("[طريقة التواصل]").join(opts.contact || "(هنا هتظهر طريقة التواصل)"));
+          if (opts.contactLink) B.push({ t: "btn", text: opts.contactLabel || "كلّمنا على واتساب", href: opts.contactLink });
+        }
       }
       shown("٨. لما الضغط يزيد", [fearWhich ? "قلق: " + fearWhich : null, alertOn ? "الرسالة اللطيفة (" + ["freeze", "depletion", "mood"].filter(function (k) { return R.alerts[k].on; }).join("، ") + ")" : null].filter(Boolean).join(" + "));
     }
@@ -317,7 +320,7 @@
       seen[b.text] = 1;
       if (b.t !== "pending" && /\[[^\]]+\]/.test(b.text)) meta.problems.push("قوس فاضل: " + b.text.slice(0, 50));
     });
-    meta.words = B.filter(function (b) { return b.t !== "pending"; }).reduce(function (s, b) { return s + b.text.split(/\s+/).filter(Boolean).length; }, 0);
+    meta.words = B.filter(function (b) { return b.t !== "pending" && b.t !== "btn"; }).reduce(function (s, b) { return s + b.text.split(/\s+/).filter(Boolean).length; }, 0);
     return { blocks: B, meta: meta };
   }
   function stripDot(s) { return (s || "").replace(/\.\s*$/, ""); }
