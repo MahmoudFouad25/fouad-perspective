@@ -113,7 +113,7 @@
     var c = current(), ph = rxPhone(c.sl, c.step);
     if (!joined() || editing) ph = { k: "join" };
     else if (ph.k === "join") ph = { k: "table" };   /* سجّل خلاص: يشوف ترابيزته ويستنى */
-    var key = [c.sl.id, c.step, ph.k, ph.act || "", joined(), editing, myTable(), mode].join("|");
+    var key = [c.sl.id, c.step, ph.k, (ph.act || "") + (ph.sec || ""), joined(), editing, myTable(), mode, (S && S.pairs && uid && S.pairs[uid]) || 0].join("|");
     if (!force && key === viewKey) { refresh(); return; }
     /* ما نقطعش حد بيكتب في نفس الشاشة */
     var ae = document.activeElement;
@@ -443,6 +443,264 @@
     $main.oninput = null;
   };
 
+
+  /* ═════════ العيادة · المراجعة · خريطة المحافظة · التسليم ═════════ */
+  function T() { var G = (S && S.groups) || {}, m = 0; Object.keys(G).forEach(function (u) { m = Math.max(m, G[u] || 0); }); return m; }
+  function aggAct(id) { return (agg.acts && agg.acts[id]) || {}; }
+  function busy() { var a = document.activeElement; return a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && $main.contains(a); }
+  function keepScroll(fn) { var y = window.scrollY; fn(); window.scrollTo(0, y); }
+
+  /* الأدوار جوّا الترابيزة: الدكتور مسؤول تنمية، والمستلم مدرب، والباقي بالترتيب */
+  function myRole() {
+    var t = myTable(); if (!t || !S) return null;
+    var G = S.groups || {}, R = S.roster || {};
+    var m = Object.keys(G).filter(function (u) { return G[u] === t; }).sort();
+    var D = m.filter(function (u) { return (R[u] || {}).r === "d"; }), Tr = m.filter(function (u) { return (R[u] || {}).r === "t"; });
+    var as = {}, rest;
+    var doc = D[0] || m[0]; as[doc] = "doc";
+    var rec = Tr.filter(function (u) { return !as[u]; })[0] || m.filter(function (u) { return !as[u]; })[0]; if (rec) as[rec] = "rec";
+    rest = m.filter(function (u) { return !as[u]; });
+    if (rest[0]) as[rest[0]] = "grd"; if (rest[1]) as[rest[1]] = "wrt";
+    rest.slice(2).forEach(function (u) { as[u] = "hlp"; });
+    if (!rest[1] && !as[uid]) as[uid] = "wrt";
+    var id = as[uid] || "hlp";
+    for (var i = 0; i < RX_CROLES.length; i++) if (RX_CROLES[i].id === id) return RX_CROLES[i];
+    return RX_CROLES[4];
+  }
+
+  /* حارس الأقفال على الموبايل */
+  var LOCK_GUARD = {
+    1: { w: ["كورس", "تدريب", "ورشة"], m: "دي وسيلة… النتيجة بعدها إيه؟" },
+    2: { w: RX_BANNED, m: "كلمة ممنوعة… الكاميرا مش هتشوفها." },
+    3: { w: ["عشان", "السبب إن", "بسبب"], m: "«عشان»؟ مكانها مش هنا. القفل التالت بيوصف بس." }
+  };
+  function lockGuard(i, v) {
+    var g = LOCK_GUARD[i]; if (!g || !v) return "";
+    var hit = g.w.filter(function (w) { return v.indexOf(w) !== -1; });
+    return hit.length ? '🔐 «' + esc(hit[0]) + "» · " + esc(g.m) : "";
+  }
+
+  function envTabsList(list, key) {
+    var cur = Math.min(uiTab[key] || 0, list.length - 1), e = list[cur];
+    return '<div class="envtabs">' + list.map(function (x, i) { return '<button data-envk="' + key + '" data-envi="' + i + '" class="' + (x.tone === "paper" ? "paper" : x.tone) + (i === cur ? " on" : "") + '">' + esc(x.h) + "</button>"; }).join("") + "</div>" +
+      '<div class="m-card m-env ' + e.tone + '"><b>' + esc(e.h) + "</b>" + e.lines.map(function (l) { return '<div style="margin:6px 0">' + esc(l) + "</div>"; }).join("") + "</div>";
+  }
+  function envClick2(e) { var b = e.target.closest("[data-envk]"); if (!b) return false; uiTab[b.dataset.envk] = +b.dataset.envi; keepScroll(function () { render(true); }); return true; }
+
+  /* ── العيادة ── */
+  function ccDraft() {
+    var t = myTable(), x = (aggAct("cc").byT || {})[t], loc = me.cc && me.cc.t === t ? me.cc : null;
+    if (x && x.v && (!loc || (x.at || 0) > (loc.at || 0))) { me.cc = JSON.parse(JSON.stringify(x.v)); me.cc.t = t; me.cc.fromAgg = x.at; save(); }
+    if (!me.cc || me.cc.t !== t) { me.cc = { t: t, case: rxClinicFor(t).id, f: {}, ty: [], to: [], dec: "", at: 0 }; save(); }
+    return me.cc;
+  }
+  XV.clinic = function (ph) {
+    var t = myTable();
+    if (!t) return '<div class="card">لسه ما اتحطتش على ترابيزة. اسأل الميسّر.</div>';
+    var c = rxClinicFor(t), role = myRole(), sec = ph.sec || "card";
+    var h = '<div class="ctop"><span class="tbl">ترابيزة ' + ar(t) + "</span><b>" + esc(c.h) + '</b><span class="muted">' + esc(c.n) + "</span></div>";
+    if (role) h += '<div class="role"><i>' + role.ic + "</i><div><b>دورك: " + esc(role.n) + "</b><span>" + esc(role.d) + "</span></div></div>";
+    if (sec === "role") return h + '<p class="muted">الأدوار اتوزعت لوحدها. لو الترابيزة حبت تبدّل، تبدّل بالكلام عادي.</p>';
+    h += '<details class="ref"' + (sec === "file" ? " open" : "") + '><summary>📁 ملف المريض</summary>' + envTabsList(c.envs, "cf") + "</details>";
+    if (sec === "file") return h;
+    var d = ccDraft();
+    if (sec === "mine") {
+      return h + '<div class="card"><b>بطاقة ترابيزتكم</b>' + RXR.SEVEN.map(function (r, i) { var v = d.f[i + 1]; return '<div class="m-row7"><b>' + (v ? "🔓" : "🔒") + " " + ar(i + 1) + ". " + esc(r.q) + "</b>" + (v ? "<small>" + esc(v) + "</small>" : "") + "</div>"; }).join("") + "</div>";
+    }
+    h += '<div class="card ccf"><b>بطاقة الاحتياج</b><p class="muted" style="margin:2px 0 8px">بطاقة واحدة للترابيزة. أي حد يقدر يكتب، والكل بيشوفها. الأحسن الكاتب.</p>';
+    RXR.SEVEN.forEach(function (r, i) {
+      var n = i + 1, v = d.f[n] || "";
+      h += '<div class="lk' + (v ? " on" : "") + '"><label>' + (v ? "🔓" : "🔒") + " " + ar(n) + ". " + esc(r.q) + '</label><textarea data-lk="' + n + '" rows="2" maxlength="300">' + esc(v) + '</textarea><div class="guard bad" id="lg' + n + '">' + lockGuard(n, v) + "</div>";
+      if (n === 5) h += '<div class="ty">' + RX_TYPES.map(function (t2) { var on = (d.ty || []).indexOf(t2.id) !== -1; return '<button data-cty="' + t2.id + '" class="' + (on ? "on" : "") + '" style="' + (on ? "background:" + t2.c + ";color:#fff" : "") + '">' + t2.ic + " " + esc(t2.n) + "</button>"; }).join("") + "</div>";
+      h += "</div>";
+    });
+    h += '<div class="lk"><label>البطاقة رايحة لـ</label><div class="ty">' + RX_TO.map(function (o) { var on = (d.to || []).indexOf(o.id) !== -1; return '<button data-cto="' + o.id + '" class="' + (on ? "on dark" : "") + '">' + esc(o.l) + "</button>"; }).join("") + "</div></div>";
+    h += '<div class="lk"><label>🏢 فيه بطاقة قرار كمان؟ (اكتبها هنا)</label><textarea data-dec="1" rows="2" maxlength="300" placeholder="مثلًا: كل متطوع ياخد بطاقة دور مكتوبة">' + esc(d.dec || "") + "</textarea></div>";
+    h += '<button class="btn gold" id="ccsend">سلّم بطاقة الترابيزة</button><div class="muted" id="ccst" style="margin-top:6px">' + (d.at ? "آخر تسليم: محفوظ ✓" : "") + "</div></div>";
+    if (role && role.id === "rec") h += '<div class="card" style="background:#eef6f2"><b>📥 سؤالك كمستلم في الآخر:</b>«لو التدريب ده نجح، هشوف إيه مختلف؟»</div>';
+    return h;
+  };
+  XB.clinic = function (ph) {
+    $main.oninput = function (e) {
+      var ta = e.target.closest("[data-lk]"), dc = e.target.closest("[data-dec]"), d = ccDraft();
+      if (ta) { d.f[ta.dataset.lk] = ta.value; var g = document.getElementById("lg" + ta.dataset.lk); if (g) g.innerHTML = lockGuard(+ta.dataset.lk, ta.value); }
+      if (dc) d.dec = dc.value;
+      save();
+    };
+    $main.onclick = function (e) {
+      if (envClick2(e)) return;
+      var d = ccDraft(), b = e.target.closest("[data-cty]"), o = e.target.closest("[data-cto]");
+      if (b) { var i = d.ty.indexOf(b.dataset.cty); if (i === -1) d.ty.push(b.dataset.cty); else d.ty.splice(i, 1); save(); keepScroll(function () { render(true); }); return; }
+      if (o) { var j = d.to.indexOf(o.dataset.cto); if (j === -1) d.to.push(o.dataset.cto); else d.to.splice(j, 1); save(); keepScroll(function () { render(true); }); return; }
+      if (e.target.id === "ccsend") {
+        var bad = [1, 2, 3].filter(function (n) { return lockGuard(n, d.f[n]); });
+        if (bad.length && !confirm("الحارس شايف حاجة في القفل " + bad.map(ar).join(" و") + ". تسلّم كده؟")) return;
+        d.at = Date.now(); save();
+        sendVote("cc", { case: d.case, f: d.f, ty: d.ty, to: d.to, dec: d.dec || "", at: d.at });
+        toast("اتسلّمت ✓ الترابيزة كلها بتشوفها"); var st = document.getElementById("ccst"); if (st) st.textContent = "اتسلّمت ✓";
+      }
+    };
+  };
+
+  /* ── المراجعة ── */
+  XV.review = function () {
+    var t = myTable(), n = T();
+    if (!t) return '<div class="card">لسه ما اتحطتش على ترابيزة.</div>';
+    var nx = t % Math.max(n, 1) + 1, card = ((aggAct("cc").byT || {})[nx] || {}).v, L = aggAct("rv").list || [];
+    var mineQ = L.filter(function (x) { return x.to === t; });
+    var h = "<h2>راجعوا بطاقة ترابيزة " + ar(nx) + '</h2><p class="lead">' + esc(rxClinicFor(nx).h) + " · لو قفل لسه مقفول: اكتبوا عليه سؤال، مش حكم.</p>";
+    if (!card) h += '<div class="card">الترابيزة دي لسه ما سلّمتش بطاقتها. استنوا ثواني، أو راجعوا من ملفها.</div>';
+    else h += RXR.SEVEN.map(function (r, i) {
+      var v = card.f && card.f[i + 1];
+      return '<div class="rw"><b style="display:block">' + (v ? "🔓" : "🔒") + " " + ar(i + 1) + ". " + esc(r.q) + "</b>" + (v ? '<div style="margin:4px 0">' + esc(v) + "</div>" : '<div class="muted">فاضي</div>') +
+        (i === 4 && card.ty && card.ty.length ? '<div class="muted">النوع: ' + card.ty.map(function (x) { var tt = rxType(x); return tt ? tt.n : x; }).join(" · ") + "</div>" : "") +
+        '<div style="display:flex;gap:6px;margin-top:6px"><input class="inp" style="padding:7px" data-rq="' + (i + 1) + '" placeholder="سؤال على القفل ده؟"><button class="btn soft" style="margin:0;width:auto;padding:7px 12px" data-rs="' + (i + 1) + '">ابعت</button></div></div>';
+    }).join("");
+    h += '<div class="card"><b>الأسئلة اللي اتكتبت على بطاقتكم (' + ar(mineQ.length) + ")</b>" + (mineQ.length ? mineQ.map(function (x) { return "<div>• " + (x.l ? "قفل " + ar(x.l) + ": " : "") + esc(x.t) + "</div>"; }).join("") : '<div class="muted">لسه مفيش.</div>') + "</div>";
+    return h;
+  };
+  XB.review = function () {
+    $main.oninput = null;
+    $main.onclick = function (e) {
+      var b = e.target.closest("[data-rs]"); if (!b) return;
+      var inp = document.querySelector('[data-rq="' + b.dataset.rs + '"]'), v = inp && inp.value.trim(); if (!v || v.length < 3) return;
+      var t = myTable(), nx = t % Math.max(T(), 1) + 1, m = ((me.sent && me.sent.rv) || []).slice();
+      if (m.length >= 10) { toast("كفاية ١٠ 🙂"); return; }
+      m.push({ t: v, at: Date.now(), to: nx, l: +b.dataset.rs }); sendVote("rv", m); inp.value = ""; toast("اتبعت ✓");
+    };
+  };
+
+  /* ── خريطة المحافظة (مشتركة للزوج) ── */
+  function myPair() { return (S && S.pairs && uid && S.pairs[uid]) || 0; }
+  function mates() { var P = (S && S.pairs) || {}, R = (S && S.roster) || {}, p = myPair(); return Object.keys(P).filter(function (u) { return P[u] === p && u !== uid; }).map(function (u) { return R[u] || { n: "…" }; }); }
+  function gmDraft() {
+    var p = myPair(), x = (aggAct("gm").byP || {})[p], loc = me.gm && me.gm.p === p ? me.gm : null;
+    if (x && x.v && (!loc || (x.at || 0) > (loc.at || 0))) { me.gm = JSON.parse(JSON.stringify(x.v)); me.gm.p = p; save(); }
+    if (!me.gm || me.gm.p !== p) { me.gm = { p: p, goals: ["", "", ""], needs: [], month: "", at: 0 }; save(); }
+    return me.gm;
+  }
+  var gmTimer = null;
+  function gmSave() {
+    var d = gmDraft(); d.at = Date.now(); save();
+    clearTimeout(gmTimer);
+    gmTimer = setTimeout(function () { var o = JSON.parse(JSON.stringify(d)); delete o.p; sendVote("gm", o); var st = document.getElementById("gmst"); if (st) st.textContent = "اتحفظت ✓ وزميلك شايفها"; }, 900);
+  }
+  function selectHtml(attr, opts, val, ph) { return "<select class=\"inp\" " + attr + '><option value="">' + esc(ph || "اختار…") + "</option>" + opts.map(function (o) { return '<option value="' + esc(o.id) + '"' + (String(val) === String(o.id) ? " selected" : "") + ">" + esc(o.l) + "</option>"; }).join("") + "</select>"; }
+  var DIM_OPTS = RX_DIMS.map(function (d) { return { id: d.id, l: d.n + " · " + RX_AXES[d.ax].q }; });
+  var TY_OPTS = RX_TYPES.map(function (t) { return { id: t.id, l: t.ic + " " + t.n }; });
+  var SC_OPTS = [{ id: 1, l: "١" }, { id: 2, l: "٢" }, { id: 3, l: "٣" }];
+  var LOCK_OPTS = [{ id: "0", l: "مفيش، كاملة" }].concat(RXR.SEVEN.map(function (r, i) { return { id: String(i + 1), l: "القفل " + ar(i + 1) + ": " + r.q }; }));
+  function score(n) { return n.s1 && n.s2 && n.s3 ? (+n.s1) * 2 + (+n.s2) + (+n.s3) : 0; }
+
+  XV.map = function (ph) {
+    var p = myPair(), sec = ph.sec || "view";
+    if (!p) return '<div class="card">لسه ما اتعملتش أزواج المحافظات. الميسّر هيعملها دلوقتي، وزميلك هيظهر هنا لوحده.</div>';
+    var M = mates(), d = gmDraft(), h = '<div class="ctop"><span class="tbl">زوج ' + ar(p) + "</span><b>" + esc(me.gov || "") + '</b><span class="muted">مع: ' + (M.length ? M.map(function (x) { return esc(x.n) + " (" + esc(RX.ROLES[x.r] || "") + ")"; }).join("، ") : "لسه محدش") + "</span></div>";
+    if (sec === "pair") return h + '<div class="card"><b>من النهارده، إنتوا فريق.</b>مسؤول التنمية عينه على الناس، والمدرب إيده بتساعدهم.</div><p class="muted">القاعدتين: ممنوع اسم كورس (اكتبوا اللي بيحصل) · ممنوع اسم حد.</p>';
+    if (sec === "notes") {
+      var mine = (me.sent && me.sent.gn) || [];
+      return h + "<h2>لوحدك، من غير كلام</h2><p class=\"lead\">إيه اللي بيحصل في المحافظة، ومحتاج يتغير؟ كل حاجة في سطر. لحد ٧.</p>" +
+        '<div class="card"><input class="inp" id="gnx" maxlength="120" placeholder="المتطوعين بيقفوا ساكتين في الحملة…"><div class="guard bad" id="gng"></div><button class="btn" id="gns"' + (mine.length >= 7 ? " disabled" : "") + ">ضيف (" + ar(mine.length) + " من ٧)</button></div>" +
+        (mine.length ? '<div class="card"><ul class="mine">' + mine.map(function (x, i) { return "<li><span>" + esc(x.t) + '</span><button data-gdel="' + i + '">امسح</button></li>'; }).join("") + "</ul></div>" : "");
+    }
+    if (sec === "round") {
+      var mineR = (me.sent && me.sent.gn) || [], pre = (uid || "").slice(0, 8), other = (aggAct("gn").list || []).filter(function (x) { return x.pr === p && x.k.indexOf(pre) !== 0; });
+      var sim = me.gsim || {};
+      function row(x, k) { return '<li><span>' + esc(x.t) + '</span><button data-sim="' + esc(k) + '" class="' + (sim[k] ? "on" : "") + '">' + (sim[k] ? "شبه ✓" : "شبه؟") + "</button></li>"; }
+      return h + "<h2>بالدور… ومن غير نقاش</h2><p class=\"lead\">كل واحد يقرا حاجة بصوت عالي. لو شبه حاجة اتقالت، علّمها «شبه».</p>" +
+        '<div class="card"><b>ورقي</b><ul class="mine">' + (mineR.length ? mineR.map(function (x, i) { return row(x, "m" + i); }).join("") : '<li class="muted">مفيش</li>') + "</ul></div>" +
+        '<div class="card"><b>ورق زميلي</b><ul class="mine">' + (other.length ? other.map(function (x) { return row(x, x.k); }).join("") : '<li class="muted">لسه ما وصلش… ثواني</li>') + "</ul></div>";
+    }
+    h += '<div class="card"><b>🎯 المحافظة عايزة توصل لإيه؟</b><p class="muted" style="margin:0">مسودة… هتتأكدوا منها مع البورد.</p>' + [0, 1, 2].map(function (i) { return '<input class="inp" style="margin-top:6px" data-goal="' + i + '" maxlength="160" value="' + esc(d.goals[i] || "") + '" placeholder="' + ar(i + 1) + '. نتيجة تتشاف…"' + (sec !== "goal" && sec !== "view" ? "" : "") + ">"; }).join("") + "</div>";
+    if (sec === "goal") return h + '<p class="muted" id="gmst">' + (d.at ? "محفوظة ✓" : "") + "</p>";
+    var needs = d.needs;
+    var src = ((me.sent && me.sent.gn) || []).map(function (x) { return x.t; });
+    h += '<div class="card"><b>📋 أهم ٥ احتياجات</b>';
+    needs.forEach(function (n, i) {
+      h += '<div class="need"><div class="nh"><b>' + ar(i + 1) + '</b><input class="inp" data-nf="t" data-ni="' + i + '" maxlength="140" value="' + esc(n.t || "") + '" placeholder="اللي بيحصل…"><button data-ndel="' + i + '" title="امسح">✕</button></div>';
+      if (sec === "needs" || sec === "view") h += selectHtml('data-nf="q" data-ni="' + i + '"', RX_QUAD.map(function (q) { return { id: q.id, l: q.l + " · " + q.s }; }), n.q, "مكانه على المصفوفة…");
+      if (sec === "type" || sec === "view") h += '<div class="g2">' + selectHtml('data-nf="d" data-ni="' + i + '"', DIM_OPTS, n.d, "البُعد…") + selectHtml('data-nf="ty" data-ni="' + i + '"', TY_OPTS, n.ty, "نوع السبب…") + "</div>" + selectHtml('data-nf="ct" data-ni="' + i + '"', RX_CTYPES, n.ct, "نوع البطاقة…");
+      if (sec === "score") h += n.ct === "k" ? '<div class="g3">' + selectHtml('data-nf="s1" data-ni="' + i + '"', SC_OPTS, n.s1, "الهدف (×٢)") + selectHtml('data-nf="s2" data-ni="' + i + '"', SC_OPTS, n.s2, "كام واحد") + selectHtml('data-nf="s3" data-ni="' + i + '"', SC_OPTS, n.s3, "هيمشوا؟") + '</div><div class="muted">المجموع: <b>' + ar(score(n)) + "</b> من ١٢" + (score(n) >= 10 ? " · أولوية أولى ⭐" : "") + "</div>" : '<div class="muted">' + (n.ct ? "مش بطاقة تدريب: مش بتترتب هنا" : "حدد نوع البطاقة الأول") + "</div>";
+      if (sec === "plan") h += selectHtml('data-nf="lock" data-ni="' + i + '"', LOCK_OPTS, n.lock, "القفل الناقص…") + '<div class="g2"><input class="inp" data-nf="who" data-ni="' + i + '" maxlength="60" value="' + esc(n.who || "") + '" placeholder="هنسأل مين؟"><input class="inp" data-nf="when" data-ni="' + i + '" maxlength="40" value="' + esc(n.when || "") + '" placeholder="لحد إمتى؟"></div>';
+      h += "</div>";
+    });
+    if (needs.length < 5 && (sec === "needs" || sec === "view")) {
+      h += '<button class="btn soft" id="nadd">+ احتياج</button>';
+      if (src.length) h += '<p class="muted" style="margin:8px 0 2px">أو انقل من ورقك:</p><div class="ty">' + src.map(function (t, i) { return '<button data-nsrc="' + i + '">' + esc(t.slice(0, 40)) + "</button>"; }).join("") + "</div>";
+    }
+    h += "</div>";
+    if (sec === "plan" || sec === "view") h += '<div class="card"><b>⚖️ الميزان في محافظتنا</b>' + selectHtml('data-month="1"', RX_MONTHS.map(function (m) { return { id: m, l: m }; }), d.month, "الشهر المقترح…") + '<p class="muted" style="margin:4px 0 0">بعيد عن الامتحانات، وأحسن قبل باقي التدريبات. مبدئي.</p></div>';
+    return h + '<p class="muted" id="gmst">' + (d.at ? "محفوظة ✓ · واحد بس يكتب، والتاني بيشوف" : "واحد بس يكتب، والتاني بيشوف على موبايله") + "</p>";
+  };
+  XB.map = function (ph) {
+    function upd(fn) { var d = gmDraft(); fn(d); gmSave(); }
+    $main.oninput = function (e) {
+      var g = e.target.closest("[data-goal]"), n = e.target.closest("input[data-nf]"), gx = e.target.id === "gnx";
+      if (g) upd(function (d) { d.goals[+g.dataset.goal] = g.value; });
+      if (n) upd(function (d) { d.needs[+n.dataset.ni][n.dataset.nf] = n.value; });
+      if (gx) { var w = bannedIn(e.target.value, ["كورس", "تدريب على"]); document.getElementById("gng").textContent = w.length ? "ده اسم كورس؟ اكتب اللي بيحصل." : ""; }
+    };
+    $main.onchange = function (e) {
+      var s = e.target.closest("select[data-nf]"), m = e.target.closest("select[data-month]");
+      if (s) upd(function (d) { var x = d.needs[+s.dataset.ni]; x[s.dataset.nf] = s.value; if (s.dataset.nf === "ty" && !x.ct) x.ct = s.value; });
+      if (m) upd(function (d) { d.month = m.value; });
+      if (s && (s.dataset.nf === "ty" || s.dataset.nf === "ct" || /^s[123]$/.test(s.dataset.nf))) keepScroll(function () { render(true); });
+    };
+    $main.onclick = function (e) {
+      var t = e.target;
+      if (t.id === "nadd") { upd(function (d) { if (d.needs.length < 5) d.needs.push({ t: "" }); }); keepScroll(function () { render(true); }); return; }
+      if (t.closest("[data-ndel]")) { upd(function (d) { d.needs.splice(+t.closest("[data-ndel]").dataset.ndel, 1); }); keepScroll(function () { render(true); }); return; }
+      if (t.closest("[data-nsrc]")) { var src = ((me.sent && me.sent.gn) || [])[+t.closest("[data-nsrc]").dataset.nsrc]; if (src) upd(function (d) { if (d.needs.length < 5) d.needs.push({ t: src.t }); }); keepScroll(function () { render(true); }); return; }
+      if (t.closest("[data-sim]")) { me.gsim = me.gsim || {}; var k = t.closest("[data-sim]").dataset.sim; me.gsim[k] = !me.gsim[k]; save(); keepScroll(function () { render(true); }); return; }
+      if (t.closest("[data-gdel]")) { var mm = ((me.sent && me.sent.gn) || []).slice(); mm.splice(+t.closest("[data-gdel]").dataset.gdel, 1); sendVote("gn", mm); render(true); return; }
+      if (t.id === "gns") {
+        var i = document.getElementById("gnx"), v = i.value.trim(); if (v.length < 3) return;
+        var m2 = ((me.sent && me.sent.gn) || []).slice(); if (m2.length >= 7) return;
+        m2.push({ t: v, at: Date.now() }); sendVote("gn", m2); toast("اتضاف ✓"); render(true);
+        setTimeout(function () { var x = document.getElementById("gnx"); if (x) x.focus(); }, 50);
+      }
+    };
+  };
+
+  /* ── اتفاق التسليم ── */
+  function hoDraft() {
+    var p = myPair(), x = (aggAct("ho").byP || {})[p], loc = me.ho && me.ho.p === p ? me.ho : null;
+    if (x && x.v && (!loc || (x.at || 0) > (loc.at || 0))) { me.ho = JSON.parse(JSON.stringify(x.v)); me.ho.p = p; save(); }
+    if (!me.ho || me.ho.p !== p) { me.ho = { p: p, card: "", ans: "", st: "", lock: "", until: "", follow: "", at: 0 }; save(); }
+    return me.ho;
+  }
+  var hoTimer = null;
+  function hoSave() { var d = hoDraft(); d.at = Date.now(); save(); clearTimeout(hoTimer); hoTimer = setTimeout(function () { var o = JSON.parse(JSON.stringify(d)); delete o.p; sendVote("ho", o); var st = document.getElementById("host"); if (st) st.textContent = "اتحفظ ✓"; }, 700); }
+  XV.handover = function (ph) {
+    var p = myPair(); if (!p) return '<div class="card">لسه ما اتعملتش أزواج المحافظات.</div>';
+    var d = hoDraft(), g = gmDraft(), opts = (g.needs || []).filter(function (n) { return n.t; }).map(function (n, i) { return { id: String(i), l: (n.ct === "k" ? "📚 " : n.ct === "p" ? "🏢 " : "") + n.t + (score(n) ? " (" + ar(score(n)) + "/١٢)" : "") }; });
+    var h = "<h2>اتفاق التسليم</h2>";
+    if (ph.sec !== "date") {
+      h += '<div class="card"><b>البطاقة</b>' + (opts.length ? selectHtml('data-ho="card"', opts, d.card, "اختار بطاقة التدريب الأعلى درجة…") : '<input class="inp" data-hoi="card" value="' + esc(d.card || "") + '" placeholder="اكتب البطاقة">') +
+        '<label class="lbl">سؤال المدرب: «لو التدريب ده نجح، هشوف إيه مختلف؟»</label><textarea class="inp" data-hoi="ans" rows="2" placeholder="إجابة مسؤول التنمية… حاجة تتشاف">' + esc(d.ans || "") + "</textarea>" +
+        '<label class="lbl">حالة البطاقة</label><div class="ty"><button data-hst="ready" class="' + (d.st === "ready" ? "on ok" : "") + '">✓ جاهزة: السبع أقفال مفتوحين</button><button data-hst="back" class="' + (d.st === "back" ? "on bk" : "") + '">↩ ترجع</button></div>';
+      if (d.st === "back") h += selectHtml('data-ho="lock"', LOCK_OPTS.slice(1), d.lock, "القفل الناقص…") + '<input class="inp" data-hoi="until" style="margin-top:6px" value="' + esc(d.until || "") + '" placeholder="هيتكمل لحد إمتى؟ (تاريخ)">';
+      h += "</div>";
+    }
+    h += '<div class="card"><b>📅 ميعاد المتابعة بتاعنا (بعد ٦ لـ٨ أسابيع)</b><input class="inp" type="date" data-hoi="follow" value="' + esc(d.follow || "") + '"><p class="muted" style="margin:6px 0 0">وحطه في تقويم موبايلك دلوقتي. ولو حد نسي، التاني يفكّره.</p></div>';
+    return h + '<p class="muted" id="host">' + (d.at ? "محفوظ ✓" : "") + "</p>";
+  };
+  XB.handover = function () {
+    $main.oninput = function (e) { var i = e.target.closest("[data-hoi]"); if (i) { hoDraft()[i.dataset.hoi] = i.value; hoSave(); } };
+    $main.onchange = function (e) { var s = e.target.closest("select[data-ho]"), i = e.target.closest("[data-hoi]"); if (s) { hoDraft()[s.dataset.ho] = s.value; hoSave(); } if (i) { hoDraft()[i.dataset.hoi] = i.value; hoSave(); } };
+    $main.onclick = function (e) { var b = e.target.closest("[data-hst]"); if (b) { hoDraft().st = b.dataset.hst; hoSave(); keepScroll(function () { render(true); }); } };
+  };
+
+  /* لما خريطة الزوج أو بطاقة الترابيزة تتحدث من الموبايل التاني: نعرضها لو محدش بيكتب */
+  function sharedRefresh() {
+    var c = current(), ph = rxPhone(c.sl, c.step);
+    if (busy()) return;
+    if (ph.k === "map" && myPair()) { var x = (aggAct("gm").byP || {})[myPair()]; if (x && me.gm && (x.at || 0) > (me.gm.at || 0)) keepScroll(function () { render(true); }); }
+    if (ph.k === "clinic" && myTable()) { var y = (aggAct("cc").byT || {})[myTable()]; if (y && me.cc && (y.at || 0) > (me.cc.at || 0)) keepScroll(function () { render(true); }); }
+    if (ph.k === "review" || (ph.k === "map" && ph.sec === "round")) keepScroll(function () { render(true); });
+    if (ph.k === "handover" && myPair()) { var z = (aggAct("ho").byP || {})[myPair()]; if (z && me.ho && (z.at || 0) > (me.ho.at || 0)) keepScroll(function () { render(true); }); }
+  }
+
   /* ───────── الاتصال ───────── */
   var unsubs = [];
   function start() {
@@ -457,12 +715,21 @@
       if (d && d.slide && d.slide !== oldSlide) { try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {} }
       status(); render(false);
     }, function (e) { serverOk = false; lastErr = e; status(); }));
-    unsubs.push(MZ.watchDoc(MZ.aggRef(SID), function (d) { agg = d || {}; refresh(); var c = current(); if (rxPhone(c.sl, c.step).k === "mirror") render(true); }, function () {}));
+    unsubs.push(MZ.watchDoc(MZ.aggRef(SID), function (d) { agg = d || {}; refresh(); var c = current(); if (rxPhone(c.sl, c.step).k === "mirror") render(true); else sharedRefresh(); }, function () {}));
     MZ.signInAnon(15000).then(function (u) { uid = u.uid; lastErr = null; flush(); render(true); status(); })
       .catch(function (e) { lastErr = e; status(); });
   }
   window.addEventListener("online", flush);
   setInterval(flush, 20000);
+
+  /* للبروفة على اللابتوب بس (?as=اسم&bus=1): الموبايل بيسمع لوحة التحكم المحلية من غير سيرفر */
+  if (MZ.qs("as") && MZ.qs("bus")) {
+    uid = "as_" + MZ.qs("as");
+    MZ.localBus(SID).on(function (m) {
+      if (m && m.S) { S = Object.assign({}, S || {}, m.S); known = true; lastGoodAt = Date.now(); serverOk = true; status(); render(false); }
+      if (m && m.agg) { agg = m.agg; var c = current(); if (rxPhone(c.sl, c.step).k === "mirror") render(true); else sharedRefresh(); }
+    });
+  }
 
   render(true); status(); start();
 })();
