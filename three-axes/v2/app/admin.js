@@ -108,7 +108,7 @@
       else if (/^h[234]$/.test(b.t)) h += "<" + b.t + ">" + esc(b.text) + "</" + b.t + ">";
       else if (b.t === "li") { if (!inList) { h += "<ul>"; inList = true; } h += "<li>" + esc(b.text) + "</li>"; }
       else if (b.t === "btn") h += '<p class="rp-btn"><a class="next wa" href="' + esc(b.href) + '" target="_blank" rel="noopener">' + esc(b.text) + "</a></p>";
-      else if (b.t === "card") h += '<div class="dcard"><div class="dc-name">' + esc(b.name) + '</div><div class="dc-line">' + esc(b.line) + '</div><div class="dc-state">' + esc(b.state) + '</div><p>' + esc(b.text) + "</p></div>";
+      else if (b.t === "card") h += '<div class="dcard"><div class="dc-name">' + esc(b.name) + '</div><div class="dc-line">' + esc(b.line) + '</div><div class="dc-state">' + (b.label ? '<span class="dc-lbl">' + esc(b.label) + '</span>' : '') + esc(b.state) + '</div><p>' + esc(b.text) + "</p></div>";
       else if (b.t === "rate") h += '<div class="soft">' + esc(b.text) + " (خانة التقييم تحت التقرير)</div>";
       else if (b.t !== "pending") h += "<p>" + esc(b.text) + "</p>";
     });

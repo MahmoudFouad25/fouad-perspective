@@ -22,7 +22,7 @@
     courseLink: "../../../insight-out/insight-out.html",
     loginPath: "../../../login.html",
     myCoursesPath: "../../../my-courses.html",
-    assetsVersion: "2026-10-12a"                  // بيتغيّر مع كل رفع علشان المتصفح ما يمسكش نسخة قديمة
+    assetsVersion: "2026-10-12b"                  // بيتغيّر مع كل رفع علشان المتصفح ما يمسكش نسخة قديمة
   };
   // الحقول اللي الكوتش بس اللي يكتبها (ولازم تبقى زي firestore.rules)
   var ADMIN_KEYS = ["override", "resultHistory", "adminUpdatedAt", "adminNote"];

@@ -90,12 +90,19 @@
       else if (kind === "cycle" || kind === "ambiguous") {
         var e = topOf(dimItems(d, "excess")), f = topOf(dimItems(d, "deficit"));
         meta.quotes.push(e.id + "، " + f.id);
-        return "من إجاباتك: قلت إن ده بيحصل معاك " + FREQ[A.freq[e.id]] + ": «" + noDot(e.text) + "» (ده وش الزيادة)، وإن ده بيحصل معاك " + FREQ[A.freq[f.id]] + ": «" + noDot(f.text) + "» (وده وش النقص).";
+        var cy = CYC[d.name];
+        if (!cy) { meta.problems.push("مفيش علامة اقتباسين للدايرة: " + d.name); cy = ["", ""]; }
+        return "من إجاباتك: قلت إن ده بيحصل معاك " + FREQ[A.freq[e.id]] + ": «" + noDot(e.text) + "» (" + cy[0] + ")، وإن ده بيحصل معاك " + FREQ[A.freq[f.id]] + ": «" + noDot(f.text) + "» (" + cy[1] + ").";
       }
       if (!q) return null;
       meta.quotes.push(q.id);
       return stmt(q);
     }
+    // علامة الاقتباسين في «بيعلى وينزل»: كلام المساحة نفسها، مش «وش الزيادة»
+    var CYC = {};
+    part(sec("قوالب عامة لأي بُعد"), "علامة الاقتباسين في الدايرة").bullets.forEach(function (b) {
+      var k = b.split(" — "); if (k.length === 3) CYC[k[0].trim()] = [k[1].trim(), k[2].trim()];
+    });
     function fill(paras, map) {
       var out = [];
       paras.forEach(function (p) {
@@ -246,6 +253,8 @@
     var WORD = {};
     part(tmpl, "كلمة الحال لكل مساحة").bullets.forEach(function (b) { var k = b.split(" — "); WORD[k[0].trim()] = k.slice(1).join(" — ").trim(); });
     var cardsP = part(tmpl, "باقي مساحاتك (الكروت)").paras;   // [0] مقدمة، [1] «في مسار [المسار]»، [2] «حالها عندك: [الحال]»، [3] الختام
+    // «حالها عندك: [الحال]» ← العنوان الصغير لوحده، والكلمة لوحدها (الكلمة نفسها ممكن يكون فيها نقطتين)
+    var stateLabel = (cardsP[2] || "").replace("[الحال]", "").replace(/[:：]\s*$/, "").trim();
     var rest = R.dimensions.filter(function (d) { return pick.indexOf(d) === -1; }), cardsShown = [];
     if (rest.length) {
       if (!acq) { add("h3", "باقي مساحاتك"); add("p", cardsP[0]); }
@@ -258,7 +267,7 @@
           if (!word) { meta.problems.push("مفيش كلمة حال لـ " + st); return; }
           var txt = part(sec(DIM_TEXTS[d.id]), "الكارت (لو المساحة ما اتشرحتش بالتفصيل)").bullets.filter(function (b) { return b.indexOf(word + " — ") === 0; })[0] || "";
           if (!txt) meta.problems.push("مفيش نص كارت: " + d.name + " / " + st);
-          B.push({ t: "card", name: d.name, line: DIMLINE[d.name] || "", state: fill([cardsP[2]], { "[الحال]": word })[0], text: txt.slice(word.length + 3) });
+          B.push({ t: "card", name: d.name, line: DIMLINE[d.name] || "", label: stateLabel, state: word, text: txt.slice(word.length + 3) });
           cardsShown.push(d.name + " (" + st + ")");
         });
       });
@@ -289,7 +298,6 @@
       var pre = t.side === "أ" ? "أ:" : t.side === "ب" ? "ب:" : "النص:";
       if (t.side === "النص") mid = true;
       add("p", fill([tp.paras[4]], { "[السؤال]": b.text.replace(/[:：]\s*$/, ""), "[أ]": noDot(b.a), "[ب]": noDot(b.b) })[0]);
-      add("p", tp.paras[t.side === "أ" ? 5 : t.side === "ب" ? 6 : 7]);
       var line = tp.bullets.slice(k * 3, k * 3 + 3).filter(function (x) { return x.indexOf(pre) === 0; })[0];
       add("p", line.slice(pre.length).trim());
     });
@@ -346,12 +354,12 @@
     var seen = {};
     B.forEach(function (b) {
       if (b.t !== "p") return;
-      if (seen[b.text] && tp.paras.slice(5, 8).indexOf(b.text) === -1) meta.problems.push("جملة مكررة: " + b.text.slice(0, 50));
+      if (seen[b.text]) meta.problems.push("جملة مكررة: " + b.text.slice(0, 50));
       seen[b.text] = 1;
       if (b.t !== "pending" && /\[[^\]]+\]/.test(b.text)) meta.problems.push("قوس فاضل: " + b.text.slice(0, 50));
     });
     meta.words = B.filter(function (b) { return b.t !== "pending" && b.t !== "btn" && b.t !== "rate"; }).reduce(function (s, b) {
-      var t = b.t === "card" ? [b.name, b.line, b.state, b.text].join(" ") : b.text;
+      var t = b.t === "card" ? [b.name, b.line, b.label, b.state, b.text].join(" ") : b.text;
       return s + t.split(/\s+/).filter(Boolean).length; }, 0);
     return { blocks: B, meta: meta };
   }

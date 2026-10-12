@@ -235,8 +235,8 @@ function noHScroll(page) { return page.evaluate(function () { return document.do
   ok("تقرير الموقع = تقرير التاب حرف بحرف (" + want.length + " سطر)", same, (function () { for (var i = 0; i < Math.max(want.length, mr.length); i++) if (want[i] !== mr[i]) return "أول اختلاف عند " + i + ": «" + (want[i] || "").slice(0, 60) + "» ≠ «" + (mr[i] || "").slice(0, 60) + "»"; })());
   ok("نسخة البصيرة: فيها الجلسة", /جلستك/.test(mr.join(" ")));
   var cards = await pm.$$eval("article.report .dcard", function (c) { return c.map(function (x) { return x.querySelector(".dc-name").textContent + "|" + x.querySelector(".dc-state").textContent; }); });
-  ok("كروت باقي المساحات ظاهرة (" + cards.length + ") وفيها «حالها عندك»", cards.length === 6 && cards.every(function (c) { return c.indexOf("حالها عندك: ") !== -1; }), cards.join(" / "));
-  ok("مفيش «الأبعاد التسعة في سطر» ولا الكلمات القديمة", !/الأبعاد التسعة في سطر|سايبه شوية|ماسك فيه زيادة|منطقة وسط|خريطة المحاور/.test(mr.join(" ")));
+  ok("كروت باقي المساحات ظاهرة (" + cards.length + ") وفيها «حالها عندك»", cards.length === 6 && cards.every(function (c) { return c.indexOf("|حالها عندك") !== -1 && c.indexOf("حالها عندك:") === -1; }), cards.join(" / "));
+  ok("مفيش «الأبعاد التسعة في سطر» ولا الكلمات القديمة", !/الأبعاد التسعة في سطر|سايبه شوية|ماسك فيه زيادة|منطقة وسط|خريطة المحاور|وش الزيادة|وش النقص|الطرف التاني|الطرف الأول|متسق|بشكل معقول/.test(mr.join(" ")));
   ok("سؤال التقييم مكتوب مرة واحدة (في الخانة بس)", (await pm.$$eval("article.report", function (a) { return (a[0].textContent.match(/التقرير ده وصفك قد إيه؟/g) || []).length; })) === 1);
   var R2 = E.score(md, ITEMS, C);
   ok("النتيجة المحفوظة = حساب المحرك في Node", JSON.stringify(R2) === JSON.stringify(md.result));
