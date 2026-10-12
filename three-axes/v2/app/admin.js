@@ -81,13 +81,14 @@
     var h = '<div class="tabs">';
     F.forEach(function (f) { h += '<button class="mini' + (FILTER === f[0] ? " on" : "") + '" data-f="' + f[0] + '">' + f[1] + (f[0] === "follow" ? " (" + ar(ROWS.filter(follow).length) + ")" : "") + "</button>"; });
     h += '<span style="flex:1"></span><button class="mini" id="recAll">إعادة الحساب للكل</button><button class="mini" id="dl">نزّل JSON</button><button class="mini" id="reload">تحديث</button></div>';
-    h += '<div class="tbl-wrap"><table class="ax"><thead><tr><th>الاسم</th><th>البداية</th><th>الشراء</th><th>الحالة</th><th>الترتيب</th><th>متابعة</th><th>التقييم</th></tr></thead><tbody>';
+    h += '<div class="tbl-wrap"><table class="ax"><thead><tr><th>الاسم</th><th>البداية</th><th>الشراء</th><th>الصيغة</th><th>الحالة</th><th>الترتيب</th><th>متابعة</th><th>التقييم</th></tr></thead><tbody>';
     var list = visible();
-    if (!list.length) h += '<tr><td colspan="7" class="soft">مفيش عملاء هنا لسه.</td></tr>';
+    if (!list.length) h += '<tr><td colspan="8" class="soft">مفيش عملاء هنا لسه.</td></tr>';
     list.forEach(function (d) {
       h += '<tr data-id="' + esc(d._id) + '"' + (SEL === d._id ? ' class="sel"' : "") + "><td>" + esc(d.name || d._id) + '<div class="soft" dir="ltr">' + esc(d.email || "") + "</div></td>";
       h += "<td>" + day(d.startedAt) + "</td>";
       h += '<td><span class="tag' + (d.purchase === "insight" ? " ins" : "") + '">' + (d.purchase === "insight" ? "البصيرة" : "منفرد") + "</span></td>";
+      h += "<td>" + (d.address === "f" ? "مؤنث" : d.address === "m" ? "مذكر" : '<span class="soft">ما اختارش</span>') + "</td>";
       h += '<td><span class="tag' + (d.status === "خلص" ? " done" : "") + '">' + esc(d.status || "—") + "</span></td>";
       h += "<td>" + esc(orderOf(d)) + "</td>";
       h += "<td>" + (follow(d) ? '<span class="tag follow">⚑ محتاج متابعة</span>' : "") + "</td>";

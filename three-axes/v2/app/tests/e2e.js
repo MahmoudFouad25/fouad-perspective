@@ -334,6 +334,7 @@ function noHScroll(page) { return page.evaluate(function () { return document.do
   await pa.fill("#ap", "adminpw"); await pa.click("#ago"); await pa.waitForSelector("table.ax tbody tr[data-id]");
   var rows = await pa.$$eval("table.ax tbody tr[data-id]", function (t) { return t.map(function (r) { return r.getAttribute("data-id"); }); });
   ok("القايمة فيها العملاء (" + rows.join("، ") + ")", rows.indexOf("u_sara") !== -1 && rows.indexOf("u_mahmoud") !== -1);
+  ok("الأدمن: عمود الصيغة في الجدول (لينا مؤنث، محمود مذكر)", /مؤنث/.test(await pa.textContent('tr[data-id="u_lina"]')) && /مذكر/.test(await pa.textContent('tr[data-id="u_mahmoud"]')));
   await pa.click('tr[data-id="u_lina"]'); await pa.waitForSelector("#detail .report");
   ok("الأدمن: تقرير لينا مكتوب «الصيغة: مؤنث» وطالع بالمؤنث", /الصيغة: مؤنث/.test(await pa.textContent("#detail")) && /أهلًا بيكي/.test(await pa.textContent("#detail .report")));
   await pa.click('[data-tab="coach"]'); await pa.waitForSelector("#detail .report");
