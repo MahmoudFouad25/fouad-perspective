@@ -204,6 +204,7 @@
   }
 
   function bind(ph) {
+    $main.onchange = null;
     if (XB[ph.k]) { XB[ph.k](ph); return; }
     var txg = document.getElementById("tx"), gd = document.getElementById("gd");
     if (txg && gd) txg.oninput = function () { gd.outerHTML = guardHtml(txg.value, ph.guard, "gd"); gd = document.getElementById("gd"); };
@@ -397,6 +398,49 @@
       var m = (sent(ph.park) || []).slice(); if (m.length >= 6) { toast("كفاية ٦ 🙂"); return; }
       m.push({ t: v, at: Date.now() }); sendVote(ph.park, m); toast("اتركنت ✓"); var keep = window.scrollY; render(true); window.scrollTo(0, keep);
     };
+  };
+
+
+  /* ── التصنيف بالبُعد ونوع السبب (القفل ٤ و٥) ── */
+  function dimsRef() {
+    return '<details class="ref"><summary>📍 الأماكن التسعة (دوس تفتحها)</summary>' + ["H", "V", "B"].map(function (a) {
+      var A = RX_AXES[a];
+      return '<div class="refax" style="--c:' + A.c + '"><b>' + esc(A.q) + "</b>" + RX_DIMS.filter(function (d) { return d.ax === a; }).map(function (d) {
+        return '<details class="refd"><summary>' + esc(d.n) + ' <span class="muted">· ' + esc(d.q) + '</span></summary><div class="ok">✓ لما يبقى كويس: ' + esc(d.ok) + '</div><div class="bad">✗ لما يبقى فيه مشكلة: ' + esc(d.bad) + "</div></details>";
+      }).join("") + "</div>";
+    }).join("") + "</details>";
+  }
+  function typesRef() {
+    return '<details class="ref"><summary>🔎 أنواع السبب الأربعة (دوس تفتحها)</summary>' + RX_TYPES.map(function (t) {
+      return '<details class="refd"><summary>' + t.ic + " " + esc(t.n) + ' <span class="muted">← ' + esc(t.sol) + "</span></summary><div>" + esc(t.d) + "</div>" + t.q.map(function (q) { return '<div class="muted">• ' + esc(q) + "</div>"; }).join("") + "</details>";
+    }).join("") + '<div class="muted" style="margin-top:6px">الترتيب: المكان الأول ← الظرف ← الدور ← المهارة آخر حاجة. واسأل: لو حياته متوقفة عليها، هيقدر؟</div></details>';
+  }
+  XV.tag = function (ph) {
+    var A = RX_ACTS[ph.act], my = sent(ph.act) || {}, F = A.fields || ["d"], done = 0;
+    var rows = A.cards.map(function (c) {
+      var v = my[c.id] || {}, full = F.every(function (f) { return v[f]; }); if (full) done++;
+      var h = '<div class="srt' + (full ? " done" : "") + '"><div class="t"><i>' + ar(c.no) + "</i>" + esc(c.t) + "</div>";
+      if (F.indexOf("d") !== -1) h += '<select class="inp dsel" data-tg="' + c.id + '" data-f="d"><option value="">البُعد: اختار…</option>' + ["H", "V", "B"].map(function (a) {
+        return '<optgroup label="' + esc(RX_AXES[a].q) + '">' + RX_DIMS.filter(function (d) { return d.ax === a; }).map(function (d) { return '<option value="' + d.id + '"' + (v.d === d.id ? " selected" : "") + ">" + esc(d.n) + "</option>"; }).join("") + "</optgroup>";
+      }).join("") + "</select>";
+      if (F.indexOf("t") !== -1) h += '<div class="bs" style="margin-top:6px">' + RX_TYPES.map(function (t) {
+        return '<button data-tg="' + c.id + '" data-f="t" data-v="' + t.id + '"' + (v.t === t.id ? ' class="on" style="background:' + t.c + '"' : "") + ">" + t.ic + " " + esc(t.n) + "</button>"; }).join("") + "</div>";
+      return h + "</div>";
+    }).join("");
+    return "<h2>" + esc(ph.title) + '</h2><p class="lead">' + esc(ph.hint || "") + "</p>" + (F.indexOf("d") !== -1 ? dimsRef() : "") + (F.indexOf("t") !== -1 ? typesRef() : "") +
+      '<p class="muted">خلصت ' + ar(done) + " من " + ar(A.cards.length) + "</p>" + rows;
+  };
+  XB.tag = function (ph) {
+    function set(card, f, val) {
+      var my = JSON.parse(JSON.stringify(sent(ph.act) || {})); my[card] = my[card] || {}; my[card][f] = val;
+      sendVote(ph.act, my); try { if (navigator.vibrate) navigator.vibrate(15); } catch (x) {}
+      var open = [].map.call(document.querySelectorAll("details[open]"), function (d) { return d.querySelector("summary").textContent; });
+      var keep = window.scrollY; render(true); window.scrollTo(0, keep);
+      [].forEach.call(document.querySelectorAll("details"), function (d) { if (open.indexOf(d.querySelector("summary").textContent) !== -1) d.open = true; });
+    }
+    $main.onclick = function (e) { var b = e.target.closest("button[data-tg]"); if (b) set(b.dataset.tg, b.dataset.f, b.dataset.v); };
+    $main.onchange = function (e) { var s = e.target.closest("select[data-tg]"); if (s) set(s.dataset.tg, s.dataset.f, s.value); };
+    $main.oninput = null;
   };
 
   /* ───────── الاتصال ───────── */

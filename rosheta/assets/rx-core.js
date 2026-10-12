@@ -117,6 +117,20 @@ var RX = (function () {
         Object.keys(byI).forEach(function (i) { byI[i].sort(function (a, b) { return a.at - b.at; }); byI[i] = byI[i].slice(-30); });
         res = { by: byI, n: k };
       }
+      else if (A.type === "tag") {
+        /* تصنيف بأكتر من حقل (البُعد · نوع السبب): لكل كارت، لكل حقل، العدد. وc = الخانة (بُعد|نوع) */
+        var tb = {}, tn = 0;
+        Object.keys(votes).forEach(function (u) {
+          var v = votes[u] && votes[u][id]; if (!v) return; tn++;
+          Object.keys(v).forEach(function (card) {
+            var x = v[card]; if (!x) return;
+            var o = tb[card] = tb[card] || { c: {} };
+            (A.fields || []).forEach(function (f) { if (x[f]) { o[f] = o[f] || {}; o[f][x[f]] = (o[f][x[f]] || 0) + 1; } });
+            if (x.d && x.t) o.c[x.d + "|" + x.t] = (o.c[x.d + "|" + x.t] || 0) + 1;
+          });
+        });
+        res = { by: tb, n: tn };
+      }
       else if (A.type === "choice") {
         var cnt = {}, m = 0;
         Object.keys(votes).forEach(function (u) {

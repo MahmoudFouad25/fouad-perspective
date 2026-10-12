@@ -20,7 +20,7 @@
     return '<div class="x-case' + (it.wide ? " wide" : "") + '"><div class="hd"><b>بطاقة احتياج · حالة «تواصل» في حملات الشارع</b><span>' + ar(open) + " من ٧ مفتوحة</span></div>" + RXR.SEVEN.map(function (r, i) {
       var on = i < open, ans = RX_CASE[i] || "";
       var cls = (on ? " on" : "") + (focus === i + 1 ? " focus" : "") + (focus === i + 1 && (it.at || 0) === step ? " fresh" : "");
-      return '<div class="cr' + cls + '">' + RXR.lockSvg(on) + '<div><b><i>' + ar(i + 1) + "</i>" + esc(r.q) + "</b>" + (on && ans ? "<span>" + esc(ans) + "</span>" : "") + "</div></div>";
+      return '<div class="cr' + cls + '">' + RXR.lockSvg(on) + '<div><b><i>' + ar(i + 1) + "</i>" + esc(r.q) + "</b>" + (on && ans && (it.wide || open <= 3 || focus === i + 1) ? "<span>" + esc(ans) + "</span>" : "") + "</div></div>";
     }).join("") + "</div>";
   };
   M.caseCard = function (it) {
@@ -34,12 +34,12 @@
   E.sortboard = function (it, ctx, step) {
     var A = act(ctx, it.act), by = A.by || {}, n = A.n || 0;
     var hot = it.hot && it.hot[step], showKey = it.keyAt !== undefined && step >= it.keyAt;
-    var h = '<div class="x-sort' + (hot ? " has-hot" : "") + '"><div class="lg">' + it.bins.map(function (b) { return '<span><i style="background:' + b.c + '"></i>' + esc(b.l) + "</span>"; }).join("") +
+    var h = '<div class="x-sort' + (hot ? " has-hot" : "") + (it.cards.length <= 4 ? " few" : "") + '"><div class="lg">' + it.bins.map(function (b) { return '<span><i style="background:' + b.c + '"></i>' + esc(b.l) + "</span>"; }).join("") +
       '<span class="cnt">' + (n ? "صنّف " + ar(n) : "لسه محدش صنّف…") + "</span></div>";
     h += it.cards.map(function (c) {
       var x = by[c.id] || {}, tot = 0; it.bins.forEach(function (b) { tot += x[b.id] || 0; });
       var top = 0; it.bins.forEach(function (b) { top = Math.max(top, x[b.id] || 0); });
-      var split = tot >= 3 && top / tot < 0.75;
+      var split = !it.noSplit && tot >= 3 && top / tot < 0.75;
       var bar = it.bins.map(function (b) { var v = x[b.id] || 0; return v ? '<i style="width:' + (100 * v / tot) + "%;background:" + b.c + '"><em>' + ar(Math.round(100 * v / tot)) + "٪</em></i>" : ""; }).join("");
       var key = showKey && it.key && it.key[c.id] ? it.bins.filter(function (b) { return b.id === it.key[c.id]; })[0] : null;
       return '<div class="sr' + (hot === c.id ? " hot" : "") + '"><span class="no">' + ar(c.no || "") + '</span><span class="t">' + esc(c.t) + "</span>" +

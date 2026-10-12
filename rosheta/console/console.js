@@ -278,7 +278,7 @@
   function phoneLabel(ph) {
     return { join: "الموبايلات: التسجيل", table: "الموبايلات: رقم الترابيزة واللي معاه", quiet: "الموبايلات هادية", pick: "الموبايلات بتفتح للاختيار", texts: "الموبايلات بتفتح للكتابة",
       sort: "الموبايلات بتفتح للتصنيف", choice: "الموبايلات بتفتح للاختيار", rewrite: "الموبايلات بتفتح على الست جمل",
-      texts2: "الموبايلات بتفتح على عمودين", envs: "الموبايلات بتعرض الظروف التلاتة", inv: "الموبايلات: الظروف + التصنيف + ركن ليه" }[ph.k] || "";
+      texts2: "الموبايلات بتفتح على عمودين", envs: "الموبايلات بتعرض الظروف التلاتة", inv: "الموبايلات: الظروف + التصنيف + ركن ليه", tag: "الموبايلات بتفتح للتصنيف على الخريطة" }[ph.k] || "";
   }
 
   /* ───────────── الحاجة الحيّة في الشريحة دي ───────────── */
@@ -294,7 +294,7 @@
       var A = agg.acts[id] || {}, D = RX_ACTS[id] || {}, t = D.type, txt;
       if (t === "tablePick") txt = A.nT ? "سلّمت <b>" + ar(A.nT) + "</b>" + (T ? " من " + ar(T) + " ترابيزة" : " ترابيزة") : "لسه محدش سلّم من الموبايلات";
       else if (t === "texts") txt = A.n ? esc(D.label) + ": <b>" + ar(A.n) + "</b> إجابة" : esc(D.label) + ": لسه فاضية";
-      else if (t === "sort" || t === "rewrite" || t === "choice") txt = A.n ? esc(D.label) + ": جاوب <b>" + ar(A.n) + "</b> من " + ar(Object.keys(people).length) : esc(D.label) + ": لسه محدش جاوب";
+      else if (t === "sort" || t === "rewrite" || t === "choice" || t === "tag") txt = A.n ? esc(D.label) + ": جاوب <b>" + ar(A.n) + "</b> من " + ar(Object.keys(people).length) : esc(D.label) + ": لسه محدش جاوب";
       else txt = esc(D.label || id);
       return '<div class="livebox">' + txt + "</div>";
     }).join("");
@@ -371,6 +371,13 @@
         var by = R.by || {};
         h += R.n ? "<table><tr><th>الجملة</th>" + A.bins.map(function (b) { return "<th>" + esc(b.l) + "</th>"; }).join("") + "</tr>" + A.cards.map(function (c) {
           return "<tr><td>" + ar(c.no) + ". " + esc(c.t) + "</td>" + A.bins.map(function (b) { return "<td>" + ar((by[c.id] || {})[b.id] || 0) + "</td>"; }).join("") + "</tr>"; }).join("") + "</table>" : '<p class="meta">لسه مفيش.</p>';
+      } else if (A.type === "tag") {
+        var tg = R.by || {};
+        h += R.n ? "<table><tr><th>الحالة</th><th>البُعد (الأكتر)</th>" + ((A.fields || []).indexOf("t") !== -1 ? "<th>نوع السبب (الأكتر)</th>" : "") + "</tr>" + A.cards.map(function (c) {
+          function top(o) { var b = null, m = 0, tot = 0; Object.keys(o || {}).forEach(function (k) { tot += o[k]; if (o[k] > m) { m = o[k]; b = k; } }); return b ? { b: b, p: Math.round(100 * m / tot) } : null; }
+          var x = tg[c.id] || {}, d = top(x.d), t = top(x.t);
+          return "<tr><td>" + ar(c.no) + ". " + esc(c.t) + "</td><td>" + (d ? esc(rxDim(d.b).n) + " (" + ar(d.p) + "٪)" : "—") + "</td>" + ((A.fields || []).indexOf("t") !== -1 ? "<td>" + (t ? esc(rxType(t.b).n) + " (" + ar(t.p) + "٪)" : "—") + "</td>" : "") + "</tr>";
+        }).join("") + "</table>" : '<p class="meta">لسه مفيش.</p>';
       } else if (A.type === "choice") {
         var cn = R.count || {};
         h += R.n ? A.opts.slice().sort(function (a, b) { return (cn[b.id] || 0) - (cn[a.id] || 0); }).map(function (o) { return '<div class="wl"><span>' + esc(o.l) + "</span><b>" + ar(cn[o.id] || 0) + "</b></div>"; }).join("") : '<p class="meta">لسه مفيش.</p>';
@@ -452,6 +459,11 @@
     var top = ["near", "hi", "story", "front", "no"]; v.top3 = MZ.shuffle(top.slice()).slice(0, 3);
     var src = {}; RX_SRC.forEach(function (c) { src[c.id] = Math.random() < .75 ? RX_SRC_KEY[c.id] : rnd(["a", "o", "x"]); }); v.src = src;
     if (Math.random() < .35) v.park = [{ t: rnd(PK), at: at }];
+    var dm = {}; RX_DS.forEach(function (c) { dm[c.id] = { d: Math.random() < .7 ? RX_DS_KEY[c.id] : rnd(RX_DIMS).id }; }); v.dm = dm;
+    v.l4 = MZ.shuffle(["V2", "V3", "H2", "V1", "B2"]).slice(0, 3);
+    var gr = {}; RX_GC.forEach(function (c) { var k = RX_GC_KEY[c.id]; gr[c.id] = { d: Math.random() < .75 ? k.d : rnd(RX_DIMS).id, t: Math.random() < .6 ? k.t : (Math.random() < .6 ? "k" : rnd(RX_TYPES).id) }; }); v.gr = gr;
+    var ln = {}; RX_LINE.forEach(function (c) { ln[c.id] = rnd(["a", "b", "b", "c"]); }); v.ln = ln;
+    var ld = {}; RX_LAD.forEach(function (c) { ld[c.id] = Math.random() < .7 ? RX_LAD_KEY[c.id] : rnd(["e", "l", "a", "r"]); }); v.ld = ld;
   }
   function clearFakes() {
     var fakes = Object.keys(people).filter(function (u) { return people[u].fake || /^fake_/.test(u); });
