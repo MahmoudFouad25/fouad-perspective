@@ -198,6 +198,10 @@ function noHScroll(page) { return page.evaluate(function () { return document.do
   ok("مفيش أي حاجة داخلية (أرقام/تنبيهات/استبدال)", !/(استبدال|تجمّد|انطفاء|ثقة (قوية|متوسطة|ضعيفة)|E \d|\bH\b|\bV\b)/.test(sr.join(" ")));
   ok("موبايل ٣٧٥: مفيش سكرول عرضي", await noHScroll(ps));
   await ps.waitForTimeout(700); await ps.screenshot({ path: path.join(SHOTS, "mobile-report-top.png") });
+  await ps.evaluate(function () { var c = document.querySelector("article.report .dcard"); if (c) c.scrollIntoView({ block: "start" }); window.scrollBy(0, -120); });
+  await ps.waitForTimeout(400); await ps.screenshot({ path: path.join(SHOTS, "mobile-report-cards.png") });
+  await ps.evaluate(function () { document.querySelector("#rate").scrollIntoView({ block: "start" }); window.scrollBy(0, -80); });
+  await ps.waitForTimeout(300); await ps.screenshot({ path: path.join(SHOTS, "mobile-report-rate.png") });
   await ps.click('#rate .dots5 button[data-v="4"]'); await ps.fill("#rateNote", "قريب جدًا"); await ps.click("#rateSave");
   await ps.waitForFunction(function () { return /وصلنا رأيك/.test(document.querySelector("#rateMsg").textContent); });
   dump = await api({ op: "_dump" }); sd = dump.db.maqyas_axes_v2.u_sara;
@@ -226,10 +230,14 @@ function noHScroll(page) { return page.evaluate(function () { return document.do
   dump = await api({ op: "_dump" }); var md = dump.db.maqyas_axes_v2.u_mahmoud;
   ok("الصيغة المتكيفة اللي ظهرت هي اللي في ملف الاختبار (" + M.adaptiveShown + ")", md.adaptive.row === M.adaptiveShown, md.adaptive.row);
   var sample = SAMPLES.filter(function (s) { return s.key === "أ"; })[0];
-  var want = sample.blocks.filter(function (b) { return b.t !== "pending" && b.t !== "btn"; }).map(function (b) { return b.text; });
+  var want = sample.blocks.filter(function (b) { return b.t !== "pending" && b.t !== "btn" && b.t !== "rate"; }).map(function (b) { return b.text; });
   var same = JSON.stringify(want) === JSON.stringify(mr);
   ok("تقرير الموقع = تقرير التاب حرف بحرف (" + want.length + " سطر)", same, (function () { for (var i = 0; i < Math.max(want.length, mr.length); i++) if (want[i] !== mr[i]) return "أول اختلاف عند " + i + ": «" + (want[i] || "").slice(0, 60) + "» ≠ «" + (mr[i] || "").slice(0, 60) + "»"; })());
   ok("نسخة البصيرة: فيها الجلسة", /جلستك/.test(mr.join(" ")));
+  var cards = await pm.$$eval("article.report .dcard", function (c) { return c.map(function (x) { return x.querySelector(".dc-name").textContent + "|" + x.querySelector(".dc-state").textContent; }); });
+  ok("كروت باقي المساحات ظاهرة (" + cards.length + ") وفيها «حالها عندك»", cards.length === 6 && cards.every(function (c) { return c.indexOf("حالها عندك: ") !== -1; }), cards.join(" / "));
+  ok("مفيش «الأبعاد التسعة في سطر» ولا الكلمات القديمة", !/الأبعاد التسعة في سطر|سايبه شوية|ماسك فيه زيادة|منطقة وسط|خريطة المحاور/.test(mr.join(" ")));
+  ok("سؤال التقييم مكتوب مرة واحدة (في الخانة بس)", (await pm.$$eval("article.report", function (a) { return (a[0].textContent.match(/التقرير ده وصفك قد إيه؟/g) || []).length; })) === 1);
   var R2 = E.score(md, ITEMS, C);
   ok("النتيجة المحفوظة = حساب المحرك في Node", JSON.stringify(R2) === JSON.stringify(md.result));
   await cxm.close();

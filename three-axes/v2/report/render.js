@@ -7,7 +7,10 @@
      items   = engine/items.json
      texts   = report/texts.json (بيتطلّع من الدوك بـ extract_texts.py)
      opts    = { mode: "standalone" | "insight", name: "…", contact: "…", contactLink: "https://wa.me/…", contactLabel: "…" }
-   blocks: [{t:"title"|"h2"|"h3"|"p"|"li"|"pending"|"btn", text, href?}]   ← "btn" زرار التواصل (النسخة المنفردة بس)   ← العميل بيشوف كل حاجة ما عدا "pending"
+   blocks: [{t:"title"|"h2"|"h3"|"h4"|"p"|"li"|"pending"|"btn"|"card"|"rate", text, …}]
+     "btn"  زرار التواصل (النسخة المنفردة بس): {text, href}
+     "card" كارت مساحة: {name, line, state, text}
+     "rate" سؤال التقييم في الآخر: {text, scale:[٥ أسامي], note}   ← العميل بيشوف كل حاجة ما عدا "pending"
    meta:   الأقسام اللي ظهرت واللي ما ظهرتش وليه، والاقتباسات، والمشاكل اللي اتلقت وهو بيولّد.
    القواعد هنا هي نفس السطور الداخلية في الدوك (بيظهر إمتى). لو اتغيّرت هناك، تتغيّر هنا.
    ===================================================================== */
@@ -70,7 +73,7 @@
         ? "ولما سألناك عن " + label + "، كان أقرب حاجة ليك: «" + noDot(opt.text) + "»."
         : "ولما سألناك عن " + label + "، كان أبعد حاجة عنك: «" + noDot(opt.text) + "».";
     }
-    function stmt(it) { return "«" + noDot(it.text) + "» بتحصل معاك " + FREQ[A.freq[it.id]]; }
+    function stmt(it) { return "من إجاباتك: قلت إن ده بيحصل معاك " + FREQ[A.freq[it.id]] + ": «" + noDot(it.text) + "»."; }
     function topOf(list) {
       var best = null;
       list.forEach(function (it) { if (typeof A.freq[it.id] === "number" && (best === null || A.freq[it.id] > A.freq[best.id])) best = it; });
@@ -87,11 +90,11 @@
       else if (kind === "cycle" || kind === "ambiguous") {
         var e = topOf(dimItems(d, "excess")), f = topOf(dimItems(d, "deficit"));
         meta.quotes.push(e.id + "، " + f.id);
-        return "قلت إن " + stmt(e) + "، وإن " + stmt(f) + ".";
+        return "من إجاباتك: قلت إن ده بيحصل معاك " + FREQ[A.freq[e.id]] + ": «" + noDot(e.text) + "» (ده وش الزيادة)، وإن ده بيحصل معاك " + FREQ[A.freq[f.id]] + ": «" + noDot(f.text) + "» (وده وش النقص).";
       }
       if (!q) return null;
       meta.quotes.push(q.id);
-      return "قلت إن " + stmt(q) + ".";
+      return stmt(q);
     }
     function fill(paras, map) {
       var out = [];
@@ -105,7 +108,7 @@
     }
 
     /* ───── العنوان ───── */
-    add("title", "خريطة المحاور" + (opts.name ? ": " + opts.name : ""));
+    add("title", "خريطة مسارات الطاقة" + (opts.name ? ": " + opts.name : ""));
 
     /* ───── ١. الافتتاح ───── */
     var s1 = sec("١. الافتتاح");
@@ -134,9 +137,11 @@
       shown("٢. خريطتك", "نسخة الثقة الضعيفة");
     } else if (undet2) {
       fill(part(s2, "نسخة الهادي غير محسوم").paras, { "[المحور]": NAME[F.main] }).forEach(function (p) { add("p", p); });
+      base.paras.slice(2).forEach(function (p) { add("p", p); });
       shown("٢. خريطتك", "نسخة الهادي غير محسوم: الأقوى، والاتنين التانيين قريبين");
     } else {
       fill([base.paras[1]], { "[الأقوى]": NAME[F.main], "[المساند]": NAME[F.supporting], "[الهادي]": NAME[third] }).forEach(function (p) { add("p", p); });
+      base.paras.slice(2).forEach(function (p) { add("p", p); });
       shown("٢. خريطتك");
     }
 
@@ -210,8 +215,10 @@
     if (acq) pick = [];   // الدوك: لو «نمط إجابة»، الجدول بس
     if (!acq && pick.length < 2) pick = pick.concat(rank(dims.filter(function (d) { return /^lean_(excess|deficit)$/.test(d.reportStatus); }), function (d) { return Math.abs(d.E - d.D); }).slice(0, 2 - pick.length));
     if (!pick.length && !acq) pick = dims.filter(function (d) { return d.reportStatus === "ambiguous"; }).slice(0, 1);
-    add("h2", "أبعادك");
+    add("h2", "مساحات حياتك التسعة");
     part(s6, "_").paras.forEach(function (p) { add("p", p); });
+    var acqP = part(s6, "لو الإجابات كانت متقاربة (نمط إجابة)").paras;
+    if (acq) add("p", acqP[0]); else part(s6, "سطر قبل التفاصيل").paras.forEach(function (p) { add("p", p); });
     var firstStep = null, dimShown = [];
     pick.forEach(function (d) {
       add("h3", d.name);
@@ -235,22 +242,42 @@
         meta.problems.push("نص «" + d.name + " — " + d.reportLabel + "» لسه ما اتكتبش");
       }
     });
-    add("h3", "الأبعاد التسعة في سطر");
-    R.dimensions.forEach(function (d) { add("li", NAME[d.axis] + " · " + d.name + ": " + d.clientWord); });
-    if (acq) part(s6, "لو الإجابات كانت متقاربة (نمط إجابة)").paras.forEach(function (p) { add("p", p); });
-    var ins6 = secInsight(tmpl) || secInsight(s6);
-    if (insight && ins6) add("p", ins6);
-    shown("٦. الأبعاد", acq ? "الجدول بس وسطر إعادة المقياس (نمط إجابة)" : dimShown.join(" · "));
+    /* ───── كروت باقي المساحات ───── */
+    var WORD = {};
+    part(tmpl, "كلمة الحال لكل مساحة").bullets.forEach(function (b) { var k = b.split(" — "); WORD[k[0].trim()] = k.slice(1).join(" — ").trim(); });
+    var cardsP = part(tmpl, "باقي مساحاتك (الكروت)").paras;   // [0] مقدمة، [1] «في مسار [المسار]»، [2] «حالها عندك: [الحال]»، [3] الختام
+    var rest = R.dimensions.filter(function (d) { return pick.indexOf(d) === -1; }), cardsShown = [];
+    if (rest.length) {
+      if (!acq) { add("h3", "باقي مساحاتك"); add("p", cardsP[0]); }
+      AX.forEach(function (ax) {
+        var ds = rest.filter(function (d) { return d.axis === ax; });
+        if (!ds.length) return;
+        add("h4", fill([cardsP[1]], { "[المسار]": NAME[ax] })[0]);
+        ds.forEach(function (d) {
+          var st = d.reportStatus, word = WORD[st];
+          if (!word) { meta.problems.push("مفيش كلمة حال لـ " + st); return; }
+          var txt = part(sec(DIM_TEXTS[d.id]), "الكارت (لو المساحة ما اتشرحتش بالتفصيل)").bullets.filter(function (b) { return b.indexOf(word + " — ") === 0; })[0] || "";
+          if (!txt) meta.problems.push("مفيش نص كارت: " + d.name + " / " + st);
+          B.push({ t: "card", name: d.name, line: DIMLINE[d.name] || "", state: fill([cardsP[2]], { "[الحال]": word })[0], text: txt.slice(word.length + 3) });
+          cardsShown.push(d.name + " (" + st + ")");
+        });
+      });
+    }
+    var ins6 = secInsight(tmpl);
+    if (acq) add("p", acqP[1]);
+    if (rest.length) add("p", insight && ins6 ? ins6 : cardsP[3]);
+    shown("٦. المساحات", (acq ? "كروت بس (نمط إجابة)" : dimShown.join(" · ")) + (cardsShown.length ? " + كروت: " + cardsShown.join("، ") : ""));
 
     /* ───── ٧. الموجات والميل ───── */
     var s7 = sec("٧. موجاتك وميلك"), hiC = AX.filter(function (a) { return R.cycles[a].high; });
-    add("h2", hiC.length ? "موجاتك وميلك" : "ميلك");
+    add("h2", hiC.length ? "حاجات بتتكرر عندك، وميلك في تلات اختيارات" : "ميلك في تلات اختيارات");
     if (hiC.length) {
       part(s7, "_").paras.forEach(function (p) { add("p", p); });
       hiC.forEach(function (a) {
         var c = topOf(items.freq.filter(function (i) { return i.kind === "cycle" && i.axis === a; }));
         meta.quotes.push(c.id);
-        fill(part(s7, "موجة " + NAME[a]).paras, { quote: "قلت إن " + stmt(c) + "." }).forEach(function (p) { add("p", p); });
+        add("h3", "موجة في مسار " + NAME[a]);
+        fill(part(s7, "موجة " + NAME[a]).paras, { quote: stmt(c) }).forEach(function (p) { add("p", p); });
       });
     }
     var tp = part(s7, "ميلك: الأسئلة التلاتة");
@@ -261,11 +288,13 @@
       add("h3", tp.paras[k + 1]);
       var pre = t.side === "أ" ? "أ:" : t.side === "ب" ? "ب:" : "النص:";
       if (t.side === "النص") mid = true;
+      add("p", fill([tp.paras[4]], { "[السؤال]": b.text.replace(/[:：]\s*$/, ""), "[أ]": noDot(b.a), "[ب]": noDot(b.b) })[0]);
+      add("p", tp.paras[t.side === "أ" ? 5 : t.side === "ب" ? 6 : 7]);
       var line = tp.bullets.slice(k * 3, k * 3 + 3).filter(function (x) { return x.indexOf(pre) === 0; })[0];
       add("p", line.slice(pre.length).trim());
     });
     if (insight && mid && tp.insight) add("p", ins(tp.insight));
-    shown("٧. " + (hiC.length ? "موجاتك وميلك" : "ميلك"), hiC.length ? "موجات: " + hiC.map(function (a) { return NAME[a]; }).join("، ") : "مفيش دايرة عالية، فالموجات ما ظهرتش");
+    shown("٧. " + (hiC.length ? "الموجات والميل" : "الميل"), hiC.length ? "موجات: " + hiC.map(function (a) { return NAME[a]; }).join("، ") : "مفيش دايرة عالية، فالموجات ما ظهرتش");
 
     /* ───── ٨. الضغط ───── */
     var s8 = sec("٨. لما الضغط يزيد"), hiF = AX.filter(function (a) { return R.station7.fear[a].high; });
@@ -309,18 +338,21 @@
     var s10 = sec("١٠. الختام");
     add("h2", "في الآخر");
     part(s10, insight ? "نسخة البصيرة الحكيمة" : "النسخة المنفردة").paras.forEach(function (p) { add("p", p); });
-    part(s10, "سؤال آخر التقرير (للنسختين)").paras.forEach(function (p) { add("p", p); });
+    var rq = part(s10, "سؤال آخر التقرير (للنسختين)").paras;   // السؤال، وأسامي النقط الخمسة، وعنوان خانة الكتابة
+    B.push({ t: "rate", text: rq[0], scale: (rq[1] || "").split("·").map(function (x) { return x.trim().replace(/^[٠-٩0-9]+\s*/, ""); }), note: rq[2] || "" });
     shown("١٠. الختام", insight ? "نسخة البصيرة" : "النسخة المنفردة");
 
     // فحوصات: جملة مكررة، وقوس فاضل
     var seen = {};
     B.forEach(function (b) {
       if (b.t !== "p") return;
-      if (seen[b.text]) meta.problems.push("جملة مكررة: " + b.text.slice(0, 50));
+      if (seen[b.text] && tp.paras.slice(5, 8).indexOf(b.text) === -1) meta.problems.push("جملة مكررة: " + b.text.slice(0, 50));
       seen[b.text] = 1;
       if (b.t !== "pending" && /\[[^\]]+\]/.test(b.text)) meta.problems.push("قوس فاضل: " + b.text.slice(0, 50));
     });
-    meta.words = B.filter(function (b) { return b.t !== "pending" && b.t !== "btn"; }).reduce(function (s, b) { return s + b.text.split(/\s+/).filter(Boolean).length; }, 0);
+    meta.words = B.filter(function (b) { return b.t !== "pending" && b.t !== "btn" && b.t !== "rate"; }).reduce(function (s, b) {
+      var t = b.t === "card" ? [b.name, b.line, b.state, b.text].join(" ") : b.text;
+      return s + t.split(/\s+/).filter(Boolean).length; }, 0);
     return { blocks: B, meta: meta };
   }
   function stripDot(s) { return (s || "").replace(/\.\s*$/, ""); }
