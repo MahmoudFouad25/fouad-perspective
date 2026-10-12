@@ -50,7 +50,7 @@ function allow(op, col, id, auth, before, after) {
   if (op === "list") return isAdmin(auth);
   if (op === "delete") return false;
   if (!before) {   // create
-    return isOwner(auth, id) && after.userId === id && after.authUid === auth.uid && after.status === "شغال" &&
+    return isOwner(auth, id) && after.userId === id && after.authUid === auth.uid && (after.status === "شغال" || after.status === "خلص") &&
       !Object.keys(after).some(function (k) { return ADMIN_KEYS.indexOf(k) !== -1; });
   }
   var ch = affected(before, after);
