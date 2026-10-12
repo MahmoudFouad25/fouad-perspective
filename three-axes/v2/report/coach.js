@@ -1,7 +1,8 @@
 /* =====================================================================
    coach.js — ورقة الكوتش لعميل واحد (بتظهر لمحمود في صفحة الأدمن)
    renderCoach(result, answers, items, coachTexts, opts) ← blocks
-     opts = { mode: "standalone" | "insight", name, timing: {"1":{startedAt,endedAt}…}, rating: {value, note} }
+     opts = { mode: "standalone" | "insight", name, timing: {"1":{startedAt,endedAt}…}, rating: {value, note}, address: "m" | "f" }
+     address "f": الورقة بتقول «العميلة» بدل «العميل» (وأفعالها). وأسئلة الجلسة مكتوبة زي ما هي، والكوتش بيقولها بصيغتها.
    ===================================================================== */
 (function (root) {
   "use strict";
@@ -10,16 +11,25 @@
   function f(n) { return n == null ? "—" : String(n).replace(/[0-9]/g, function (d) { return "٠١٢٣٤٥٦٧٨٩"[+d]; }).replace(".", "٫"); }
   function sgn(n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + f(Math.abs(n)); }
 
+  // «العميل» ← «العميلة» في جمل الورقة (الأطول الأول، علشان الفعل اللي بعدها يتأنث معاها)
+  var CLIENT_F = [["والعميل شاف", "والعميلة شافت"], ["العميل اختار", "العميلة اختارت"], ["والعميل اشترى", "والعميلة اشترت"],
+                  ["العميل يحس", "العميلة تحس"], ["للعميل", "للعميلة"], ["العميل", "العميلة"]];
+  var CLIENT_MAP = {}, CLIENT_RE = new RegExp(CLIENT_F.map(function (p) { CLIENT_MAP[p[0]] = p[1]; return p[0]; }).join("|") + "(?!ة)", "g");
   function renderCoach(R, A, items, CT, opts) {
     opts = opts || {};
-    var B = [];
-    function add(t, text) { B.push({ t: t, text: text }); }
+    var B = [], fem = opts.address === "f";
+    function W(s) {
+      if (!fem || typeof s !== "string") return s;
+      return s.replace(CLIENT_RE, function (m) { return CLIENT_MAP[m]; });
+    }
+    function add(t, text) { B.push({ t: t, text: W(text) }); }
     var F = R.final, dims = R.dimensions;
     var on = ["depletion", "mood", "freeze", "period"].filter(function (k) { return R.alerts[k].on; });
     var alertName = { depletion: "الانطفاء", mood: "تقلّب المزاج", freeze: "التجمّد", period: "الفترة" };
     var needFollow = opts.mode === "standalone" && (R.alerts.depletion.on || R.alerts.mood.on || R.alerts.freeze.on);
 
     add("title", "ورقة الكوتش" + (opts.name ? ": " + opts.name : ""));
+    if (fem) add("p", "العميلة اختارت إن المقياس والتقرير يكلموها بصيغة المؤنث.");
     if (needFollow) add("p", "⚑ محتاج متابعة: فيه تنبيه شغال والعميل اشترى المقياس لوحده.");
 
     /* ١. الملخص */
@@ -61,7 +71,7 @@
     add("li", "سؤال الفترة: " + (per.length ? per.map(function (x) { return popts[x] || x; }).join("، ") + "، والأثر: " + (A.period.impact || "—") : "الفترة عادية") + ".");
     var tm = opts.timing || A.timing || {};
     add("li", "وقت كل محطة: " + (Object.keys(tm).length ? Object.keys(tm).sort().map(function (k) { return "المحطة " + f(k) + " " + f(Math.round((tm[k].endedAt - tm[k].startedAt) / 60000)) + " د"; }).join("، ") : "مش متسجل") + ".");
-    add("li", "تقييم العميل للتقرير: " + (opts.rating ? f(opts.rating.value) + " من ٥" + (opts.rating.note ? "، وكتب: «" + opts.rating.note + "»" : "") : "لسه ما قيّمش") + ".");
+    add("li", "تقييم العميل للتقرير: " + (opts.rating ? f(opts.rating.value) + " من ٥" + (opts.rating.note ? (fem ? "، وكتبت: «" : "، وكتب: «") + opts.rating.note + "»" : "") : (fem ? "لسه ما قيّمتش" : "لسه ما قيّمش")) + ".");
 
     /* ٣. التنبيهات */
     add("h2", "٣. التنبيهات");

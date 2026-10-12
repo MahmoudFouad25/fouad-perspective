@@ -6,7 +6,8 @@
      answers = نفس الإجابات (شكل المحرك، أو بعد engine.normalize)
      items   = engine/items.json
      texts   = report/texts.json (بيتطلّع من الدوك بـ extract_texts.py)
-     opts    = { mode: "standalone" | "insight", name: "…", contact: "…", contactLink: "https://wa.me/…", contactLabel: "…" }
+     opts    = { mode: "standalone" | "insight", name: "…", contact: "…", contactLink: "https://wa.me/…", contactLabel: "…",
+                 address: "m" | "f" }   ← "f" = صيغة المؤنث: كل جملة ليها نسخة في texts.fem و items.fem بتتبدل بيها
    blocks: [{t:"title"|"h2"|"h3"|"h4"|"p"|"li"|"pending"|"btn"|"card"|"rate", text, …}]
      "btn"  زرار التواصل (النسخة المنفردة بس): {text, href}
      "card" كارت مساحة: {name, line, state, text}
@@ -31,7 +32,12 @@
     opts = opts || {};
     var insight = opts.mode === "insight";
     var B = [], meta = { shown: [], hidden: [], quotes: [], problems: [] };
-    var tx = T.texts;
+    // صيغة المؤنث: النصوص كلها بتتبدل بنسختها من texts.fem (والأسئلة المقتبسة من items.fem) قبل أي حاجة،
+    // فكل اللي تحت شغال زي ما هو. والجمل القليلة المكتوبة هنا في الكود ليها نسختين بـ G(مذكر، مؤنث).
+    var fem = opts.address === "f", FT = (fem && T.fem) || {}, FI = (fem && items.fem) || {};
+    function G(m, f) { return fem ? f : m; }
+    function itf(s) { return (s && FI[s]) || s; }
+    var tx = fem ? femTexts(T.texts, FT) : T.texts;
     function sec(h2) { var k = tx[h2] ? h2 : Object.keys(tx).filter(function (x) { return x.indexOf(h2) !== -1; })[0]; if (!k) meta.problems.push("قسم مش موجود في الدوك: " + h2); return tx[k] || {}; }
     function part(s, h3) { var p = s[h3]; if (!p) meta.problems.push("جزء مش موجود في الدوك: " + h3); return p || { paras: [], bullets: [], insight: null, tables: [] }; }
     function secInsight(s) { var v = null; Object.keys(s).forEach(function (k) { if (s[k].insight) v = s[k].insight; }); return v && ins(v); }
@@ -70,10 +76,11 @@
       if (!label) { meta.problems.push("مفيش اسم قصير للموقف " + it.id); return null; }
       meta.quotes.push(it.id + " (" + which + ")");
       return which === "closest"
-        ? "ولما سألناك عن " + label + "، كان أقرب حاجة ليك: «" + noDot(opt.text) + "»."
-        : "ولما سألناك عن " + label + "، كان أبعد حاجة عنك: «" + noDot(opt.text) + "».";
+        ? G("ولما سألناك عن ", "ولما سألناكي عن ") + label + G("، كان أقرب حاجة ليك: «", "، كان أقرب حاجة ليكي: «") + noDot(itf(opt.text)) + "»."
+        : G("ولما سألناك عن ", "ولما سألناكي عن ") + label + "، كان أبعد حاجة عنك: «" + noDot(itf(opt.text)) + "».";
     }
-    function stmt(it) { return "من إجاباتك: قلت إن ده بيحصل معاك " + FREQ[A.freq[it.id]] + ": «" + noDot(it.text) + "»."; }
+    var SAID = G("من إجاباتك: قلت إن ده بيحصل معاك ", "من إجاباتك: قلتي إن ده بيحصل معاكي "), AND = G("، وإن ده بيحصل معاك ", "، وإن ده بيحصل معاكي ");
+    function stmt(it) { return SAID + FREQ[A.freq[it.id]] + ": «" + noDot(itf(it.text)) + "»."; }
     function topOf(list) {
       var best = null;
       list.forEach(function (it) { if (typeof A.freq[it.id] === "number" && (best === null || A.freq[it.id] > A.freq[best.id])) best = it; });
@@ -92,7 +99,7 @@
         meta.quotes.push(e.id + "، " + f.id);
         var cy = CYC[d.name];
         if (!cy) { meta.problems.push("مفيش علامة اقتباسين للدايرة: " + d.name); cy = ["", ""]; }
-        return "من إجاباتك: قلت إن ده بيحصل معاك " + FREQ[A.freq[e.id]] + ": «" + noDot(e.text) + "» (" + cy[0] + ")، وإن ده بيحصل معاك " + FREQ[A.freq[f.id]] + ": «" + noDot(f.text) + "» (" + cy[1] + ").";
+        return SAID + FREQ[A.freq[e.id]] + ": «" + noDot(itf(e.text)) + "» (" + cy[0] + ")" + AND + FREQ[A.freq[f.id]] + ": «" + noDot(itf(f.text)) + "» (" + cy[1] + ").";
       }
       if (!q) return null;
       meta.quotes.push(q.id);
@@ -297,7 +304,7 @@
       add("h3", tp.paras[k + 1]);
       var pre = t.side === "أ" ? "أ:" : t.side === "ب" ? "ب:" : "النص:";
       if (t.side === "النص") mid = true;
-      add("p", fill([tp.paras[4]], { "[السؤال]": b.text.replace(/[:：]\s*$/, ""), "[أ]": noDot(b.a), "[ب]": noDot(b.b) })[0]);
+      add("p", fill([tp.paras[4]], { "[السؤال]": itf(b.text).replace(/[:：]\s*$/, ""), "[أ]": noDot(itf(b.a)), "[ب]": noDot(itf(b.b)) })[0]);
       var line = tp.bullets.slice(k * 3, k * 3 + 3).filter(function (x) { return x.indexOf(pre) === 0; })[0];
       add("p", line.slice(pre.length).trim());
     });
@@ -362,6 +369,20 @@
       var t = b.t === "card" ? [b.name, b.line, b.label, b.state, b.text].join(" ") : b.text;
       return s + t.split(/\s+/).filter(Boolean).length; }, 0);
     return { blocks: B, meta: meta };
+  }
+  // نسخة من النصوص كل جملة فيها متبدلة بالمؤنث (لو ليها نسخة)
+  function femTexts(texts, FT) {
+    function f(x) { return (x && FT[x]) || x; }
+    var out = {};
+    Object.keys(texts).forEach(function (sec) {
+      out[sec] = {};
+      Object.keys(texts[sec]).forEach(function (h) {
+        var s = texts[sec][h];
+        out[sec][h] = { paras: s.paras.map(f), bullets: s.bullets.map(f), insight: f(s.insight),
+                        tables: (s.tables || []).map(function (t) { return t.map(function (r) { return r.map(f); }); }) };
+      });
+    });
+    return out;
   }
   function stripDot(s) { return (s || "").replace(/\.\s*$/, ""); }
 

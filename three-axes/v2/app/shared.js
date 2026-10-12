@@ -18,11 +18,11 @@
     oldCollection: "maqyas_axes_results",
     courses: { standalone: "three-axes", insight: "insight-out", legacy: ["reignite"] },
     admins: ["admin@fouad-academy.com"],          // لازم تبقى نفس القايمة اللي في firestore.rules
-    contact: { text: "واتساب 01024584537", link: "https://wa.me/201024584537", label: "كلّمنا على واتساب" },
+    contact: { text: "واتساب 01024584537", link: "https://wa.me/201024584537", label: "كلّمنا على واتساب", labelF: "كلّمينا على واتساب" },
     courseLink: "../../../insight-out/insight-out.html",
     loginPath: "../../../login.html",
     myCoursesPath: "../../../my-courses.html",
-    assetsVersion: "2026-10-12b"                  // بيتغيّر مع كل رفع علشان المتصفح ما يمسكش نسخة قديمة
+    assetsVersion: "2026-10-12c"                  // بيتغيّر مع كل رفع علشان المتصفح ما يمسكش نسخة قديمة
   };
   // الحقول اللي الكوتش بس اللي يكتبها (ولازم تبقى زي firestore.rules)
   var ADMIN_KEYS = ["override", "resultHistory", "adminUpdatedAt", "adminNote"];
@@ -34,6 +34,19 @@
   function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
   function lower(s) { return String(s || "").trim().toLowerCase(); }
   function first(name) { return String(name || "").trim().split(/\s+/)[0] || ""; }
+
+  /* ───────── صيغة الكلام (مذكر/مؤنث) ─────────
+     العميل بيختارها أول مرة («نكلمك إزاي؟»)، وبتتحفظ في وثيقته وفي users/{userId}.personalInfo.address.
+     النصوص المؤنثة نفسها في items.fem و texts.fem (جملة المذكر ← جملة المؤنث). */
+  function addressOf(doc) {
+    var a = doc && ((doc.personalInfo && doc.personalInfo.address) || doc.address);
+    return a === "f" || a === "m" ? a : null;
+  }
+  function femmer(map, on) { return function (s) { return (on && s && map && map[s]) || s; }; }
+  function saveAddressToUser(userId, v) {
+    try { return fb().db.collection("users").doc(userId).update({ "personalInfo.address": v }).catch(function (e) { console.warn("[axv2] address→users", e && e.code); }); }
+    catch (e) { return Promise.resolve(); }
+  }
 
   var store = (function () {
     var mem = {}, can = false;
@@ -112,7 +125,7 @@
         var email = (u.data.personalInfo && u.data.personalInfo.email) || "";
         var name = (u.data.personalInfo && u.data.personalInfo.name) || store.raw("userName") || "";
         var en = enrollment(u.data);
-        var base = { userId: u.id, userDoc: u.data, email: email, name: name, mode: en.mode, legacy: en.legacy };
+        var base = { userId: u.id, userDoc: u.data, email: email, name: name, mode: en.mode, legacy: en.legacy, address: addressOf(u.data) };
         if (!email) return Object.assign(base, { status: "no-profile" });
         if (!en.mode) return Object.assign(base, { status: "not-enrolled" });
         if (authUser && lower(authUser.email) === lower(email)) return Object.assign(base, { status: "ok", authUser: authUser });
@@ -152,25 +165,26 @@
 
   /* ───────── شاشات الهوية المشتركة ───────── */
   function gateHTML(ctx) {
-    var C = CFG.contact, h = '<section class="card rise">';
+    var C = CFG.contact, h = '<section class="card rise">', f = ctx.address === "f";
+    function G(m, w) { return f ? w : m; }
     if (ctx.status === "login") {
-      h += "<h2>محتاج تدخل حسابك الأول</h2><p>ادخل حسابك في المنصة، وبعدها افتح المقياس من «كورساتي».</p>";
-      h += '<a class="next" href="' + CFG.loginPath + '">ادخل حسابك</a>';
+      h += G("<h2>محتاج تدخل حسابك الأول</h2><p>ادخل حسابك في المنصة، وبعدها افتح المقياس من «كورساتي».</p>", "<h2>محتاجة تدخلي حسابك الأول</h2><p>ادخلي حسابك في المنصة، وبعدها افتحي المقياس من «كورساتي».</p>");
+      h += '<a class="next" href="' + CFG.loginPath + '">' + G("ادخل حسابك", "ادخلي حسابك") + '</a>';
     } else if (ctx.status === "not-enrolled") {
       h += "<h2>المقياس ده مش مفتوح في حسابك</h2>";
-      h += "<p>" + esc(CFG.scaleName) + " بيتفتح للي اشترك فيه لوحده، أو للي مشترك في رحلة «البصيرة الحكيمة». ولو إنت اشتركت فعلًا وشايف الرسالة دي، كلّمنا وهنظبطها.</p>";
+      h += "<p>" + esc(CFG.scaleName) + G(" بيتفتح للي اشترك فيه لوحده، أو للي مشترك في رحلة «البصيرة الحكيمة». ولو إنت اشتركت فعلًا وشايف الرسالة دي، كلّمنا وهنظبطها.</p>", " بيتفتح للي اشترك فيه لوحده، أو للي مشترك في رحلة «البصيرة الحكيمة». ولو إنتي اشتركتي فعلًا وشايفة الرسالة دي، كلّمينا وهنظبطها.</p>");
       h += '<div class="row"><a class="next" href="' + CFG.courseLink + '">اعرف عن البصيرة الحكيمة</a>';
-      h += '<a class="next ghost" href="' + C.link + '" target="_blank" rel="noopener">' + esc(C.label) + "</a></div>";
+      h += '<a class="next ghost" href="' + C.link + '" target="_blank" rel="noopener">' + esc(G(C.label, C.labelF)) + "</a></div>";
     } else if (ctx.status === "no-profile") {
-      h += "<h2>حسابك محتاج تظبيط صغير</h2><p>مش لاقيين إيميل في بيانات حسابك، ومن غيره مش هنقدر نحفظ إجاباتك بأمان. كلّمنا وهنظبطه في دقايق.</p>";
-      h += '<a class="next" href="' + C.link + '" target="_blank" rel="noopener">' + esc(C.label) + "</a>";
+      h += G("<h2>حسابك محتاج تظبيط صغير</h2><p>مش لاقيين إيميل في بيانات حسابك، ومن غيره مش هنقدر نحفظ إجاباتك بأمان. كلّمنا وهنظبطه في دقايق.</p>", "<h2>حسابك محتاج تظبيط صغير</h2><p>مش لاقيين إيميل في بيانات حسابك، ومن غيره مش هنقدر نحفظ إجاباتك بأمان. كلّمينا وهنظبطه في دقايق.</p>");
+      h += '<a class="next" href="' + C.link + '" target="_blank" rel="noopener">' + esc(G(C.label, C.labelF)) + "</a>";
     } else if (ctx.status === "confirm") {
-      h += "<h2>أكّد دخولك مرة واحدة</h2>";
-      h += "<p>إجابات المقياس ده خاصة بيك، فبنحفظها في مكان محمي ما يفتحهوش غيرك. علشان كده محتاجين تكتب باسورد حسابك في المنصة مرة واحدة بس.</p>";
+      h += G("<h2>أكّد دخولك مرة واحدة</h2>", "<h2>أكّدي دخولك مرة واحدة</h2>");
+      h += G("<p>إجابات المقياس ده خاصة بيك، فبنحفظها في مكان محمي ما يفتحهوش غيرك. علشان كده محتاجين تكتب باسورد حسابك في المنصة مرة واحدة بس.</p>", "<p>إجابات المقياس ده خاصة بيكي، فبنحفظها في مكان محمي ما يفتحهوش غيرك. علشان كده محتاجين تكتبي باسورد حسابك في المنصة مرة واحدة بس.</p>");
       if (ctx.otherAccount) h += '<p class="soft">المتصفح ده كان داخل بحساب تاني (' + esc(ctx.otherAccount) + ")، وهنخرج منه.</p>";
       h += '<label class="field"><span>الإيميل</span><input type="email" value="' + esc(ctx.email) + '" readonly dir="ltr"></label>';
       h += '<label class="field"><span>الباسورد</span><input id="axPw" type="password" autocomplete="current-password" dir="ltr"></label>';
-      h += '<button type="button" class="next" id="axPwGo">ادخل</button>';
+      h += '<button type="button" class="next" id="axPwGo">' + G("ادخل", "ادخلي") + '</button>';
       h += '<p class="hint" id="axPwMsg" hidden></p>';
     }
     return h + "</section>";
@@ -179,21 +193,23 @@
   function runGate(main, ctx) {
     main.innerHTML = gateHTML(ctx);
     if (ctx.status !== "confirm") return new Promise(function () {});
+    var f = ctx.address === "f";
+    function G(m, w) { return f ? w : m; }
     return new Promise(function (resolve) {
       var btn = document.getElementById("axPwGo"), pw = document.getElementById("axPw"), msg = document.getElementById("axPwMsg");
       function say(html) { msg.innerHTML = html; msg.hidden = false; }
       function go() {
-        if (!pw.value) { say("اكتب الباسورد."); return; }
+        if (!pw.value) { say(G("اكتب الباسورد.", "اكتبي الباسورد.")); return; }
         btn.setAttribute("aria-disabled", "true"); btn.textContent = "لحظة…";
         confirmLogin(ctx, pw.value).then(function (u) {
           ctx.status = "ok"; ctx.authUser = u; resolve(ctx);
         }).catch(function (e) {
-          btn.removeAttribute("aria-disabled"); btn.textContent = "ادخل";
+          btn.removeAttribute("aria-disabled"); btn.textContent = G("ادخل", "ادخلي");
           var k = (e && e.kind) || "help";
-          if (k === "wrong") say("الباسورد مش مظبوط. اكتبه زي ما بتدخل بيه المنصة بالظبط.");
-          else if (k === "locked") say("محاولات كتير ورا بعض. استنى ٥ دقايق وجرّب تاني.");
-          else if (k === "network") say("النت فاصل. اتأكد من الاتصال وجرّب تاني.");
-          else say('مش قادرين نأكد دخولك من هنا، والمشكلة عندنا مش عندك. كلّمنا وهنظبطها في دقايق: <a href="' + CFG.contact.link + '" target="_blank" rel="noopener">' + esc(CFG.contact.text) + "</a>");
+          if (k === "wrong") say(G("الباسورد مش مظبوط. اكتبه زي ما بتدخل بيه المنصة بالظبط.", "الباسورد مش مظبوط. اكتبيه زي ما بتدخلي بيه المنصة بالظبط."));
+          else if (k === "locked") say(G("محاولات كتير ورا بعض. استنى ٥ دقايق وجرّب تاني.", "محاولات كتير ورا بعض. استني ٥ دقايق وجرّبي تاني."));
+          else if (k === "network") say(G("النت فاصل. اتأكد من الاتصال وجرّب تاني.", "النت فاصل. اتأكدي من الاتصال وجرّبي تاني."));
+          else say(G('مش قادرين نأكد دخولك من هنا، والمشكلة عندنا مش عندك. كلّمنا وهنظبطها في دقايق: ', 'مش قادرين نأكد دخولك من هنا، والمشكلة عندنا مش عندك. كلّمينا وهنظبطها في دقايق: ') + '<a href="' + CFG.contact.link + '" target="_blank" rel="noopener">' + esc(CFG.contact.text) + "</a>");
         });
       }
       btn.addEventListener("click", go);
@@ -205,6 +221,7 @@
   root.AXV2 = {
     CFG: CFG, ADMIN_KEYS: ADMIN_KEYS,
     ar: ar, esc: esc, clone: clone, lower: lower, first: first, store: store, loadJSON: loadJSON,
+    addressOf: addressOf, femmer: femmer, saveAddressToUser: saveAddressToUser,
     fb: fb, ts: ts, docRef: docRef, waitAuth: waitAuth,
     platformUserId: platformUserId, enrollment: enrollment, identify: identify, confirmLogin: confirmLogin, runGate: runGate
   };

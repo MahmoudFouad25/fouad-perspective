@@ -2,6 +2,8 @@
    report.js — تقرير العميل في «مقياس مسارات الطاقة» (النسخة ٢)
    بيبني التقرير من النتيجة المحفوظة في وثيقته + نصوص التقرير المقفولة (report/texts.json)،
    بالنسخة الصح (منفرد / البصيرة الحكيمة). مفيش أي رقم أو تنبيه أو اسم داخلي بيظهر للعميل.
+   وبالصيغة اللي العميل اختارها (address في وثيقته، أو في حسابه على المنصة). والتقارير القديمة اللي اتعملت قبل
+   سؤال الصيغة بتطلع بالمذكر، وفوقها زرار صغير «اقري التقرير بصيغة المؤنث»، والاختيار بيتحفظ.
    ===================================================================== */
 (function () {
   "use strict";
@@ -9,6 +11,8 @@
   var esc = X.esc, ar = X.ar;
   var main = null, CTX = null, DOC = null, RATE = null;
   function $(s) { return document.querySelector(s); }
+  function address() { return DOC.address || CTX.address || null; }
+  function G(m, f) { return address() === "f" ? f : m; }
 
   function blocksHTML(B) {
     var h = "", inList = false;
@@ -27,25 +31,29 @@
   }
 
   function rateHTML() {
-    var r = DOC.rating || {}, Q = RATE || { text: "التقرير ده وصفك قد إيه؟", scale: [], note: "لو حابب تقول أكتر (اختياري)" };
+    var r = DOC.rating || {}, Q = RATE || { text: "التقرير ده وصفك قد إيه؟", scale: [], note: G("لو حابب تقول أكتر (اختياري)", "لو حابة تقولي أكتر (اختياري)") };
     var h = '<section class="rate noprint" id="rate"><h3>' + esc(Q.text) + '</h3><div class="dots5" role="radiogroup" aria-label="' + esc(Q.text) + '">';
     for (var v = 1; v <= 5; v++) h += '<button type="button" data-v="' + v + '" class="' + (r.value === v ? "on" : "") + '" role="radio" aria-checked="' + (r.value === v) + '" title="' + esc(Q.scale[v - 1] || "") + '">' + ar(v) + "</button>";
     h += '</div><p class="scale-now" id="scaleNow">' + esc(r.value ? (Q.scale[r.value - 1] || "") : (Q.scale.length ? "١ = " + Q.scale[0] + " · ٥ = " + Q.scale[4] : "")) + "</p>";
     h += '<label class="field"><span>' + esc(Q.note) + '</span><textarea id="rateNote" rows="3" maxlength="2000">' + esc(r.note || "") + "</textarea></label>";
-    h += '<button type="button" class="next" id="rateSave"' + (r.value ? "" : ' aria-disabled="true"') + ">ابعت رأيك</button>";
-    return h + '<p class="soft" id="rateMsg">' + (r.value ? "وصلنا رأيك، شكرًا. تقدر تغيّره في أي وقت." : "") + "</p></section>";
+    h += '<button type="button" class="next" id="rateSave"' + (r.value ? "" : ' aria-disabled="true"') + ">" + G("ابعت رأيك", "ابعتي رأيك") + "</button>";
+    return h + '<p class="soft" id="rateMsg">' + (r.value ? G("وصلنا رأيك، شكرًا. تقدر تغيّره في أي وقت.", "وصلنا رأيك، شكرًا. تقدري تغيّريه في أي وقت.") : "") + "</p></section>";
   }
 
   function render() {
     var A = E.normalize(DOC), ITEMS = window.__items, TEXTS = window.__texts;
     var rep = RP.renderReport(DOC.result, A, ITEMS, TEXTS, {
       mode: CTX.mode, name: X.first(CTX.name || DOC.name),
-      contact: X.CFG.contact.text, contactLink: X.CFG.contact.link, contactLabel: X.CFG.contact.label
+      contact: X.CFG.contact.text, contactLink: X.CFG.contact.link, contactLabel: G(X.CFG.contact.label, X.CFG.contact.labelF),
+      address: address() || "m"
     });
     if (rep.meta.problems.length) console.warn("[axv2 report]", rep.meta.problems);
     var body = blocksHTML(rep.blocks);
-    var h = '<article class="card report rise">' + body + rateHTML() + "</article>";
-    h += '<div class="tools"><button type="button" class="next ghost" id="print">احفظه PDF أو اطبعه</button><a class="next ghost" href="' + X.CFG.myCoursesPath + '">ارجع لكورساتي</a></div>';
+    var f = address() === "f";
+    var bar = '<div class="addr-bar noprint">' + (f ? "التقرير مكتوب بصيغة المؤنث." : "التقرير مكتوب بصيغة المذكر.") +
+              ' <button type="button" class="linkish" id="addrSwitch" data-v="' + (f ? "m" : "f") + '">' + (f ? "اقرا التقرير بصيغة المذكر" : "اقري التقرير بصيغة المؤنث") + "</button></div>";
+    var h = bar + '<article class="card report rise">' + body + rateHTML() + "</article>";
+    h += '<div class="tools"><button type="button" class="next ghost" id="print">' + G("احفظه PDF أو اطبعه", "احفظيه PDF أو اطبعيه") + '</button><a class="next ghost" href="' + X.CFG.myCoursesPath + '">' + G("ارجع لكورساتي", "ارجعي لكورساتي") + "</a></div>";
     main.innerHTML = h;
     wire();
   }
@@ -66,12 +74,19 @@
       btn.setAttribute("aria-disabled", "true");
       var rating = { value: val, note: note, at: Date.now() };
       X.docRef(CTX.userId).update({ rating: rating, updatedAt: X.ts() }).then(function () {
-        DOC.rating = rating; msg.textContent = "وصلنا رأيك، شكرًا. تقدر تغيّره في أي وقت."; btn.removeAttribute("aria-disabled");
+        DOC.rating = rating; msg.textContent = G("وصلنا رأيك، شكرًا. تقدر تغيّره في أي وقت.", "وصلنا رأيك، شكرًا. تقدري تغيّريه في أي وقت."); btn.removeAttribute("aria-disabled");
       }).catch(function (e) {
-        console.warn(e); msg.textContent = "ما اتبعتش. اتأكد من النت وجرّب تاني."; btn.removeAttribute("aria-disabled");
+        console.warn(e); msg.textContent = G("ما اتبعتش. اتأكد من النت وجرّب تاني.", "ما اتبعتش. اتأكدي من النت وجرّبي تاني."); btn.removeAttribute("aria-disabled");
       });
     });
     $("#print").addEventListener("click", function () { window.print(); });
+    // تغيير الصيغة: التقرير بيترسم تاني على طول، والاختيار بيتحفظ في الوثيقة وفي حسابه
+    $("#addrSwitch").addEventListener("click", function () {
+      var v = this.getAttribute("data-v"), y = window.scrollY;
+      DOC.address = v; render(); window.scrollTo(0, y);
+      X.docRef(CTX.userId).update({ address: v, addressAt: Date.now(), updatedAt: X.ts() }).catch(function (e) { console.warn("[axv2] address", e && e.code); });
+      X.saveAddressToUser(CTX.userId, v);
+    });
   }
 
   function boot() {

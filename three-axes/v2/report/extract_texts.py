@@ -9,6 +9,7 @@
 القفل زي الأسئلة بالظبط (texts.lock.json): لو النصوص اتغيّرت ورقم النسخة زي ما هو، السكريبت بيرفض،
 ولو الرقم اتغيّر والنصوص زي ما هي، بيرفض برضه. وكل تقرير بيتسجل معاه textsVersion اللي اتبنى بيها.
 الشكل: texts[«القسم»][«الحالة»] = {paras: [...], bullets: [...], insight: «...»}
+  • وجنبها fem = {جملة المذكر: جملة المؤنث} للجمل اللي بتختلف بس (من fem/texts.fem.json).
   • السطور اللي بتبدأ بـ«داخلي —» ما بتدخلش.
   • السطر الأخضر «جوه البصيرة الحكيمة: …» بيتحط في insight.
 """
@@ -22,8 +23,9 @@ def bump(v):
     a = v.split('.'); a[-1] = str(int(a[-1]) + 1); return '.'.join(a)
 
 
-def lock_and_write(texts, revision, version=None):
-    h = hashlib.sha1(json.dumps(texts, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+def lock_and_write(texts, revision, version=None, fem=None):
+    payload = {'texts': texts, 'fem': fem} if fem else texts
+    h = hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()[:12]
     lock = json.load(open(LOCK, encoding='utf-8')) if os.path.exists(LOCK) else None
     if version is None:
         if not lock:
@@ -35,6 +37,8 @@ def lock_and_write(texts, revision, version=None):
         sys.exit(f'رقم النسخة اتغيّر ({lock["version"]} ← {version}) والنصوص زي ما هي. سيب الرقم زي ما هو.')
     now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     out = {'version': version, 'hash': h, 'docRevision': revision, 'texts': texts}
+    if fem:
+        out['fem'] = fem
     json.dump(out, open(os.path.join(HERE, 'texts.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     if not lock or lock['version'] != version:
         hist = (lock or {}).get('history', [])
@@ -77,7 +81,11 @@ def main(path, version=None):
             s['bullets'].append(t)
         else:
             s['paras'].append(t)
-    lock_and_write(texts, d.get('revisionId', '')[:16], version)
+    # صيغة المؤنث (fem/texts.fem.json): بتتحط جنب النصوص وبتدخل في الهاش
+    sys.path.insert(0, os.path.join(HERE, '..', 'fem'))
+    import fem as FEM
+    fem = FEM.attach(FEM.collect_texts(texts), 'texts')
+    lock_and_write(texts, d.get('revisionId', '')[:16], version, fem)
 
 
 if __name__ == '__main__':

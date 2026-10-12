@@ -4,6 +4,8 @@
    • الأسئلة من engine/items.json (النسخة المقفولة). مفيش نص أسئلة هنا.
    • الحفظ: على الجهاز بعد كل ضغطة، وفي فايربيز بعد كل محطة. والرجوع بيكمّل من مكانه.
    • لما المحطة السابعة تخلص: النتيجة بتتحسب على الجهاز بالمحرك، وتتحفظ، والعميل يروح لتقريره.
+   • صيغة الكلام: أول شاشة «نكلمك إزاي؟» (لو مش معروفة من حساب المنصة). والاختيار بيتحفظ في الوثيقة (address: m / f)
+     وفي users/{userId}.personalInfo.address. وكل نص بيعدّي على F() اللي بتجيب نسخته المؤنثة من items.fem.
    ===================================================================== */
 (function () {
   "use strict";
@@ -18,6 +20,10 @@
   var ITEMS = null, TEXTS = null, CTX = null, ST = [], S = null, SCREENS = [], shownAt = 0, main = null;
   var sync = { state: "idle", pending: false };
   var LS = function () { return "axv2:s:" + CTX.userId; };
+  // صيغة الكلام: F() للنصوص اللي جاية من ملف الأسئلة، و G() للجمل القليلة المكتوبة هنا
+  function fem() { return !!(S && S.address === "f"); }
+  function F(s) { return (fem() && s && ITEMS.fem && ITEMS.fem[s]) || s; }
+  function G(m, f) { return fem() ? f : m; }
 
   /* ───────── المحطات من ملف الأسئلة ───────── */
   function buildStations() {
@@ -32,10 +38,9 @@
           .map(function (i) { return { id: i.id, n: i.n, text: i.text, adaptive: i.kind === "adaptive" ? i.slot : null }; });
       }
       if (c.bipolar) st.bipolar = { title: c.bipolar.title, intro: c.bipolar.intro, scale: c.bipolar.scale, items: ITEMS.bipolar };
-      if (c.id === 7 && CTX.mode === "insight") st.transition = String(st.transition).replace(/\.?\s*$/, "، ") + INSIGHT_S7_ADD;
       return st;
     });
-    SCREENS = ["welcome", "period", "periodThanks"];
+    SCREENS = ["address", "welcome", "period", "periodThanks"];
     ST.forEach(function (st) { SCREENS.push("s" + st.id); SCREENS.push("t" + st.id); });
     SCREENS.push("closing");
   }
@@ -46,7 +51,8 @@
     return {
       v: 2, userId: CTX.userId, authUid: CTX.authUser.uid, email: CTX.email, name: CTX.name, purchase: CTX.mode,
       questionsVersion: ITEMS.version, questionsHash: ITEMS.hash, qVersion: { questions: ITEMS.version, hash: ITEMS.hash }, device: device(),
-      status: "شغال", screen: "welcome", startedAt: now(), updatedAtMs: now(), finishedAt: null,
+      address: CTX.address || null,
+      status: "شغال", screen: CTX.address ? "welcome" : "address", startedAt: now(), updatedAtMs: now(), finishedAt: null,
       period: { selected: [], impact: null }, st: {}, adaptive: null
     };
   }
@@ -95,7 +101,7 @@
     stationOf(7).items.forEach(function (it) { if (it.adaptive) shown[it.id] = r.slots[it.adaptive - 1]; });
     return { row: r.row, main: r.main, suppressed: r.suppressed, general: r.general, reason: r.reason, shown: shown, engineVersion: E.ENGINE_VERSION };
   }
-  function itemText(it) { return it.adaptive ? ((S.adaptive && S.adaptive.shown[it.id]) || "") : it.text; }
+  function itemText(it) { return F(it.adaptive ? ((S.adaptive && S.adaptive.shown[it.id]) || "") : it.text); }
 
   /* ───────── الاكتمال ───────── */
   function itemDone(st, it, ans) {
@@ -125,33 +131,50 @@
   }
   function render() {
     var s = S.screen, h = "";
-    if (s === "welcome") h = rWelcome();
+    if (s === "address") h = rAddress();
+    else if (s === "welcome") h = rWelcome();
     else if (s === "period") h = rPeriod();
-    else if (s === "periodThanks") h = rText(ITEMS.client.period.thanks, "يلّا نبدأ");
+    else if (s === "periodThanks") h = rText(F(ITEMS.client.period.thanks), "يلّا نبدأ");
     else if (/^s\d$/.test(s)) h = rStation(stationOf(+s.slice(1)));
-    else if (/^t\d$/.test(s)) h = rText(stationOf(+s.slice(1)).transition, s === "t7" ? "كمّل" : "المحطة الجاية");
+    else if (/^t\d$/.test(s)) h = rText(transitionOf(stationOf(+s.slice(1))), s === "t7" ? G("كمّل", "كمّلي") : "المحطة الجاية");
     else if (s === "closing") h = rClosing();
     main.innerHTML = progressHTML() + h;
     shownAt = now(); paintSync();
   }
+  function transitionOf(st) {
+    var t = F(st.transition);
+    return st.id === 7 && CTX.mode === "insight" ? String(t).replace(/\.?\s*$/, "، ") + INSIGHT_S7_ADD : t;
+  }
+  // أول شاشة: نكلمك إزاي؟ (إجباري، ومن غير صيغة لسه، فالكلام فيها محايد)
+  function rAddress() {
+    var h = '<section class="card rise center addr"><h2>نكلمك إزاي؟</h2>';
+    h += "<p>الأسئلة والتقرير بيكلموك على طول، فأنهي صيغة تناسبك؟</p>";
+    h += '<div class="addr-pick"><button type="button" class="next" data-act="addr" data-v="m">بصيغة المذكر</button>';
+    h += '<button type="button" class="next" data-act="addr" data-v="f">بصيغة المؤنث</button></div>';
+    return h + '<p class="soft">الاختيار ده بيغيّر الكلام بس. الأسئلة والحساب واحد في الصيغتين، والصيغة ممكن تتغير بعدين.</p></section>';
+  }
   function rWelcome() {
     var W = ITEMS.client.welcome, nm = X.first(CTX.name);
-    var h = '<section class="card rise"><h1>' + esc(W.title) + (nm ? " يا " + esc(nm) : "") + "</h1>";
-    W.paragraphs.forEach(function (p) { h += "<p>" + esc(p) + "</p>"; });
-    return h + '<button type="button" class="next" data-act="go">يلّا</button></section>';
+    var h = '<section class="card rise"><h1>' + esc(F(W.title)) + (nm ? " يا " + esc(nm) : "") + "</h1>";
+    W.paragraphs.forEach(function (p) { h += "<p>" + esc(F(p)) + "</p>"; });
+    h += '<button type="button" class="next" data-act="go">يلّا</button>';
+    // الصيغة معروفة (اختارها هنا أو محفوظة في حسابه): بتتعرض كإعداد يتغير
+    h += '<p class="soft addr-now">' + G("بنكلمك بصيغة المذكر.", "بنكلمك بصيغة المؤنث.") +
+         ' <button type="button" class="linkish" data-act="addrSwitch">' + G("غيّرها لصيغة المؤنث", "غيّريها لصيغة المذكر") + "</button></p>";
+    return h + "</section>";
   }
   function isNone(id) { return ITEMS.client.period.options.some(function (o) { return o.id === id && o.none; }); }
   function rPeriod() {
     var P = ITEMS.client.period, sel = S.period.selected;
-    var h = '<section class="card rise"><h2>قبل ما نبدأ</h2><p class="q">' + esc(P.question) + '</p><div class="checks">';
+    var h = '<section class="card rise"><h2>قبل ما نبدأ</h2><p class="q">' + esc(F(P.question)) + '</p><div class="checks">';
     P.options.forEach(function (o) {
       var on = sel.indexOf(o.id) !== -1;
-      h += '<button type="button" class="check' + (on ? " sel" : "") + '" data-act="period" data-id="' + o.id + '"><b aria-hidden="true">' + (on ? "✓" : "") + "</b>" + esc(o.text) + "</button>";
+      h += '<button type="button" class="check' + (on ? " sel" : "") + '" data-act="period" data-id="' + o.id + '"><b aria-hidden="true">' + (on ? "✓" : "") + "</b>" + esc(F(o.text)) + "</button>";
     });
     h += "</div>";
     var some = sel.length && !(sel.length === 1 && isNone(sel[0]));
     if (some) {
-      h += '<p class="q">' + esc(P.followup.question) + '</p><div class="chips">';
+      h += '<p class="q">' + esc(F(P.followup.question)) + '</p><div class="chips">';
       P.followup.options.forEach(function (o) { h += '<button type="button" class="chip' + (S.period.impact === o ? " sel" : "") + '" data-act="impact" data-v="' + esc(o) + '">' + esc(o) + "</button>"; });
       h += "</div>";
     }
@@ -165,13 +188,13 @@
     var rec = ensureSt(st.id);
     if (!rec.startedAt) { rec.startedAt = now(); save(); }
     if (st.id === 7 && !S.adaptive) { S.adaptive = computeAdaptive(); save(); }
-    var h = '<header class="st-head rise"><div class="st-n">المحطة ' + ar(st.id) + " من ٧</div><h2>" + esc(st.title) + "</h2>";
-    st.intro.forEach(function (p) { h += "<p>" + esc(p) + "</p>"; });
-    if (st.kind === "triad") h += '<p class="soft">في كل موقف: دوس «الأقرب» على اختيار، و«الأبعد» على اختيار تاني.</p>';
+    var h = '<header class="st-head rise"><div class="st-n">المحطة ' + ar(st.id) + " من ٧</div><h2>" + esc(F(st.title)) + "</h2>";
+    st.intro.forEach(function (p) { h += "<p>" + esc(F(p)) + "</p>"; });
+    if (st.kind === "triad") h += '<p class="soft">' + G("في كل موقف: دوس «الأقرب» على اختيار، و«الأبعد» على اختيار تاني.", "في كل موقف: دوسي «الأقرب» على اختيار، و«الأبعد» على اختيار تاني.") + "</p>";
     h += "</header>";
     st.items.forEach(function (it, i) { h += st.kind === "triad" ? rTriad(st, it, i, rec) : rFreq(st, it, i, rec.answers); });
     if (st.bipolar) {
-      h += '<header class="st-head sub"><h3>' + esc(st.bipolar.title) + "</h3><p>" + esc(st.bipolar.intro) + "</p></header>";
+      h += '<header class="st-head sub"><h3>' + esc(F(st.bipolar.title)) + "</h3><p>" + esc(F(st.bipolar.intro)) + "</p></header>";
       st.bipolar.items.forEach(function (it, i) { h += rBipolar(st, it, i, rec.answers); });
     }
     var miss = missingOf(st);
@@ -183,10 +206,10 @@
     if (!rec.order[it.id]) { rec.order[it.id] = shuffle(it.options.map(function (o) { return o.id; })); save(); }
     var a = rec.answers[it.id] || {}, byId = {};
     it.options.forEach(function (o) { byId[o.id] = o; });
-    var h = '<article class="item' + (itemDone(st, it, rec.answers) ? " done" : "") + (a.none ? " none" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(it.text) + '</p><div class="opts">';
+    var h = '<article class="item' + (itemDone(st, it, rec.answers) ? " done" : "") + (a.none ? " none" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(F(it.text)) + '</p><div class="opts">';
     rec.order[it.id].forEach(function (oid) {
       var o = byId[oid], c = a.closest === oid, f = a.farthest === oid;
-      h += '<div class="opt' + (c ? " is-c" : "") + (f ? " is-f" : "") + '"><p>' + esc(o.text) + '</p><div class="pick">';
+      h += '<div class="opt' + (c ? " is-c" : "") + (f ? " is-f" : "") + '"><p>' + esc(F(o.text)) + '</p><div class="pick">';
       h += '<button type="button" class="pk c' + (c ? " on" : "") + '" data-act="close" data-st="' + st.id + '" data-id="' + it.id + '" data-o="' + oid + '" aria-pressed="' + c + '">الأقرب</button>';
       h += '<button type="button" class="pk f' + (f ? " on" : "") + '" data-act="far" data-st="' + st.id + '" data-id="' + it.id + '" data-o="' + oid + '" aria-pressed="' + f + '">الأبعد</button></div></div>';
     });
@@ -204,15 +227,15 @@
   }
   function rBipolar(st, it, i, ans) {
     var a = ans[it.id] || {}, sc = st.bipolar.scale;
-    var h = '<article class="item' + (typeof a.v === "number" ? " done" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(it.text) + "</p>";
-    h += '<div class="poles"><div class="pole"><b>أ</b>' + esc(it.a) + '</div><div class="pole"><b>ب</b>' + esc(it.b) + '</div></div><div class="dots" role="radiogroup">';
+    var h = '<article class="item' + (typeof a.v === "number" ? " done" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(F(it.text)) + "</p>";
+    h += '<div class="poles"><div class="pole"><b>أ</b>' + esc(F(it.a)) + '</div><div class="pole"><b>ب</b>' + esc(F(it.b)) + '</div></div><div class="dots" role="radiogroup">';
     for (var v = 1; v <= 5; v++) h += '<button type="button" class="dot' + (a.v === v ? " on" : "") + '" data-act="bip" data-st="' + st.id + '" data-id="' + it.id + '" data-v="' + v + '" role="radio" aria-checked="' + (a.v === v) + '" aria-label="' + esc(sc[v - 1]) + '"><i></i></button>';
     h += '</div><div class="dots-lab"><span>أقرب لـ«أ»</span><span>في النص</span><span>أقرب لـ«ب»</span></div>';
     return h + '<p class="dot-now">' + (typeof a.v === "number" ? esc(sc[a.v - 1]) : "&nbsp;") + "</p></article>";
   }
   function rClosing() {
     var h = '<section class="card rise center">';
-    ITEMS.client.closing.forEach(function (p) { h += '<p class="big">' + esc(p) + "</p>"; });
+    ITEMS.client.closing.forEach(function (p) { h += '<p class="big">' + esc(F(p)) + "</p>"; });
     h += '<button type="button" class="next" data-act="report">اعرض خريطتي</button><p class="soft" id="doneSync"></p></section>';
     return h;
   }
@@ -262,6 +285,13 @@
     var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
     var st = b.hasAttribute("data-st") ? stationOf(+b.getAttribute("data-st")) : null;
     if (act === "go") return go(nextScreen());
+    if (act === "addr" || act === "addrSwitch") {
+      var v = act === "addr" ? b.getAttribute("data-v") : (S.address === "f" ? "m" : "f");
+      S.address = v; S.addressAt = now(); save();
+      X.saveAddressToUser(CTX.userId, v);
+      if (S.screen === "address") { var back = S.afterAddress || "welcome"; delete S.afterAddress; return go(back, "address"); }
+      push("address"); return render();
+    }
     if (act === "period") {
       var sel = S.period.selected, i = sel.indexOf(id);
       if (i !== -1) sel.splice(i, 1);
@@ -298,8 +328,8 @@
       b.setAttribute("aria-disabled", "true"); b.textContent = "بنحفظ إجاباتك…";
       return finish().then(function (ok) {
         if (ok) return toReport();
-        b.removeAttribute("aria-disabled"); b.textContent = "جرّب تاني";
-        var d = $("#doneSync"); if (d) d.textContent = "إجاباتك محفوظة على جهازك، بس لسه ما وصلتش. اتأكد من النت ودوس تاني.";
+        b.removeAttribute("aria-disabled"); b.textContent = G("جرّب تاني", "جرّبي تاني");
+        var d = $("#doneSync"); if (d) d.textContent = G("إجاباتك محفوظة على جهازك، بس لسه ما وصلتش. اتأكد من النت ودوس تاني.", "إجاباتك محفوظة على جهازك، بس لسه ما وصلتش. اتأكدي من النت ودوسي تاني.");
       });
     }
   }
@@ -330,7 +360,10 @@
         delete S.result; delete S.summary; delete S.engineVersion; delete S.configVersion; delete S.textsVersion; delete S.computedAt;
         X.ADMIN_KEYS.forEach(function (k) { delete S[k]; });
         S.authUid = CTX.authUser.uid;
-        if (SCREENS.indexOf(S.screen) === -1) S.screen = "welcome";
+        if (!S.address && CTX.address) S.address = CTX.address;           // اتحفظت في حسابه من مقياس تاني أو جهاز تاني
+        if (SCREENS.indexOf(S.screen) === -1) S.screen = S.address ? "welcome" : "address";
+        if (S.screen === "address" && S.address) S.screen = "welcome";
+        if (!S.address && S.screen !== "address" && S.status !== "خلص") { S.afterAddress = S.screen; S.screen = "address"; }   // بدأ قبل ما الشاشة دي تتعمل: بيرجع لمكانه بعدها
         if (S.status === "خلص") S.screen = "closing";            // خلّص على الجهاز ولسه ما وصلش ← نكمّل الإرسال
         if (remote) sync.state = "ok";
       } else S = fresh();

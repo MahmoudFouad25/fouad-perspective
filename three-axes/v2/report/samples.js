@@ -1,5 +1,5 @@
 /* تقارير نموذجية:  node three-axes/v2/report/samples.js
-   ٣ عملاء: محمود (إجاباته الحقيقية)، وعميلين مصنوعين. بيكتب samples.json (التقارير + معلومات داخلية). */
+   ٤ عملاء: محمود (إجاباته الحقيقية)، وعميلين مصنوعين، وعميلة مصنوعة بصيغة المؤنث. بيكتب samples.json (التقارير + معلومات داخلية). */
 "use strict";
 var fs = require("fs"), path = require("path");
 var E = require("../engine/engine.js"), C = require("../engine/config.js"), items = require("../engine/items.json");
@@ -80,14 +80,53 @@ function clientC() {
   return a;
 }
 
+/* د. عميلة مصنوعة (صيغة المؤنث): الانتماء أقوى بثقة عالية، والحفظ هادي، وموجات في الحفظ والانتماء،
+   وقلق الانتماء عالي، وعلامة تجمّد، والنسخة المنفردة. متعمولة علشان تعدّي على أكبر قدر من النصوص المؤنثة. */
+function clientD() {
+  var a = base(), k = 0;
+  items.station1.forEach(function (it) {
+    if (it.light) { a.triad[it.id] = { closest: null, farthest: null, none: true }; return; }
+    a.triad[it.id] = k < 11 ? pick(it, "A", "H") : pick(it, "V", "H"); k++;
+  });
+  items.station2.forEach(function (it, i) { a.triad[it.id] = i < 4 ? pick(it, "A", "H") : pick(it, "V", "H"); });
+  var dimVals = {
+    H1: { excess: [3, 3], deficit: [1, 1], leave: 1, take: 2 },
+    H2: { excess: [1, 1], deficit: [3, 3], leave: 2, take: 1 },
+    H3: { excess: [3, 3], deficit: [3, 3], leave: 1, take: 1 },
+    V1: { excess: [1, 0], deficit: [1, 1], leave: 3, take: 3 },
+    V2: { excess: [2, 2], deficit: [1, 1], leave: 1, take: 1 },
+    V3: { excess: [2, 2], deficit: [2, 2], leave: 2, take: 2 },
+    A1: { excess: [4, 3], deficit: [1, 1], leave: 1, take: 2 },
+    A2: { excess: [2, 3], deficit: [1, 2], leave: 2, take: 2 },
+    A3: { excess: [3, 4], deficit: [3, 3], leave: 1, take: 1 }
+  };
+  var seen = {};
+  items.freq.forEach(function (it) {
+    if (it.dim) {
+      var v = dimVals[it.dim][it.kind];
+      if (Array.isArray(v)) { var key = it.dim + it.kind; seen[key] = (seen[key] || 0); a.freq[it.id] = v[seen[key]++]; }
+      else a.freq[it.id] = v;
+    } else if (it.kind === "cycle") a.freq[it.id] = it.id === "s6n8" ? 1 : (it.axis === "V" ? 1 : 3);
+    else if (it.kind === "validity") a.freq[it.id] = 1;
+    else if (it.kind === "fear") a.freq[it.id] = it.axis === "A" ? 3 : 1;
+    else if (it.kind === "freeze") a.freq[it.id] = it.id === "s7n17" ? 3 : 1;
+    else a.freq[it.id] = 1;
+  });
+  a.bipolar = { s6t1: 4, s6t2: 2, s6t3: 3 };
+  a.adaptiveShown = { row: E.adaptiveRow(a, items, C).row };
+  return a;
+}
+
 var cases = [
   { key: "أ", title: "أ. تقرير محمود (إجاباته في الاختبار) — نسخة البصيرة الحكيمة", answers: mahmoud(), opts: { mode: "insight", name: "محمود" } },
   { key: "ب", title: "ب. عميل مصنوع: الحيوية بثقة متوسطة، والهادي غير محسوم، ومفيش تنبيهات — النسخة المنفردة", answers: clientB(), opts: { mode: "standalone", name: "سارة" } },
-  { key: "ج", title: "ج. عميل مصنوع: الحفظ بثقة ضعيفة، ونمط إجابة، وتنبيه فترة — النسخة المنفردة", answers: clientC(), opts: { mode: "standalone", name: "كريم" } }
+  { key: "ج", title: "ج. عميل مصنوع: الحفظ بثقة ضعيفة، ونمط إجابة، وتنبيه فترة — النسخة المنفردة", answers: clientC(), opts: { mode: "standalone", name: "كريم" } },
+  { key: "د", title: "د. عميلة مصنوعة (صيغة المؤنث): الانتماء أقوى، والحفظ هادي، وموجات وقلق وعلامة تجمّد — النسخة المنفردة", answers: clientD(),
+    opts: { mode: "standalone", name: "سلمى", address: "f", contact: "واتساب 01024584537", contactLink: "https://wa.me/201024584537", contactLabel: "كلّمينا على واتساب" } }
 ];
 var out = cases.map(function (c) {
   var R = E.score(c.answers, items, C), rep = Rp.renderReport(R, E.normalize(c.answers), items, T, c.opts);
-  return { key: c.key, title: c.title, blocks: rep.blocks, meta: rep.meta,
+  return { key: c.key, title: c.title, address: c.opts.address || "m", blocks: rep.blocks, meta: rep.meta,
            engine: { main: R.ranking.main, order: R.ranking.order, points: R.ranking.points, confidence: R.ranking.confidence,
                      suppressed: [R.suppressed.status, R.suppressed.axis, R.suppressed.alternatives], acq: R.quality.acquiescence.flag,
                      validity: R.quality.validity.flag, period: R.alerts.period.on,

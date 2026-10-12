@@ -342,6 +342,10 @@ def main(path, version=None):
                                  **({'bipolar': {k_: st['bipolar'][k_] for k_ in ('title', 'intro', 'scale')}} if st.get('bipolar') else {})}
                                 for st in stations]},
     }
+    # صيغة المؤنث: جنب كل جملة بتختلف، نسختها المؤنثة (fem/items.fem.json). بتدخل في الهاش والقفل.
+    sys.path.insert(0, os.path.join(HERE, '..', 'fem'))
+    import fem as FEM
+    full_body['fem'] = FEM.attach(FEM.collect_items(full_body), 'items')
     qhash = hashlib.sha1(json.dumps(full_body, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()[:12]
     lock = json.load(open(LOCK, encoding='utf-8')) if os.path.exists(LOCK) else None
     if version is None:

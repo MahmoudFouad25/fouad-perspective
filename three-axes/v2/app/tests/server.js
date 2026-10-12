@@ -57,7 +57,7 @@ function allow(op, col, id, auth, before, after) {
   if (isOwner(auth, id) && before.status === "شغال" && after.userId === id && after.authUid === auth.uid &&
       !ch.some(function (k) { return ADMIN_KEYS.indexOf(k) !== -1; })) return true;
   if (isOwner(auth, id) && before.status === "خلص" &&
-      ch.every(function (k) { return ["rating", "reportViewedAt", "purchase", "updatedAt"].indexOf(k) !== -1; })) return true;
+      ch.every(function (k) { return ["rating", "reportViewedAt", "purchase", "updatedAt", "address", "addressAt"].indexOf(k) !== -1; })) return true;
   if (isAdmin(auth) && ch.every(function (k) { return ["override", "result", "summary", "resultHistory", "engineVersion", "configVersion", "textsVersion", "adminUpdatedAt", "adminNote"].indexOf(k) !== -1; })) return true;
   return false;
 }
@@ -80,7 +80,15 @@ function api(body) {
       var before = c[id] ? clone(c[id]) : null;
       if (body.op === "update" && !before) return { error: "not-found" };
       var after = body.merge || body.op === "update" ? deepMerge(before || {}, body.data) : resolve(body.data);
-      if (body.op === "update") { after = clone(before); Object.keys(body.data).forEach(function (k) { var p = body.data[k]; if (p && p.__fv === "del") delete after[k]; else after[k] = resolve(p, after[k]); }); }
+      if (body.op === "update") {   // زي فايربيز: «a.b» في update بيكتب الحقل المتداخل
+        after = clone(before);
+        Object.keys(body.data).forEach(function (k) {
+          var p = body.data[k], parts = k.split("."), o = after;
+          for (var i = 0; i < parts.length - 1; i++) { if (!o[parts[i]] || typeof o[parts[i]] !== "object") o[parts[i]] = {}; o = o[parts[i]]; }
+          var last = parts[parts.length - 1];
+          if (p && p.__fv === "del") delete o[last]; else o[last] = resolve(p, o[last]);
+        });
+      }
       if (!allow("write", col, id, auth, before, after)) return deny();
       c[id] = after; return { ok: true };
     }
@@ -102,6 +110,7 @@ function api(body) {
     // للاختبار بس
     case "_reset": DB = body.db || {}; AUTH = body.auth || {}; LOG = []; return { ok: true };
     case "_dump": return { db: DB, auth: AUTH, log: LOG };
+    case "_put": (DB[body.col] = DB[body.col] || {})[body.id] = body.data; return { ok: true };
   }
   return { error: "bad-op" };
 }

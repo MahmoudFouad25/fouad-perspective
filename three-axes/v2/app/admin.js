@@ -129,11 +129,12 @@
     }
     var A = E.normalize(d);
     if (TAB === "report") {
-      var rep = RP.renderReport(d.result, A, ITEMS, TEXTS, { mode: d.purchase, name: X.first(d.name), contact: X.CFG.contact.text, contactLink: X.CFG.contact.link, contactLabel: X.CFG.contact.label });
-      h += '<p class="soft">النسخة: ' + (d.purchase === "insight" ? "البصيرة الحكيمة" : "المنفردة") + " · نصوص " + esc(TEXTS.version) + " · " + ar(rep.meta.words) + " كلمة" + (rep.meta.problems.length ? " · مشاكل: " + esc(rep.meta.problems.join(" | ")) : "") + "</p>";
+      var fa = d.address === "f";
+      var rep = RP.renderReport(d.result, A, ITEMS, TEXTS, { mode: d.purchase, name: X.first(d.name), contact: X.CFG.contact.text, contactLink: X.CFG.contact.link, contactLabel: fa ? X.CFG.contact.labelF : X.CFG.contact.label, address: d.address || "m" });
+      h += '<p class="soft">النسخة: ' + (d.purchase === "insight" ? "البصيرة الحكيمة" : "المنفردة") + " · الصيغة: " + (fa ? "مؤنث" : d.address === "m" ? "مذكر" : "مذكر (ما اختارش)") + " · نصوص " + esc(TEXTS.version) + " · " + ar(rep.meta.words) + " كلمة" + (rep.meta.problems.length ? " · مشاكل: " + esc(rep.meta.problems.join(" | ")) : "") + "</p>";
       h += '<div class="report">' + blocksHTML(rep.blocks) + "</div>";
     } else if (TAB === "coach") {
-      h += '<div class="report">' + blocksHTML(CO.renderCoach(d.result, A, ITEMS, CT, { mode: d.purchase, name: d.name, rating: d.rating || null })) + "</div>";
+      h += '<div class="report">' + blocksHTML(CO.renderCoach(d.result, A, ITEMS, CT, { mode: d.purchase, name: d.name, rating: d.rating || null, address: d.address || "m" })) + "</div>";
     } else if (TAB === "override") {
       var o = (d.override && d.override.order) || [d.result.final.main, d.result.final.supporting, d.result.final.suppressed || d.result.ranking.order[2]];
       h += "<p>الحساب الأصلي: " + d.result.ranking.order.map(function (a) { return NAME[a]; }).join(" ← ") + " (ثقة " + esc(d.result.ranking.confidence) + "، والهادي " + esc(d.result.suppressed.status) + ").</p>";
