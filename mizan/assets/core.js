@@ -73,10 +73,17 @@ var MZ = (function () {
       "auth/invalid-login-credentials": "الإيميل أو كلمة السر غلط.",
       "auth/user-not-found": "الإيميل ده مالوش حساب في فايربيز.",
       "auth/too-many-requests": "محاولات كتير. استنى دقيقة وجرّب تاني.",
+      "auth/invalid-email": "الإيميل مكتوب غلط.",
+      "auth/weak-password": "كلمة السر ضعيفة: لازم ٦ حروف أو أرقام على الأقل.",
+      "auth/email-already-in-use": "الإيميل ده عنده حساب قبل كده.",
+      "auth/requires-recent-login": "عشان تغيّر كلمة السر لازم تكتب كلمة السر الحالية صح.",
+      "auth/missing-email": "اكتب الإيميل الأول.",
       "permission-denied": "قواعد الأمان رافضة. (ملف firestore.rules بتاع الميزان لسه ما اتنشرش، أو الإيميل مش في قايمة الأدمن)",
       "unavailable": "السيرفر مش واصل دلوقتي. الصفحة هتحاول لوحدها.",
       "mz/timeout": "الاتصال أخد وقت طويل.",
-      "mz/not-admin": "الإيميل ده مش في قايمة الأدمن (config.js و firestore.rules)."
+      "mz/not-admin": "الإيميل ده مش متسجّل كميسّر في الميزان. محمود يقدر يضيفك من صفحة الفريق.",
+      "mz/staff-off": "حسابك في الميزان موقوف دلوقتي. كلّم محمود.",
+      "mz/not-yours": "الجلسة دي مش بتاعتك. تقدر تتابعها بس، والتحكم مع صاحبها."
     };
     return map[c] || ("حصلت مشكلة" + (c ? " (" + c + ")" : "") + ". " + ((e && e.message) || ""));
   }
@@ -113,6 +120,44 @@ var MZ = (function () {
   }
 
   function isAdmin(u) { return !!(u && u.email && MZ_ADMINS.indexOf(u.email.toLowerCase()) !== -1); }
+
+  /* ───────── مين ده؟ الأدمن الرئيسي · ميسّر · ولا حد مش متسجّل ─────────
+     الأدمن الرئيسي: إيميله في MZ_ADMINS (config.js) — بيشوف ويتحكم في كل حاجة وبيضيف الميسّرين.
+     الميسّر: إيميله متسجّل في mizan_staff ومش موقوف — بيتحكم في جلساته واللي هو شريك فيها، وأي جلسة تانية بيتابعها بس. */
+  function emailOf(u) { return u && u.email ? u.email.toLowerCase() : ""; }
+  function staffRef(email) { return db.collection("mizan_staff").doc(String(email).toLowerCase()); }
+  function role(u) {
+    if (!u || u.isAnonymous || !u.email) return Promise.resolve({ role: null });
+    if (isAdmin(u)) return Promise.resolve({ role: "super", email: emailOf(u), name: "محمود" });
+    if (!db) return Promise.reject({ code: "mz/no-sdk" });
+    return staffRef(emailOf(u)).get().then(function (d) {
+      if (!d.exists) return { role: null, why: "mz/not-admin" };
+      var x = d.data() || {};
+      if (x.active === false) return { role: null, why: "mz/staff-off" };
+      return { role: "staff", email: emailOf(u), name: x.name || emailOf(u), staff: x };
+    });
+  }
+  /* يقدر يتحكم في الجلسة دي؟ (sess = بيانات مستند الجلسة أو null لو لسه مش موجودة) */
+  function canControl(r, sess) {
+    if (!r || !r.role) return false;
+    if (r.role === "super") return true;
+    if (!sess) return false;
+    return sess.owner === r.email || (sess.editors || []).indexOf(r.email) !== -1;
+  }
+  /* كل اللي الصفحة محتاجاه مرة واحدة بعد الدخول:
+     { role, email, name, sess, mode: "control" | "follow" | "missing" } */
+  function access(u, s) {
+    return role(u).then(function (r) {
+      if (!r.role) return r;
+      return sRef(s).get().then(function (d) {
+        r.sess = d.exists ? d.data() : null;
+        r.mode = canControl(r, r.sess) ? "control" : (r.sess ? "follow" : "missing");
+        return r;
+      }, function (e) {                    /* السيرفر مش راضي يرد: نخليه يتحكم، والقواعد هي اللي هتحكم */
+        r.sess = null; r.mode = r.role === "super" ? "control" : "follow"; r.err = e; return r;
+      });
+    });
+  }
 
   /* ───────── المراجع ───────── */
   function sRef(s)       { return db.collection("mizan").doc(s); }
@@ -240,6 +285,7 @@ var MZ = (function () {
     db: db, auth: auth, TS: TS,
     store: store, qs: qs, ar: ar, en: en, esc: esc, vibrate: vibrate, shuffle: shuffle, sid: sid,
     errText: errText, signInAnon: signInAnon, isAdmin: isAdmin,
+    emailOf: emailOf, staffRef: staffRef, role: role, canControl: canControl, access: access,
     sRef: sRef, aggRef: aggRef, pRef: pRef, pCol: pCol, vRef: vRef, vCol: vCol,
     watchDoc: watchDoc, reconnect: reconnect, touch: touch,
     lastServerAt: function () { return lastServerAt; },

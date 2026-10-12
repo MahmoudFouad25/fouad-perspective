@@ -10,6 +10,7 @@
   var SID = MZ.sid(), esc = MZ.esc, ar = MZ.ar;
   var bus = MZ.localBus(SID);
   var remote = null, local = null, admin = null, serverOk = false, lastErr = null;
+  var who = null;     /* اللي داخل (أدمن رئيسي أو ميسّر) — admin بيتملي بس لو يقدر يتحكم في الجلسة دي */
   var tab = "now", browseId = null, people = {};
   var $ = function (id) { return document.getElementById(id); };
   var size = parseFloat(MZ.store.get("mz:scsize") || "1.12");
@@ -63,6 +64,10 @@
       $("cmeta").textContent = "إنت ماسك الشرايح من هنا · " + admin.email + " · ";
       var o = document.createElement("a"); o.href = "#"; o.textContent = "خروج"; o.onclick = function (e) { e.preventDefault(); MZ.auth.signOut(); };
       $("cmeta").appendChild(o);
+    } else if (who && who.role) {
+      c.innerHTML = '<button class="ghost" id="lo">👀 بتتابع بس · التحكم مع صاحب الجلسة · خروج</button>';
+      $("lo").onclick = function () { MZ.auth.signOut(); };
+      $("cmeta").textContent = who.email + " · الجلسة دي مش بتاعتك، فالصفحة بتمشي مع صاحبها.";
     } else {
       c.innerHTML = '<button class="ghost" id="lg">دخول للتحكم في الشرايح من هنا</button>';
       $("lg").onclick = function () { if (!MZ.hasFb()) return alert(MZ.errText({ code: "mz/no-sdk" })); $("sheet").classList.add("on"); };
@@ -141,12 +146,15 @@
 
   /* الدخول */
   $("cx").onclick = function () { $("sheet").classList.remove("on"); };
-  $("em").value = MZ.store.get("mz:adminEmail") || MZ_ADMINS[0] || "";
+  $("em").value = MZ.store.get("mz:adminEmail") || "";
   $("go").onclick = function () {
     var em = $("em").value.trim().toLowerCase();
-    if (MZ_ADMINS.indexOf(em) < 0) { $("er").textContent = MZ.errText({ code: "mz/not-admin" }); return; }
     $("er").textContent = "بندخل…"; MZ.store.set("mz:adminEmail", em);
-    MZ.auth.signInWithEmailAndPassword(em, $("pw").value).then(function () { $("sheet").classList.remove("on"); $("er").textContent = ""; })
+    MZ.auth.signInWithEmailAndPassword(em, $("pw").value).then(function (c) { return MZ.access(c.user, SID); }).then(function (r) {
+        if (!r.role) { MZ.auth.signOut(); $("er").textContent = MZ.errText({ code: r.why || "mz/not-admin" }); return; }
+        if (r.mode !== "control") $("er").textContent = MZ.errText({ code: "mz/not-yours" });
+        else { $("sheet").classList.remove("on"); $("er").textContent = ""; }
+      })
       .catch(function (e) { $("er").textContent = MZ.errText(e); });
   };
 
@@ -168,9 +176,14 @@
 
   if (MZ.hasFb()) {
     MZ.auth.onAuthStateChanged(function (u) {
-      admin = (u && MZ.isAdmin(u)) ? u : null;
-      watchHelp(); draw();
-      if (!u) MZ.signInAnon(8000).catch(function () {});
+      admin = null; who = null;
+      if (!u) { watchHelp(); draw(); MZ.signInAnon(8000).catch(function () {}); return; }
+      if (u.isAnonymous) { watchHelp(); draw(); return; }
+      MZ.access(u, SID).then(function (r) {
+        who = r.role ? r : null;
+        admin = r.role && r.mode === "control" ? u : null;
+        watchHelp(); draw();
+      }).catch(function () { watchHelp(); draw(); });
     });
     MZ.watchDoc(MZ.sRef(SID), function (d, server) {
       if (server) serverOk = true;

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>الميزان · فحص قبل اليوم</title>
 <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/base.css?v=5">
+<link rel="stylesheet" href="../assets/base.css?v=6">
 <style>
   body{font-size:16px}
   .w{max-width:720px;margin:0 auto;padding:22px 18px 60px}
@@ -30,10 +30,10 @@
   <button id="again">افحص تاني</button>
 
   <div class="box">
-    <b>فحص الأدمن (من اللابتوب اللي هيمسك اللوحة)</b>
-    <p class="meta">بيتأكد إن الإيميل ده يقدر يكتب في الجلسة ويقرا الحضور.</p>
+    <b>فحص الدخول (من اللابتوب اللي هيمسك اللوحة)</b>
+    <p class="meta">بيتأكد إن الإيميل ده (الأدمن الرئيسي أو ميسّر) يقدر يتحكم في الجلسة دي ويقرا الحضور.</p>
     <input id="em" type="email" placeholder="الإيميل"><input id="pw" type="password" placeholder="كلمة السر">
-    <button id="adm">افحص الأدمن</button>
+    <button id="adm">افحص الدخول</button>
     <div id="admList"></div>
   </div>
 
@@ -43,6 +43,7 @@
     <p class="meta">شاشة العرض:<br><code id="lStage"></code></p>
     <p class="meta">لوحة التحكم:<br><code id="lCon"></code></p>
     <p class="meta">سكريبت الميسّر:<br><code id="lScr"></code></p>
+    <p class="meta">جلساتي والفريق (الدخول وإضافة الميسّرين):<br><code id="lTeam"></code></p>
   </div>
 
   <div class="box">
@@ -56,9 +57,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="../assets/config.js?v=5"></script>
-<script src="../assets/core.js?v=5"></script>
-<script src="../assets/content.js?v=5"></script>
+<script src="../assets/config.js?v=6"></script>
+<script src="../assets/core.js?v=6"></script>
+<script src="../assets/content.js?v=6"></script>
 <script>
 (function () {
   var SID = MZ.sid(), esc = MZ.esc;
@@ -68,6 +69,7 @@
   document.getElementById("lStage").textContent = base + "stage/?s=" + SID;
   document.getElementById("lCon").textContent = base + "console/?s=" + SID;
   document.getElementById("lScr").textContent = base + "script/?s=" + SID;
+  document.getElementById("lTeam").textContent = base + "team/";
 
   function row(host, title) {
     var el = document.createElement("div"); el.className = "row run";
@@ -128,20 +130,24 @@
   document.getElementById("adm").onclick = function () {
     var L = document.getElementById("admList"); L.innerHTML = "";
     var em = document.getElementById("em").value.trim().toLowerCase(), pw = document.getElementById("pw").value;
-    var a1 = row(L, "الإيميل في قايمة الأدمن");
-    if (MZ_ADMINS.indexOf(em) < 0) { a1("bad", MZ.errText({ code: "mz/not-admin" }), "ضيف الإيميل في mizan/assets/config.js وفي mizan/firestore.rules بنفس الحروف."); return; }
-    a1("ok", "تمام");
-    var a2 = row(L, "دخول الأدمن");
-    MZ.auth.signInWithEmailAndPassword(em, pw).then(function () {
-      a2("ok", "تمام");
-      var a3 = row(L, "الأدمن يكتب في الجلسة");
-      return MZ.sRef(SID).set({ checkedAt: Date.now() }, { merge: true }).then(function () { a3("ok", "تمام"); })
-        .catch(function (e) { a3("bad", MZ.errText(e), "الإيميل لازم يبقى في firestore.rules، والقواعد تكون منشورة."); });
-    }).then(function () {
-      var a4 = row(L, "الأدمن يقرا الحضور");
-      return MZ.pCol(SID).limit(1).get().then(function () { a4("ok", "تمام"); }).catch(function (e) { a4("bad", MZ.errText(e), "انشر ملف القواعد."); });
+    var a1 = row(L, "الدخول بالإيميل وكلمة السر");
+    MZ.auth.signInWithEmailAndPassword(em, pw).then(function (c) {
+      a1("ok", "تمام");
+      var a2 = row(L, "الحساب متسجّل في الميزان");
+      return MZ.access(c.user, SID).then(function (r) {
+        if (!r.role) { a2("bad", MZ.errText({ code: r.why || "mz/not-admin" }), "محمود يضيف الإيميل ده من صفحة «جلساتي والفريق» ← الميسّرين."); return; }
+        a2("ok", r.role === "super" ? "الأدمن الرئيسي" : "ميسّر: " + r.name);
+        var a3 = row(L, "يقدر يتحكم في الجلسة دي (" + SID + ")");
+        if (r.mode === "missing") { a3("warn", "الجلسة دي لسه مش متعملة.", "اعملها من صفحة «جلساتي»، أو افتح لوحة التحكم ودوس «اعمل الجلسة دي باسمي»."); return; }
+        if (r.mode === "follow") { a3("warn", "لأ، يتابعها بس.", "صاحب الجلسة يضيفك «شريك في التحكم» من صفحة «جلساتي»، أو اعمل جلسة ليك."); return; }
+        return MZ.sRef(SID).set({ checkedAt: Date.now() }, { merge: true }).then(function () {
+          a3("ok", "تمام");
+          var a4 = row(L, "يقرا الحضور");
+          return MZ.pCol(SID).limit(1).get().then(function () { a4("ok", "تمام"); }).catch(function (e) { a4("bad", MZ.errText(e), "اتأكد إن ملف القواعد الجديد منشور (Publish)."); });
+        }).catch(function (e) { a3("bad", MZ.errText(e), "اتأكد إن ملف القواعد الجديد منشور (Publish)."); });
+      });
     }).then(function () { return MZ.auth.signOut(); })
-      .catch(function (e) { a2("bad", MZ.errText(e), e.code === "auth/operation-not-allowed" ? "فعّل Email/Password في Firebase Authentication." : "اتأكد من الإيميل وكلمة السر، أو اعمل الحساب في Firebase Authentication ← Users."); });
+      .catch(function (e) { a1("bad", MZ.errText(e), e.code === "auth/operation-not-allowed" ? "فعّل Email/Password في Firebase Authentication." : "اتأكد من الإيميل وكلمة السر. ولو ناسي كلمة السر، من صفحة «جلساتي» فيه «نسيت كلمة السر»."); });
   };
 
   /* كود صفحة الميسّر */

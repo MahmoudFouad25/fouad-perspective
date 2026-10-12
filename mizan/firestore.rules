@@ -1,50 +1,93 @@
 // =====================================================================
-// قواعد الأمان لورشة «الميزان» — mizan/{sessionId}
+// قواعد الأمان لورشة «الميزان» — mizan/{sessionId} + mizan_staff/{email}
 // ---------------------------------------------------------------------
-// ⚑ متستبدلش قواعد المشروع كلها بالملف ده!
-//   انسخ الدالة isMizanAdmin ومقطع match /mizan/... وحطهم جوّه
-//   match /databases/{database}/documents { ... } في ملف القواعد الأساسي،
-//   جنب باقي المقاطع اللي موجودة. وبعدين Publish.
-// ⚑ لو عندك قاعدة عامة في الآخر (match /{collection}/{doc=**}) بتفتح كل حاجة،
-//   لازم تضيف collection == 'mizan' لقايمة الاستثناءات بتاعتها،
-//   وإلا أي حد هيقدر يكتب في الجلسة (القواعد في فايربيز بتتجمع بـ «أو»).
-// ⚑ الإيميل لازم يبقى نفس اللي في mizan/assets/config.js بالحرف (حروف صغيرة).
+// ⚑ الملف الكامل للمشروع كله (اللي بيتنسخ في Firebase ويتعمل له Publish):
+//     three-axes/v2/app/firestore.full.rules
+//   الملف ده نسخة من مقطع «الميزان» بس، للمراجعة.
+// ⚑ القاعدة العامة في آخر الملف الكامل لازم تستثني كل اللي بيبدأ بـ mizan:
+//     collection.matches('mizan.*')
+//   وإلا أي حد يقدر يكتب نفسه ميسّر.
+// ⚑ isAdmin() = إيميل الأدمن الرئيسي، ولازم يبقى نفس اللي في mizan/assets/config.js.
 // =====================================================================
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isMizanAdmin() {
+    function isAdmin() {
       return request.auth != null
         && request.auth.token.email != null
         && request.auth.token.email.lower() in ['admin@fouad-academy.com'];
     }
-    function isSelf(uid) { return request.auth != null && request.auth.uid == uid; }
+
+    // ===================== ورشة «الميزان» =====================
+    // الأدمن الرئيسي = isAdmin() (admin@fouad-academy.com): كل الجلسات + بيضيف الميسّرين.
+    // الميسّر = إيميله متسجّل في mizan_staff ومش موقوف: بيعمل جلساته، وبيتحكم فيها
+    //   وفي الجلسات اللي صاحبها ضافه فيها «شريك» (editors). وأي جلسة تانية: قراية بس.
+    function mzEmail() {
+      return (request.auth != null && request.auth.token.email != null) ? request.auth.token.email.lower() : '';
+    }
+    function mzStaff() {
+      return mzEmail() != ''
+        && exists(/databases/$(database)/documents/mizan_staff/$(mzEmail()))
+        && get(/databases/$(database)/documents/mizan_staff/$(mzEmail())).data.get('active', true) == true;
+    }
+    function mzSessCan(d) {
+      return isAdmin()
+        || (mzStaff() && (d.get('owner', '') == mzEmail() || mzEmail() in d.get('editors', [])));
+    }
+    function mzCan(sid) {
+      return isAdmin()
+        || (mzStaff()
+            && exists(/databases/$(database)/documents/mizan/$(sid))
+            && mzSessCan(get(/databases/$(database)/documents/mizan/$(sid)).data));
+    }
+
+    // الفريق: الأدمن بس يضيف ويوقف. والميسّر يقرا (عشان يشوف حسابه ويختار شركاءه).
+    match /mizan_staff/{email} {
+      allow get: if isAdmin() || mzEmail() == email || mzStaff();
+      allow list: if isAdmin() || mzStaff();
+      allow write: if isAdmin();
+    }
 
     match /mizan/{sid} {
-      // مستند الجلسة: الكل يقرا (الموبايلات وشاشة العرض حتى من غير دخول)، والأدمن بس يكتب.
+      // مستند الجلسة: الكل يقرا (الموبايلات وشاشة العرض حتى من غير دخول).
       allow read: if true;
-      allow write: if isMizanAdmin();
+      // الميسّر يعمل جلسة باسمه هو بس.
+      allow create: if isAdmin()
+        || (mzStaff() && request.resource.data.get('owner', '') == mzEmail());
+      // صاحبها أو شريكه يحرّكها. محدش غير الأدمن يغيّر صاحبها، ومحدش غير صاحبها يغيّر الشركاء.
+      allow update: if isAdmin()
+        || (mzSessCan(resource.data)
+            && request.resource.data.get('owner', '') == resource.data.get('owner', '')
+            && (request.resource.data.get('editors', []) == resource.data.get('editors', [])
+                || resource.data.get('owner', '') == mzEmail()));
+      allow delete: if isAdmin()
+        || (mzStaff() && resource.data.get('owner', '') == mzEmail());
 
       // الأعداد المجمّعة (أرقام بس، من غير أسماء)
       match /pub/{doc} {
         allow read: if true;
-        allow write: if isMizanAdmin();
+        allow write: if mzCan(sid);
       }
 
       // المشارك: اسمه الأول + مدته + طلب «محتاج حد يكلمني»
       match /people/{uid} {
-        allow read: if isMizanAdmin() || isSelf(uid);
-        allow create, update: if isMizanAdmin() || (isSelf(uid) && request.resource.data.size() <= 12);
-        allow delete: if isMizanAdmin() || isSelf(uid);
+        allow read: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
+        allow create, update: if (request.auth != null && request.auth.uid == uid
+                                  && request.resource.data.size() <= 12)
+                              || mzCan(sid);
+        allow delete: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
       }
 
       // التصويت المجهول (اللي بيتعرض أعداد) + التقييم في الآخر
       match /votes/{uid} {
-        allow read: if isMizanAdmin() || isSelf(uid);
-        allow create, update: if isMizanAdmin() || (isSelf(uid) && request.resource.data.size() <= 40);
-        allow delete: if isMizanAdmin() || isSelf(uid);
+        allow read: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
+        allow create, update: if (request.auth != null && request.auth.uid == uid
+                                  && request.resource.data.size() <= 40)
+                              || mzCan(sid);
+        allow delete: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
       }
     }
+    // ============================================================
   }
 }

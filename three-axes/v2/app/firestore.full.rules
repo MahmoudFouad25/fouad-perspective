@@ -195,33 +195,72 @@ service cloud.firestore {
     }
 
     // ===================== ورشة «الميزان» =====================
-    match /mizan/{sid} {
-      allow read: if true;
-      allow write: if isAdmin();
+    // الأدمن الرئيسي = isAdmin() (admin@fouad-academy.com): كل الجلسات + بيضيف الميسّرين.
+    // الميسّر = إيميله متسجّل في mizan_staff ومش موقوف: بيعمل جلساته، وبيتحكم فيها
+    //   وفي الجلسات اللي صاحبها ضافه فيها «شريك» (editors). وأي جلسة تانية: قراية بس.
+    function mzEmail() {
+      return (request.auth != null && request.auth.token.email != null) ? request.auth.token.email.lower() : '';
+    }
+    function mzStaff() {
+      return mzEmail() != ''
+        && exists(/databases/$(database)/documents/mizan_staff/$(mzEmail()))
+        && get(/databases/$(database)/documents/mizan_staff/$(mzEmail())).data.get('active', true) == true;
+    }
+    function mzSessCan(d) {
+      return isAdmin()
+        || (mzStaff() && (d.get('owner', '') == mzEmail() || mzEmail() in d.get('editors', [])));
+    }
+    function mzCan(sid) {
+      return isAdmin()
+        || (mzStaff()
+            && exists(/databases/$(database)/documents/mizan/$(sid))
+            && mzSessCan(get(/databases/$(database)/documents/mizan/$(sid)).data));
+    }
 
+    // الفريق: الأدمن بس يضيف ويوقف. والميسّر يقرا (عشان يشوف حسابه ويختار شركاءه).
+    match /mizan_staff/{email} {
+      allow get: if isAdmin() || mzEmail() == email || mzStaff();
+      allow list: if isAdmin() || mzStaff();
+      allow write: if isAdmin();
+    }
+
+    match /mizan/{sid} {
+      // مستند الجلسة: الكل يقرا (الموبايلات وشاشة العرض حتى من غير دخول).
+      allow read: if true;
+      // الميسّر يعمل جلسة باسمه هو بس.
+      allow create: if isAdmin()
+        || (mzStaff() && request.resource.data.get('owner', '') == mzEmail());
+      // صاحبها أو شريكه يحرّكها. محدش غير الأدمن يغيّر صاحبها، ومحدش غير صاحبها يغيّر الشركاء.
+      allow update: if isAdmin()
+        || (mzSessCan(resource.data)
+            && request.resource.data.get('owner', '') == resource.data.get('owner', '')
+            && (request.resource.data.get('editors', []) == resource.data.get('editors', [])
+                || resource.data.get('owner', '') == mzEmail()));
+      allow delete: if isAdmin()
+        || (mzStaff() && resource.data.get('owner', '') == mzEmail());
+
+      // الأعداد المجمّعة (أرقام بس، من غير أسماء)
       match /pub/{doc} {
         allow read: if true;
-        allow write: if isAdmin();
+        allow write: if mzCan(sid);
       }
 
+      // المشارك: اسمه الأول + مدته + طلب «محتاج حد يكلمني»
       match /people/{uid} {
-        allow read: if isAdmin()
-                    || (request.auth != null && request.auth.uid == uid);
-        allow create, update: if isAdmin()
-                    || (request.auth != null && request.auth.uid == uid
-                        && request.resource.data.size() <= 12);
-        allow delete: if isAdmin()
-                    || (request.auth != null && request.auth.uid == uid);
+        allow read: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
+        allow create, update: if (request.auth != null && request.auth.uid == uid
+                                  && request.resource.data.size() <= 12)
+                              || mzCan(sid);
+        allow delete: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
       }
 
+      // التصويت المجهول (اللي بيتعرض أعداد) + التقييم في الآخر
       match /votes/{uid} {
-        allow read: if isAdmin()
-                    || (request.auth != null && request.auth.uid == uid);
-        allow create, update: if isAdmin()
-                    || (request.auth != null && request.auth.uid == uid
-                        && request.resource.data.size() <= 40);
-        allow delete: if isAdmin()
-                    || (request.auth != null && request.auth.uid == uid);
+        allow read: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
+        allow create, update: if (request.auth != null && request.auth.uid == uid
+                                  && request.resource.data.size() <= 40)
+                              || mzCan(sid);
+        allow delete: if (request.auth != null && request.auth.uid == uid) || mzCan(sid);
       }
     }
     // ============================================================
@@ -270,7 +309,7 @@ service cloud.firestore {
     // ============================================================
 
     match /{collection}/{doc=**} {
-      allow read, write: if (collection == 'sessions' || collection == 'mizan' || collection.matches('rt_.*') || collection.matches('wq_.*') || collection == 'maqyas_axes_v2')
+      allow read, write: if (collection == 'sessions' || collection.matches('mizan.*') || collection.matches('rt_.*') || collection.matches('wq_.*') || collection == 'maqyas_axes_v2')
                             ? false
                             : ((collection != 'telegramChats'
                                 && collection != 'quickReplies')

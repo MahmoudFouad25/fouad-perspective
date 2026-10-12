@@ -13,20 +13,22 @@
   var LKEY = "mz:" + SID + ":console";
   var S = MZ.store.getJ(LKEY, null) || { state: MZ_STATES[0].id, step: 0, rev: 0 };
   var user = null, remoteOk = false, localOnly = false, lastErr = null;
+  var who = null, follow = false;      /* who = {role, email, name, sess} · follow = وضع المتابعة (من غير تحكم) */
+  var TEAM = location.href.split("?")[0].replace(/\/console\/(index\.html)?$/, "/") + "team/";
   var people = {}, votes = {}, agg = {};
   var unsubs = [];
   var knownHelp = {};
 
   /* ───────────── الدخول ───────────── */
   function loginView(msg) {
-    root.innerHTML = '<div class="login"><div class="eyebrow">الميزان · لوحة التحكم</div><h2 style="margin:0 0 12px">ادخل بإيميل الأدمن</h2>' +
-      '<label>الإيميل<input id="em" type="email" autocomplete="username" value="' + esc(MZ.store.get("mz:adminEmail") || MZ_ADMINS[0] || "") + '"></label>' +
+    root.innerHTML = '<div class="login"><div class="eyebrow">الميزان · لوحة التحكم</div><h2 style="margin:0 0 12px">ادخل بإيميلك</h2>' +
+      '<label>الإيميل<input id="em" type="email" autocomplete="username" value="' + esc(MZ.store.get("mz:adminEmail") || "") + '"></label>' +
       '<label>كلمة السر<input id="pw" type="password" autocomplete="current-password"></label>' +
       '<button class="b dark" id="go" style="width:100%;padding:12px">دخول</button><div class="err" id="er">' + esc(msg || "") + "</div>" +
       '<hr style="border:none;border-top:1px solid var(--line);margin:18px 0">' +
       '<p class="meta">النت واقع أو الدخول مش راضي؟ تقدر تشغّل اليوم من اللابتوب ده بس: شاشة العرض لازم تبقى مفتوحة على نفس الجهاز ونفس المتصفح. الموبايلات ساعتها هتمشي «مع الشاشة» برقمها.</p>' +
       '<button class="b" id="loc" style="width:100%;padding:10px">تشغيل محلي من غير سيرفر</button>' +
-      '<p class="meta" style="margin-top:14px">الجلسة: <b>' + esc(SID) + '</b> · <a href="../check/?s=' + encodeURIComponent(SID) + '">صفحة الفحص</a></p></div>';
+      '<p class="meta" style="margin-top:14px">الجلسة: <b>' + esc(SID) + '</b> · <a href="../check/?s=' + encodeURIComponent(SID) + '">صفحة الفحص</a> · <a href="' + TEAM + '">جلساتي والفريق</a></p></div>';
     document.getElementById("go").onclick = doLogin;
     document.getElementById("pw").onkeydown = function (e) { if (e.key === "Enter") doLogin(); };
     document.getElementById("loc").onclick = function () { localOnly = true; app(); };
@@ -34,7 +36,7 @@
   function doLogin() {
     var em = document.getElementById("em").value.trim().toLowerCase(), pw = document.getElementById("pw").value, er = document.getElementById("er");
     if (!MZ.hasFb()) { er.textContent = MZ.errText({ code: "mz/no-sdk" }); return; }
-    if (MZ_ADMINS.indexOf(em) === -1) { er.textContent = MZ.errText({ code: "mz/not-admin" }); return; }
+    if (!em || !pw) { er.textContent = "اكتب الإيميل وكلمة السر."; return; }
     er.textContent = "بندخل…";
     MZ.store.set("mz:adminEmail", em);
     MZ.auth.signInWithEmailAndPassword(em, pw).catch(function (e) { er.textContent = MZ.errText(e); });
@@ -42,14 +44,36 @@
 
   if (MZ.hasFb()) {
     MZ.auth.onAuthStateChanged(function (u) {
-      if (u && MZ.isAdmin(u)) { user = u; localOnly = false; app(); }
-      else if (u && !u.isAnonymous) { MZ.auth.signOut(); loginView(MZ.errText({ code: "mz/not-admin" })); }
-      else if (!localOnly) loginView();
+      if (!u || u.isAnonymous) { user = null; who = null; if (!localOnly) loginView(); return; }
+      root.innerHTML = '<div class="login"><p>بنتأكد من حسابك…</p></div>';
+      MZ.access(u, SID).then(function (r) {
+        if (!r.role) { MZ.auth.signOut(); loginView(MZ.errText({ code: r.why || "mz/not-admin" })); return; }
+        who = r;
+        if (r.mode === "missing") return missingView(u);
+        user = u; localOnly = false; follow = r.mode === "follow"; app();
+      }).catch(function (e) { MZ.auth.signOut(); loginView(MZ.errText(e)); });
     }, function (e) { loginView(MZ.errText(e)); });
   } else loginView(MZ.errText({ code: "mz/no-sdk" }));
 
+  /* ميسّر فتح رابط جلسة لسه ما اتعملتش */
+  function missingView(u) {
+    root.innerHTML = '<div class="login"><div class="eyebrow">الميزان · لوحة التحكم</div><h2 style="margin:0 0 10px">الجلسة دي لسه مش موجودة</h2>' +
+      '<p class="meta" style="font-size:.95rem;line-height:1.8">الرابط ده لجلسة اسمها <b>' + esc(SID) + '</b>، ومحدش عملها لسه.<br>الأحسن تعمل جلساتك من صفحة «جلساتي»، عشان كل جلسة يبقى ليها اسم ومحافظة وروابطها جاهزة.</p>' +
+      '<a class="b dark" style="display:block;text-align:center;padding:12px;margin:12px 0" href="' + TEAM + '">روح لجلساتي ↗</a>' +
+      '<button class="b" id="mk" style="width:100%;padding:10px">لأ، اعمل الجلسة دي باسمي هنا</button><div class="err" id="er"></div>' +
+      '<p class="meta"><a href="#" id="out">خروج</a></p></div>';
+    document.getElementById("out").onclick = function (e) { e.preventDefault(); MZ.auth.signOut(); };
+    document.getElementById("mk").onclick = function () {
+      var er = document.getElementById("er"); er.textContent = "بنعمل الجلسة…";
+      MZ.sRef(SID).set({ owner: who.email, ownerName: who.name, title: SID, gov: "", editors: [], createdAt: Date.now(),
+        state: MZ_STATES[0].id, step: 0, rev: 1, stateAt: Date.now(), stepAt: Date.now(), support: MZ_SETTINGS.supportName })
+        .then(function () { location.reload(); }).catch(function (e) { er.textContent = MZ.errText(e); });
+    };
+  }
+
   /* ───────────── الكتابة ───────────── */
   function push(patch) {
+    if (follow) return;                /* وضع المتابعة: ولا حاجة بتتكتب */
     Object.keys(patch).forEach(function (k) { S[k] = patch[k]; });
     S.rev = Date.now(); patch.rev = S.rev;
     MZ.store.setJ(LKEY, S);
@@ -62,6 +86,7 @@
     paint();
   }
   function go(id, step) {
+    if (follow) return;
     var now = Date.now();
     var patch = { step: step || 0, stepAt: now };
     if (id !== S.state) { patch.state = id; patch.stateAt = now; }
@@ -83,6 +108,7 @@
     if (!user || !MZ.db) return;
     unsubs.push(MZ.watchDoc(MZ.sRef(SID), function (d, server) {
       if (server) remoteOk = true;
+      if (follow) { if (d) { S = d; bus.send({ S: S }); who.sess = d; paint(); } head(); return; }
       if (!d) {  /* أول مرة: نعمل مستند الجلسة من الحالة المحلية */
         push({ state: S.state, step: S.step || 0, stateAt: Date.now(), stepAt: Date.now(), support: S.support || MZ_SETTINGS.supportName, createdBy: user.email });
         return;
@@ -90,6 +116,7 @@
       if ((d.rev || 0) >= (S.rev || 0)) { S = d; MZ.store.setJ(LKEY, S); bus.send({ S: S }); paint(); }
       head();
     }, function (e) { remoteOk = false; lastErr = e; head(); }));
+    if (follow) return;                /* المتابع ما بيشوفش أسامي الناس ولا التصويت */
     unsubs.push(MZ.pCol(SID).onSnapshot(function (q) {
       people = {}; q.forEach(function (d) { var x = d.data(); if (x && x.n) people[d.id] = x; });   // صفحة الفحص بتكتب مستند من غير اسم وبتمسحه
       checkHelp(); migrate(); recompute(); paint();
@@ -113,7 +140,7 @@
       }
       if (people[old] && user) { MZ.pRef(SID, old).delete().catch(function () {}); delete people[old]; }
     });
-    if (changed && user) push({ groups: G, pairs: P, roster: rosterOf() });
+    if (changed && user && !follow) push({ groups: G, pairs: P, roster: rosterOf() });
   }
 
   /* الأعداد المجمّعة: بتتحسب هنا وبتتكتب في مستند عام فيه أرقام بس */
@@ -131,7 +158,7 @@
     bus.send({ agg: agg });
     clearTimeout(aggTimer);
     aggTimer = setTimeout(function () {
-      if (user && MZ.db) MZ.aggRef(SID).set({ counts: agg.counts, n: agg.n, at: Date.now() }).catch(function (e) { lastErr = e; head(); });
+      if (user && MZ.db && !follow) MZ.aggRef(SID).set({ counts: agg.counts, n: agg.n, at: Date.now() }).catch(function (e) { lastErr = e; head(); });
     }, 1200);
   }
 
@@ -151,8 +178,9 @@
   var tabNow = "people";
   function app() {
     root.innerHTML =
-      '<div class="wrap"><aside><div style="padding:14px"><div class="eyebrow">الميزان</div><b>' + esc(SID) + '</b></div><div class="tl" id="tl"></div></aside>' +
+      '<div class="wrap' + (follow ? " follow" : "") + '"><aside><div style="padding:14px"><div class="eyebrow">الميزان</div><b id="stitle">' + esc(sTitle()) + '</b><div class="meta" style="margin:2px 0 0">' + esc(SID) + '</div></div><div class="tl" id="tl"></div></aside>' +
       '<main><div class="help-alert" id="ha"></div><div class="hdr" id="hdr"></div>' +
+        (follow ? '<div class="follow-bar">👀 <b>وضع المتابعة.</b> إنت شايف الجلسة دي لحظة بلحظة مع السكريبت، بس التحكم مع صاحبها' + (who && who.sess && who.sess.ownerName ? " (" + esc(who.sess.ownerName) + ")" : "") + '. عشان تتمرّن بإيدك اعمل جلسة ليك من <a href="' + TEAM + '">جلساتي</a>.</div>' : "") +
       '<div class="grid"><div class="panel"><div class="eyebrow" id="cses"></div><div class="cur-label" id="clab"></div>' +
         '<div class="meta" id="cmeta"></div><div class="cue" id="ccue"></div>' +
         '<div class="nav"><button class="prev" id="bprev">→ السابق</button><button class="next" id="bnext">التالي ←</button></div>' +
@@ -180,7 +208,7 @@
     document.getElementById("bmir").onclick = function () { push({ noMirror: !S.noMirror }); };
     document.getElementById("btheme").onclick = function () { push({ theme: S.theme === "light" ? "dark" : "light" }); };
     document.getElementById("tabs").onclick = function (e) { var b = e.target.closest("button"); if (!b) return; tabNow = b.dataset.t; paintTab(); };
-    document.getElementById("tl").onclick = function (e) { var b = e.target.closest("button[data-id]"); if (!b) return;
+    document.getElementById("tl").onclick = function (e) { var b = e.target.closest("button[data-id]"); if (!b || follow) return;
       if (confirm("تروح لـ«" + mzState(b.dataset.id).label + "»؟")) go(b.dataset.id, 0); };
     window.addEventListener("resize", scalePv); scalePv();
     if (!window._mzKeys) { window._mzKeys = 1;
@@ -193,6 +221,13 @@
     bus.send({ S: S });
     listen(); recompute(); paint(); head();
     setInterval(head, 5000);
+  }
+  function sTitle() { var x = (S && S.title) ? S : ((who && who.sess) || {}); return (x.title && x.title !== SID ? x.title : "") + (x.gov ? " · " + x.gov : "") || SID; }
+  function roleLabel() {
+    if (localOnly || !who) return "";
+    if (follow) return "متابعة";
+    if (who.role === "super") return "الأدمن الرئيسي";
+    return who.sess && who.sess.owner === who.email ? "ميسّر · جلستك" : "ميسّر · شريك في الجلسة";
   }
   function scalePv() {
     var pv = document.getElementById("pv"), f = document.getElementById("pvf"); if (!pv || !f) return;
@@ -207,7 +242,8 @@
       : '<span class="pill bad">' + esc(lastErr ? MZ.errText(lastErr) : "بنوصل للسيرفر…") + "</span>";
     h.innerHTML = '<span class="t">لوحة التحكم</span>' + conn +
       '<span class="pill">الحاضرين: ' + ar(n - fake) + (fake ? " (+" + ar(fake) + " بروفة)" : "") + "</span>" +
-      (user ? '<span class="pill">' + esc(user.email) + '</span><button class="b" id="out">خروج</button>' : "");
+      (user ? '<span class="pill' + (follow ? " warn" : "") + '">' + esc(roleLabel()) + " · " + esc(user.email) + '</span><a class="b" href="' + TEAM + '">جلساتي ↗</a><button class="b" id="out">خروج</button>' : "");
+    var tt = document.getElementById("stitle"); if (tt) tt.textContent = sTitle();
     var o = document.getElementById("out"); if (o) o.onclick = function () { MZ.auth.signOut(); };
   }
 
@@ -419,7 +455,7 @@
   var NAMES = ["أحمد", "منة", "يوسف", "سلمى", "عمر", "نور", "مريم", "كريم", "هاجر", "زياد", "رنا", "محمد", "آية", "خالد", "فرح", "مصطفى", "ملك", "عبدالله", "شهد", "حسن", "دينا", "طه", "روان", "إسلام", "ندى", "بلال", "سارة", "معاذ", "جنى", "أنس"];
   function rnd(a) { return a[Math.floor(Math.random() * a.length)]; }
   function makeFakes() {
-    if (!user) return alert("البروفة محتاجة دخول الأدمن (عشان بتكتب في السيرفر).");
+    if (!user) return alert("البروفة محتاجة دخول بإيميلك (عشان بتكتب في السيرفر).");
     var n = Math.max(2, Math.min(80, +document.getElementById("fn").value || 36));
     var batch = MZ.db.batch();
     for (var i = 0; i < n; i++) {
