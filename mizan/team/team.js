@@ -362,8 +362,24 @@
 
   /* الأدمن يغيّر كلمة سر ميسّر بنفسه: بندخل بحسابه في نسخة فايربيز التانية بكلمة السر الحالية، ونغيّرها */
   function setStaffPw(email) {
-    var cur = (pws[email] || {}).pw;
-    if (!cur) { alert("كلمة السر الحالية لـ" + (staff[email].name || email) + " مش معروفة لسه (بتظهر أول ما يدخل مرة).\nتقدر تبعت له «رابط على الإيميل» يغيّرها منه."); return; }
+    var cur = (pws[email] || {}).pw, nm = staff[email].name || email;
+    if (!cur) {   /* مش معروفة: نجرّب كلمة سر يقترحها الأدمن (مثلًا اللي كتبها وهو بيضيفه)، ولو صح نحفظها */
+      var g = prompt("كلمة السر الحالية لـ" + nm + " مش محفوظة عندنا.\nلو فاكر كلمة السر اللي كتبتها وإنت بتضيفه (أو اللي هو بيدخل بيها)، اكتبها هنا ونجرّبها:");
+      if (g === null || !g.trim()) return;
+      g = g.trim();
+      var t = app2().auth();
+      t.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function () {})
+        .then(function () { return t.signInWithEmailAndPassword(email, g); })
+        .then(function () { return t.signOut().catch(function () {}); })
+        .then(function () { return MZ.pwRef(email).set({ pw: g, at: Date.now() }); })
+        .then(function () { shown[email] = true; msgFor[email] = "تمام ✓ كلمة السر دي صح واتحفظت. ولو عايز تغيّرها دوس «🔑 غيّر كلمة السر» تاني."; return reload(); })
+        .catch(function (e) {
+          t.signOut().catch(function () {});
+          var bad = e && /invalid-credential|wrong-password|invalid-login-credentials|user-not-found/.test(e.code || "");
+          alert(bad ? "كلمة السر دي مش هي.\n\nغالبًا الإيميل ده كان عنده حساب قبل كده في منصة منظور الفؤاد بكلمة سر تانية، فالكلمة اللي كتبتها وإنت بتضيفه ما اتسجّلتش.\n\nالحل: دوس «ابعت له رابط على الإيميل»، يفتح الإيميل (ويبص في Spam)، ويعمل كلمة سر جديدة، ويدخل بيها مرة، فتظهر لك هنا." : MZ.errText(e));
+        });
+      return;
+    }
     var n = prompt("كلمة السر الجديدة لـ" + (staff[email].name || email) + " (٦ حروف أو أرقام على الأقل):", genPw());
     if (n === null) return; n = n.trim();
     if (n.length < 6) { alert(MZ.errText({ code: "auth/weak-password" })); return; }
@@ -396,13 +412,22 @@
     er.textContent = "بنعمل الحساب…";
     createAuthUser(email, pw).then(function (created) {
       return MZ.staffRef(email).set({ name: name, email: email, gov: gov, phone: phone, active: true, createdAt: Date.now(), by: me.email }, { merge: true })
-        .then(function () { return created ? MZ.pwRef(email).set({ pw: pw, at: Date.now() }) : null; })
-        .then(function () { return created; });
+        .then(function () {
+          if (created) return MZ.pwRef(email).set({ pw: pw, at: Date.now() }).then(function () { return true; });
+          /* الإيميل كان ليه حساب: نجرّب يمكن كلمة السر اللي كتبناها هي هي */
+          var t = app2().auth();
+          return t.signInWithEmailAndPassword(email, pw)
+            .then(function () { return t.signOut().catch(function () {}); })
+            .then(function () { return MZ.pwRef(email).set({ pw: pw, at: Date.now() }).then(function () { return "same"; }); },
+                  function () { return false; });
+        });
     }).then(function (created) {
       var x = { name: name, email: email };
-      lastAdd = created
+      lastAdd = created === "same"
+        ? { title: name + " اتضاف للفريق ✓", note: "الإيميل ده كان عنده حساب قبل كده، وكلمة السر اللي كتبتها هي نفسها بتاعته، فاتحفظت.", msg: welcomeMsg(x, pw), phone: phone }
+        : created
         ? { title: "اتعمل حساب " + name + " ✓", note: "ابعتله الرسالة دي. وكلمة السر هتفضل ظاهرة لك في جدول الميسّرين تحت.", msg: welcomeMsg(x, pw), phone: phone }
-        : { title: name + " اتضاف للفريق ✓", note: "الإيميل ده كان عنده حساب قبل كده (مثلًا في منصة منظور الفؤاد)، فهيدخل بكلمة السر بتاعته هو، مش اللي فوق. وكلمة السر دي هتظهر لك في الجدول أول ما يدخل مرة. ولو ناسيها: «ابعت له رابط على الإيميل».", msg: welcomeMsg(x, null), phone: phone };
+        : { title: name + " اتضاف للفريق ✓", note: "⚠️ الإيميل ده كان عنده حساب قبل كده (غالبًا في منصة منظور الفؤاد)، فكلمة السر اللي كتبتها «ما اتسجّلتش». هو هيدخل بكلمة السر القديمة بتاعته. ولو ناسيها: دوس «ابعت له رابط على الإيميل» في الجدول، يعمل واحدة جديدة، ويدخل بيها مرة، فتظهر لك.", msg: welcomeMsg(x, null), phone: phone };
       er.textContent = ""; return reload();
     }).catch(function (e) { er.textContent = MZ.errText(e); });
   }
