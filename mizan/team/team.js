@@ -13,7 +13,7 @@
   var BASE = location.href.split("?")[0].split("#")[0].replace(/\/team\/(index\.html)?$/, "/");
   var TEAM = BASE + "team/";
   var me = null;                  /* {role:"super"|"staff", email, name, staff} */
-  var sessions = {}, staff = {}, tab = null, showNew = false, editing = null, lastAdd = null, msgFor = {};
+  var sessions = {}, staff = {}, pws = {}, shown = {}, tab = null, showNew = false, editing = null, lastAdd = null, msgFor = {};
   var FV = (typeof firebase !== "undefined" && firebase.firestore) ? firebase.firestore.FieldValue : null;
 
   /* ───────────── أدوات ───────────── */
@@ -69,7 +69,7 @@
     var em = val("em").toLowerCase(), pw = $("pw").value;
     if (!em || !pw) { $("er").textContent = "اكتب الإيميل وكلمة السر."; return; }
     $("er").textContent = "بندخل…"; MZ.store.set("mz:adminEmail", em);
-    auth.signInWithEmailAndPassword(em, pw).catch(function (e) { $("er").textContent = MZ.errText(e); });
+    MZ.signIn(em, pw).catch(function (e) { $("er").textContent = MZ.errText(e); });
   }
 
   if (!MZ.hasFb()) { loginView(MZ.errText({ code: "mz/no-sdk" })); return; }
@@ -90,7 +90,10 @@
       : Promise.all([col.where("owner", "==", me.email).get(), col.where("editors", "array-contains", me.email).get(),
           col.where("open", "==", true).get().catch(function () { return null; })]);
     var qT = db.collection("mizan_staff").get().catch(function () { return null; });
-    return Promise.all([qS, qT]).then(function (res) {
+    var qP = me.role === "super" ? db.collection("mizan_staff_pw").get().catch(function () { return null; }) : Promise.resolve(null);
+    return Promise.all([qS, qT, qP]).then(function (res) {
+      pws = {};
+      if (res[2]) res[2].forEach(function (d) { pws[d.id] = d.data() || {}; });
       sessions = {};
       res[0].forEach(function (q) { if (q) q.forEach(function (d) { var x = d.data() || {}; if (me.role === "super" || x.owner) sessions[d.id] = x; }); });
       staff = {};
@@ -235,20 +238,29 @@
     h += '<div class="panel"><h2>الميسّرين <span class="meta">(' + ar(es.length) + ")</span></h2>";
     if (!es.length) return h + '<div class="empty">مفيش ميسّرين لسه.</div></div>';
     var cnt = {}; Object.keys(sessions).forEach(function (s) { var o = sessions[s].owner; if (o) cnt[o] = (cnt[o] || 0) + 1; });
-    h += '<table><thead><tr><th>الاسم</th><th>المحافظة</th><th>جلساته</th><th>الحالة</th><th></th></tr></thead><tbody>';
+    h += '<table><thead><tr><th>الاسم</th><th>كلمة السر الحالية</th><th>المحافظة</th><th>جلساته</th><th>الحالة</th><th></th></tr></thead><tbody>';
     es.forEach(function (e) {
       var x = staff[e], off = x.active === false;
       h += '<tr data-e="' + esc(e) + '"><td><b>' + esc(x.name || "—") + '</b><br><span class="e">' + esc(e) + "</span>" + (x.phone ? '<br><span class="e">' + esc(x.phone) + "</span>" : "") + "</td>" +
+        "<td>" + pwCell(e) + "</td>" +
         "<td>" + esc(x.gov || "—") + "</td><td>" + ar(cnt[e] || 0) + "</td>" +
         '<td><span class="pill ' + (off ? "off" : "blue") + '">' + (off ? "موقوف" : "شغّال") + "</span></td>" +
-        '<td><div class="ctr"><a class="b sm green" target="_blank" href="' + esc(wa(welcomeMsg(x, null), x.phone)) + '">📲 رسالة الدخول</a>' +
-        '<button class="b sm" data-act="reset">ابعت له رابط كلمة سر جديدة</button>' +
+        '<td><div class="ctr"><a class="b sm green" target="_blank" href="' + esc(wa(welcomeMsg(x, (pws[e] || {}).pw), x.phone)) + '">📲 رسالة الدخول</a>' +
+        '<button class="b sm" data-act="setpw">🔑 غيّر كلمة السر</button>' +
+        '<button class="b sm" data-act="reset">ابعت له رابط على الإيميل</button>' +
         '<button class="b sm" data-act="toggle">' + (off ? "شغّله" : "وقّفه") + '</button>' +
         '<button class="b sm red" data-act="rmstaff">شيله</button></div>' + (msgFor[e] ? '<div class="okm">' + esc(msgFor[e]) + "</div>" : "") + "</td></tr>";
     });
     return h + "</tbody></table></div>";
   }
 
+  function pwCell(e) {
+    var p = pws[e];
+    if (!p || !p.pw) return '<span class="meta">مش معروفة لسه — هتظهر أول ما يدخل مرة</span>';
+    return '<span class="e" style="font-size:.92rem;font-weight:600;color:var(--ink)">' + (shown[e] ? esc(p.pw) : "••••••••") + "</span> " +
+      '<button class="b sm" data-act="eye">' + (shown[e] ? "إخفاء" : "👁 اعرض") + '</button> <button class="b sm" data-act="copy" data-u="' + esc(p.pw) + '">انسخ</button>' +
+      '<br><span class="meta">آخر تحديث: ' + fmtDate(p.at) + "</span>";
+  }
   function welcomeMsg(x, pw) {
     return "أهلًا " + (x.name || "") + " 🌿\nده حسابك في منظومة «الميزان»:\n\n" +
       "📧 الإيميل: " + x.email + "\n🔑 كلمة السر: " + (pw || "(كلمة السر اللي اتبعتتلك قبل كده — ولو ناسيها دوس «نسيت كلمة السر» في الصفحة)") + "\n\n" +
@@ -291,6 +303,8 @@
       case "unpart": upd(sid, { editors: FV.arrayRemove(t.dataset.e) }, "اتشال"); break;
       case "addstaff": addStaff(); break;
       case "clradd": lastAdd = null; paint(); break;
+      case "eye": shown[em] = !shown[em]; paint(); break;
+      case "setpw": setStaffPw(em); break;
       case "reset": auth.sendPasswordResetEmail(em).then(function () { msgFor[em] = "اتبعت رابط تغيير كلمة السر على إيميله ✓"; paint(); }).catch(function (x) { alert(MZ.errText(x)); }); break;
       case "toggle": MZ.staffRef(em).update({ active: staff[em].active === false }).then(reload).catch(function (x) { alert(MZ.errText(x)); }); break;
       case "rmstaff":
@@ -339,14 +353,37 @@
 
   /* حساب دخول جديد من غير ما الأدمن يخرج: بنستعمل نسخة تانية من فايربيز */
   function createAuthUser(email, pw) {
-    var app2 = null;
-    (firebase.apps || []).forEach(function (a) { if (a.name === "mzAdd") app2 = a; });
-    if (!app2) app2 = firebase.initializeApp(MZ_FIREBASE, "mzAdd");
-    var a2 = app2.auth();
+    var a2 = app2().auth();
     return a2.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function () {})
       .then(function () { return a2.createUserWithEmailAndPassword(email, pw); })
       .then(function () { return a2.signOut().catch(function () {}).then(function () { return true; }); },
             function (e) { if (e && e.code === "auth/email-already-in-use") return false; throw e; });
+  }
+
+  /* الأدمن يغيّر كلمة سر ميسّر بنفسه: بندخل بحسابه في نسخة فايربيز التانية بكلمة السر الحالية، ونغيّرها */
+  function setStaffPw(email) {
+    var cur = (pws[email] || {}).pw;
+    if (!cur) { alert("كلمة السر الحالية لـ" + (staff[email].name || email) + " مش معروفة لسه (بتظهر أول ما يدخل مرة).\nتقدر تبعت له «رابط على الإيميل» يغيّرها منه."); return; }
+    var n = prompt("كلمة السر الجديدة لـ" + (staff[email].name || email) + " (٦ حروف أو أرقام على الأقل):", genPw());
+    if (n === null) return; n = n.trim();
+    if (n.length < 6) { alert(MZ.errText({ code: "auth/weak-password" })); return; }
+    var a2 = app2().auth();
+    a2.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function () {})
+      .then(function () { return a2.signInWithEmailAndPassword(email, cur); })
+      .then(function (c) { return c.user.updatePassword(n); })
+      .then(function () { return a2.signOut().catch(function () {}); })
+      .then(function () { return MZ.pwRef(email).set({ pw: n, at: Date.now() }); })
+      .then(function () { shown[email] = true; msgFor[email] = "كلمة السر اتغيّرت ✓ — ابعتها له"; toast("اتغيّرت ✓"); return reload(); })
+      .catch(function (e) {
+        a2.signOut().catch(function () {});
+        alert((e && (e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" || e.code === "auth/invalid-login-credentials"))
+          ? "كلمة السر المحفوظة مش هي الحالية (غالبًا غيّرها من رابط الإيميل ولسه ما دخلش بيها). أول ما يدخل هتتحدّث، أو ابعت له «رابط على الإيميل»."
+          : MZ.errText(e));
+      });
+  }
+  function app2() {
+    var a = null; (firebase.apps || []).forEach(function (x) { if (x.name === "mzAdd") a = x; });
+    return a || firebase.initializeApp(MZ_FIREBASE, "mzAdd");
   }
 
   function addStaff() {
@@ -359,12 +396,13 @@
     er.textContent = "بنعمل الحساب…";
     createAuthUser(email, pw).then(function (created) {
       return MZ.staffRef(email).set({ name: name, email: email, gov: gov, phone: phone, active: true, createdAt: Date.now(), by: me.email }, { merge: true })
+        .then(function () { return created ? MZ.pwRef(email).set({ pw: pw, at: Date.now() }) : null; })
         .then(function () { return created; });
     }).then(function (created) {
       var x = { name: name, email: email };
       lastAdd = created
-        ? { title: "اتعمل حساب " + name + " ✓", note: "ابعتله الرسالة دي. كلمة السر دي مش هتظهر تاني، فابعتها دلوقتي.", msg: welcomeMsg(x, pw), phone: phone }
-        : { title: name + " اتضاف للفريق ✓", note: "الإيميل ده كان عنده حساب قبل كده (مثلًا في منصة منظور الفؤاد)، فهيدخل بكلمة السر بتاعته هو، مش اللي فوق. ولو ناسيها: «ابعت له رابط كلمة سر جديدة».", msg: welcomeMsg(x, null), phone: phone };
+        ? { title: "اتعمل حساب " + name + " ✓", note: "ابعتله الرسالة دي. وكلمة السر هتفضل ظاهرة لك في جدول الميسّرين تحت.", msg: welcomeMsg(x, pw), phone: phone }
+        : { title: name + " اتضاف للفريق ✓", note: "الإيميل ده كان عنده حساب قبل كده (مثلًا في منصة منظور الفؤاد)، فهيدخل بكلمة السر بتاعته هو، مش اللي فوق. وكلمة السر دي هتظهر لك في الجدول أول ما يدخل مرة. ولو ناسيها: «ابعت له رابط على الإيميل».", msg: welcomeMsg(x, null), phone: phone };
       er.textContent = ""; return reload();
     }).catch(function (e) { er.textContent = MZ.errText(e); });
   }
@@ -377,6 +415,7 @@
     var u = auth.currentUser; er.textContent = "بنغيّر…";
     u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(me.email, c))
       .then(function () { return u.updatePassword(n); })
+      .then(function () { return MZ.rememberPw(u, n); })
       .then(function () { er.innerHTML = '<span class="okm">كلمة السر اتغيّرت ✓</span>'; $("aC").value = $("aN").value = $("aN2").value = ""; })
       .catch(function (e) { er.textContent = MZ.errText(e); });
   }

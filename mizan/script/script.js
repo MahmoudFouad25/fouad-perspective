@@ -150,7 +150,7 @@
   $("go").onclick = function () {
     var em = $("em").value.trim().toLowerCase();
     $("er").textContent = "بندخل…"; MZ.store.set("mz:adminEmail", em);
-    MZ.auth.signInWithEmailAndPassword(em, $("pw").value).then(function (c) { return MZ.access(c.user, SID); }).then(function (r) {
+    MZ.signIn(em, $("pw").value).then(function (c) { return MZ.access(c.user, SID); }).then(function (r) {
         if (!r.role) { MZ.auth.signOut(); $("er").textContent = MZ.errText({ code: r.why || "mz/not-admin" }); return; }
         if (r.mode !== "control") $("er").textContent = MZ.errText({ code: "mz/not-yours" });
         else { $("sheet").classList.remove("on"); $("er").textContent = ""; }

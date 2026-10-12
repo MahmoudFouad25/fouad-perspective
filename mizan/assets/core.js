@@ -137,6 +137,19 @@ var MZ = (function () {
       return { role: "staff", email: emailOf(u), name: x.name || emailOf(u), staff: x };
     });
   }
+  /* كلمة السر الحالية للميسّر: بتتحفظ في مستند مالوش قراية غير للأدمن الرئيسي (mizan_staff_pw)،
+     وبتتحدّث مع كل دخول ناجح، فحتى لو اتغيّرت برابط الإيميل، الأدمن بيشوف الحالية. */
+  function pwRef(email) { return db.collection("mizan_staff_pw").doc(String(email).toLowerCase()); }
+  function rememberPw(u, pw) {
+    if (!db || !u || !u.email || !pw || isAdmin(u)) return Promise.resolve();
+    return pwRef(u.email).set({ pw: pw, at: Date.now() }).catch(function () {});   /* مش ميسّر؟ القواعد هترفض بهدوء */
+  }
+  /* دخول بالإيميل + حفظ كلمة السر للأدمن */
+  function signIn(email, pw) {
+    return auth.signInWithEmailAndPassword(email, pw).then(function (c) {
+      rememberPw(c.user, pw); return c;
+    });
+  }
   /* يقدر يتحكم في الجلسة دي؟ (sess = بيانات مستند الجلسة أو null لو لسه مش موجودة) */
   function canControl(r, sess) {
     if (!r || !r.role) return false;
@@ -285,7 +298,7 @@ var MZ = (function () {
     db: db, auth: auth, TS: TS,
     store: store, qs: qs, ar: ar, en: en, esc: esc, vibrate: vibrate, shuffle: shuffle, sid: sid,
     errText: errText, signInAnon: signInAnon, isAdmin: isAdmin,
-    emailOf: emailOf, staffRef: staffRef, role: role, canControl: canControl, access: access,
+    emailOf: emailOf, staffRef: staffRef, pwRef: pwRef, rememberPw: rememberPw, signIn: signIn, role: role, canControl: canControl, access: access,
     sRef: sRef, aggRef: aggRef, pRef: pRef, pCol: pCol, vRef: vRef, vCol: vCol,
     watchDoc: watchDoc, reconnect: reconnect, touch: touch,
     lastServerAt: function () { return lastServerAt; },

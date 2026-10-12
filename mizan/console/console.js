@@ -39,7 +39,7 @@
     if (!em || !pw) { er.textContent = "اكتب الإيميل وكلمة السر."; return; }
     er.textContent = "بندخل…";
     MZ.store.set("mz:adminEmail", em);
-    MZ.auth.signInWithEmailAndPassword(em, pw).catch(function (e) { er.textContent = MZ.errText(e); });
+    MZ.signIn(em, pw).catch(function (e) { er.textContent = MZ.errText(e); });
   }
 
   if (MZ.hasFb()) {
