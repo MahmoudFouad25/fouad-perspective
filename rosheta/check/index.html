@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>قبل الروشتة · الفحص</title>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  body{font-family:"Readex Pro",system-ui,sans-serif;background:#f6f0e6;color:#2a241e;direction:rtl;margin:0;line-height:1.7}
+  .w{max-width:620px;margin:0 auto;padding:22px 16px 60px}
+  h1{margin:0 0 4px}.m{color:#8d8276;font-size:14px}
+  .r{display:flex;gap:12px;align-items:flex-start;background:#fffdf8;border:1px solid #e7dccd;border-radius:14px;padding:12px 14px;margin:10px 0}
+  .r i{font-style:normal;flex:none;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:#bbb}
+  .r.ok i{background:#2f8a5b}.r.no i{background:#c2412d}.r.wait i{background:#d9a441}
+  .r b{display:block}.r .f{font-size:14px;color:#7c2c1c;margin-top:4px}
+  .sum{font-size:20px;font-weight:600;margin:20px 0;padding:14px;border-radius:14px;text-align:center}
+  .sum.ok{background:#dff1e6;color:#1f6b45}.sum.no{background:#fbe8e3;color:#7c2c1c}
+  button{font:inherit;border:none;background:#2a241e;color:#fff;border-radius:12px;padding:10px 18px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="w">
+  <h1>فحص قبل الورشة</h1>
+  <p class="m">افتح الصفحة دي على موبايل (من الواي فاي اللي في القاعة لو ممكن) وعلى اللابتوب. لو كل السطور خضرا: جاهز.</p>
+  <div id="list"></div>
+  <div id="sum"></div>
+  <button onclick="location.reload()">افحص تاني</button>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="../../mizan/assets/config.js?v=7"></script>
+<script src="../../mizan/assets/core.js?v=7"></script>
+<script src="../assets/rx-core.js?v=1"></script>
+<script src="../assets/content.js?v=1"></script>
+<script>
+(function () {
+  var SID = RX.sid(), list = document.getElementById("list"), bad = 0, rows = {};
+  function row(id, t) { var d = document.createElement("div"); d.className = "r wait"; d.innerHTML = "<i>…</i><div><b>" + t + '</b><div class="f"></div></div>'; list.appendChild(d); rows[id] = d; }
+  function ok(id, extra) { var d = rows[id]; d.className = "r ok"; d.querySelector("i").textContent = "✓"; if (extra) d.querySelector(".f").textContent = extra, d.querySelector(".f").style.color = "#5c5248"; }
+  function no(id, fix) { var d = rows[id]; d.className = "r no"; d.querySelector("i").textContent = "!"; d.querySelector(".f").textContent = fix; bad++; }
+  function done() { var s = document.getElementById("sum"); s.className = "sum " + (bad ? "no" : "ok"); s.textContent = bad ? "فيه " + MZ.ar(bad) + " مشكلة. الحل مكتوب تحت كل سطر أحمر." : "كله تمام ✓ جاهز للورشة"; }
+
+  row("files", "ملفات الورشة اتحمّلت");
+  row("sdk", "مكتبة الاتصال (فايربيز) اتحمّلت");
+  row("store", "الموبايل بيقدر يحفظ الإجابات");
+  row("auth", "الدخول المجهول للمشاركين شغال");
+  row("read", "قراية الجلسة «" + SID + "»");
+  row("write", "المشارك يقدر يكتب إجابته");
+
+  if (typeof RX_SLIDES !== "undefined" && RX_SLIDES.length) ok("files", MZ.ar(RX_SLIDES.length) + " شريحة جاهزة"); else no("files", "ملفات المحتوى ما اتحمّلتش. اعمل تحديث للصفحة.");
+  if (MZ.store.available) ok("store"); else no("store", "المتصفح ده مقفّل التخزين (تصفح خاص أو جوّه واتساب). الصفحة هتشتغل، بس الأحسن تفتح الرابط في كروم أو سفاري.");
+  if (!MZ.hasFb()) {
+    no("sdk", MZ.errText({ code: "mz/no-sdk" }) + " جرّب تقفل الواي فاي وتشتغل بالبيانات.");
+    ["auth", "read", "write"].forEach(function (k) { no(k, "متوقف على السطر اللي فوق."); }); done(); return;
+  }
+  ok("sdk");
+  MZ.signInAnon(15000).then(function (u) {
+    ok("auth");
+    return MZ.sRef(SID).get().then(function (d) {
+      ok("read", d.exists ? "الجلسة موجودة · الشريحة الحالية: " + (rxSlide(d.data().slide || RX_SLIDES[0].id).label) : "الجلسة لسه ما اتعملتش. هتتعمل لوحدها أول ما تدخل لوحة التحكم. (ده مش مشكلة: صفحة المشارك شغالة من غيرها)");
+    }, function (e) { no("read", MZ.errText(e)); }).then(function () {
+      var ref = MZ.pRef(SID, u.uid);
+      return ref.set({ check: Date.now() }, { merge: true }).then(function () {
+        ok("write"); return ref.get().then(function (d) { if (d.exists && !d.data().n) return ref.delete(); });
+      }, function (e) { no("write", MZ.errText(e)); });
+    });
+  }, function (e) {
+    no("auth", MZ.errText(e)); no("read", "متوقف على الدخول."); no("write", "متوقف على الدخول.");
+  }).then(done, done);
+})();
+</script>
+</body>
+</html>

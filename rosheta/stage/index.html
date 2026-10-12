@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>قبل الروشتة · شاشة العرض</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="stage.css?v=1">
+</head>
+<body>
+<div class="vp"><div class="cv" id="cv">
+  <div class="in" id="in"><div class="x-body"><div class="x-big"><div class="t">قبل الروشتة</div><div class="s">بنوصل…</div></div></div></div>
+  <div class="corner"><span class="no" id="no">–</span><span id="joined"></span></div>
+  <div class="mark"><b>℞</b>قبل الروشتة</div>
+</div></div>
+<div class="status" id="st"></div>
+<div class="blackout" id="black"></div>
+<button class="fs" id="fs">ملء الشاشة (F)</button>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="../../mizan/assets/config.js?v=7"></script>
+<script src="../../mizan/assets/core.js?v=7"></script>
+<script src="../assets/rx-core.js?v=1"></script>
+<script src="../assets/content.js?v=1"></script>
+<script src="../assets/render.js?v=1"></script>
+<script>
+/* شاشة العرض: بتقرا مستند الجلسة (مقروء للكل) + الأرقام المجمّعة.
+   ولو مفتوحة على نفس اللابتوب اللي عليه لوحة التحكم، بتسمعها مباشرة من غير سيرفر.
+   فلو النت وقع، الشاشة بتكمّل. */
+(function () {
+  var SID = RX.sid();
+  var $cv = document.getElementById("cv"), $in = document.getElementById("in"), $no = document.getElementById("no"),
+      $st = document.getElementById("st"), $joined = document.getElementById("joined"), $black = document.getElementById("black");
+  var remote = null, local = null, agg = {}, lastKey = "";
+  var bus = MZ.localBus(SID);
+  var PV = MZ.qs("pv") === "1";
+  if (PV) document.body.classList.add("pv");
+
+  /* اللوحة ١٦٠٠×٩٠٠ على قد الشاشة */
+  function fit() {
+    var k = Math.min(window.innerWidth / 1600, window.innerHeight / 900);
+    $cv.style.transform = "scale(" + k + ")";
+  }
+  window.addEventListener("resize", fit); fit();
+
+  function pick() {
+    if (remote && local) return (local.rev || 0) > (remote.rev || 0) ? local : remote;
+    return remote || local;
+  }
+  function joinUrl() {
+    var u = location.href.split("?")[0].replace(/\/stage\/(index\.html)?$/, "/live/");
+    return u + "?s=" + encodeURIComponent(SID);
+  }
+
+  function draw() {
+    var S = pick() || {};
+    var id = S.slide || RX_SLIDES[0].id, sl = rxSlide(id), step = Math.min(S.step || 0, rxSteps(sl) - 1);
+    $black.classList.toggle("on", !!S.black);
+    $no.textContent = MZ.ar(rxIndex(id) + 1);
+    $joined.textContent = agg.n ? "دخل " + MZ.ar(agg.n) : "";
+    var key = [id, step, S.stepAt, JSON.stringify(agg.acts || {}), agg.n, JSON.stringify(S.groups || {}), JSON.stringify(S.roster || {}), JSON.stringify(S.hidden || {})].join("|");
+    if (key === lastKey) return;
+    lastKey = key;
+    $in.innerHTML = RXR.stage(sl, step, { S: S, agg: agg, stepAt: S.stepAt });
+    var box = document.getElementById("qrbox");
+    if (box) putQR(box, joinUrl());
+  }
+  function putQR(box, url) {
+    var u = document.getElementById("qrurl"); if (u) u.textContent = url.replace(/^https?:\/\//, "");
+    box.innerHTML = "";
+    try { new QRCode(box, { text: url, width: 440, height: 440, correctLevel: QRCode.CorrectLevel.M }); }
+    catch (e) { box.innerHTML = '<div style="color:#000;padding:1em;direction:ltr;font-size:22px;word-break:break-all">' + MZ.esc(url) + "</div>"; }
+  }
+  setInterval(function () { RXR.tick($in); }, 500);
+
+  bus.on(function (d) {
+    if (d && d.S) { local = d.S; draw(); }
+    if (d && d.agg) { agg = d.agg; lastKey = ""; draw(); }
+  });
+  var l0 = bus.last(); if (l0 && l0.S) local = l0.S;
+
+  function status(t) { $st.textContent = t || ""; }
+  if (MZ.hasFb()) {
+    MZ.signInAnon(8000).catch(function () {});
+    MZ.watchDoc(MZ.sRef(SID), function (d, server) { remote = d; status(server ? "" : "مش متصل بالسيرفر · بيعرض آخر حاجة وصلت"); draw(); },
+      function (e) { status(MZ.errText(e)); });
+    MZ.watchDoc(MZ.aggRef(SID), function (d) { if (d) { agg = d; lastKey = ""; draw(); } }, function () {});
+  } else status("مكتبة الاتصال ما اتحمّلتش · الشاشة بتسمع لوحة التحكم على نفس الجهاز بس");
+  draw();
+
+  document.getElementById("fs").onclick = function () { try { document.documentElement.requestFullscreen(); } catch (e) {} };
+  document.addEventListener("keydown", function (e) { if (e.key === "f" || e.key === "F") document.getElementById("fs").click(); });
+})();
+</script>
+</body>
+</html>
