@@ -104,6 +104,19 @@ var RX = (function () {
         });
         res = { by: by, n: n };
       }
+      else if (A.type === "rewrite") {
+        /* إعادة كتابة جمل: لكل جملة، اللي القاعة كتبته */
+        var byI = {}, k = 0;
+        Object.keys(votes).forEach(function (u) {
+          var v = votes[u] && votes[u][id]; if (!v) return; k++;
+          Object.keys(v).forEach(function (i) {
+            var x = v[i]; if (!x || !x.t) return;
+            (byI[i] = byI[i] || []).push({ k: u.slice(0, 8) + i, t: String(x.t).slice(0, 140), at: x.at || 0, tb: groups[u] || 0 });
+          });
+        });
+        Object.keys(byI).forEach(function (i) { byI[i].sort(function (a, b) { return a.at - b.at; }); byI[i] = byI[i].slice(-30); });
+        res = { by: byI, n: k };
+      }
       else if (A.type === "choice") {
         var cnt = {}, m = 0;
         Object.keys(votes).forEach(function (u) {

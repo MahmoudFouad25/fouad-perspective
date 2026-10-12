@@ -204,7 +204,8 @@
       if (sl.ses !== lastSes) { lastSes = sl.ses; var se = RX_SESSIONS[sl.ses] || {}; h += "<h4>" + esc(sl.ses ? "ج" + ar(sl.ses) + " · " + se.name : se.name) + "</h4>"; }
       h += '<button data-id="' + sl.id + '" class="' + (i === cur ? "cur" : i < cur ? "done" : "") + '"><span class="n">' + ar(i + 1) + "</span>" + esc(sl.label) + "</button>";
     });
-    h += "<h4>لسه بتتبني</h4>" + RX_PLAN.map(function (p) { return '<div class="soon">ج' + ar(p.ses) + " · " + esc(p.l) + "</div>"; }).join("");
+    var plan = RX_PLAN.filter(function (p) { return !RX_SLIDES.some(function (x) { return x.ses === p.ses; }); });
+    if (plan.length) h += "<h4>لسه بتتبني</h4>" + plan.map(function (p) { return '<div class="soon">ج' + ar(p.ses) + " · " + esc(p.l) + "</div>"; }).join("");
     var tl = document.getElementById("tl"); tl.innerHTML = h;
     var c = tl.querySelector(".cur"); if (c && c.scrollIntoViewIfNeeded) c.scrollIntoViewIfNeeded();
 
@@ -253,7 +254,8 @@
     if (scTab === "ifs") {
       h = ifs.length ? ifs.map(function (x) { return '<div class="if"><b>' + esc(x[0]) + "</b>" + esc(x[1]) + "</div>"; }).join("") : '<p class="meta">مفيش مواقف متوقعة في الشريحة دي.</p>';
     } else if (scTab === "ses") {
-      h = '<div class="sesinfo"><p><b>المدة:</b> ' + esc(se.dur || "") + "</p><p><b>الحالة النفسية:</b> " + esc(se.mood || "") + "</p><p><b>الفكرة:</b> " + esc(se.idea || "") + "</p><p><b>الأسلوب:</b> " + esc(se.style || "") + "</p></div>";
+      h = '<div class="sesinfo"><p><b>المدة:</b> ' + esc(se.dur || "") + "</p><p><b>الحالة النفسية:</b> " + esc(se.mood || "") + "</p><p><b>الفكرة:</b> " + esc(se.idea || "") + "</p><p><b>الأسلوب:</b> " + esc(se.style || "") + "</p>" +
+        (se.why ? '<h3 style="margin-top:16px">ورا الكواليس (ليك وللمدربين في الـTOT)</h3>' + se.why.map(function (w) { return '<p class="note" style="font-size:15px">' + esc(w) + "</p>"; }).join("") : "") + "</div>";
     } else {
       sl.steps.forEach(function (stp, i) {
         var cls = i === st ? "now" : i < st ? "done" : "";
@@ -274,18 +276,28 @@
     } else box.scrollTop = 0;
   }
   function phoneLabel(ph) {
-    return { join: "الموبايلات: التسجيل", table: "الموبايلات: رقم الترابيزة واللي معاه", quiet: "الموبايلات هادية", pick: "الموبايلات بتفتح للاختيار", texts: "الموبايلات بتفتح للكتابة" }[ph.k] || "";
+    return { join: "الموبايلات: التسجيل", table: "الموبايلات: رقم الترابيزة واللي معاه", quiet: "الموبايلات هادية", pick: "الموبايلات بتفتح للاختيار", texts: "الموبايلات بتفتح للكتابة",
+      sort: "الموبايلات بتفتح للتصنيف", choice: "الموبايلات بتفتح للاختيار", rewrite: "الموبايلات بتفتح على الست جمل",
+      texts2: "الموبايلات بتفتح على عمودين", envs: "الموبايلات بتعرض الظروف التلاتة", inv: "الموبايلات: الظروف + التصنيف + ركن ليه" }[ph.k] || "";
   }
 
   /* ───────────── الحاجة الحيّة في الشريحة دي ───────────── */
   function paintLive() {
     var el = document.getElementById("live"); if (!el) return;
     var sl = rxSlide(S.slide), st = Math.min(S.step || 0, rxSteps(sl) - 1), ph = rxPhone(sl, st);
-    var id = ph.act || (sl.items.filter(function (i) { return i.act; })[0] || {}).act;
-    if (!id) { el.innerHTML = ""; return; }
-    var A = agg.acts[id] || {}, T = maxTable();
-    if (RX_ACTS[id].type === "tablePick") el.innerHTML = '<div class="livebox">' + (A.nT ? "سلّمت <b>" + ar(A.nT) + "</b>" + (T ? " من " + ar(T) + " ترابيزة" : " ترابيزة") : "لسه محدش سلّم من الموبايلات") + "</div>";
-    else if (RX_ACTS[id].type === "texts") el.innerHTML = '<div class="livebox">' + (A.n ? "على الحيطة <b>" + ar(A.n) + "</b> إجابة" : "الحيطة لسه فاضية") + " · تقدر تخبي أي واحدة من تبويب «الإجابات»</div>";
+    var ids = [];
+    [ph.act, ph.park, ph.a && ph.a.act, ph.b && ph.b.act].forEach(function (x) { if (x && ids.indexOf(x) === -1) ids.push(x); });
+    if (!ids.length) RXR.visible(sl, st).forEach(function (it) { [it.act, it.a && it.a.act, it.b && it.b.act].forEach(function (x) { if (x && ids.indexOf(x) === -1) ids.push(x); }); });
+    if (!ids.length) { el.innerHTML = ""; return; }
+    var T = maxTable();
+    el.innerHTML = ids.map(function (id) {
+      var A = agg.acts[id] || {}, D = RX_ACTS[id] || {}, t = D.type, txt;
+      if (t === "tablePick") txt = A.nT ? "سلّمت <b>" + ar(A.nT) + "</b>" + (T ? " من " + ar(T) + " ترابيزة" : " ترابيزة") : "لسه محدش سلّم من الموبايلات";
+      else if (t === "texts") txt = A.n ? esc(D.label) + ": <b>" + ar(A.n) + "</b> إجابة" : esc(D.label) + ": لسه فاضية";
+      else if (t === "sort" || t === "rewrite" || t === "choice") txt = A.n ? esc(D.label) + ": جاوب <b>" + ar(A.n) + "</b> من " + ar(Object.keys(people).length) : esc(D.label) + ": لسه محدش جاوب";
+      else txt = esc(D.label || id);
+      return '<div class="livebox">' + txt + "</div>";
+    }).join("");
   }
   function maxTable() { var G = S.groups || {}, m = 0; Object.keys(G).forEach(function (u) { m = Math.max(m, G[u] || 0); }); return m; }
 
@@ -355,6 +367,20 @@
         h += ks.length ? "<table><tr><th>الترابيزة</th><th>الاختيار</th><th>السبب</th><th>سلّم</th></tr>" + ks.map(function (t) {
           var x = byT[t]; return "<tr><td>" + (+t ? ar(t) : "من غير") + "</td><td>" + x.c.map(RXR.reqLabel).map(esc).join(" · ") + "</td><td>" + x.c.map(function (c) { return esc(x.w[c] || "—"); }).join(" · ") + "</td><td>" + esc(x.by || "") + "</td></tr>";
         }).join("") + "</table>" : '<p class="meta">لسه مفيش.</p>';
+      } else if (A.type === "sort") {
+        var by = R.by || {};
+        h += R.n ? "<table><tr><th>الجملة</th>" + A.bins.map(function (b) { return "<th>" + esc(b.l) + "</th>"; }).join("") + "</tr>" + A.cards.map(function (c) {
+          return "<tr><td>" + ar(c.no) + ". " + esc(c.t) + "</td>" + A.bins.map(function (b) { return "<td>" + ar((by[c.id] || {})[b.id] || 0) + "</td>"; }).join("") + "</tr>"; }).join("") + "</table>" : '<p class="meta">لسه مفيش.</p>';
+      } else if (A.type === "choice") {
+        var cn = R.count || {};
+        h += R.n ? A.opts.slice().sort(function (a, b) { return (cn[b.id] || 0) - (cn[a.id] || 0); }).map(function (o) { return '<div class="wl"><span>' + esc(o.l) + "</span><b>" + ar(cn[o.id] || 0) + "</b></div>"; }).join("") : '<p class="meta">لسه مفيش.</p>';
+      } else if (A.type === "rewrite") {
+        var bi = R.by || {};
+        h += R.n ? A.items.map(function (it) {
+          var L2 = (bi[it.i] || []).slice().reverse();
+          return '<p style="margin:10px 0 2px"><b>' + esc(it.t) + "</b></p>" + (L2.length ? L2.map(function (x) {
+            return '<div class="wl' + (hid[x.k] ? " off" : "") + '"><span>' + esc(x.t) + '</span><button class="b" data-hide="' + esc(x.k) + '">' + (hid[x.k] ? "رجّعها" : "خبّيها") + "</button></div>"; }).join("") : '<p class="meta">—</p>');
+        }).join("") : '<p class="meta">لسه مفيش.</p>';
       } else if (A.type === "texts") {
         var L = (R.list || []).slice().reverse();
         h += L.length ? '<p class="meta">اللي بتشطب عليه بيختفي من الشاشة على طول.</p>' + L.map(function (x) {
@@ -407,9 +433,25 @@
       pick.forEach(function (c) { var x = rnd(WHY); if (x) w[c] = x; });
       var v = { pick3: { c: pick, w: w, at: now + i } };
       if (Math.random() < .6) v.drq = MZ.shuffle(DQ.slice()).slice(0, 1 + Math.floor(Math.random() * 2)).map(function (t, j) { return { t: t, at: now + i * 10 + j }; });
+      addFake(v, now + i * 10);
       batch.set(MZ.vRef(SID, u), v);
     }
     batch.commit().then(function () { alert("اتولّد " + ar(n) + " مشارك وهمي ✓\nروح «الناس والترابيزات» ودوس «وزّع الترابيزات»."); }).catch(function (e) { alert(MZ.errText(e)); });
+  }
+  var L1 = ["في حملات الشارع، الناس تقف وتسمع المتطوع", "عدد اللي بيتبرعوا من الشارع يزيد", "المتطوعين بيكلموا الناس مش واقفين ساكتين", "الحملات تبقى أحسن"];
+  var RWX = { 1: ["يقول في جملة واحدة الحملة هتساعد مين", "يحكي لأي حد بيسأله الحملة دي ليه"], 6: ["بيقف قدام الترابيزة مش وراها", "بيبص في عين اللي بيكلمه", "بيكمّل لو حد قاله لأ", "بيبدأ الكلام من غير ما يتردد"], 3: ["يبدأ الكلام مع حد غريب ويكمّل دقيقة"], 5: ["يشكر عضو بالاسم قدام الفريق"] };
+  var CG = ["بيقف قدام الترابيزة", "بيقرّب من الناس الماشية", "بيبدأ بسلام أو سؤال", "بيحكي حكاية عن أسرة", "بيضحك وبيبص في العين", "لو حد رفض بيقوله ربنا يسهّلك"];
+  var CB = ["واقف ورا الترابيزة", "بيستنى الناس تيجي", "ماسك الموبايل", "بيقول ممكن تتبرع على طول", "لو حد رفض بيسكت ويتضايق"];
+  var PK = ["عشان مش واثقين", "عشان مش متحمسين", "عشان محدش ادّاهم حكايات", "عشان حاسين إنهم بيشحتوا", "عشان مكسوفين"];
+  function addFake(v, at) {
+    var nv = {}; RX_NV.forEach(function (c) { nv[c.id] = Math.random() < (c.id === "c3" || c.id === "c9" ? .5 : .85) ? RX_NV_KEY[c.id] : (RX_NV_KEY[c.id] === "r" ? "m" : "r"); }); v.nv = nv;
+    if (Math.random() < .3) v.l1 = [{ t: rnd(L1), at: at }];
+    var rw = {}; Object.keys(RWX).forEach(function (i) { if (Math.random() < .5) rw[i] = { t: rnd(RWX[i]), at: at + +i }; }); v.rw = rw;
+    if (Math.random() < .6) v.camg = MZ.shuffle(CG.slice()).slice(0, 2).map(function (t, j) { return { t: t, at: at + j }; });
+    if (Math.random() < .5) v.camb = MZ.shuffle(CB.slice()).slice(0, 2).map(function (t, j) { return { t: t, at: at + j }; });
+    var top = ["near", "hi", "story", "front", "no"]; v.top3 = MZ.shuffle(top.slice()).slice(0, 3);
+    var src = {}; RX_SRC.forEach(function (c) { src[c.id] = Math.random() < .75 ? RX_SRC_KEY[c.id] : rnd(["a", "o", "x"]); }); v.src = src;
+    if (Math.random() < .35) v.park = [{ t: rnd(PK), at: at }];
   }
   function clearFakes() {
     var fakes = Object.keys(people).filter(function (u) { return people[u].fake || /^fake_/.test(u); });

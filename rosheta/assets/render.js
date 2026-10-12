@@ -6,6 +6,7 @@
    ===================================================================== */
 var RXR = (function () {
   var esc = MZ.esc, ar = MZ.ar;
+  var EXT = {}, MEXT = {};   /* أنواع إضافية بتتسجل من ملفات تانية (render-2.js) */
 
   /* ───────── أنهي حاجات ظاهرة في الدوسة دي ───────── */
   function isPin(it) { return it.pin || it.k === "eyebrow" || it.k === "brand"; }
@@ -87,12 +88,12 @@ var RXR = (function () {
   function wall(it, ctx) {
     var A = act(ctx, it.act), hid = (ctx.S && ctx.S.hidden) || {};
     var list = (A.list || []).filter(function (x) { return !hid[x.k]; });
-    var n = list.length, last = list.slice(-48).reverse();   /* الأحدث الأول: لو الحيطة اتملت، القديم هو اللي يتقص */
+    var n = list.length, last = (RXR.group ? RXR.group(list) : list).slice(-48).reverse();   /* الأحدث الأول: لو الحيطة اتملت، القديم هو اللي يتقص */
     var size = n > 24 ? "s" : n > 10 ? "m" : "l";
     var h = '<div class="x-wall ' + size + '"><div class="x-h3">' + esc(it.title || "") + (n ? ' <span class="cnt">' + ar(n) + "</span>" : "") + "</div>";
     if (!n) return h + '<div class="empty">الأسئلة هتظهر هنا أول ما تتكتب…</div></div>';
     h += '<div class="cards">' + last.map(function (x, i) {
-      return '<div class="wc' + (i < 3 ? " fresh" : "") + '">' + esc(x.t) + (x.tb ? '<i>' + ar(x.tb) + "</i>" : "") + "</div>";
+      return '<div class="wc' + (i < 3 ? " fresh" : "") + '">' + esc(x.t) + (RXR.cnt ? RXR.cnt(x) : "") + (x.tb && !(x.n > 1) ? '<i>' + ar(x.tb) + "</i>" : "") + "</div>";
     }).join("") + "</div></div>";
     return h;
   }
@@ -181,7 +182,7 @@ var RXR = (function () {
           '<div class="url" id="qrurl"></div><div class="joined"><b>' + ar((ctx.agg && ctx.agg.n) || 0) + "</b> دخلوا لحد دلوقتي</div></div></div>";
       case "tables": return tables(ctx);
     }
-    return "";
+    return EXT[it.k] ? EXT[it.k](it, ctx, step, fresh) : "";
   }
 
   /* ───────── الشاشة كلها ───────── */
@@ -227,10 +228,11 @@ var RXR = (function () {
           var A = act(ctx, it.act), cnt = A.count || {};
           out.push('<div class="m-card"><b>اختياراتنا</b>' + RX_REQ.slice().sort(function (a, b) { return (cnt[b.id] || 0) - (cnt[a.id] || 0); }).filter(function (r) { return cnt[r.id]; }).map(function (r) { return '<div class="m-row"><span>' + esc(r.l) + "</span><span>" + ar(cnt[r.id]) + " ✓</span></div>"; }).join("") + "</div>");
           break;
+        default: if (MEXT[it.k]) out.push(MEXT[it.k](it, ctx, step));
       }
     });
     return out.join("");
   }
 
-  return { visible: visible, stage: stage, mirror: mirror, tick: tick, lockSvg: lockSvg, SEVEN: SEVEN, reqLabel: reqLabel };
+  return { EXT: EXT, MEXT: MEXT, act: act, timer: timer, visible: visible, stage: stage, mirror: mirror, tick: tick, lockSvg: lockSvg, SEVEN: SEVEN, reqLabel: reqLabel };
 })();

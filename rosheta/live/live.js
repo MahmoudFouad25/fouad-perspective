@@ -50,7 +50,18 @@
 
   /* ───────── الشريحة الحالية ───────── */
   function current() {
-    if (mode === "manual") { var sl = RX_SLIDES[manualIdx]; return { sl: sl, step: rxSteps(sl) - 1, manual: true }; }
+    if (mode === "manual") {
+      /* ماشي بنفسه: نفتح الجزء التفاعلي في الشريحة لو فيه، عشان يقدر يشارك حتى من غير اتصال */
+      var sl = RX_SLIDES[manualIdx], st = rxSteps(sl) - 1;
+      var alt = -1;
+      for (var i = 0; i < sl.steps.length; i++) {
+        var p = sl.steps[i].ph; if (!p) continue;
+        if (p.act || (p.a && p.a.act)) { alt = -1; st = i; break; }          /* أولوية: الجزء اللي فيه إجابة */
+        if (alt < 0 && !/^(mirror|quiet|join|table)$/.test(p.k)) alt = i;
+      }
+      if (alt >= 0) st = alt;
+      return { sl: sl, step: st, manual: true };
+    }
     if (S && S.slide) { var s2 = rxSlide(S.slide); return { sl: s2, step: Math.min(S.step || 0, rxSteps(s2) - 1) }; }
     return { sl: RX_SLIDES[0], step: 0, notStarted: true };
   }
@@ -114,6 +125,7 @@
     else if (ph.k === "quiet") h = '<div class="quiet"><div class="rx">℞</div><p>' + esc(ph.t || "بص للشاشة الكبيرة") + "</p></div>";
     else if (ph.k === "pick") h = pickView(ph);
     else if (ph.k === "texts") h = textsView(ph);
+    else if (XV[ph.k]) h = XV[ph.k](ph);
     else h = mirrorView(c);
     $main.innerHTML = '<div class="view">' + h + "</div>";
     bind(ph);
@@ -169,6 +181,7 @@
     var A = RX_ACTS[ph.act], mine = (me.sent && me.sent[ph.act]) || [];
     var h = '<h2>' + esc(ph.prompt) + '</h2><p class="lead">' + esc(ph.hint || "") + "</p>" +
       '<div class="card"><textarea class="inp" id="tx" maxlength="' + (A.maxLen || 140) + '" placeholder="' + esc(ph.ph || "") + '"></textarea>' +
+      (ph.guard ? '<div class="guard" id="gd"></div>' : "") +
       '<button class="btn" id="tsend"' + (mine.length >= (A.max || 8) ? " disabled" : "") + '>ابعت للحيطة</button><div class="err" id="er"></div></div>';
     if (mine.length) h += '<div class="card"><b>اللي بعته (' + ar(mine.length) + ")</b><ul class=\"mine\">" + mine.map(function (x, i) {
       return "<li><span>" + esc(x.t) + '</span><button data-del="' + i + '">امسح</button></li>'; }).join("") + "</ul></div>";
@@ -191,6 +204,9 @@
   }
 
   function bind(ph) {
+    if (XB[ph.k]) { XB[ph.k](ph); return; }
+    var txg = document.getElementById("tx"), gd = document.getElementById("gd");
+    if (txg && gd) txg.oninput = function () { gd.outerHTML = guardHtml(txg.value, ph.guard, "gd"); gd = document.getElementById("gd"); };
     var go = document.getElementById("go");
     if (go) {
       var rl = document.getElementById("rl"), role = me.role || "";
@@ -229,6 +245,7 @@
         if (v.length < 3) { er.textContent = "اكتب السؤال الأول."; return; }
         var mine = ((me.sent && me.sent[ph.act]) || []).slice();
         if (mine.some(function (x) { return x.t === v; })) { er.textContent = "بعته قبل كده ✓"; return; }
+        if (ph.guard && bannedIn(v, ph.guard).length) { er.textContent = "شيل الكلمة الممنوعة الأول 🙂"; return; }
         mine.push({ t: v, at: Date.now() });
         sendVote(ph.act, mine); tx.value = ""; toast("اتبعت للحيطة ✓"); render(true);
         setTimeout(function () { var t2 = document.getElementById("tx"); if (t2) t2.focus(); }, 50);
@@ -239,10 +256,148 @@
         sendVote(ph.act, mine); render(true);
       };
     } else $main.onclick = null;
+    $main.oninput = null;
   }
   function keepWhy() {
     [].forEach.call(document.querySelectorAll("[data-w]"), function (i) { draft.w[i.dataset.w] = i.value.trim(); });
   }
+
+
+  /* ═════════ أوضاع الموبايل الإضافية (الأقفال ١ → ٣ وبعدها) ═════════ */
+  var XV = {}, XB = {}, uiTab = {};
+  function words(g) { return g === 1 || g === true ? RX_BANNED : (g || RX_BANNED); }
+  function bannedIn(t, g) { var w = []; t = t || ""; words(g).forEach(function (b) { if (t.indexOf(b) !== -1 && w.indexOf(b) === -1) w.push(b); }); return w; }
+  function guardHtml(t, g, id) {
+    var w = bannedIn(t, g), a = id ? ' id="' + id + '"' : "";
+    if (w.length) return '<div class="guard bad"' + a + '>فيها كلمة ممنوعة: «' + w.map(esc).join("»، «") + "». " + (g && g.length && g !== RX_BANNED && g !== 1 ? "دي وسيلة… النتيجة بعدها إيه؟" : "الكاميرا مش هتشوفها 🙂") + "</div>";
+    return '<div class="guard' + ((t || "").trim().length > 4 ? " ok" : "") + '"' + a + ">" + ((t || "").trim().length > 4 ? "تمام، دي حاجة تتشاف ✓" : "") + "</div>";
+  }
+  function sent(act) { return (me.sent && me.sent[act]) || null; }
+
+  /* ── التصنيف ── */
+  function sortRows(act) {
+    var A = RX_ACTS[act], my = sent(act) || {}, done = 0;
+    var h = A.cards.map(function (c) {
+      var v = my[c.id]; if (v) done++;
+      return '<div class="srt' + (v ? " done" : "") + '"><div class="t"><i>' + ar(c.no) + "</i>" + esc(c.t) + '</div><div class="bs">' + A.bins.map(function (b) {
+        return '<button data-sc="' + c.id + '" data-sb="' + b.id + '" data-sa="' + act + '"' + (v === b.id ? ' class="on" style="background:' + b.c + '"' : "") + ">" + esc(b.s || b.l) + "</button>"; }).join("") + "</div></div>";
+    }).join("");
+    return { h: h, done: done, n: A.cards.length };
+  }
+  XV.sort = function (ph) {
+    var r = sortRows(ph.act);
+    return "<h2>" + esc(ph.title || "صنّف") + '</h2><p class="lead">' + esc(ph.hint || "") + '</p><p class="muted" id="sdone">صنّفت ' + ar(r.done) + " من " + ar(r.n) + "</p>" + r.h;
+  };
+  function sortClick(e) {
+    var b = e.target.closest("[data-sc]"); if (!b) return false;
+    var act = b.dataset.sa, my = Object.assign({}, sent(act) || {});
+    my[b.dataset.sc] = b.dataset.sb; sendVote(act, my);
+    try { if (navigator.vibrate) navigator.vibrate(15); } catch (x) {}
+    var keep = window.scrollY; render(true); window.scrollTo(0, keep);
+    return true;
+  }
+  XB.sort = function () { $main.onclick = sortClick; $main.oninput = null; };
+
+  /* ── الاختيار ── */
+  XV.choice = function (ph) {
+    var A = RX_ACTS[ph.act], my = sent(ph.act) || [], max = ph.max || A.max || 3;
+    return "<h2>" + esc(ph.prompt) + '</h2><p class="muted">اخترت ' + ar(my.length) + " من " + ar(max) + (my.length === max ? " ✓ اتبعت" : "") + '</p><div class="picks">' + A.opts.map(function (o) {
+      var on = my.indexOf(o.id) !== -1;
+      return '<button class="pick' + (on ? " on" : "") + '" data-ch="' + o.id + '"' + (!on && my.length >= max ? " disabled" : "") + '><span class="bx">' + (on ? "✓" : "") + "</span>" + esc(o.l) + "</button>";
+    }).join("") + "</div>";
+  };
+  XB.choice = function (ph) {
+    $main.oninput = null;
+    $main.onclick = function (e) {
+      var b = e.target.closest("[data-ch]"); if (!b) return;
+      var A = RX_ACTS[ph.act], max = ph.max || A.max || 3, my = (sent(ph.act) || []).slice(), i = my.indexOf(b.dataset.ch);
+      if (i !== -1) my.splice(i, 1); else if (my.length < max) my.push(b.dataset.ch);
+      sendVote(ph.act, my); render(true);
+    };
+  };
+
+  /* ── إعادة الكتابة (الكلمات الممنوعة) ── */
+  XV.rewrite = function (ph) {
+    var A = RX_ACTS[ph.act], my = sent(ph.act) || {};
+    return "<h2>" + esc(ph.title) + '</h2><p class="lead">' + esc(ph.hint || "") + "</p>" + A.items.map(function (it) {
+      var v = (my[it.i] && my[it.i].t) || "";
+      return '<div class="rw"><s>' + esc(it.t) + '</s><input data-rw="' + it.i + '" maxlength="140" value="' + esc(v) + '" placeholder="المتطوع بي…"' + (v ? ' class="ok"' : "") + ">" + guardHtml(v, 1, "g" + it.i) + "</div>";
+    }).join("") + '<button class="btn" id="rwsend">ابعت اللي كتبته</button><div class="err" id="er"></div>';
+  };
+  XB.rewrite = function (ph) {
+    $main.onclick = null;
+    $main.oninput = function (e) {
+      var i = e.target.closest("[data-rw]"); if (!i) return;
+      var g = document.getElementById("g" + i.dataset.rw); if (g) g.outerHTML = guardHtml(i.value, 1, "g" + i.dataset.rw);
+      i.className = bannedIn(i.value, 1).length ? "bad" : "";
+    };
+    document.getElementById("rwsend").onclick = function () {
+      var my = Object.assign({}, sent(ph.act) || {}), bad = 0, any = 0, er = document.getElementById("er");
+      [].forEach.call(document.querySelectorAll("[data-rw]"), function (i) {
+        var v = i.value.trim(); if (!v) return;
+        if (bannedIn(v, 1).length) { bad++; return; }
+        any++; if (!my[i.dataset.rw] || my[i.dataset.rw].t !== v) my[i.dataset.rw] = { t: v, at: Date.now() };
+      });
+      if (bad) { er.textContent = "فيه " + ar(bad) + " جملة لسه فيها كلمة ممنوعة. صلّحها، أو امسحها."; }
+      if (!any) { if (!bad) er.textContent = "اكتب جملة واحدة على الأقل."; return; }
+      sendVote(ph.act, my); toast("اتبعت ✓");
+    };
+  };
+
+  /* ── عمودين (الكاميرا) ── */
+  XV.texts2 = function (ph) {
+    var cur = uiTab.t2 || "a", c = ph[cur], A = RX_ACTS[c.act], mine = sent(c.act) || [];
+    return "<h2>" + esc(ph.prompt) + '</h2><p class="lead">' + esc(ph.hint || "") + '</p><div class="tabs2"><button data-t2="a" class="good' + (cur === "a" ? " on" : "") + '">' + esc(ph.a.l) + " (" + ar((sent(ph.a.act) || []).length) + ')</button><button data-t2="b" class="bad' + (cur === "b" ? " on" : "") + '">' + esc(ph.b.l) + " (" + ar((sent(ph.b.act) || []).length) + ")</button></div>" +
+      '<div class="card"><textarea class="inp" id="tx" maxlength="' + (A.maxLen || 110) + '" placeholder="مثلًا: بيقف قدام الترابيزة"></textarea><div class="guard" id="gd"></div><button class="btn" id="tsend"' + (mine.length >= (A.max || 10) ? " disabled" : "") + ">ابعت</button><div class=\"err\" id=\"er\"></div></div>" +
+      (mine.length ? '<div class="card"><b>اللي بعته هنا</b><ul class="mine">' + mine.map(function (x, i) { return "<li><span>" + esc(x.t) + '</span><button data-del="' + i + '">امسح</button></li>'; }).join("") + "</ul></div>" : "");
+  };
+  XB.texts2 = function (ph) {
+    var cur = uiTab.t2 || "a", act = ph[cur].act, tx = document.getElementById("tx"), gd = document.getElementById("gd");
+    $main.oninput = function () { gd.outerHTML = guardHtml(tx.value, 1, "gd"); gd = document.getElementById("gd"); };
+    $main.onclick = function (e) {
+      var t = e.target.closest("[data-t2]"); if (t) { uiTab.t2 = t.dataset.t2; render(true); return; }
+      var d = e.target.closest("[data-del]"); if (d) { var m = (sent(act) || []).slice(); m.splice(+d.dataset.del, 1); sendVote(act, m); render(true); }
+    };
+    document.getElementById("tsend").onclick = function () {
+      var v = tx.value.trim(), er = document.getElementById("er");
+      if (v.length < 3) { er.textContent = "اكتب اللي الكاميرا هتشوفه."; return; }
+      if (bannedIn(v, 1).length) { er.textContent = "شيل الكلمة الممنوعة الأول 🙂"; return; }
+      var m = (sent(act) || []).slice(); if (m.some(function (x) { return x.t === v; })) { er.textContent = "بعته قبل كده ✓"; return; }
+      m.push({ t: v, at: Date.now() }); sendVote(act, m); toast("اتبعت ✓"); render(true);
+      setTimeout(function () { var t2 = document.getElementById("tx"); if (t2) t2.focus(); }, 50);
+    };
+  };
+
+  /* ── الظروف ── */
+  function envTabs(list) {
+    var cur = Math.min(uiTab.env || 0, list.length - 1), e = list[cur];
+    return '<div class="envtabs">' + list.map(function (x, i) { return '<button data-env="' + i + '" class="' + x.tone + (i === cur ? " on" : "") + '">' + esc(x.h.split(" (")[0]) + "</button>"; }).join("") + "</div>" +
+      '<div class="m-card m-env ' + e.tone + '"><b>' + esc(e.h) + "</b>" + e.lines.map(function (l) { return '<div style="margin:6px 0">' + esc(l) + "</div>"; }).join("") + "</div>";
+  }
+  function envClick(e) { var t = e.target.closest("[data-env]"); if (!t) return false; uiTab.env = +t.dataset.env; render(true); return true; }
+  XV.envs = function (ph) { return "<h2>التلات ظروف</h2><p class=\"lead\">اقرا التلاتة. دوس على كل لون.</p>" + envTabs(ph.list); };
+  XB.envs = function () { $main.oninput = null; $main.onclick = envClick; };
+
+  /* ── التحقيق: الظروف + التصنيف + ركن «ليه؟» ── */
+  XV.inv = function (ph) {
+    var r = sortRows(ph.act), mine = sent(ph.park) || [];
+    return "<h2>التحقيق</h2>" + envTabs(RX_ENVS) +
+      '<h3 style="margin:18px 0 4px">صنّف كل جملة</h3><p class="muted" id="sdone">صنّفت ' + ar(r.done) + " من " + ar(r.n) + "</p>" + r.h +
+      '<div class="card" style="border:1.5px dashed #d8b97a"><b>ركن «ليه؟»</b><p class="muted" style="margin:0 0 6px">قلت «عشان»؟ اركنها هنا. هنرجعلها بعد الاستراحة.</p><input class="inp" id="pk" maxlength="90" placeholder="عشان…"><button class="btn soft" id="pks">اركنها</button>' +
+      (mine.length ? '<ul class="mine">' + mine.map(function (x, i) { return "<li><span>" + esc(x.t) + '</span><button data-pdel="' + i + '">امسح</button></li>'; }).join("") + "</ul>" : "") + "</div>";
+  };
+  XB.inv = function (ph) {
+    $main.oninput = null;
+    $main.onclick = function (e) {
+      if (envClick(e) || sortClick(e)) return;
+      var d = e.target.closest("[data-pdel]"); if (d) { var m = (sent(ph.park) || []).slice(); m.splice(+d.dataset.pdel, 1); sendVote(ph.park, m); render(true); }
+    };
+    document.getElementById("pks").onclick = function () {
+      var i = document.getElementById("pk"), v = i.value.trim(); if (v.length < 3) return;
+      var m = (sent(ph.park) || []).slice(); if (m.length >= 6) { toast("كفاية ٦ 🙂"); return; }
+      m.push({ t: v, at: Date.now() }); sendVote(ph.park, m); toast("اتركنت ✓"); var keep = window.scrollY; render(true); window.scrollTo(0, keep);
+    };
+  };
 
   /* ───────── الاتصال ───────── */
   var unsubs = [];
