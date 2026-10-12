@@ -122,7 +122,7 @@
   /* الأرقام المجمّعة: بتتحسب هنا وبتتكتب في مستند عام (للشاشة والموبايلات) */
   var aggTimer = null;
   function recompute() {
-    agg = { acts: RX.aggregate(votes, people, S.groups || {}), n: Object.keys(people).length };
+    agg = { acts: RX.aggregate(votes, people, S.groups || {}, S.pairs || {}), n: Object.keys(people).length };
     bus.send({ agg: agg });
     paintLive();
     clearTimeout(aggTimer);
@@ -278,7 +278,8 @@
   function phoneLabel(ph) {
     return { join: "الموبايلات: التسجيل", table: "الموبايلات: رقم الترابيزة واللي معاه", quiet: "الموبايلات هادية", pick: "الموبايلات بتفتح للاختيار", texts: "الموبايلات بتفتح للكتابة",
       sort: "الموبايلات بتفتح للتصنيف", choice: "الموبايلات بتفتح للاختيار", rewrite: "الموبايلات بتفتح على الست جمل",
-      texts2: "الموبايلات بتفتح على عمودين", envs: "الموبايلات بتعرض الظروف التلاتة", inv: "الموبايلات: الظروف + التصنيف + ركن ليه", tag: "الموبايلات بتفتح للتصنيف على الخريطة" }[ph.k] || "";
+      texts2: "الموبايلات بتفتح على عمودين", envs: "الموبايلات بتعرض الظروف التلاتة", inv: "الموبايلات: الظروف + التصنيف + ركن ليه", tag: "الموبايلات بتفتح للتصنيف على الخريطة",
+      clinic: "الموبايلات: ملف المريض والبطاقة", review: "الموبايلات: بطاقة الترابيزة اللي جنبهم", map: "الموبايلات: خريطة المحافظة", handover: "الموبايلات: اتفاق التسليم" }[ph.k] || "";
   }
 
   /* ───────────── الحاجة الحيّة في الشريحة دي ───────────── */
@@ -286,7 +287,7 @@
     var el = document.getElementById("live"); if (!el) return;
     var sl = rxSlide(S.slide), st = Math.min(S.step || 0, rxSteps(sl) - 1), ph = rxPhone(sl, st);
     var ids = [];
-    [ph.act, ph.park, ph.a && ph.a.act, ph.b && ph.b.act].forEach(function (x) { if (x && ids.indexOf(x) === -1) ids.push(x); });
+    [ph.act, ph.park, ph.a && ph.a.act, ph.b && ph.b.act, ph.k === "clinic" && "cc", ph.k === "review" && "rv", ph.k === "map" && (ph.sec === "notes" || ph.sec === "round" ? "gn" : "gm"), ph.k === "handover" && "ho"].forEach(function (x) { if (x && ids.indexOf(x) === -1) ids.push(x); });
     if (!ids.length) RXR.visible(sl, st).forEach(function (it) { [it.act, it.a && it.a.act, it.b && it.b.act].forEach(function (x) { if (x && ids.indexOf(x) === -1) ids.push(x); }); });
     if (!ids.length) { el.innerHTML = ""; return; }
     var T = maxTable();
@@ -294,6 +295,8 @@
       var A = agg.acts[id] || {}, D = RX_ACTS[id] || {}, t = D.type, txt;
       if (t === "tablePick") txt = A.nT ? "سلّمت <b>" + ar(A.nT) + "</b>" + (T ? " من " + ar(T) + " ترابيزة" : " ترابيزة") : "لسه محدش سلّم من الموبايلات";
       else if (t === "texts") txt = A.n ? esc(D.label) + ": <b>" + ar(A.n) + "</b> إجابة" : esc(D.label) + ": لسه فاضية";
+      else if (t === "tableCard") txt = esc(D.label) + ": سلّمت <b>" + ar(A.nT || 0) + "</b>" + (T ? " من " + ar(T) : "");
+      else if (t === "form") txt = esc(D.label) + ": <b>" + ar(A.nP || 0) + "</b> زوج";
       else if (t === "sort" || t === "rewrite" || t === "choice" || t === "tag") txt = A.n ? esc(D.label) + ": جاوب <b>" + ar(A.n) + "</b> من " + ar(Object.keys(people).length) : esc(D.label) + ": لسه محدش جاوب";
       else txt = esc(D.label || id);
       return '<div class="livebox">' + txt + "</div>";
@@ -319,7 +322,8 @@
       '<div class="ctr"><label>كام واحد في الترابيزة؟ <input class="s" id="tsz" type="number" min="3" max="12" value="' + size + '" style="width:64px"></label>' +
       '<button class="b dark" id="mk">' + (Object.keys(G).length ? "وزّع الترابيزات من الأول" : "وزّع الترابيزات") + "</button>" +
       (unplaced.length && Object.keys(G).length ? '<button class="b" id="late">حط المتأخرين (' + ar(unplaced.length) + ")</button>" : "") +
-      '<span class="meta">بيخلط المدربين بمسؤولين التنمية، وبيفرّق اللي من نفس المحافظة.</span></div>';
+      '<span class="meta">بيخلط المدربين بمسؤولين التنمية، وبيفرّق اللي من نفس المحافظة.</span></div>' +
+      '<div class="ctr"><button class="b dark" id="mkpairs">' + (Object.keys(S.pairs || {}).length ? "اعمل أزواج المحافظات من الأول" : "اعمل أزواج المحافظات") + '</button><span class="meta">لجلسة «محافظتك»: كل مسؤول تنمية مع مدرب من محافظته. وتقدر تعدّل الرقم من عمود «الزوج».</span></div>';
     var by = {};
     L.forEach(function (p) { if (G[p.u]) (by[G[p.u]] = by[G[p.u]] || []).push(p); });
     var ks = Object.keys(by).sort(function (a, b) { return a - b; });
@@ -327,9 +331,9 @@
       return '<div class="tcard"><b>' + ar(k) + "</b>" + ar(by[k].length) + "<div>" + by[k].map(function (p) { return '<span class="dt ' + p.r + '"></span>' + esc(p.n.split(" ")[0]) + " <span class=\"meta\">" + esc(p.g) + "</span>"; }).join("<br>") + "</div></div>";
     }).join("") + '</div><p class="meta"><span class="dt t"></span>مدرب · <span class="dt d"></span>مسؤول تنمية · <span class="dt o"></span>تنظيم/ضيف</p>';
     var maxT = Math.max(maxTable(), ks.length);
-    h += "<table><tr><th>الاسم</th><th>الدور</th><th>المحافظة</th><th>الترابيزة</th><th></th></tr>" + L.sort(function (a, b) { return (G[a.u] || 99) - (G[b.u] || 99) || a.n.localeCompare(b.n, "ar"); }).map(function (p) {
+    h += "<table><tr><th>الاسم</th><th>الدور</th><th>المحافظة</th><th>الترابيزة</th><th>الزوج</th><th></th></tr>" + L.sort(function (a, b) { return (G[a.u] || 99) - (G[b.u] || 99) || a.n.localeCompare(b.n, "ar"); }).map(function (p) {
       var opts = '<option value="">—</option>'; for (var i = 1; i <= maxT + 1; i++) opts += '<option value="' + i + '"' + (G[p.u] === i ? " selected" : "") + ">" + ar(i) + "</option>";
-      return "<tr><td>" + esc(p.n) + (p.fake ? ' <span class="meta">(بروفة)</span>' : "") + "</td><td>" + esc(RX.ROLES[p.r] || "") + "</td><td>" + esc(p.g) + '</td><td><select class="s" data-tb="' + p.u + '">' + opts + '</select></td><td><button class="b red" data-rm="' + p.u + '">شيله</button></td></tr>';
+      return "<tr><td>" + esc(p.n) + (p.fake ? ' <span class="meta">(بروفة)</span>' : "") + "</td><td>" + esc(RX.ROLES[p.r] || "") + "</td><td>" + esc(p.g) + '</td><td><select class="s" data-tb="' + p.u + '">' + opts + '</select></td><td><input class="s" style="width:56px" data-pr="' + p.u + '" value="' + ((S.pairs || {})[p.u] || "") + '"></td><td><button class="b red" data-rm="' + p.u + '">شيله</button></td></tr>';
     }).join("") + "</table>";
     el.innerHTML = h;
     document.getElementById("tsz").onchange = function () { MZ.store.set("rx:tsize", this.value); };
@@ -344,7 +348,13 @@
       unplaced.forEach(function (p) { g2[p.u] = RX.placeLate(p, g2, all); });
       push({ groups: g2 }); recompute(); paintPeople();
     };
+    document.getElementById("mkpairs").onclick = function () {
+      if (Object.keys(S.pairs || {}).length && !confirm("الأزواج الحالية هتتمسح وتتعمل من الأول. موافق؟")) return;
+      push({ pairs: RX.makeGovPairs(plist()) }); recompute(); paintPeople();
+    };
     el.onchange = function (e) {
+      var pr = e.target.closest("[data-pr]");
+      if (pr) { var P = Object.assign({}, S.pairs || {}), v = parseInt(MZ.en(pr.value), 10); if (v > 0) P[pr.dataset.pr] = v; else delete P[pr.dataset.pr]; push({ pairs: P }); recompute(); return; }
       var s = e.target.closest("[data-tb]"); if (!s) return;
       var g2 = Object.assign({}, S.groups || {}); if (s.value) g2[s.dataset.tb] = +s.value; else delete g2[s.dataset.tb];
       push({ groups: g2 }); recompute(); paintPeople();
@@ -371,6 +381,13 @@
         var by = R.by || {};
         h += R.n ? "<table><tr><th>الجملة</th>" + A.bins.map(function (b) { return "<th>" + esc(b.l) + "</th>"; }).join("") + "</tr>" + A.cards.map(function (c) {
           return "<tr><td>" + ar(c.no) + ". " + esc(c.t) + "</td>" + A.bins.map(function (b) { return "<td>" + ar((by[c.id] || {})[b.id] || 0) + "</td>"; }).join("") + "</tr>"; }).join("") + "</table>" : '<p class="meta">لسه مفيش.</p>';
+      } else if (A.type === "tableCard") {
+        var cb = R.byT || {}, ck = Object.keys(cb).sort(function (a, b) { return a - b; });
+        h += ck.length ? ck.map(function (t) { var v = cb[t].v; return '<div class="if"><b>ترابيزة ' + ar(t) + " · " + esc(rxClinicFor(+t).h) + ' <span class="meta">(' + esc(cb[t].by) + ")</span></b>" + RXR.SEVEN.map(function (r, i) { return "<div>" + ar(i + 1) + ". " + esc(r.q) + " <b style=\"display:inline\">" + esc((v.f || {})[i + 1] || "—") + "</b></div>"; }).join("") +
+          "<div>النوع: " + (v.ty || []).map(function (x) { var tt = rxType(x); return tt ? tt.n : x; }).join(" · ") + " · رايحة لـ: " + (v.to || []).map(function (x) { var o = RX_TO.filter(function (y) { return y.id === x; })[0]; return o ? o.l : x; }).join(" · ") + "</div>" + (v.dec ? "<div>🏢 قرار: " + esc(v.dec) + "</div>" : "") + "</div>"; }).join("") : '<p class="meta">لسه مفيش.</p>';
+      } else if (A.type === "form") {
+        var fb = R.byP || {}, fk = Object.keys(fb);
+        h += fk.length ? '<p class="meta">التفاصيل كاملة في «حمّل تقرير الورشة».</p>' + fk.map(function (p) { var v = fb[p].v; return '<div class="wl"><span>زوج ' + esc(p) + " · " + esc(fb[p].g || "") + " · " + esc(fb[p].by) + "</span><b>" + (id === "gm" ? ar((v.needs || []).filter(function (n) { return n.t; }).length) + " احتياج" + (v.month ? " · ⚖️ " + esc(v.month) : "") : (v.st === "ready" ? "جاهزة ✓" : v.st === "back" ? "ترجع" : "—") + (v.follow ? " · 📅 " + esc(v.follow) : "")) + "</b></div>"; }).join("") : '<p class="meta">لسه مفيش.</p>';
       } else if (A.type === "tag") {
         var tg = R.by || {};
         h += R.n ? "<table><tr><th>الحالة</th><th>البُعد (الأكتر)</th>" + ((A.fields || []).indexOf("t") !== -1 ? "<th>نوع السبب (الأكتر)</th>" : "") + "</tr>" + A.cards.map(function (c) {
@@ -409,11 +426,18 @@
     el.innerHTML = "<h3>البروفة</h3><p class=\"meta\">قبل اليوم: ولّد مشاركين وهميين، ووزّع الترابيزات، وامشي الورشة كلها بـ«التالي» وشوف الشاشة والموبايل. وبعدها امسح البروفة.</p>" +
       '<div class="ctr"><label>عدد <input class="s" id="fk" type="number" value="30" min="4" max="120" style="width:70px"></label><button class="b dark" id="mkf">ولّد مشاركين وهميين بإجاباتهم</button><button class="b red" id="clf">امسح بيانات البروفة</button></div>' +
       '<p class="meta">وعشان تجرّب موبايل حقيقي: افتح <a target="_blank" href="' + link("live") + '&as=1">صفحة المشارك ١</a> و<a target="_blank" href="' + link("live") + '&as=2">٢</a> في تابات جنب بعض.</p>' +
+      "<h3 style=\"margin-top:20px\">تقرير الورشة</h3><p class=\"meta\">كل البطاقات، وخرايط المحافظات، واتفاقات التسليم، وبطاقات القرار، وكلام «قبل ما تمشي»، في ملف واحد تبعته لميرنا ود. أمنية.</p>" +
+      '<div class="ctr"><button class="b dark" id="report">حمّل تقرير الورشة</button><button class="b" id="csv">حمّل كشف الحضور (CSV)</button></div>' +
       "<h3 style=\"margin-top:20px\">الورشة</h3>" +
       '<div class="ctr"><button class="b" id="rst">ارجع لأول شريحة</button><button class="b red" id="wipe">امسح كل الإجابات (يبدأ اليوم نضيف)</button></div>' +
       '<p class="meta">«امسح كل الإجابات» بيمسح إجابات اللعبة والحيطة بتاعة الكل، ويسيب الناس والترابيزات. استخدمه بعد البروفة لو جربت بموبايلات حقيقية.</p>' +
       "<h3 style=\"margin-top:20px\">الكيبورد والريموت</h3><p class=\"meta\">السهم الشمال أو المسافة = التالي · السهم اليمين = السابق · B = شاشة سودا · والريموت (الكليكر) شغال لوحده. وعلى شاشة العرض: F = ملء الشاشة.</p>";
     document.getElementById("mkf").onclick = makeFakes;
+    document.getElementById("report").onclick = function () { download("تقرير-قبل-الروشتة.txt", buildReport(), "text/plain"); };
+    document.getElementById("csv").onclick = function () {
+      var rows = [["الاسم", "الدور", "المحافظة", "الترابيزة", "الزوج"]].concat(plist().filter(function (p) { return !p.fake; }).map(function (p) { return [p.n, RX.ROLES[p.r] || "", p.g, (S.groups || {})[p.u] || "", (S.pairs || {})[p.u] || ""]; }));
+      download("حضور-قبل-الروشتة.csv", "\ufeff" + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(","); }).join("\n"), "text/csv");
+    };
     document.getElementById("clf").onclick = clearFakes;
     document.getElementById("rst").onclick = function () { if (confirm("ترجع لأول شريحة؟")) go(RX_SLIDES[0].id, 0); };
     document.getElementById("wipe").onclick = function () {
@@ -422,6 +446,54 @@
       Object.keys(votes).forEach(function (u) { if (k < 450) { batch.delete(MZ.vRef(SID, u)); k++; } });
       batch.commit().then(function () { push({ hidden: {} }); alert("اتمسحت ✓"); }).catch(function (e) { alert(MZ.errText(e)); });
     };
+  }
+
+  /* ───────────── تقرير الورشة ───────────── */
+  function download(name, text, type) {
+    try { var b = new Blob([text], { type: type + ";charset=utf-8" }), a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
+    catch (e) { alert("التحميل مش شغال في المتصفح ده: " + e.message); }
+  }
+  function buildReport() {
+    var A = agg.acts || {}, L = [], line = "─".repeat(40), P = plist().filter(function (p) { return !p.fake; });
+    function top(o) { var b = null, m = 0; Object.keys(o || {}).forEach(function (k) { if (o[k] > m) { m = o[k]; b = k; } }); return b; }
+    L.push("تقرير ورشة «قبل الروشتة» · " + new Date().toLocaleString("ar-EG"), "الجلسة: " + SID, "الحضور: " + P.length + " (" + P.filter(function (p) { return p.r === "t"; }).length + " مدرب · " + P.filter(function (p) { return p.r === "d"; }).length + " مسؤول تنمية)", line);
+    var pk = (A.pick3 || {}).count || {};
+    L.push("١) اللعبة الصبح: اختيارات الترابيزات", RX_REQ.filter(function (r) { return pk[r.id]; }).map(function (r) { return "  " + r.l + ": " + pk[r.id] + " ترابيزة"; }).join("\n") || "  —", line);
+    var cc = (A.cc || {}).byT || {};
+    L.push("٢) عيادة الاحتياج: بطاقات الترابيزات");
+    Object.keys(cc).sort(function (a, b) { return a - b; }).forEach(function (t) {
+      var v = cc[t].v; L.push("", "ترابيزة " + t + " · " + rxClinicFor(+t).h);
+      RXR.SEVEN.forEach(function (r, i) { L.push("  " + (i + 1) + ". " + r.q + " ← " + ((v.f || {})[i + 1] || "—")); });
+      L.push("  النوع: " + (v.ty || []).map(function (x) { var tt = rxType(x); return tt ? tt.n : x; }).join(" · ") + " · رايحة لـ: " + (v.to || []).map(function (x) { var o = RX_TO.filter(function (y) { return y.id === x; })[0]; return o ? o.l : x; }).join(" · "));
+      if (v.dec) L.push("  🏢 بطاقة قرار: " + v.dec);
+    });
+    L.push(line);
+    var vd = (A.vd || {}).count || {}, mzg = (A.mzg || {}).list || [];
+    L.push("٣) الميزان تحت الأداة", "  حقيقي: " + (vd.y || 0) + " · بشروط: " + (vd.c || 0) + " · مش احتياج: " + (vd.n || 0), "  اللي الميزان مش هيحله:", mzg.map(function (x) { return "   • " + x.t; }).join("\n") || "   —", line);
+    var gm = (A.gm || {}).byP || {}, ho = (A.ho || {}).byP || {}, R = S.roster || {}, PR = S.pairs || {};
+    L.push("٤) خرايط المحافظات");
+    Object.keys(gm).forEach(function (p) {
+      var v = gm[p].v, names = Object.keys(PR).filter(function (u) { return String(PR[u]) === String(p); }).map(function (u) { return (R[u] || {}).n + " (" + (RX.ROLES[(R[u] || {}).r] || "") + ")"; });
+      L.push("", "■ " + (gm[p].g || "—") + " · " + names.join(" + "));
+      L.push("  🎯 الهدف: " + (v.goals || []).filter(function (g) { return g; }).join(" · "));
+      (v.needs || []).filter(function (n) { return n.t; }).forEach(function (n, i) {
+        var dd = rxDim(n.d), tt = rxType(n.ty), ct = RX_CTYPES.filter(function (c) { return c.id === n.ct; })[0], q = RX_QUAD.filter(function (c) { return c.id === n.q; })[0];
+        var sc = n.s1 && n.s2 && n.s3 ? (+n.s1) * 2 + (+n.s2) + (+n.s3) : 0;
+        L.push("  " + (i + 1) + ". " + n.t + " | " + (dd ? dd.n : "—") + " | " + (tt ? tt.n : "—") + " | " + (ct ? ct.l : "—") + (q ? " | " + q.s : "") + (sc ? " | " + sc + "/12" : "") + (n.lock && n.lock !== "0" ? " | ناقص القفل " + n.lock + (n.who ? " · نسأل: " + n.who : "") + (n.when ? " · لحد: " + n.when : "") : ""));
+      });
+      L.push("  ⚖️ الميزان: " + (v.month || "—"));
+      var h = ho[p] && ho[p].v; if (h) L.push("  📥 التسليم: " + (h.st === "ready" ? "جاهزة" : h.st === "back" ? "ترجع (القفل " + (h.lock || "?") + " لحد " + (h.until || "?") + ")" : "—") + (h.ans ? " · «لو نجح هشوف»: " + h.ans : "") + (h.follow ? " · 📅 المتابعة: " + h.follow : ""));
+    });
+    L.push(line);
+    var d = RXR.decisions ? RXR.decisions({ S: S, agg: agg }) : null;
+    L.push("٥) صندوق بطاقات القرار (لمجلس الإدارة)" + (d ? ": " + d.all : ""));
+    Object.keys(gm).forEach(function (p) { (gm[p].v.needs || []).forEach(function (n) { if (n.t && n.ct === "p") L.push("  • " + (gm[p].g || "") + ": " + n.t); }); });
+    Object.keys(cc).forEach(function (t) { if (cc[t].v.dec) L.push("  • العيادة (ترابيزة " + t + "): " + cc[t].v.dec); });
+    L.push("  • جنب الميزان: كل متطوع ياخد بطاقة دور مكتوبة · رسالة حملات الشارع تتغير · طريقة واضحة لصرف المواصلات من غير إحراج", line);
+    var fs = (A.first || {}).list || [];
+    L.push("٦) قبل ما تمشي: أول حاجة هعملها مختلف", fs.map(function (x) { return "  • " + x.t; }).join("\n") || "  —", line);
+    L.push("قياس الورشة نفسها (القفل السابع): بعد ٣ أسابيع · بعد ٦ لـ٨ أسابيع · بعد ٣ لـ٦ شهور. واتكلم مع أنجح ٣ أزواج وأضعف ٣.");
+    return L.join("\n");
   }
 
   /* ───────────── البروفة ───────────── */
@@ -464,6 +536,14 @@
     var gr = {}; RX_GC.forEach(function (c) { var k = RX_GC_KEY[c.id]; gr[c.id] = { d: Math.random() < .75 ? k.d : rnd(RX_DIMS).id, t: Math.random() < .6 ? k.t : (Math.random() < .6 ? "k" : rnd(RX_TYPES).id) }; }); v.gr = gr;
     var ln = {}; RX_LINE.forEach(function (c) { ln[c.id] = rnd(["a", "b", "b", "c"]); }); v.ln = ln;
     var ld = {}; RX_LAD.forEach(function (c) { ld[c.id] = Math.random() < .7 ? RX_LAD_KEY[c.id] : rnd(["e", "l", "a", "r"]); }); v.ld = ld;
+    if (Math.random() < .3) { var cf = {}; RXR.SEVEN.forEach(function (r, i) { if (Math.random() < .8) cf[i + 1] = rnd(["٣ من ٨ بس بيكلموا الناس", "مسؤول الملف يدّي كل متطوع حكاية", "قربي وأثري", "المكان ناقص + مش عارف إزاي", "٣٠ مبتدئ و٧ ممارسين", "المنسق يعد في أول حملة"]); }); v.cc = { case: "a", f: cf, ty: Math.random() < .7 ? ["p", "k"] : ["k"], to: ["t"], dec: Math.random() < .6 ? "كل متطوع ياخد بطاقة دور مكتوبة" : "", at: at }; }
+    if (Math.random() < .3) v.rv = [{ t: rnd(["جبتوا الرقم ده منين؟", "فحصتوا المكان؟", "مين بالظبط؟"]), at: at, to: 1 + Math.floor(Math.random() * 6), l: 1 + Math.floor(Math.random() * 7) }];
+    v.vd = [rnd(["c", "c", "c", "y", "n"])];
+    if (Math.random() < .3) v.mzg = [{ t: rnd(["وضوح الدور", "رسالة الحملة", "المواصلات", "الناس اللي محتاجة متخصص"]), at: at }];
+    v.gn = [{ t: rnd(["المتطوعين بيقفوا ساكتين في الحملة", "الاجتماعات حضورها قليل", "مفيش حد بيقول للمتطوعين النتيجة", "المسؤولين شايلين كل حاجة"]), at: at }];
+    if (Math.random() < .5) v.gm = { goals: ["الناس تقف تسمع في الحملات", "المتطوع الجديد يكمّل ٣ شهور", ""], needs: [{ t: "المتطوعين بيقفوا ساكتين في الحملة", q: "a", d: "V2", ty: "k", ct: "k", s1: 3, s2: 3, s3: 2, lock: "3", who: "المنسق", when: "آخر الشهر" }, { t: "مفيش حد بيقول للمتطوعين الفلوس راحت فين", q: "a", d: "V3", ty: "p", ct: "p" }, { t: "مسؤولين الملفات شايلين كل حاجة", q: "b", d: "B3", ty: "k", ct: "k", s1: 2, s2: 2, s3: 3 }], month: rnd(["يناير", "فبراير", "مارس"]), at: at };
+    if (Math.random() < .5) v.ho = { card: "0", ans: "في أول حملة أغلبهم بيكلموا الناس", st: rnd(["back", "back", "ready"]), lock: "3", until: "آخر الشهر", follow: "2026-12-10", at: at };
+    if (Math.random() < .4) v.first = [{ t: rnd(["هقعد مع المنسق ونعد في الحملة الجاية", "هسأل البورد عن الهدف", "هعمل بطاقة دور لكل متطوع"]), at: at }];
   }
   function clearFakes() {
     var fakes = Object.keys(people).filter(function (u) { return people[u].fake || /^fake_/.test(u); });

@@ -66,8 +66,8 @@ var RX = (function () {
      كل مشارك بيكتب إجاباته في مستند باسمه (votes/{uid}).
      لوحة التحكم بتجمعها هنا، وبتكتب النتيجة في مستند عام (pub/agg)
      فيه اللي محتاجينه للشاشة بس. والموبايلات بتقراه برضه. */
-  function aggregate(votes, people, groups) {
-    var acts = {};
+  function aggregate(votes, people, groups, pairs) {
+    var acts = {}; pairs = pairs || {};
     Object.keys(RX_ACTS).forEach(function (id) {
       var A = RX_ACTS[id], res;
       if (A.type === "tablePick") {
@@ -89,7 +89,7 @@ var RX = (function () {
           var v = votes[u] && votes[u][id]; if (!v || !v.length) return;
           v.forEach(function (x, i) {
             if (!x || !x.t) return;
-            list.push({ k: u.slice(0, 8) + i, t: String(x.t).slice(0, A.maxLen || 160), at: x.at || 0, tb: groups[u] || 0 });
+            list.push({ k: u.slice(0, 8) + i, t: String(x.t).slice(0, A.maxLen || 160), at: x.at || 0, tb: groups[u] || 0, pr: pairs[u] || 0, to: x.to || 0, l: x.l || 0 });
           });
         });
         list.sort(function (a, b) { return a.at - b.at; });
@@ -131,6 +131,26 @@ var RX = (function () {
         });
         res = { by: tb, n: tn };
       }
+      else if (A.type === "tableCard") {
+        /* بطاقة الترابيزة: آخر حد سلّم من الترابيزة هو اللي بيتحسب */
+        var cT = {};
+        Object.keys(votes).forEach(function (u) {
+          var v = votes[u] && votes[u][id]; if (!v || !v.at) return;
+          var t = groups[u] || 0;
+          if (!cT[t] || v.at > cT[t].at) cT[t] = { v: v, at: v.at, by: (people[u] && people[u].n) || "" };
+        });
+        res = { byT: cT, nT: Object.keys(cT).length };
+      }
+      else if (A.type === "form") {
+        /* خريطة المحافظة: آخر نسخة من أي حد في الزوج */
+        var fP = {};
+        Object.keys(votes).forEach(function (u) {
+          var v = votes[u] && votes[u][id]; if (!v || !v.at) return;
+          var p = pairs[u] || ("u" + u.slice(0, 6));
+          if (!fP[p] || v.at > fP[p].at) fP[p] = { v: v, at: v.at, by: (people[u] && people[u].n) || "", g: (people[u] && people[u].g) || "" };
+        });
+        res = { byP: fP, nP: Object.keys(fP).length };
+      }
       else if (A.type === "choice") {
         var cnt = {}, m = 0;
         Object.keys(votes).forEach(function (u) {
@@ -144,6 +164,26 @@ var RX = (function () {
     return acts;
   }
 
+  /* ───────── أزواج المحافظات (للجلسة «محافظتك») ─────────
+     كل مسؤول تنمية مع مدرب من نفس المحافظة. اللي فاضل من نفس المحافظة بيتضاف
+     لزوج موجود (تلاتي). واللي ملوش حد في محافظته، بيتجمع مع حد فاضل من محافظة تانية. */
+  function makeGovPairs(people) {
+    var by = {}, out = {}, no = 0, leftD = [], leftT = [];
+    people.forEach(function (p) { (by[p.g || "—"] = by[p.g || "—"] || []).push(p); });
+    Object.keys(by).sort(function (a, b) { return a.localeCompare(b, "ar"); }).forEach(function (g) {
+      var L = by[g], D = L.filter(function (p) { return p.r === "d"; }), T = L.filter(function (p) { return p.r === "t"; }), O = L.filter(function (p) { return p.r !== "d" && p.r !== "t"; });
+      var made = [];
+      while (D.length && T.length) { no++; var a = D.shift(), b = T.shift(); out[a.u] = no; out[b.u] = no; made.push(no); }
+      D.concat(T).concat(O).forEach(function (p) {
+        if (made.length) out[p.u] = made[made.length - 1];
+        else if (p.r === "t") leftT.push(p); else leftD.push(p);
+      });
+    });
+    while (leftD.length && leftT.length) { no++; out[leftD.shift().u] = no; out[leftT.shift().u] = no; }
+    leftD.concat(leftT).forEach(function (p) { if (!no) no = 1; out[p.u] = no; });
+    return out;
+  }
+
   /* أرقام عربية لعدد مع كلمة */
   function count(n, one, two, many) {
     n = n || 0;
@@ -153,5 +193,5 @@ var RX = (function () {
     return ar(n) + " " + many;
   }
 
-  return { sid: sid, ROLES: ROLES, GOVS: GOVS, makeTables: makeTables, placeLate: placeLate, aggregate: aggregate, count: count };
+  return { sid: sid, ROLES: ROLES, GOVS: GOVS, makeTables: makeTables, placeLate: placeLate, makeGovPairs: makeGovPairs, aggregate: aggregate, count: count };
 })();

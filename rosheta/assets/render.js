@@ -47,6 +47,7 @@ var RXR = (function () {
   }
   function fmt(left) { var m = Math.floor(left / 60), s = left % 60; return ar(m) + ":" + ar(s < 10 ? "0" + s : s); }
   function tick(root) {
+    if (RXR.tickExtra) try { RXR.tickExtra(root); } catch (e) {}
     [].forEach.call(root.querySelectorAll("[data-timer]"), function (el) {
       var total = +el.dataset.timer, st = +el.dataset.start;
       var left = Math.max(0, Math.round(total - (Date.now() - st) / 1000));

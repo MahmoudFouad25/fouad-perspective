@@ -17,8 +17,8 @@
   /* ───── بطاقة الحالة: الأقفال اللي اتفتحت وإجاباتها ───── */
   E.caseCard = function (it, ctx, step, fresh) {
     var open = it.open || 0, focus = it.focus || 0;
-    return '<div class="x-case' + (it.wide ? " wide" : "") + '"><div class="hd"><b>بطاقة احتياج · حالة «تواصل» في حملات الشارع</b><span>' + ar(open) + " من ٧ مفتوحة</span></div>" + RXR.SEVEN.map(function (r, i) {
-      var on = i < open, ans = RX_CASE[i] || "";
+    return '<div class="x-case' + (it.wide ? " wide" : "") + '"><div class="hd"><b>' + esc(it.title || "بطاقة احتياج · حالة «تواصل» في حملات الشارع") + '</b><span>' + ar(open) + " من ٧ مفتوحة</span></div>" + RXR.SEVEN.map(function (r, i) {
+      var on = i < open, ans = (it.answers || RX_CASE)[i] || "";
       var cls = (on ? " on" : "") + (focus === i + 1 ? " focus" : "") + (focus === i + 1 && (it.at || 0) === step ? " fresh" : "");
       return '<div class="cr' + cls + '">' + RXR.lockSvg(on) + '<div><b><i>' + ar(i + 1) + "</i>" + esc(r.q) + "</b>" + (on && ans && (it.wide || open <= 3 || focus === i + 1) ? "<span>" + esc(ans) + "</span>" : "") + "</div></div>";
     }).join("") + "</div>";
@@ -26,7 +26,7 @@
   M.caseCard = function (it) {
     var open = it.open || 0;
     return '<div class="m-card"><b>بطاقة الاحتياج · حالة «تواصل»</b>' + RXR.SEVEN.map(function (r, i) {
-      return '<div class="m-row7' + (it.focus === i + 1 ? " hl" : "") + '"><b>' + (i < open ? "🔓" : "🔒") + " " + ar(i + 1) + ". " + esc(r.q) + "</b>" + (i < open && RX_CASE[i] ? "<small>" + esc(RX_CASE[i]) + "</small>" : "") + "</div>";
+      return '<div class="m-row7' + (it.focus === i + 1 ? " hl" : "") + '"><b>' + (i < open ? "🔓" : "🔒") + " " + ar(i + 1) + ". " + esc(r.q) + "</b>" + (i < open && (it.answers || RX_CASE)[i] ? "<small>" + esc((it.answers || RX_CASE)[i]) + "</small>" : "") + "</div>";
     }).join("") + "</div>";
   };
 
@@ -73,7 +73,7 @@
   function env(e, big) {
     return '<div class="env ' + e.tone + (big ? " big" : "") + '"><div class="eh"><span class="dot"></span>' + esc(e.h) + "</div>" + e.lines.map(function (l) { return "<p>" + esc(l) + "</p>"; }).join("") + "</div>";
   }
-  E.envs = function (it) { return '<div class="x-envs n' + it.list.length + '">' + it.list.map(function (e) { return env(e, it.list.length === 1); }).join("") + "</div>"; };
+  E.envs = function (it) { return '<div class="x-envs n' + it.list.length + (it.sm ? " sm" : "") + '">' + it.list.map(function (e) { return env(e, it.list.length === 1); }).join("") + "</div>"; };
   M.envs = function (it) { return it.list.map(function (e) { return '<div class="m-card m-env ' + e.tone + '"><b>' + esc(e.h) + "</b>" + e.lines.map(function (l) { return "<div>" + esc(l) + "</div>"; }).join("") + "</div>"; }).join(""); };
 
   /* ───── كل مصدر شايف إيه ───── */
