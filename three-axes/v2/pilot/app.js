@@ -48,7 +48,7 @@
       if (!firebase.apps.length) firebase.initializeApp(AXP_FIREBASE);
       fb.db = firebase.firestore();
       fb.auth = firebase.auth();
-      try { fb.db.settings({ experimentalForceLongPolling: true, useFetchStreams: false, merge: true }); } catch (e) {}
+      try { fb.db.settings({ experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false, useFetchStreams: false, merge: true }); } catch (e) {}
       fb.ok = true;
     } else { fb.err = "no-sdk"; }
   } catch (e) { fb.err = (e && e.code) || "init"; }

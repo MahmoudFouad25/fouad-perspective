@@ -21,6 +21,7 @@ var Day = (function () {
   try {
     db.settings({
       experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: false,   /* لازم: نسخة 10 بتشغّله افتراضيًا ولو اتجمع مع Force الإعداد كله بيترمي */
       useFetchStreams: false,
       merge: true
     });
