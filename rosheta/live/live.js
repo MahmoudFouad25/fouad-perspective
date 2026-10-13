@@ -32,7 +32,16 @@
     me.pending = me.pending || {}; me.pending[k] = v; me.sent = me.sent || {}; me.sent[k] = v; save();
     flush();
   }
+  /* الدخول المجهول: لو فشل مرة، بنعيده مع كل flush بدل ما نفضل من غير uid للأبد */
+  var signing = false;
+  function signIn() {
+    if (signing || !MZ.db || !MZ.hasFb()) return;
+    signing = true;
+    MZ.signInAnon(15000).then(function (u) { signing = false; uid = u.uid; lastErr = null; flush(); render(true); status(); })
+      .catch(function (e) { signing = false; lastErr = e; status(); });
+  }
   function flush() {
+    if (MZ.db && !uid) { signIn(); return; }
     if (!uid || !MZ.db) return;
     if (me.pending && Object.keys(me.pending).length) {
       var data = me.pending;
@@ -41,9 +50,11 @@
         save(); lastErr = null; status();
       }).catch(function (e) { lastErr = e; status(); });
     }
-    if (joined() && !me.registered) {
-      MZ.pRef(SID, uid).set({ n: me.name, r: me.role, g: me.gov, at: Date.now() }, { merge: true })
-        .then(function () { me.registered = true; save(); lastErr = null; status(); })
+    /* التسجيل مربوط بالـuid: لو الموبايل خد uid جديد (مسح بيانات، متصفح تاني جوه واتساب…) بيسجّل تاني */
+    if (joined() && (!me.registered || me.regUid !== uid)) {
+      var forUid = uid;
+      MZ.pRef(SID, forUid).set({ n: me.name, r: me.role, g: me.gov, at: Date.now() }, { merge: true })
+        .then(function () { me.registered = true; me.regUid = forUid; save(); lastErr = null; status(); })
         .catch(function (e) { lastErr = e; status(); });
     }
   }
@@ -78,6 +89,10 @@
       html = "إنت ماشي مع الشاشة بنفسك. اكتب الرقم اللي في ركن الشاشة الكبيرة (تحت على الشمال):" +
         '<div class="row"><button data-m="prev">اللي قبلها</button><input id="mnum" inputmode="numeric" style="width:70px;border:1px solid #e0c48f;border-radius:10px;padding:4px 8px;text-align:center" value="' + ar(manualIdx + 1) + '">' +
         '<button data-m="go">روح</button><button data-m="next">اللي بعدها</button></div><div class="row"><button data-m="auto">رجّعني للمزامنة</button></div>';
+    } else if (joined() && !(me.registered && me.regUid === uid) && Date.now() - (me.joinAt || bootAt) > 12000) {
+      cls = lastErr && lastErr.code !== "mz/timeout" ? "err" : "warn";
+      html = "<b>اسمك لسه ما وصلش للمدرب.</b> " + esc(lastErr ? MZ.errText(lastErr) : "بنحاول نبعته…") +
+        '<br>بياناتك متحفظة على موبايلك. لو الرسالة دي فضلت، قول للمدرب.<div class="row"><button data-m="retry">جرّب تاني</button></div>';
     } else if (stale) {
       cls = lastErr && lastErr.code === "permission-denied" ? "err" : "warn";
       html = esc(lastErr ? MZ.errText(lastErr) : "مش واصلين للسيرفر دلوقتي. إجاباتك متحفظة على موبايلك، وهتتبعت أول ما الاتصال يرجع.") +
@@ -91,7 +106,7 @@
     var m = b.getAttribute("data-m");
     if (m === "manual") { mode = "manual"; manualIdx = S && S.slide ? rxIndex(S.slide) : 0; }
     if (m === "auto") mode = "auto";
-    if (m === "retry") { MZ.reconnect(); toast("بنحاول…"); start(); }
+    if (m === "retry") { MZ.reconnect(); toast("بنحاول…"); uid = null; signing = false; start(); }
     if (m === "prev") manualIdx = Math.max(0, manualIdx - 1);
     if (m === "next") manualIdx = Math.min(RX_SLIDES.length - 1, manualIdx + 1);
     if (m === "go") { var v = parseInt(MZ.en(document.getElementById("mnum").value), 10); if (v >= 1 && v <= RX_SLIDES.length) manualIdx = v - 1; }
@@ -217,7 +232,7 @@
         if (n.length < 2) { er.textContent = "اكتب اسمك."; return; }
         if (!role) { er.textContent = "اختار: مدرب ولا مسؤول تنمية."; return; }
         if (!g) { er.textContent = "اختار محافظتك."; return; }
-        me.name = n; me.role = role; me.gov = g; me.registered = false; editing = false; save();
+        me.name = n; me.role = role; me.gov = g; me.registered = false; me.joinAt = Date.now(); editing = false; save();
         flush(); toast("أهلًا يا " + n.split(" ")[0] + " ✓"); render(true);
       };
     }
@@ -716,8 +731,7 @@
       status(); render(false);
     }, function (e) { serverOk = false; lastErr = e; status(); }));
     unsubs.push(MZ.watchDoc(MZ.aggRef(SID), function (d) { agg = d || {}; refresh(); var c = current(); if (rxPhone(c.sl, c.step).k === "mirror") render(true); else sharedRefresh(); }, function () {}));
-    MZ.signInAnon(15000).then(function (u) { uid = u.uid; lastErr = null; flush(); render(true); status(); })
-      .catch(function (e) { lastErr = e; status(); });
+    signIn();
   }
   window.addEventListener("online", flush);
   setInterval(flush, 20000);
