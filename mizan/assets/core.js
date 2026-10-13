@@ -20,7 +20,9 @@ var MZ = (function () {
       TS = firebase.firestore.FieldValue.serverTimestamp;
       /* long-polling إجباري: القناة الحيّة العادية بتتقفل على شبكات المحمول
          وسفاري ومتصفح واتساب. ده كان سبب «الشاشة واقفة» في أيام سابقة. */
-      try { db.settings({ experimentalForceLongPolling: true, useFetchStreams: false, merge: true }); }
+      /* ⚑ لازم نقفل experimentalAutoDetectLongPolling صراحةً: نسخة 10 بتشغّله افتراضيًا،
+         ولو اتجمع مع ForceLongPolling الإعداد كله بيترمي (وبيطلع تحذير في الكونسول) والـlong-polling ما بيشتغلش. */
+      try { db.settings({ experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false, useFetchStreams: false, merge: true }); }
       catch (e) { console.warn("[mz] settings", e && e.message); }
     } catch (e) { fbInitError = e; hasFb = false; db = null; auth = null; }
   }
