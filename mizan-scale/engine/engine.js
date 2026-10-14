@@ -362,7 +362,7 @@
          grows_main: الأقوى لسه الأول في التطوع («وفي التطوع بيبقى أقوى كمان»)
          wakes_quiet: الهادي مش آخر واحد في التطوع («طاقتك بتروح لها أكتر بشكل واضح»)
          other_face: المساند بقى الأول في التطوع («بيتقدّم ويبقى هو اللي بيشدك الأول»)
-       لو الشرط ما اتحققش، النتيجة دي بتتشال. ولو مفيش نتيجة فضلت ← like_life. ولو فضل اتنين ← tie، بالترتيب: wakes_quiet، grows_main، other_face. */
+       لو الشرط ما اتحققش، النتيجة دي بتتشال، ومن غير ما نروح للمحور اللي بعده في الفرق. وفي التعادل الشرط على كل محور لوحده. ولو مفيش نتيجة فضلت ← like_life. ولو فضل اتنين ← tie، بالترتيب: wakes_quiet، grows_main، other_face. */
   var OUT_ORDER = ["wakes_quiet", "grows_main", "other_face"];
   var TENURE_LT1 = "t1", TENURE_LT3 = ["t1", "t2"];
   function volunteer(ans, items, C, final) {

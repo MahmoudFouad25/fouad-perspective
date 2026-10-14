@@ -30,7 +30,7 @@
     var needFollow = R.alerts.depletion.on || R.alerts.mood.on || R.alerts.freeze.on;   // علامة في الأدمن بس، من غير أي إجراء
     var VT = R.volunteer, VCT = CT.volunteer;
     var start = (items.client && items.client.start) || {}, cl = A.client || {};
-    function optText(q, id) { var o = ((start[q] || {}).options || []).filter(function (x) { return x.id === id; })[0]; return o ? o.text : "—"; }
+    function optText(q, id) { var o = ((start[q] || {}).options || []).filter(function (x) { return x.id === id; })[0]; if (!o) return "—"; return fem && items.fem && items.fem[o.text] ? items.fem[o.text] : o.text; }   // بالمؤنث لو المتطوعة اختارته (الورقة ممكن تتقري معاها)
 
     add("title", "ورقة الكوتش" + (opts.name ? ": " + opts.name : ""));
     if (fem) add("p", "المتطوعة اختارت إن المقياس والتقرير يكلموها بصيغة المؤنث.");

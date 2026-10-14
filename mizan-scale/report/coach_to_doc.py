@@ -9,6 +9,8 @@
 الورق كامل لكل المتطوعين الخمسة في samples.html.
 """
 import json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gitref import ref
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 S = json.load(open(os.path.join(HERE, 'samples.json'), encoding='utf-8'))
@@ -22,8 +24,8 @@ def add(t, k='p'):
 
 
 add('ب. ورقة الكوتش: قسم «التطوع» من التقارير النموذجية', 'h1')
-add('داخلي — متولّد آليًا بـ report/coach.js من نفس المتطوعين اللي في تاب «تقارير نموذجية» (' + S['generated'] +
-    '). هنا القسم الجديد بس (رقم ٥) لتلات حالات: ب و ج و د. والورقة كاملة للخمسة (الملخص والأرقام والتنبيهات وأسئلة الجلسة) في الريبو: mizan-scale/report/samples.html.', 'note')
+add('داخلي — متولّد آليًا بـ ' + ref('mizan-scale/report/coach.js') + ' من نفس المتطوعين اللي في تاب «تقارير نموذجية» (' + S['generated'] +
+    '). هنا القسم الجديد بس (رقم ٥) لتلات حالات: ب و ج و د. والورقة كاملة للخمسة (الملخص والأرقام والتنبيهات وأسئلة الجلسة) في الريبو: ' + ref('mizan-scale/report/samples.html') + '.', 'note')
 MAP = {'h2': 'h3', 'h3': 'h4', 'h4': 'h5', 'li': 'li', 'p': 'p'}
 for x in S['samples']:
     if x['key'] not in KEYS:

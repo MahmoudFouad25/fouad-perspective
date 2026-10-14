@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """بيحوّل samples.json لطلبات Google Docs (batchUpdate) لتاب «تقارير نموذجية»، ولصفحة samples.html للريبو.
   python3 to_doc.py <tabId> <tabEndIndex>   ← بيكتب doc_requests.json و samples.html
-التقرير «أ» كامل، و«ب» لـ«هـ» الأقسام الخاصة بالتطوع بس (والتقارير كاملة في samples.html)."""
+التقريرين «أ» و«ج» كاملين، و«ب» و«د» و«هـ» الأقسام الخاصة بالتطوع بس (والتقارير كاملة في samples.html)."""
 import json, sys, os, html
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gitref import ref
 HERE = os.path.dirname(os.path.abspath(__file__))
 S = json.load(open(os.path.join(HERE, 'samples.json'), encoding='utf-8'))
 T = json.load(open(os.path.join(HERE, 'texts.json'), encoding='utf-8'))
-FULL = {'أ'}
+FULL = {'أ', 'ج'}
 KEEP = ('إنت والتطوع', 'دايرتك في التطوع', 'لما الضغط يزيد')
 
 def arn(n): return str(n).translate(str.maketrans('0123456789', '٠١٢٣٤٥٦٧٨٩'))
@@ -15,11 +17,14 @@ paras = []   # (text, kind) kind: h1 h2 h3 h4 h5 p li note bold
 def add(t, k='p'): paras.append((t, k))
 
 add('تقارير نموذجية', 'h1')
+ST = len(sys.argv) > 2   # من غير tab: بيبني samples.html بس، فما يقفش على الملفات اللي لسه ما اترفعتش
+R_RENDER, R_SAMPLES = ref('mizan-scale/report/render.js', ST), ref('mizan-scale/report/samples.js', ST)
+R_HTML, R_FEM = ref('mizan-scale/report/samples.html', ST), ref('mizan-scale/fem/texts.fem.json', ST)
 add(f'داخلي — التقارير دي متولّدة آليًا ({S["generated"]}) من محرك «ميزان المتطوع» (نسخة {S["engine"]}، والإعدادات {S["config"]})، '
-    f'والأسئلة {S["questions"]}، ونصوص التاب الأولاني {S["texts"]}، بنفس الكود اللي بيبني تقرير المتطوع (mizan-scale/report/render.js). '
-    'ما تتعدّلش بإيد: أي تعديل في اللغة بيتعمل في التاب الأولاني، وبعدين التقارير دي بتتولّد من جديد (mizan-scale/report/samples.js).', 'note')
-add('داخلي — التقرير «أ» هنا كامل. وفي «ب» لـ«هـ» الأقسام اللي بتختلف بين الحالات بس: «إنت والتطوع» و«دايرتك في التطوع»، و«لما الضغط يزيد» لو ظهر. '
-    'والتقارير الخمسة كاملة، ومعاها ورقة الكوتش لكل واحد، في الريبو: mizan-scale/report/samples.html. والتقريرين «أ» و«د» بصيغة المؤنث: كل جملة فيهم جاية من نسختها المؤنثة في mizan-scale/fem.', 'note')
+    f'والأسئلة {S["questions"]}، ونصوص التاب الأولاني {S["texts"]}، بنفس الكود اللي بيبني تقرير المتطوع ({R_RENDER}). '
+    f'ما تتعدّلش بإيد: أي تعديل في اللغة بيتعمل في التاب الأولاني، وبعدين التقارير دي بتتولّد من جديد ({R_SAMPLES}).', 'note')
+add('داخلي — التقريرين «أ» و«ج» هنا كاملين، زي ما المتطوع هيقراهم بالظبط. وفي «ب» و«د» و«هـ» الأقسام اللي بتختلف بين الحالات بس: «إنت والتطوع» و«دايرتك في التطوع»، و«لما الضغط يزيد» لو ظهر. '
+    f'والتقارير الخمسة كاملة، ومعاها ورقة الكوتش لكل واحد، في الريبو: {R_HTML}. والتقريرين «أ» و«د» بصيغة المؤنث: كل جملة فيهم جاية من نسختها المؤنثة في {R_FEM}.', 'note')
 for x in S['samples']:
     r = x['report']; m = r['meta']; sm = x['summary']
     add(f'{x["key"]}. {x["title"]}', 'h1')
