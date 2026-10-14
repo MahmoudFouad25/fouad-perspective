@@ -96,7 +96,8 @@ function api(body, res) {
 var TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg" };
 http.createServer(function (req, res) {
   if (req.url === "/__api" && req.method === "POST") {
-    var b = ""; req.on("data", function (c) { b += c; }); req.on("end", function () { try { api(JSON.parse(b), res); } catch (e) { res.writeHead(500); res.end(String(e)); } });
+    // البايتات بتتجمع الأول وبعدين تتحوّل نص: لو اتجمعت كنص، حرف عربي بيتقسم بين قطعتين بيبوظ (ده اللي حصل لـ«الأصالة»)
+    var chunks = []; req.on("data", function (c) { chunks.push(c); }); req.on("end", function () { try { api(JSON.parse(Buffer.concat(chunks).toString("utf8")), res); } catch (e) { res.writeHead(500); res.end(String(e)); } });
     return;
   }
   var p = decodeURIComponent(req.url.split("?")[0]);

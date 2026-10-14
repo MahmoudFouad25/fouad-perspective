@@ -81,6 +81,15 @@ async function answerAll(p, o) {
     });
   }, o || {});
 }
+// بيكمّل المحطة المفتوحة ويدوس «التالي» (محطات المواقف موقف موقف)
+async function finishStation(p, o) {
+  if (await p.$('[data-act="introGo"]')) await click(p, '[data-act="introGo"]');
+  for (var k = 0; k < 20; k++) {
+    await answerAll(p, o);
+    if (await p.$('[data-act="sitNext"]')) await click(p, '[data-act="sitNext"]');
+    else { await click(p, '[data-act="stNext"]'); return; }
+  }
+}
 // بيمشي المقياس من مكانه لحد شاشة معيّنة (أو للتقرير)
 async function walk(p, target, o) {
   o = o || {};
@@ -95,6 +104,14 @@ async function walk(p, target, o) {
       await click(p, '[data-act="about"][data-k="tenure"][data-id="' + (o.tenure || "t3") + '"]');
       await click(p, '[data-act="aboutNext"]');
     } else if (sc === "period") { await click(p, '[data-act="period"][data-id="p9"]'); await click(p, '[data-act="periodNext"]'); }
+    else if (/^s[127]$/.test(sc)) {   // محطات المواقف: شرح المحطة، وبعدين موقف واحد في الشاشة
+      if (await p.$('[data-act="introGo"]')) await click(p, '[data-act="introGo"]');
+      for (var k = 0; k < 20; k++) {
+        await answerAll(p, o.answers && o.answers(+sc.slice(1)));
+        if (await p.$('[data-act="sitNext"]')) await click(p, '[data-act="sitNext"]');
+        else { await click(p, '[data-act="stNext"]'); break; }
+      }
+    }
     else if (/^s\d$/.test(sc)) { await answerAll(p, o.answers && o.answers(+sc.slice(1))); await click(p, '[data-act="stNext"]'); }
     else if (sc === "closing") await click(p, '[data-act="report"]');
     else await click(p, '[data-act="go"]');
@@ -164,8 +181,9 @@ async function run() {
   d = (await dump()).db.mizan_scale.MENA2345;
   ok("الصيغة اتبعتت بعد «نكلمك إزاي؟»", d.address === "f" && d.client && d.client.form === "f2");
   ok("الاسم والمحافظة (حقول الأدمن) زي ما هم", d.name === "منة الله علي" && d.gov === "سوهاج");
-  var leaks = [];
-  await walk(p, "s3", { address: "f", tenure: "t1", onScreen: async function () { leaks = leaks.concat(await mascLeaks(p)); } });
+  var leaks = [], trialBtns = 0;
+  async function spy() { leaks = leaks.concat(await mascLeaks(p)); trialBtns += (await p.$$('[data-act="trialFill"],[data-act="trialReset"]')).length; }
+  await walk(p, "s3", { address: "f", tenure: "t1", onScreen: spy });
   d = (await dump()).db.mizan_scale.MENA2345;
   ok("المحطتين ١ و٢ اتبعتوا للسيرفر", d.st && d.st["1"] && Object.keys(d.st["1"].answers).length === 18 && Object.keys(d.st["2"].answers).length === 6);
   ok("أسئلة البداية اتبعتت (السن والدور والمدة)", d.client.age === "a2" && d.client.role === "r1" && d.client.tenure === "t1");
@@ -179,17 +197,19 @@ async function run() {
   s = await st(p);
   ok("رجعت بنفس الرابط في نص المحطة ← نفس المحطة ونفس الـ٧ إجابات", Object.keys(s.st["3"].answers).length === 7 && JSON.stringify(Object.keys(s.st["3"].answers)) === JSON.stringify(Object.keys(before)));
   ok("…وعداد «فاضل» بيقول ١٢", /فاضل ١٢/.test(await p.innerText("#left")));
-  await walk(p, "s8", { address: "f", onScreen: async function () { leaks = leaks.concat(await mascLeaks(p)); } });
+  await walk(p, "s8", { address: "f", onScreen: spy });
   await p.screenshot({ path: path.join(SHOTS, "s8-375-f.png"), fullPage: true });
   ok("المحطة ٨: ٩ عبارات + «إنت فين»", (await p.$$("article.item")).length === 10);
   ok("…«لسه بدري» بالمؤنث موجود جنب كل عبارة", (await p.$$('[data-act="early"]')).length === 9);
   ok("…«إنتي فين» بالمؤنث", /إنتي فين/.test(await mainText(p)));
-  await walk(p, "report", { address: "f", answers: function (n) { return n === 8 ? { early: true, now: 3 } : null; }, onScreen: async function () { leaks = leaks.concat(await mascLeaks(p)); } });
+  await walk(p, "report", { address: "f", answers: function (n) { return n === 8 ? { early: true, now: 3 } : null; }, onScreen: spy });
   await p.waitForSelector(".report");
   await sleep(600);
   leaks = leaks.concat(await mascLeaks(p));
   ok("صيغة المؤنث: ولا جملة ليها نسخة مؤنثة ظهرت بالمذكر (المقياس كله والتقرير)", !leaks.length, leaks.slice(0, 3).join(" | "));
   t = await mainText(p);
+  trialBtns += (await p.$$('[data-act="trialFill"],[data-act="trialReset"]')).length;
+  ok("كود حقيقي: زرار «املأ عشوائي» و«ابدأ من الأول» ما ظهروش ولا مرة (كل الشاشات من الأول للتقرير)", trialBtns === 0, trialBtns);
   ok("التقرير ظهر بعنوانه", /ميزاني/.test(t) && (await p.$$(".report h2")).length >= 8);
   ok("التقرير: ولا كلمة عن واتساب أو تواصل", !/واتساب|wa\.me|هنتواصل|هنكلمك|هيتابع|كلّمينا/.test(t));
   ok("المتطوعة أقل من شهر ← «صورتك المتوقعة» في التقرير", (await st(p)).result.volunteer.expectedPicture === true);
@@ -250,7 +270,7 @@ async function run() {
   await p.goto(APP + "?c=NETT2345");
   await walk(p, "s2");
   await p.ctx.setOffline(true);
-  await answerAll(p); await click(p, '[data-act="stNext"]');
+  await finishStation(p);
   await p.waitForFunction(function () { return /النت ضعيف/.test(document.getElementById("note").innerText); }, null, { timeout: 15000 });
   ok("النت وقع ← المتطوع على المحطة ٣ على طول (ما استناش)", (await screen(p)) === "t2" || (await screen(p)) === "s3");
   ok("…والرسالة: «النت ضعيف. إجاباتك محفوظة على موبايلك…»", /إجاباتك محفوظة على موبايلك، وهتتبعت أول ما النت يرجع/.test(await notes(p)));
@@ -318,7 +338,9 @@ async function run() {
   p = await open({ noStorage: true });
   await p.goto(APP + "?c=STRG2345");
   await waitScreen(p, "address");
-  ok("رسالة التخزين ظاهرة", /مش بيحفظ على الموبايل/.test(await notes(p)));
+  ok("نصيحة التخزين ظاهرة كنصيحة صغيرة", /نصيحة صغيرة/.test(await notes(p)));
+  await click(p, '[data-act="noteHide"]');
+  ok("…و«تمام» بيقفلها", !/نصيحة صغيرة/.test(await notes(p)));
   await walk(p, "s2");
   d = (await dump()).db.mizan_scale.STRG2345;
   ok("…والإجابات بتوصل السيرفر بعد كل محطة", d.st && d.st["1"] && Object.keys(d.st["1"].answers).length === 18);
@@ -333,7 +355,7 @@ async function run() {
   ok("رسالة «دي نسخة تجربة» ظاهرة", /نسخة تجربة/.test(await notes(p)));
   await walk(p, "s1");
   await click(p, '[data-act="trialFill"]');
-  ok("زرار «املأ اللي فاضل» بيكمّل المحطة", /كده المحطة كملت/.test(await p.innerText("#left")));
+  ok("زرار «املأ اللي فاضل» بيكمّل المحطة ويفتح على آخر موقف", /خلّصت المحطة/.test(await p.innerText('[data-act="stNext"]')) && !(await p.getAttribute('[data-act="stNext"]', "aria-disabled")));
   await click(p, '[data-act="stNext"]');
   await walk(p, "report");
   await p.waitForSelector(".report");
@@ -374,12 +396,42 @@ async function run() {
   await waitScreen(p, "address", 20000);
   ok("أول شاشة في " + (Date.now() - t0) + "ms", Date.now() - t0 < 6000);
   await walk(p, "s9", {});
-  t0 = Date.now(); await answerAll(p); var tAns = Date.now() - t0;
+  t0 = Date.now(); await answerAll(p); var tAns = Date.now() - t0;   // محطة ٩ = عبارات، كلها في شاشة واحدة
   ok("١٨ دوسة في محطة الضغط: " + Math.round(tAns / 18) + "ms للدوسة", tAns / 18 < 250);
   t0 = Date.now();
   await click(p, '[data-act="stNext"]'); await walk(p, "report");
   await p.waitForSelector(".report");
   ok("حساب النتيجة + رسم التقرير في " + (Date.now() - t0) + "ms", Date.now() - t0 < 6000);
+  await p.ctx.close();
+
+  console.log("\n١٣. موقف واحد في الشاشة (محطات ١ و٢ و٧)");
+  await seed("RANA2345", { name: "رنا", status: "جديد" });
+  p = await open({ w: 360 });
+  await p.goto(APP + "?c=RANA2345");
+  await walk(p, "s1", { address: "f" });
+  ok("أول ما المحطة تفتح: شاشة الشرح ومفيش ولا موقف", !!(await p.$('[data-act="introGo"]')) && (await p.$$("article.item")).length === 0);
+  await click(p, '[data-act="introGo"]');
+  ok("بعد «يلّا نبدأ»: موقف واحد بس في الشاشة، ومكتوب «موقف ١ من ١٨»", (await p.$$("article.item")).length === 1 && /موقف ١ من ١٨/.test(await mainText(p)));
+  var vis = await p.evaluate(function () { var r = document.querySelector("article.item .opts").getBoundingClientRect(); return r.top < window.innerHeight; });
+  ok("…والاختيارات باينة من غير scroll (عرض ٣٦٠)", vis);
+  ok("«اللي بعده» مقفول قبل ما تختاري", (await p.getAttribute('[data-act="sitNext"]', "aria-disabled")) === "true");
+  await p.evaluate(function () { document.querySelectorAll(".pk.c")[0].click(); });
+  ok("اختارت «الأقرب» بس ← لسه على موقف ١ (مفيش نط لوحده)، والزرار لسه مقفول", /موقف ١ من ١٨/.test(await mainText(p)) && (await p.getAttribute('[data-act="sitNext"]', "aria-disabled")) === "true");
+  await p.evaluate(function () { document.querySelectorAll(".pk.f")[1].click(); });
+  var badges = await p.evaluate(function () { return Array.prototype.map.call(document.querySelectorAll(".opt .badge"), function (b) { return b.textContent; }); });
+  ok("شارة «الأقرب» و«الأبعد» جوه الاختيارين اللي اتختاروا بس", JSON.stringify(badges.sort()) === JSON.stringify(["الأبعد", "الأقرب"].sort()) && (await p.$$(".opt.is-c")).length === 1 && (await p.$$(".opt.is-f")).length === 1);
+  ok("…و«اللي بعده» اتفتح", !(await p.getAttribute('[data-act="sitNext"]', "aria-disabled")));
+  for (var q = 0; q < 2; q++) { await click(p, '[data-act="sitNext"]'); await answerAll(p); }
+  ok("بعد ٣ مواقف: «موقف ٣ من ١٨»", /موقف ٣ من ١٨/.test(await mainText(p)));
+  await click(p, '[data-act="sitPrev"]');
+  s = await st(p);
+  ok("«اللي قبله» ← موقف ٢ وإجابته زي ما هي", /موقف ٢ من ١٨/.test(await mainText(p)) && (await p.$$(".opt.is-c")).length === 1);
+  await click(p, '[data-act="sitNext"]');
+  await p.reload();
+  await waitScreen(p, "s1");
+  ok("قفلت وفتحت تاني ← نفس الموقف (٣) ومن غير شاشة الشرح", /موقف ٣ من ١٨/.test(await mainText(p)) && !(await p.$('[data-act="introGo"]')));
+  ok("مفيش أخطاء JavaScript", !p.errs.length, p.errs.join(" | "));
+  await p.screenshot({ path: path.join(SHOTS, "sit-360.png") });
   await p.ctx.close();
 
   // WebKit (أقرب حاجة لسفاري الآيفون في البيئة دي) لو متسطّب

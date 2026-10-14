@@ -52,6 +52,21 @@
     return true;
   }
   function isTrial(c) { return c.indexOf(CFG.trialPrefix) === 0; }
+  /* مولّد الأكواد الحقيقية (صفحة الأدمن بتستعمله). عشوائي من crypto، ومستحيل يطلّع كود بيبدأ بـ TEST:
+     الحرف التاني بيتسحب من غير E، فأول ٤ حروف عمرها ما تبقى TEST (اختبار tests/codes.js على مليون كود).
+     rand(n) ← رقم من 0 لـ n−1 (للاختبار بس، علشان نجرّب أسوأ الحالات). */
+  function makeCode(rand) {
+    var A = CFG.codeAlphabet, noE = A.replace("E", "");
+    rand = rand || function (n) {
+      var c = (typeof crypto !== "undefined" && crypto.getRandomValues) ? crypto : (typeof require === "function" ? require("crypto").webcrypto : null);
+      var u = new Uint32Array(1), lim = Math.floor(4294967296 / n) * n;
+      do { c.getRandomValues(u); } while (u[0] >= lim);   // من غير ميل لحروف دون غيرها
+      return u[0] % n;
+    };
+    var out = "";
+    for (var i = 0; i < CFG.codeLength; i++) out += i === 1 ? noE.charAt(rand(noE.length)) : A.charAt(rand(A.length));
+    return out;
+  }
   function codeFromUrl() {
     var m = /[?&#]c=([^&#]*)/.exec(location.search + location.hash);
     return m ? cleanCode(decodeURIComponent(m[1])) : "";
@@ -183,9 +198,9 @@
     ours: function (a, code) { return "فيه مشكلة في الحفظ عندنا، مش عندك. إجاباتك محفوظة على موبايلك." + (code ? " (رقم الخطأ: " + code + ")" : ""); },
     nosdk: function (a) { return "مكتبة الاتصال ما اتحمّلتش (غالبًا النت ضعيف). المقياس شغال من غيرها، وإجاباتك محفوظة على موبايلك لحد ما ترجع."; },
     storage: function (a) {
-      return G(a, "المتصفح ده مش بيحفظ على الموبايل (غالبًا الرابط مفتوح من جوه واتساب، أو تصفح خاص). إجاباتك بتتبعت لنا بعد كل محطة، بس الأضمن تفتح الرابط في كروم أو سفاري.",
-                  "المتصفح ده مش بيحفظ على الموبايل (غالبًا الرابط مفتوح من جوه واتساب، أو تصفح خاص). إجاباتك بتتبعت لنا بعد كل محطة، بس الأضمن تفتحي الرابط في كروم أو سفاري.",
-                  "المتصفح ده مش بيحفظ على الموبايل (غالبًا الرابط مفتوح من جوه واتساب، أو تصفح خاص). الإجابات بتتبعت بعد كل محطة، بس الأضمن فتح الرابط في كروم أو سفاري.");
+      return G(a, "نصيحة صغيرة: المتصفح ده مش بيحفظ على الموبايل، بس إجاباتك بتتبعت لنا بعد كل محطة، فكمّل عادي.",
+                  "نصيحة صغيرة: المتصفح ده مش بيحفظ على الموبايل، بس إجاباتك بتتبعت لنا بعد كل محطة، فكمّلي عادي.",
+                  "نصيحة صغيرة: المتصفح ده مش بيحفظ على الموبايل، بس الإجابات بتتبعت بعد كل محطة، فالمقياس شغال عادي.");
     },
     trial: function (a) {
       return G(a, "دي نسخة تجربة. إجاباتك بتتحفظ على الموبايل ده بس، ومش بتتبعت لأي حد. والتقرير بيطلع عادي في الآخر.",
@@ -201,7 +216,7 @@
   root.MZS = {
     CFG: CFG, VOLUNTEER_KEYS: VOLUNTEER_KEYS, MSG: MSG,
     ar: ar, esc: esc, clone: clone, first: first, pickKeys: pickKeys,
-    cleanCode: cleanCode, validCode: validCode, isTrial: isTrial, codeFromUrl: codeFromUrl,
+    cleanCode: cleanCode, validCode: validCode, isTrial: isTrial, codeFromUrl: codeFromUrl, makeCode: makeCode,
     store: store, loadJSON: loadJSON,
     sdk: sdk, resetSdkIfFailed: resetSdkIfFailed,
     firestore: firestore, fbError: function () { return fbError; }, docRef: docRef, ts: ts, withTimeout: withTimeout, kindOf: kindOf

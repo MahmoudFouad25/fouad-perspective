@@ -28,7 +28,7 @@
   function G(m, f) { return fem() ? f : m; }
 
   /* ───────── الرسائل اللي فوق (كل واحدة باسم سببها) ───────── */
-  var notes = {};
+  var notes = {}, hidden = {};   // نصيحة التخزين ممكن تتقفل بـ«تمام»؛ رسايل الحفظ لأ
   function setNote(kind, text) { notes[kind] = text; paintNotes(); }
   // الرسايل اللي اتكتبت قبل ما نعرف الصيغة: تتكتب تاني بالصيغة اللي اختارها
   function refreshNotes() {
@@ -41,7 +41,11 @@
   function paintNotes() {
     var d = $("#note"); if (!d) return;
     var order = ["trial", "ours", "nosdk", "net", "storage"], h = "";
-    order.forEach(function (k) { if (notes[k]) h += '<div class="nt nt-' + k + '" data-kind="' + k + '">' + esc(notes[k]) + "</div>"; });
+    order.forEach(function (k) {
+      if (!notes[k] || hidden[k]) return;
+      h += '<div class="nt nt-' + k + '" data-kind="' + k + '">' + esc(notes[k]) +
+           (k === "storage" ? ' <button type="button" class="linkish nt-x" data-act="noteHide" data-kind="storage">تمام</button>' : "") + "</div>";
+    });
     d.innerHTML = h; d.hidden = !h;
   }
 
@@ -276,36 +280,70 @@
   function rText(text, btn) {
     return '<section class="card rise center"><p class="big">' + esc(text) + '</p><button type="button" class="next" data-act="go">' + esc(btn) + "</button></section>";
   }
+  // محطات المواقف (١ و٢ و٧): موقف واحد في الشاشة (قرار المراجعة: التداخل بين المواقف كان بيلخبط العين).
+  // rec.cur = الموقف المفتوح. والرجوع بيفتح على أول موقف ما اتجاوبش.
+  function curOf(st, rec) {
+    if (typeof rec.cur === "number" && rec.cur >= 0 && rec.cur < st.items.length) return rec.cur;
+    for (var i = 0; i < st.items.length; i++) if (!itemDone(st, st.items[i], rec.answers)) return i;
+    return st.items.length - 1;
+  }
+  function stHead(st, full) {
+    var h = '<header class="st-head rise"><div class="st-n">المحطة ' + ar(st.id) + " من ٩</div><h2>" + esc(F(st.title)) + "</h2>";
+    if (full) st.intro.forEach(function (p) { h += "<p>" + esc(F(p)) + "</p>"; });
+    return h;
+  }
+  function trialBtn(st) {
+    return TRIAL ? '<button type="button" class="mini trialfill noprint" data-act="trialFill" data-st="' + st.id + '">تجربة بس: املأ اللي فاضل في المحطة دي عشوائي</button>' : "";
+  }
   function rStation(st) {
     var rec = ensureSt(st.id);
     if (!rec.startedAt) { rec.startedAt = now(); save(); }
     if (st.id === 9 && !S.adaptive) { S.adaptive = computeAdaptive(); save(); }
-    var h = '<header class="st-head rise"><div class="st-n">المحطة ' + ar(st.id) + " من ٩</div><h2>" + esc(F(st.title)) + "</h2>";
-    st.intro.forEach(function (p) { h += "<p>" + esc(F(p)) + "</p>"; });
-    if (st.kind === "triad") h += '<p class="soft">' + G("في كل موقف: دوس «الأقرب» على اختيار، و«الأبعد» على اختيار تاني.", "في كل موقف: دوسي «الأقرب» على اختيار، و«الأبعد» على اختيار تاني.") + "</p>";
-    if (TRIAL) h += '<button type="button" class="mini trialfill noprint" data-act="trialFill" data-st="' + st.id + '">تجربة بس: املأ اللي فاضل في المحطة دي عشوائي</button>';
-    h += "</header>";
+    if (st.kind === "triad") return rTriadStation(st, rec);
+    var h = stHead(st, true) + trialBtn(st) + "</header>";
+    var n = st.items.length + (st.now ? 1 : 0);
     st.items.forEach(function (it, i) {
-      h += st.kind === "triad" ? rTriad(st, it, i, rec) : st.kind === "vcycle" ? rCycle(st, it, i, rec.answers) : rFreq(st, it, i, rec.answers);
+      h += st.kind === "vcycle" ? rCycle(st, it, i, rec.answers, n) : rFreq(st, it, i, rec.answers, n);
     });
     if (st.now) h += rNow(st, rec.answers);
     if (st.bipolar) {
       h += '<header class="st-head sub"><h3>' + esc(F(st.bipolar.title)) + "</h3><p>" + esc(F(st.bipolar.intro)) + "</p></header>";
-      st.bipolar.items.forEach(function (it, i) { h += rBipolar(st, it, i, rec.answers); });
+      st.bipolar.items.forEach(function (it, i) { h += rBipolar(st, it, i, rec.answers, st.bipolar.items.length); });
     }
     var miss = missingOf(st);
     h += '<div class="foot"><div class="left" id="left">' + (miss.length ? "فاضل " + ar(miss.length) : "كده المحطة كملت") + "</div>";
-    return h + '<button type="button" class="next" data-act="stNext" data-st="' + st.id + '"' + (miss.length ? ' aria-disabled="true"' : "") + ">" + (st.id === 9 ? G("خلّصت", "خلّصت") : "التالي") + "</button></div>";
+    return h + '<button type="button" class="next" data-act="stNext" data-st="' + st.id + '"' + (miss.length ? ' aria-disabled="true"' : "") + ">" + (st.id === 9 ? "خلّصت" : "التالي") + "</button></div>";
+  }
+  function rTriadStation(st, rec) {
+    // شرح المحطة في شاشة لوحده قبل أول موقف: من غيره الشرح الطويل كان بيزق الموقف الأول لتحت الشاشة.
+    if (!rec.introSeen) {
+      var hi = stHead(st, true) + '<p class="soft how">' + G("في كل موقف: اختار «الأقرب» ليك، وبعدين «الأبعد» عنك. والمواقف بتيجي واحد واحد.", "في كل موقف: اختاري «الأقرب» ليكي، وبعدين «الأبعد» عنك. والمواقف بتيجي واحد واحد.") + "</p>" + trialBtn(st) + "</header>";
+      return hi + '<div class="intro-go"><button type="button" class="next" data-act="introGo" data-st="' + st.id + '">' + G("يلّا نبدأ", "يلّا نبدأ") + " (" + ar(st.items.length) + " موقف)</button></div>";
+    }
+    var cur = curOf(st, rec), it = st.items[cur], last = cur === st.items.length - 1;
+    if (rec.cur !== cur) { rec.cur = cur; persist(); }   // بنثبّته: من غير ده، أول ما يجاوب، الشاشة كانت بتنط للموقف اللي بعده لوحدها
+    var h = '<header class="st-head mini-head"><div class="st-n">المحطة ' + ar(st.id) + " من ٩ · " + esc(F(st.title)) + "</div>" + trialBtn(st) + "</header>";
+    h += rTriad(st, it, cur, rec);
+    var done = itemDone(st, it, rec.answers), all = !missingOf(st).length;
+    h += '<div class="foot sit-foot">';
+    h += cur > 0 ? '<button type="button" class="next ghost back" data-act="sitPrev" data-st="' + st.id + '">اللي قبله</button>' : "<span></span>";
+    if (last) h += '<button type="button" class="next" data-act="stNext" data-st="' + st.id + '"' + (all ? "" : ' aria-disabled="true"') + ">" + (all ? "خلّصت المحطة" : "فاضل مواقف") + "</button>";
+    else h += '<button type="button" class="next" data-act="sitNext" data-st="' + st.id + '"' + (done ? "" : ' aria-disabled="true"') + ">اللي بعده</button>";
+    return h + "</div>";
   }
   function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
   function rTriad(st, it, i, rec) {
     if (!rec.order[it.id]) { rec.order[it.id] = shuffle(it.options.map(function (o) { return o.id; })); save(); }
     var a = rec.answers[it.id] || {}, byId = {};
     it.options.forEach(function (o) { byId[o.id] = o; });
-    var h = '<article class="item' + (itemDone(st, it, rec.answers) ? " done" : "") + (a.none ? " none" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(F(it.text)) + '</p><div class="opts">';
+    var h = '<article class="item sit' + (itemDone(st, it, rec.answers) ? " done" : "") + (a.none ? " none" : "") + '" id="it-' + it.id + '">';
+    h += '<div class="count">موقف ' + ar(i + 1) + " من " + ar(st.items.length) + "</div>";
+    h += '<p class="q">' + esc(F(it.text)) + '</p><div class="opts">';
     rec.order[it.id].forEach(function (oid) {
       var o = byId[oid], c = a.closest === oid, f = a.farthest === oid;
-      h += '<div class="opt' + (c ? " is-c" : "") + (f ? " is-f" : "") + '"><p>' + esc(F(o.text)) + '</p><div class="pick">';
+      h += '<div class="opt' + (c ? " is-c" : "") + (f ? " is-f" : "") + '">';
+      if (c || f) h += '<span class="badge ' + (c ? "c" : "f") + '">' + (c ? "الأقرب" : "الأبعد") + "</span>";
+      h += "<p>" + esc(F(o.text)) + '</p><div class="pick">';
       h += '<button type="button" class="pk c' + (c ? " on" : "") + '" data-act="close" data-st="' + st.id + '" data-id="' + it.id + '" data-o="' + oid + '" aria-pressed="' + c + '">الأقرب</button>';
       h += '<button type="button" class="pk f' + (f ? " on" : "") + '" data-act="far" data-st="' + st.id + '" data-id="' + it.id + '" data-o="' + oid + '" aria-pressed="' + f + '">الأبعد</button></div></div>';
     });
@@ -320,30 +358,31 @@
     });
     return h + "</div>";
   }
-  function rFreq(st, it, i, ans) {
+  function count(i, n) { return '<div class="count">عبارة ' + ar(i + 1) + " من " + ar(n) + "</div>"; }
+  function rFreq(st, it, i, ans, n) {
     var a = ans[it.id] || {};
-    return '<article class="item' + (typeof a.v === "number" ? " done" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(itemText(it)) + "</p>" + scaleHTML(st, it, a) + "</article>";
+    return '<article class="item' + (typeof a.v === "number" ? " done" : "") + '" id="it-' + it.id + '">' + count(i, n || st.items.length) + '<p class="q">' + esc(itemText(it)) + "</p>" + scaleHTML(st, it, a) + "</article>";
   }
   // دايرة التطوع: نفس سلم التكرار، ومعاه «لسه بدري عليّا أعرف» (برّه الحساب)
-  function rCycle(st, it, i, ans) {
+  function rCycle(st, it, i, ans, n) {
     var a = ans[it.id] || {}, early = a.v === "early";
-    var h = '<article class="item' + (typeof a.v === "number" || early ? " done" : "") + (early ? " none" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(F(it.text)) + "</p>";
+    var h = '<article class="item' + (typeof a.v === "number" || early ? " done" : "") + (early ? " none" : "") + '" id="it-' + it.id + '">' + count(i, n || st.items.length) + '<p class="q">' + esc(F(it.text)) + "</p>";
     h += scaleHTML(st, it, a);
     return h + '<button type="button" class="skip' + (early ? " on" : "") + '" data-act="early" data-st="' + st.id + '" data-id="' + it.id + '">' + (early ? "✓ " : "") + esc(F(it.early || "لسه بدري عليّا أعرف")) + "</button></article>";
   }
   // «إنت فين دلوقتي؟»: اختيار واحد من ستة
   function rNow(st, ans) {
     var Q = st.now, a = ans[Q.id] || {};
-    var h = '<article class="item now' + (a.v ? " done" : "") + '" id="it-' + Q.id + '"><p class="q">' + esc(F(Q.text)) + '</p><div class="checks" role="radiogroup">';
+    var h = '<article class="item now' + (a.v ? " done" : "") + '" id="it-' + Q.id + '"><div class="count">آخر سؤال</div><p class="q">' + esc(F(Q.text)) + '</p><div class="checks" role="radiogroup">';
     Q.options.forEach(function (o) {
       var on = a.v === o.id;
       h += '<button type="button" class="check radio' + (on ? " sel" : "") + '" data-act="now" data-st="' + st.id + '" data-id="' + Q.id + '" data-v="' + o.id + '" role="radio" aria-checked="' + on + '"><b aria-hidden="true">' + (on ? "✓" : "") + "</b>" + esc(F(o.text)) + "</button>";
     });
     return h + "</div></article>";
   }
-  function rBipolar(st, it, i, ans) {
+  function rBipolar(st, it, i, ans, n) {
     var a = ans[it.id] || {}, sc = st.bipolar.scale;
-    var h = '<article class="item' + (typeof a.v === "number" ? " done" : "") + '" id="it-' + it.id + '"><p class="q"><span class="num">' + ar(i + 1) + ".</span> " + esc(F(it.text)) + "</p>";
+    var h = '<article class="item' + (typeof a.v === "number" ? " done" : "") + '" id="it-' + it.id + '"><div class="count">سؤال ' + ar(i + 1) + " من " + ar(n || 3) + '</div><p class="q">' + esc(F(it.text)) + "</p>";
     h += '<div class="poles"><div class="pole"><b>أ</b>' + esc(F(it.a)) + '</div><div class="pole"><b>ب</b>' + esc(F(it.b)) + '</div></div><div class="dots" role="radiogroup">';
     for (var v = 1; v <= 5; v++) h += '<button type="button" class="dot' + (a.v === v ? " on" : "") + '" data-act="bip" data-st="' + st.id + '" data-id="' + it.id + '" data-v="' + v + '" role="radio" aria-checked="' + (a.v === v) + '" aria-label="' + esc(sc[v - 1]) + '"><i></i></button>';
     h += '</div><div class="dots-lab"><span>أقرب لـ«أ»</span><span>في النص</span><span>أقرب لـ«ب»</span></div>';
@@ -360,11 +399,13 @@
     var el = document.getElementById("it-" + id);
     if (!el) return render();
     var rec = ensureSt(st.id), html = null;
+    if (st.kind === "triad") { var y = window.scrollY; render(); window.scrollTo(0, y); return; }
+    var n = st.items.length + (st.now ? 1 : 0);
     st.items.forEach(function (x, i) {
-      if (x.id === id) html = st.kind === "triad" ? rTriad(st, x, i, rec) : st.kind === "vcycle" ? rCycle(st, x, i, rec.answers) : rFreq(st, x, i, rec.answers);
+      if (x.id === id) html = st.kind === "vcycle" ? rCycle(st, x, i, rec.answers, n) : rFreq(st, x, i, rec.answers, n);
     });
     if (!html && st.now && st.now.id === id) html = rNow(st, rec.answers);
-    if (!html && st.bipolar) st.bipolar.items.forEach(function (x, i) { if (x.id === id) html = rBipolar(st, x, i, rec.answers); });
+    if (!html && st.bipolar) st.bipolar.items.forEach(function (x, i) { if (x.id === id) html = rBipolar(st, x, i, rec.answers, st.bipolar.items.length); });
     var tmp = document.createElement("div"); tmp.innerHTML = html;
     el.parentNode.replaceChild(tmp.firstChild, el);
     var miss = missingOf(st), left = $("#left"), nx = $('[data-act="stNext"]');
@@ -392,6 +433,7 @@
     });
     if (st.bipolar) st.bipolar.items.forEach(function (it) { if (!rec.answers[it.id]) rec.answers[it.id] = { v: 1 + rnd(5), changes: 1, t: 0, trial: true }; });
     if (st.now && !rec.answers[st.now.id]) rec.answers[st.now.id] = { v: st.now.options[rnd(6)].id, changes: 1, t: 0, trial: true };
+    if (st.kind === "triad") { rec.cur = st.items.length - 1; rec.introSeen = rec.introSeen || now(); }
     save(); render();
   }
 
@@ -466,7 +508,9 @@
 
   /* ───────── الأحداث ───────── */
   function onClick(e) {
-    var b = e.target.closest ? e.target.closest("[data-act]") : null; if (!b || !S) return;
+    var b = e.target.closest ? e.target.closest("[data-act]") : null; if (!b) return;
+    if (b.getAttribute("data-act") === "noteHide") { hidden[b.getAttribute("data-kind")] = true; paintNotes(); return; }
+    if (!S) return;
     if (b.getAttribute("aria-disabled") === "true" && b.getAttribute("data-act") !== "stNext") return;
     var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
     var st = b.hasAttribute("data-st") ? stationOf(+b.getAttribute("data-st")) : null;
@@ -505,8 +549,20 @@
     if (act === "now") return setAns(st, id, { v: b.getAttribute("data-v") });
     if (act === "bip") return setAns(st, id, { v: +b.getAttribute("data-v") });
     if (act === "trialFill" && TRIAL) return trialFill(st);
+    if (act === "introGo") { ensureSt(st.id).introSeen = now(); save(); render(); window.scrollTo(0, 0); return; }
+    if (act === "sitNext" || act === "sitPrev") {
+      var rc = ensureSt(st.id), cu = curOf(st, rc);
+      if (act === "sitNext" && !itemDone(st, st.items[cu], rc.answers)) return;
+      rc.cur = Math.max(0, Math.min(st.items.length - 1, cu + (act === "sitNext" ? 1 : -1)));
+      save(); render(); window.scrollTo(0, 0); return;
+    }
     if (act === "stNext") {
       var miss = missingOf(st);
+      if (miss.length && st.kind === "triad") {   // فيه موقف فات من غير إجابة: يفتح عليه
+        var rm = ensureSt(st.id); rm.introSeen = rm.introSeen || now();
+        st.items.forEach(function (x, i) { if (x.id === miss[0]) rm.cur = i; });
+        save(); render(); window.scrollTo(0, 0); return;
+      }
       if (miss.length) {
         var el = document.getElementById("it-" + miss[0]);
         if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse"); }
