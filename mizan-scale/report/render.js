@@ -242,7 +242,7 @@
       return NAME[order[0]] + "، وبعد" + (order[0] === "V" ? "ها" : "ه") + " " + NAME[order[1]] + "، وبعدهم " + NAME[order[2]];
     }
     function firstSentence(p) { var m = /^[^.؟?]*[.؟?]/.exec(p); return m ? m[0] : p; }
-    add("h2", "إنت والتطوع");
+    add("h2", G("إنت والتطوع", "إنتي والتطوع"));
     add("p", vBase.paras[0]);
     var weakAny = VT.lifeRanking.confidence === "ضعيفة" || VT.volunteerRanking.confidence === "ضعيفة";
     if (!weakAny) add("p", fill([vBase.paras[1]], { "[ترتيب الحياة]": orderLine(VT.lifeRanking.order), "[ترتيب التطوع]": orderLine(VT.volunteerRanking.order) })[0]);
@@ -398,7 +398,7 @@
     }
     if (VT.now) {
       var nowI = items.vnow.options.map(function (o) { return o.id; }).indexOf(VT.now.id);
-      add("h3", "إنت فين دلوقتي");
+      add("h3", G("إنت فين دلوقتي", "إنتي فين دلوقتي"));
       add("p", part(s9v, "إنت فين دلوقتي").bullets[nowI]);
     }
     shown("٩. دايرتك في التطوع", cy9 + (VT.cycleExpected ? (hiV.length ? " · صورة متوقعة (أقل من ٣ شهور)" : " · أقل من ٣ شهور (من غير فقرة الصورة المتوقعة، لأن مفيش موجة تحتها)") : "") + (VT.now ? " · إنت فين: " + VT.now.id : ""));
