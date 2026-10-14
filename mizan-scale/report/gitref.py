@@ -17,5 +17,5 @@ def ref(path, strict=True):
     if not h or dirty:
         if strict:
             sys.exit(f'[gitref] {path}: ' + ('مش في الريبو' if not h else 'فيه تعديل لسه ما اترفعش') + ' — اعمل commit الأول، وبعدين ابني الدوك.')
-        return f'{path} (لسه)'
-    return f'{path} (commit {h})'
+        return f'{path} · لسه'
+    return f'{path} · commit {h}'

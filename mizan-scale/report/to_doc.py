@@ -54,7 +54,7 @@ for x in S['samples']:
             add(b['text']); add(' · '.join(f'{arn(i+1)} {s}' for i, s in enumerate(b['scale']))); add(b['note'])
         else: add(b['text'])
     if not full:
-        add('داخلي — باقي التقرير (المسارات، والمساحات، والميل، والخطوة، والختام) في samples.html.', 'note')
+        add(f'داخلي — باقي التقرير (المسارات، والمساحات، والميل، والخطوة، والختام) في {R_HTML}.', 'note')
 
 if len(sys.argv) > 2:
     tab, end = sys.argv[1], int(sys.argv[2])
