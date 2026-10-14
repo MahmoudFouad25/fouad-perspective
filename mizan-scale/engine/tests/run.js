@@ -178,6 +178,24 @@ eq("م. الخفيفة ٣ وبرّه النقط", [v(r).volunteerRanking.lightSi
 // ن. مواقف تطوع ناقصة ← شبه حياتك والنقص ظاهر
 var miss = clone(base); delete miss.triad.s7n1; r = E.score(miss, items, C);
 eq("ن. موقف تطوع ناقص ← شبه حياتك", [v(r).outcomes, r.complete, r.missing.indexOf("s7n1") !== -1], [["like_life"], false, true]);
+
+// س. صفحة المقياس بتحفظ الإجابات بشكلها هي (st["1".."9"].answers). لازم تطلع نفس النتيجة بالظبط زي شكل المحرك،
+// ومنها أسئلة البداية (السن والدور والمدة): من غيرها المتطوع الجديد ما كانش هياخد «صورتك المتوقعة» أبدًا.
+function toPage(a) {
+  var p = { qVersion: { questions: a.questionsVersion }, period: clone(a.period), client: clone(a.client), st: {},
+            adaptive: a.adaptiveShown ? { row: a.adaptiveShown.row } : null };
+  function put(id, val) { var k = /^s(\d)/.exec(id)[1]; (p.st[k] = p.st[k] || { answers: {} }).answers[id] = val; }
+  Object.keys(a.triad).forEach(function (id) { var t = a.triad[id]; put(id, { closest: t.closest, farthest: t.farthest, none: !!t.none }); });
+  Object.keys(a.freq).forEach(function (id) { put(id, { v: a.freq[id] }); });
+  Object.keys(a.bipolar).forEach(function (id) { put(id, { v: a.bipolar[id] }); });
+  if (a.vnow) put("s8now", { v: a.vnow });
+  return p;
+}
+[["أقل من شهر", cy], ["من شهر لـ٣", cy2], ["قديم ومن غير مدة", base]].forEach(function (x) {
+  var eng = E.score(x[1], items, C), page = E.score(toPage(x[1]), items, C);
+  eq("س. شكل الصفحة = شكل المحرك (" + x[0] + ")", JSON.stringify(page), JSON.stringify(eng));
+});
+eq("س. المدة وصلت من شكل الصفحة", [v(E.score(toPage(cy), items, C)).tenure, v(E.score(toPage(cy), items, C)).expectedPicture], ["t1", true]);
 flush("٣. طبقة التطوع");
 
 var c = T.counts();

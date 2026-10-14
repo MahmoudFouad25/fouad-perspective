@@ -114,8 +114,9 @@
   function normalize(raw) {
     if (!raw) return null;
     if (raw.triad || raw.freq) return raw;
+    // client = أسئلة البداية (الصيغة والسن والدور والمدة). من غيرها المدة بتضيع، والمتطوع الجديد ما بياخدش «صورتك المتوقعة» (اختبار «س»).
     var out = { questionsVersion: raw.qVersion && (raw.qVersion.questions || raw.qVersion.hash), period: raw.period || { selected: [] },
-                triad: {}, freq: {}, bipolar: {}, timing: {}, adaptiveShown: null };
+                triad: {}, freq: {}, bipolar: {}, timing: {}, adaptiveShown: null, client: raw.client || undefined };
     Object.keys(raw.st || {}).forEach(function (k) {
       var st = raw.st[k], ans = st.answers || {};
       Object.keys(ans).forEach(function (id) {
