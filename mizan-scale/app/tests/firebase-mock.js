@@ -4,7 +4,17 @@
 (function () {
   if (window.firebase && window.firebase.__mock) return;
   function err(code, message) { var e = new Error(message || code); e.code = code; e.name = "FirebaseError"; return e; }
+  var KEY = "__mockAuth", listeners = [];
+  var auth = {
+    currentUser: (function () { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } })(),
+    onAuthStateChanged: function (cb) { listeners.push(cb); setTimeout(function () { cb(auth.currentUser); }, 20); return function () {}; },
+    _set: function (u) { auth.currentUser = u; try { if (u) localStorage.setItem(KEY, JSON.stringify(u)); else localStorage.removeItem(KEY); } catch (e) {} listeners.forEach(function (cb) { cb(u); }); },
+    signInWithEmailAndPassword: function (email, pw) { return call({ op: "signIn", email: email, password: pw }).then(function (o) { auth._set(o.user); return { user: o.user }; }); },
+    signOut: function () { auth._set(null); return Promise.resolve(); },
+    setPersistence: function () { return Promise.resolve(); }
+  };
   function call(body) {
+    body.auth = auth.currentUser ? { email: auth.currentUser.email } : null;
     return fetch("/__api", { method: "POST", body: JSON.stringify(body) }).then(function (r) {
       if (!r.ok) throw err("unavailable", "server " + r.status);
       return r.json();
@@ -30,9 +40,13 @@
       }
     };
   }
-  var db = { settings: function (s) { window.__mockSettings = s; }, collection: function (col) { return { doc: function (id) { return doc(col, id); } }; } };
+  var db = { settings: function (s) { window.__mockSettings = s; }, collection: function (col) {
+    return { doc: function (id) { return doc(col, id); },
+             get: function () { return call({ op: "list", col: col }).then(function (o) { var docs = o.docs.map(function (d) { return snap(d.id, d.data); }); return { docs: docs, size: docs.length, empty: !docs.length }; }); } };
+  } };
   var apps = [];
   function firestore() { return db; }
   firestore.FieldValue = { serverTimestamp: function () { return { __sentinel: { __fv: "ts" } }; } };
-  window.firebase = { __mock: true, apps: apps, initializeApp: function (c) { apps.push({ options: c }); window.__mockConfig = c; return apps[0]; }, firestore: firestore };
+  window.firebase = { __mock: true, apps: apps, initializeApp: function (c) { apps.push({ options: c }); window.__mockConfig = c; return apps[0]; }, firestore: firestore,
+                      auth: function () { return auth; } };
 })();

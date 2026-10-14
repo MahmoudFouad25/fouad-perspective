@@ -434,6 +434,107 @@ async function run() {
   await p.screenshot({ path: path.join(SHOTS, "sit-360.png") });
   await p.ctx.close();
 
+  console.log("\n١٤. صفحة الأدمن");
+  var ADMIN = BASE + "/mizan-scale/admin/";
+  await api({ op: "user", email: "admin@fouad-academy.com", password: "pass-1234" });
+  await api({ op: "user", email: "someone@x.com", password: "pass-1234" });
+  p = await open({ w: 1280, mobile: false });
+  p.on("dialog", function (dl) { dl.accept(); });
+  await p.ctx.route(/cdnjs\.cloudflare\.com\/ajax\/libs\/xlsx/, function (r) {
+    var f = process.env.XLSX_LOCAL || "/tmp/claude-0/xlsx.full.min.js";
+    return fs.existsSync(f) ? r.fulfill({ path: f, contentType: "text/javascript" }) : r.abort();
+  });
+  await p.goto(ADMIN);
+  await p.waitForSelector("#ago");
+  await p.fill("#ap", "غلط");
+  await click(p, "#ago");
+  await p.waitForFunction(function () { var m = document.getElementById("amsg"); return m && !m.hidden; });
+  ok("باسورد غلط ← «الإيميل أو الباسورد غلط»", /غلط/.test(await p.innerText("#amsg")));
+  await p.fill("#ae", "someone@x.com"); await p.fill("#ap", "pass-1234"); await click(p, "#ago");
+  await p.waitForFunction(function () { return /مش أدمن/.test(document.getElementById("main").innerText); });
+  ok("إيميل مش أدمن ← «الإيميل ده مش أدمن» ومفيش قايمة", !(await p.$("table.ax")));
+  await p.fill("#ae", "admin@fouad-academy.com"); await p.fill("#ap", "pass-1234"); await click(p, "#ago");
+  await p.waitForSelector("table.ax");
+  var nRows0 = (await p.$$("tbody tr[data-id]")).length;
+  ok("الأدمن دخل والقايمة ظهرت (" + nRows0 + " متطوع من الاختبارات اللي فاتت)", nRows0 >= 5);
+  await click(p, '[data-act="add"]');
+  await p.fill("#addList", "هالة سمير، سوهاج، متطوعة في المحافظة\nمروان عادل\tالأقصر\tمسؤول ملف\nسيف، بني سويف");
+  await click(p, '[data-act="addGo"]');
+  await p.waitForFunction(function () { return /اتضاف/.test((document.getElementById("panel") || {}).innerText || ""); }, null, { timeout: 15000 });
+  var db1 = (await dump()).db.mizan_scale;
+  var added = Object.keys(db1).filter(function (k) { return ["هالة سمير", "مروان عادل", "سيف"].indexOf(db1[k].name) !== -1; });
+  ok("القايمة اتضافت: ٣ متطوعين، بالاسم والمحافظة والدور (فصلة وTab)", added.length === 3 && db1[added.filter(function (k) { return db1[k].name === "مروان عادل"; })[0]].gov === "الأقصر" && db1[added.filter(function (k) { return db1[k].name === "هالة سمير"; })[0]].team === "متطوعة في المحافظة");
+  global.self = global; require("../shared.js");
+  ok("الأكواد الجديدة صالحة ومفيش ولا واحد بيبدأ بـ TEST", added.every(function (k) { return global.MZS.validCode(k) && !global.MZS.isTrial(k); }));
+  ok("الروابط ظهرت في نتيجة الإضافة", (await p.innerText("#panel")).split("mizan-scale/app/?c=").length - 1 === 3);
+  ok("الجدول اتحدث بالأسامي الجديدة", (await p.$$("tbody tr[data-id]")).length === nRows0 + 3);
+  // متطوعة من الجداد تخلّص من موبايلها
+  var hala = added.filter(function (k) { return db1[k].name === "هالة سمير"; })[0];
+  var v = await open({ w: 360 });
+  await v.goto(APP + "?c=" + hala);
+  await walk(v, "report", { address: "f", tenure: "t1" });
+  await v.waitForSelector(".report");
+  ok("المتطوعة الجديدة فتحت رابطها وخلّصت (والترحيب باسمها)", /هالة/.test(await mainText(v)));
+  // متطوع تاني يبدأ بس
+  var marwan = added.filter(function (k) { return db1[k].name === "مروان عادل"; })[0];
+  var v2 = await open({ w: 360 });
+  await v2.goto(APP + "?c=" + marwan);
+  await walk(v2, "s3");
+  await v2.ctx.close();
+  await click(p, '[data-act="reload"]');
+  await p.waitForSelector("table.ax");
+  await sleep(300);
+  var rowTxt = async function (code) { return p.evaluate(function (c) { var r = document.querySelector('tr[data-id="' + c + '"]'); return r ? r.innerText : ""; }, code); };
+  ok("الحالة: هالة «خلّص»، ومروان «خلّص المحطة ٢ من ٩»، وسيف «ما بدأش»", /\tخلّص\t/.test(await rowTxt(hala)) && /خلّص المحطة ٢ من ٩/.test(await rowTxt(marwan)) && /ما بدأش/.test(await rowTxt(added.filter(function (k) { return db1[k].name === "سيف"; })[0])));
+  await p.click('tr[data-id="' + hala + '"] td');
+  await p.waitForSelector("#detail .report");
+  ok("فتح هالة ← التقرير زي ما شافته (بالمؤنث وباسمها)", /ميزاني/.test(await p.innerText("#detail")) && /إنتي والتطوع/.test(await p.innerText("#detail")));
+  await click(p, '[data-act="tab"][data-v="coach"]');
+  ok("ورقة الكوتش: «المتطوعة» والدور بالمؤنث وقسم التطوع", /ورقة الكوتش: هالة/.test(await p.innerText("#detail")) && /متطوعة في المحافظة/.test(await p.innerText("#detail")) && /التطوع/.test(await p.innerText("#detail")));
+  await click(p, '[data-act="tab"][data-v="data"]');
+  ok("البيانات ظاهرة", /"st"/.test(await p.innerText("#detail")));
+  // رابط جديد
+  await click(p, '[data-act="newLink"][data-id="' + hala + '"]');
+  for (var w8 = 0; w8 < 60 && !(await dump()).db.mizan_scale[hala].revoked; w8++) await sleep(250);
+  await p.waitForSelector("#detail .ad-link");
+  var db2 = (await dump()).db.mizan_scale, oldD = db2[hala], newC = oldD.replacedBy, newD = db2[newC];
+  ok("رابط جديد: القديم revoked وفيه الكود الجديد", oldD.revoked === true && global.MZS.validCode(newC) && !global.MZS.isTrial(newC));
+  ok("…والجديد فيه كل الإجابات والنتيجة والاسم", newD && newD.name === "هالة سمير" && newD.status === "خلص" && JSON.stringify(newD.st) === JSON.stringify(oldD.st) && newD.replaces === hala && !newD.revoked);
+  await v.goto(APP + "?c=" + hala);
+  await v.waitForFunction(function () { return /اتقفل/.test(document.getElementById("main").innerText); });
+  ok("الرابط القديم على موبايلها ← «الرابط ده اتقفل، واتعمل لك رابط جديد»", true);
+  await v.goto(APP + "?c=" + newC);
+  await v.waitForSelector(".report");
+  ok("الرابط الجديد ← تقريرها على طول", (await screen(v)) === "report");
+  await v.ctx.close();
+  // الأرقام والتنزيل
+  await click(p, '[data-act="stats"]');
+  ok("الأرقام المجمّعة: العدد ظاهر، والتوزيعات مستخبية لحد ١٠ (لسه أقل)", /المتطوعين:/.test(await p.innerText("#panel")) && /بتظهر لما يخلّص ١٠/.test(await p.innerText("#panel")));
+  var dl = p.waitForEvent("download");
+  await click(p, '[data-act="json"]');
+  var jf = await (await dl).path(), J = JSON.parse(fs.readFileSync(jf, "utf8"));
+  ok("تنزيل JSON: كل الوثايق وفيها الكود", J.docs.length === Object.keys((await dump()).db.mizan_scale).length && J.docs.every(function (x) { return x.code; }));
+  var xf = process.env.XLSX_LOCAL || "/tmp/claude-0/xlsx.full.min.js";
+  if (fs.existsSync(xf)) {
+    dl = p.waitForEvent("download");
+    await click(p, '[data-act="xlsx"]');
+    var xp = await (await dl).path();
+    var XL = require(xf);   // نفس ملف المكتبة اللي الصفحة استعملته (UMD)
+    var wb = XL.read(fs.readFileSync(xp), { type: "buffer" }), sh = XL.utils.sheet_to_json(wb.Sheets["المتطوعين"], { header: 1 });
+    var hrow = sh.filter(function (r) { return r[0] === newC; })[0] || [];
+    ok("تنزيل Excel: تابين، وصف لكل متطوع، وهالة فيها الترتيب ونتيجة التطوع", wb.SheetNames.join("|") === "المتطوعين|الأرقام المجمعة" && sh.length === J.docs.length + 1 && hrow[1] === "هالة سمير" && !!hrow[13] && !!hrow[19]);
+  } else console.log("  · Excel: مكتبة xlsx مش متاحة محليًا، الاختبار ده اتعدّى");
+  // من غير أدمن: القايمة مقفولة
+  var nv = await open({ w: 360 });
+  await nv.goto(APP + "?c=RANA2345");   // كود حقيقي علشان المكتبة تتحمّل (كود التجربة ما بيحمّلهاش)
+  await nv.waitForFunction(function () { return typeof firebase !== "undefined" && window.MZS_APP.state(); });
+  var listTry = await nv.evaluate(function () { return firebase.firestore().collection("mizan_scale").get().then(function () { return "ok"; }, function (e) { return e.code; }); });
+  ok("من غير أدمن: عرض القايمة مرفوض", listTry === "permission-denied");
+  await nv.ctx.close();
+  ok("مفيش أخطاء JavaScript في الأدمن", !p.errs.length, p.errs.join(" | "));
+  await p.screenshot({ path: path.join(SHOTS, "admin.png"), fullPage: false });
+  await p.ctx.close();
+
   // WebKit (أقرب حاجة لسفاري الآيفون في البيئة دي) لو متسطّب
   try {
     var wk = await pw.webkit.launch();

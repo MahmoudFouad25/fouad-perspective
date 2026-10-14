@@ -13,6 +13,8 @@ var VOL = ["v", "address", "addressAt", "status", "screen", "device", "questions
   "rating", "reportViewedAt"];
 var AFTER_DONE = ["rating", "reportViewedAt", "address", "addressAt", "updatedAt", "updatedAtMs", "lastPush"];
 var DB = {}, LOG = [], MODE = { get: "ok", set: "ok" };   // ok | hang | denied | unavailable
+var AUTH = {}, ADMINS = ["admin@fouad-academy.com"];   // AUTH[email] = password (أدمن الاختبار بيتعمل بـ op: "user")
+function isAdmin(a) { return !!(a && a.email && AUTH[a.email] !== undefined && ADMINS.indexOf(String(a.email).toLowerCase()) !== -1); }
 
 function clone(o) { return o === undefined ? undefined : JSON.parse(JSON.stringify(o)); }
 function eq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
@@ -71,7 +73,14 @@ function api(body, res) {
   if (op === "seed") { (DB[col] = DB[col] || {})[id] = body.data; return send({ ok: true }); }
   if (op === "mode") { Object.keys(body.mode).forEach(function (k) { MODE[k] = body.mode[k]; }); return send({ ok: true, mode: MODE }); }
   if (op === "dump") return send({ db: DB, log: LOG });
-  if (op === "reset") { DB = {}; LOG = []; MODE = { get: "ok", set: "ok" }; return send({ ok: true }); }
+  if (op === "reset") { DB = {}; LOG = []; MODE = { get: "ok", set: "ok" }; AUTH = {}; return send({ ok: true }); }
+  if (op === "user") { AUTH[body.email] = body.password; return send({ ok: true }); }
+  if (op === "signIn") {
+    if (AUTH[body.email] === undefined) return send({ error: "auth/user-not-found" });
+    if (AUTH[body.email] !== body.password) return send({ error: "auth/wrong-password" });
+    return send({ user: { uid: "u-" + body.email, email: body.email } });
+  }
+  var admin = isAdmin(body.auth);
   var mode = op === "get" ? MODE.get : MODE.set;
   LOG.push({ op: op, col: col, id: id, mode: mode, keys: body.data ? Object.keys(body.data) : null, reason: body.data && body.data.lastPush });
   if (mode === "hang") return;                                         // ما بيردّش أبدًا
@@ -80,14 +89,17 @@ function api(body, res) {
   if (col !== "mizan_scale") return send({ error: "permission-denied" });   // القاعدة العامة مستثنية mizan.*
   var cur = (DB[col] || {})[id];
   if (op === "get") return send({ data: cur === undefined ? null : cur });
-  if (op === "list") return send({ error: "permission-denied" });
+  if (op === "list") {
+    if (!admin) return send({ error: "permission-denied" });
+    var all = DB[col] || {}; return send({ docs: Object.keys(all).map(function (k) { return { id: k, data: all[k] }; }) });
+  }
   if (op === "set") {
     var bad = invalid(body.data, "data", false);
     if (bad) return send({ error: "invalid-argument", message: bad });
     var next = body.merge ? deepMerge(cur, body.data) : resolve(body.data);
     if (Buffer.byteLength(JSON.stringify(next)) > 1048000) return send({ error: "invalid-argument", message: "الوثيقة أكبر من ١ ميجا" });
-    if (!canUpdate(cur, next)) return send({ error: "permission-denied" });
-    DB[col][id] = next;
+    if (!admin && !canUpdate(cur, next)) return send({ error: "permission-denied" });   // الأدمن: create و update مسموحين
+    (DB[col] = DB[col] || {})[id] = next;
     return send({ ok: true });
   }
   send({ error: "unimplemented" });
