@@ -98,7 +98,7 @@ function api(body, res) {
     if (bad) return send({ error: "invalid-argument", message: bad });
     var next = body.merge ? deepMerge(cur, body.data) : resolve(body.data);
     if (Buffer.byteLength(JSON.stringify(next)) > 1048000) return send({ error: "invalid-argument", message: "الوثيقة أكبر من ١ ميجا" });
-    if (!admin && !canUpdate(cur, next)) return send({ error: "permission-denied" });   // الأدمن: create و update مسموحين
+    if (!admin && !canUpdate(cur, next)) { LOG[LOG.length - 1].denied = changed(cur, next); return send({ error: "permission-denied" }); }   // الأدمن: create و update مسموحين
     (DB[col] = DB[col] || {})[id] = next;
     return send({ ok: true });
   }

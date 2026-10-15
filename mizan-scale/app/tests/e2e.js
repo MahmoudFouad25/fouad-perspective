@@ -210,6 +210,10 @@ async function run() {
   t = await mainText(p);
   trialBtns += (await p.$$('[data-act="trialFill"],[data-act="trialReset"]')).length;
   ok("كود حقيقي: زرار «املأ عشوائي» و«ابدأ من الأول» ما ظهروش ولا مرة (كل الشاشات من الأول للتقرير)", trialBtns === 0, trialBtns);
+  await sleep(1500);   // الحفظ اللي بيحصل بعد «اعرض خريطتي» (ده اللي اترفض عند غادة)
+  var nAfter = await notes(p);
+  ok("بعد ما خلّصت وفتحت التقرير: مفيش رسالة «مشكلة في الحفظ عندنا» (القواعد ما رفضتش أي حفظ)", !/عندنا، مش عندك/.test(nAfter), nAfter);
+  ok("…وفوق مكتوب «اتحفظ» مش «محفوظ على موبايلك»", /اتحفظ/.test(await p.innerText("#sync")), await p.innerText("#sync"));
   ok("التقرير ظهر بعنوانه", /ميزاني/.test(t) && (await p.$$(".report h2")).length >= 8);
   ok("التقرير: ولا كلمة عن واتساب أو تواصل", !/واتساب|wa\.me|هنتواصل|هنكلمك|هيتابع|كلّمينا/.test(t));
   ok("المتطوعة أقل من شهر ← «صورتك المتوقعة» في التقرير", (await st(p)).result.volunteer.expectedPicture === true);
@@ -225,6 +229,9 @@ async function run() {
   ok("الصفحة ما كتبتش ولا حقل برّه المسموح (pushedAtMs وغيره بيفضلوا على الموبايل)", !stray.length, stray.join(","));
   var RK = fs.readFileSync(path.join(__dirname, "..", "..", "firestore.rules"), "utf8").match(/mzsVolunteerKeys\(\) \{\s*return \[([\s\S]*?)\]/)[1].match(/'([^']+)'/g).map(function (x) { return x.slice(1, -1); });
   ok("قايمة الحقول في الصفحة = نفس القايمة في firestore.rules", JSON.stringify(VK) === JSON.stringify(RK));
+  var AK = fs.readFileSync(path.join(__dirname, "..", "shared.js"), "utf8").match(/AFTER_DONE_KEYS = \[([\s\S]*?)\]/)[1].match(/"([^"]+)"/g).map(function (x) { return x.slice(1, -1); });
+  var RA = fs.readFileSync(path.join(__dirname, "..", "..", "firestore.rules"), "utf8").match(/mzsAfterDoneKeys\(\) \{\s*return \[([\s\S]*?)\]/)[1].match(/'([^']+)'/g).map(function (x) { return x.slice(1, -1); });
+  ok("الحقول المسموحة بعد «خلص» في الصفحة = نفس اللي في firestore.rules", JSON.stringify(AK) === JSON.stringify(RA));
   await click(p, '[data-act="rate"][data-v="4"]');
   await p.fill("#rateNote", "كويس");
   await click(p, '[data-act="rateSave"]');
@@ -238,6 +245,10 @@ async function run() {
   await p.goto(APP + "?c=MENA2345");
   await p.waitForSelector(".report");
   ok("فتحت الرابط تاني ← التقرير على طول", (await screen(p)) === "report");
+  await sleep(1200);
+  ok("…ومن غير رسالة حفظ بعد التقييم وتغيير الصيغة وفتح الرابط تاني", !/عندنا، مش عندك|النت ضعيف/.test(await notes(p)), await notes(p));
+  var denied = (await dump()).log.filter(function (l) { return l.id === "MENA2345" && l.op === "set" && l.mode === "ok"; });
+  ok("السيرفر استقبل " + denied.length + " حفظ من منة، والقواعد ما رفضتش ولا واحد", (await api({ op: "dump" })).log.filter(function (l) { return l.id === "MENA2345" && l.denied; }).length === 0);
   ok("مفيش أخطاء JavaScript", !p.errs.length, p.errs.join(" | "));
   await p.ctx.close();
 

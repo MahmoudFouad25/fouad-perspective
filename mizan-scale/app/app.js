@@ -123,8 +123,11 @@
       });
     }).catch(function (e) { noteFor(e); return false; });
   }
+  // S.serverDone (على الموبايل بس، مش بيتبعت): النتيجة وصلت السيرفر. بعدها الحفظ بيبعت الحقول المسموحة بعد «خلص» بس.
+  // من غير ده، «اعرض خريطتي» كانت بتبعت كل حاجة ومعاها screen، والقواعد بترفض الحفظ كله (permission-denied).
   function payload(extra) {
-    var data = X.pickKeys(clone(S), X.VOLUNTEER_KEYS);
+    var data = X.pickKeys(clone(S), S.serverDone ? X.AFTER_DONE_KEYS : X.VOLUNTEER_KEYS);
+    if (S.status === "خلص") delete data.screen;   // ولو أول إرسال للنتيجة اتعاد (الرد ضاع في السكة)، برضه من غير screen
     if (S.status !== "خلص") { delete data.result; delete data.summary; delete data.engineVersion; delete data.configVersion; delete data.textsVersion; delete data.computedAt; }
     if (extra) Object.keys(extra).forEach(function (k) { data[k] = extra[k]; });
     data.updatedAt = X.ts();
@@ -142,7 +145,9 @@
       return X.withTimeout(server().set(data, { merge: true })).then(function () {
         sync.pending = false; sync.state = "ok";
         // لو اتغيرت حاجة وهو بيتبعت، ما بنعلّمهاش «وصلت»: هتتبعت مع المحطة الجاية (وهي على الموبايل أصلًا)
-        if (S.updatedAtMs === stamp) { S.pushedAtMs = stamp; persist(); }
+        if (data.status === "خلص" && data.result) S.serverDone = true;
+        if (S.updatedAtMs === stamp) { S.pushedAtMs = stamp; }
+        persist();
         paintSync();
         clearNote("net"); clearNote("ours"); clearNote("nosdk");
         return true;
@@ -642,7 +647,7 @@
     if (remote && remote.status === "خلص" && remote.result) {
       S = X.pickKeys(remote, X.VOLUNTEER_KEYS);
       if (localS && localS.rating && (!S.rating || (localS.rating.at || 0) > (S.rating.at || 0))) S.rating = localS.rating;   // رأي ما اتبعتش لسه
-      S.screen = "report"; S.pushedAtMs = S.updatedAtMs;
+      S.screen = "report"; S.pushedAtMs = S.updatedAtMs; S.serverDone = true;
     } else if (localS && localS.status === "خلص" && localS.result) {
       S = localS; S.screen = "report";       // خلّص على الموبايل ولسه ما وصلش ← التقرير على طول، والإرسال بيتعاد
     } else {

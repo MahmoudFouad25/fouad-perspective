@@ -35,6 +35,10 @@
     "updatedAt", "lastPush", "result", "summary", "engineVersion", "configVersion", "textsVersion", "computedAt",
     "rating", "reportViewedAt"];
 
+  // بعد ما النتيجة توصل السيرفر (status = خلص): القواعد بتسمح بالحقول دي بس. أي حقل تاني بيترفض كله.
+  // ولازم تبقى نفس mzsAfterDoneKeys() في firestore.rules (الاختبار بيقارنهم).
+  var AFTER_DONE_KEYS = ["rating", "reportViewedAt", "address", "addressAt", "updatedAt", "updatedAtMs", "lastPush"];
+
   /* ───────── أدوات ───────── */
   var AR = "٠١٢٣٤٥٦٧٨٩";
   function ar(n) { return String(n).replace(/[0-9]/g, function (d) { return AR[+d]; }); }
@@ -214,7 +218,7 @@
   };
 
   root.MZS = {
-    CFG: CFG, VOLUNTEER_KEYS: VOLUNTEER_KEYS, MSG: MSG,
+    CFG: CFG, VOLUNTEER_KEYS: VOLUNTEER_KEYS, AFTER_DONE_KEYS: AFTER_DONE_KEYS, MSG: MSG,
     ar: ar, esc: esc, clone: clone, first: first, pickKeys: pickKeys,
     cleanCode: cleanCode, validCode: validCode, isTrial: isTrial, codeFromUrl: codeFromUrl, makeCode: makeCode,
     store: store, loadJSON: loadJSON,
