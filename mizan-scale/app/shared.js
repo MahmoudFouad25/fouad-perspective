@@ -13,7 +13,7 @@
 
   var CFG = {
     collection: "mizan_scale",
-    assetsVersion: "2026-10-14b",          // بيتغيّر مع كل رفع، ومعاه ?v= في index.html
+    assetsVersion: "2026-10-15a",          // بيتغيّر مع كل رفع، ومعاه ?v= في index.html
     codeAlphabet: "ABCDEFGHJKMNPQRSTUVWXYZ23456789",   // من غير 0 وO، ولا 1 وI وL
     codeLength: 8,
     trialPrefix: "TEST",
