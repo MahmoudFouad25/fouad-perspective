@@ -305,24 +305,56 @@ MapShow.init = function(cfg){
   MapShow.go = go;
 
   /* ═════════ شاشة الكوتش ═════════ */
+  function md(src){
+    function esc(t){ return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function inl(t){
+      t = esc(t.replace(/\\([\[\]_*\-#>])/g,'$1'));
+      return t.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');
+    }
+    var out = '';
+    String(src||'').split(/\n\s*\n/).forEach(function(blk){
+      var b = blk.trim(); if(!b || /^-{3,}$/.test(b)) return;
+      var plain = b.replace(/\\/g,'');
+      var m = plain.match(/^\*\*\[([^\]]*)\]\*\*$/);
+      if(m){
+        var c = m[1], k = /^صمت/.test(c)?'sil':/^شاشة/.test(c)?'scr':/^التسجيل/.test(c)?'rec':'cue';
+        var ic = {sil:'⏳ ', scr:'🖥 ', rec:'⏺⏸ ', cue:'▸ '}[k];
+        out += '<div class="chip '+k+'">'+ic+inl(c)+'</div>'; return;
+      }
+      if(/^#{1,6}\s/.test(b)){ out += '<div class="sh">'+inl(b.replace(/^#{1,6}\s*/,''))+'</div>'; return; }
+      if(/^>/.test(b)){ out += '<div class="bq">'+b.split('\n').map(function(l){ return inl(l.replace(/^>\s?/,'')); }).join('<br>')+'</div>'; return; }
+      if(/^\*\*ملاحظة للكوتش/.test(b)){ out += '<div class="cn">'+inl(b).replace(/\n/g,'<br>')+'</div>'; return; }
+      if(b.split('\n').every(function(l){ return /^\s*(-|\d+\.)\s/.test(l); })){
+        out += '<ul>'+b.split('\n').map(function(l){ return '<li>'+inl(l.replace(/^\s*(-|\d+\.)\s/,''))+'</li>'; }).join('')+'</ul>'; return;
+      }
+      out += '<p>'+inl(b).replace(/\n/g,'<br>')+'</p>';
+    });
+    return out;
+  }
+
   function coachMode(){
     var root = document.getElementById('coach');
-    var cur = 0, rec = false, sil = null, cdS = null, lastSeen = 0;
+    var cur = -1, rec = false, sil = null, cdS = null, lastSeen = 0;
+    var SC = cfg.script || null, tips = cfg.tips || {};
+    var fs = 22; try{ fs = +localStorage.getItem('masarat-coach-fs') || 22; }catch(e){}
+    var extras = SC && SC.extras ? SC.extras.map(function(x){ return '<details class="ex"><summary>'+x.t+'</summary><div class="scr">'+md(x.md)+'</div></details>'; }).join('') : '';
     root.innerHTML =
       '<div class="main">'+
-        '<div class="card"><div class="top"><span class="num" id="cNum"></span><span class="mvn" id="cMv"></span><span class="pill" id="cRec"></span><span class="conn" id="cConn">مستني شاشة العرض...</span></div>'+
-        '<div class="ttl" id="cTtl"></div></div>'+
-        '<div class="card"><div class="lbl">تقول / تعمل</div><div class="say" id="cSay"></div></div>'+
-        '<div class="note" id="cNote"></div>'+
-        '<div class="card ctrl">'+
-          '<button id="bPrev">→ السابق</button><button class="big" id="bNext">التالي ←</button>'+
-          '<button class="rec" id="bRec">⏸ شريط التسجيل</button><button id="bOv">الخريطة كلها</button>'+
-          '<span class="clock" id="cClock"></span>'+
-          '<button id="bCd" style="display:none">إيقاف/تشغيل المؤقّت</button><button id="bCdP" style="display:none">+١ دقيقة</button>'+
+        '<div class="bar">'+
+          '<div class="top"><span class="num" id="cNum"></span><span class="mvn" id="cMv"></span><span class="pill" id="cRec"></span><span class="clock" id="cClock"></span><span class="conn" id="cConn">مستني شاشة العرض...</span></div>'+
+          '<div class="ctrl">'+
+            '<button id="bPrev">→ السابق</button><button class="big" id="bNext">التالي ←</button>'+
+            '<button class="rec" id="bRec"></button><button id="bOv">الخريطة كلها</button>'+
+            '<button id="bCd" style="display:none">إيقاف/تشغيل المؤقّت</button><button id="bCdP" style="display:none">+١ دقيقة</button>'+
+            '<span class="sp"></span><button id="bFm" title="تصغير الخط">أ−</button><button id="bFp" title="تكبير الخط">أ+</button>'+
+          '</div>'+
+          '<div class="ttl" id="cTtl"></div>'+
+          '<div class="tip" id="cTip"></div>'+
         '</div>'+
-        '<div class="card nxt"><div class="lbl">اللي جاي</div><div class="ttl" id="nTtl"></div><div class="say" id="nSay"></div></div>'+
+        '<div class="card scr" id="cSay"></div>'+
+        '<div class="card nxt"><div class="lbl">الشريحة الجاية</div><div class="nt" id="nTtl"></div><div class="scr" id="nSay"></div></div>'+
       '</div>'+
-      '<div class="list" id="cList"></div>';
+      '<div class="side"><div class="list" id="cList"></div>'+extras+'</div>';
     var list = document.getElementById('cList'), html='', lastMv='';
     steps.forEach(function(s,k){
       if(s.mv && s.mv!==lastMv){ html += '<h5>'+s.mv+'</h5>'; lastMv=s.mv; }
@@ -331,38 +363,52 @@ MapShow.init = function(cfg){
     list.innerHTML = html;
     list.addEventListener('click', function(e){ var a=e.target.closest('a'); if(a) post({type:'go', i:+a.dataset.k}); });
     function post(m){ chan && chan.postMessage(m); }
+    function setFs(v){ fs=Math.max(15,Math.min(34,v)); document.documentElement.style.setProperty('--cfs', fs+'px'); try{ localStorage.setItem('masarat-coach-fs', fs); }catch(e){} }
+    setFs(fs);
     document.getElementById('bNext').onclick = function(){ post({type:'next'}); };
     document.getElementById('bPrev').onclick = function(){ post({type:'prev'}); };
     document.getElementById('bRec').onclick = function(){ post({type:'rec', on:!rec}); };
     document.getElementById('bOv').onclick = function(){ post({type:'ov'}); };
     document.getElementById('bCd').onclick = function(){ post({type:'cd'}); };
     document.getElementById('bCdP').onclick = function(){ post({type:'cdadd', s:60}); };
+    document.getElementById('bFm').onclick = function(){ setFs(fs-2); };
+    document.getElementById('bFp').onclick = function(){ setFs(fs+2); };
     document.addEventListener('keydown', function(e){
+      if(e.target.closest && e.target.closest('input,textarea')) return;
       var k=e.key;
-      if(k==='ArrowLeft'||k==='ArrowDown'||k===' '||k==='PageDown'){ e.preventDefault(); post({type:'next'}); }
-      else if(k==='ArrowRight'||k==='ArrowUp'||k==='PageUp'){ e.preventDefault(); post({type:'prev'}); }
+      if(k==='ArrowLeft'||k===' '||k==='PageDown'){ e.preventDefault(); post({type:'next'}); }
+      else if(k==='ArrowRight'||k==='PageUp'){ e.preventDefault(); post({type:'prev'}); }
       else if(k==='r'||k==='R'||k==='ق'){ post({type:'rec', on:!rec}); }
     });
-    function show(){
-      var s = steps[cur], n = steps[cur+1];
+    function stepText(k){ var s=steps[k]; if(!s) return ''; return (SC && SC.steps && SC.steps[k]) ? md(SC.steps[k]) : md(s.say||''); }
+    function show(changed){
+      var s = steps[cur] || steps[0], n = steps[cur+1];
       document.getElementById('cNum').textContent = toAr(cur+1)+' / '+toAr(steps.length);
       document.getElementById('cMv').textContent = s.mv||'';
       document.getElementById('cTtl').textContent = s.t||'';
-      document.getElementById('cSay').textContent = s.say||'';
-      var note = document.getElementById('cNote'); note.textContent = s.note||''; note.style.display = s.note?'':'none';
+      var tip = document.getElementById('cTip'); tip.textContent = tips[cur]||''; tip.style.display = tips[cur]?'':'none';
+      if(changed){
+        document.getElementById('cSay').innerHTML = stepText(cur) + (!SC && s.note ? '<div class="cn">'+s.note+'</div>' : '');
+        window.scrollTo(0,0);
+        document.getElementById('nTtl').textContent = n ? (n.t||'') : 'آخر شريحة';
+        var nx = n ? stepText(cur+1) : '';
+        var tmp = document.createElement('div'); tmp.innerHTML = nx;
+        var first = [].slice.call(tmp.children).filter(function(c){ return !c.classList.contains('chip') && !c.classList.contains('cn') && !c.classList.contains('sh'); })[0];
+        document.getElementById('nSay').innerHTML = first ? first.outerHTML : '';
+      }
       var r = document.getElementById('cRec');
       r.className = 'pill'+(s.rec==='off'?' off':s.rec==='on'?' onr':'');
-      r.textContent = s.rec==='off' ? '⏸ اقفل تسجيل زوم وقول إنه اتقفل' : s.rec==='on' ? '⏺ رجّع تسجيل زوم وقول إنه رجع' : '';
+      r.textContent = s.rec==='off' ? '⏸ اقفل تسجيل زوم دلوقتي' : s.rec==='on' ? '⏺ رجّع تسجيل زوم دلوقتي' : '';
       r.style.display = s.rec ? '' : 'none';
-      document.getElementById('nTtl').textContent = n ? (n.t||'') : 'آخر خطوة';
-      document.getElementById('nSay').textContent = n ? (n.say||'') : '';
       var b = document.getElementById('bRec'); b.classList.toggle('on', rec);
-      b.textContent = rec ? '⏸ الشريط ظاهر · اضغط تخفيه' : '⏸ إظهار شريط «التسجيل متوقف»';
+      b.textContent = rec ? '⏸ الشريط ظاهر · اخفيه' : '⏸ إظهار شريط «التسجيل متوقف»';
       var cdOn = !!cdS;
       document.getElementById('bCd').style.display = cdOn?'':'none';
       document.getElementById('bCdP').style.display = cdOn?'':'none';
-      [].forEach.call(list.querySelectorAll('a'), function(a){ a.classList.toggle('cur', +a.dataset.k===cur); });
-      var c = list.querySelector('a.cur'); if(c && c.scrollIntoView) c.scrollIntoView({block:'nearest'});
+      if(changed){
+        [].forEach.call(list.querySelectorAll('a'), function(a){ a.classList.toggle('cur', +a.dataset.k===cur); });
+        var c = list.querySelector('a.cur'); if(c && c.scrollIntoView) c.scrollIntoView({block:'center'});
+      }
     }
     function clock(){
       var el = document.getElementById('cClock');
@@ -371,15 +417,15 @@ MapShow.init = function(cfg){
       else { el.textContent=''; }
       var conn = document.getElementById('cConn');
       var ok = Date.now()-lastSeen < 60000;
-      conn.className = 'conn'+(ok?' ok':''); conn.textContent = ok ? 'متصلة بشاشة العرض' : 'مستني شاشة العرض...';
+      conn.className = 'conn'+(ok?' ok':''); conn.textContent = ok ? '● متصلة بالعرض' : 'مستني شاشة العرض...';
     }
     setInterval(clock, 250);
     if(chan) chan.onmessage = function(m){
       var d=m.data||{}; if(d.type!=='state') return;
-      lastSeen = Date.now(); cur=d.i; rec=d.rec; sil=d.sil; cdS=d.cd; show();
+      lastSeen = Date.now(); var ch = d.i!==cur; cur=d.i; rec=d.rec; sil=d.sil; cdS=d.cd; show(ch);
     };
     if(!chan){ document.getElementById('cConn').textContent = 'المتصفح ده مش بيدعم الربط بين الشاشتين. استخدم كروم أو إيدج.'; }
-    show(); post({type:'hello'});
+    cur = 0; show(true); post({type:'hello'});
     setInterval(function(){ if(Date.now()-lastSeen>5000) post({type:'hello'}); }, 3000);
   }
 };
