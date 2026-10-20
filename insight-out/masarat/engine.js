@@ -324,6 +324,14 @@ MapShow.init = function(cfg){
       if(/^#{1,6}\s/.test(b)){ out += '<div class="sh">'+inl(b.replace(/^#{1,6}\s*/,''))+'</div>'; return; }
       if(/^>/.test(b)){ out += '<div class="bq">'+b.split('\n').map(function(l){ return inl(l.replace(/^>\s?/,'')); }).join('<br>')+'</div>'; return; }
       if(/^\*\*ملاحظة للكوتش/.test(b)){ out += '<div class="cn">'+inl(b).replace(/\n/g,'<br>')+'</div>'; return; }
+      if(b.split('\n').every(function(l){ return /^\s*\|/.test(l); })){
+        var rows = b.split('\n').filter(function(l){ return !/^\s*\|[\s\-:|]+\|\s*$/.test(l); });
+        out += '<table>'+rows.map(function(l,ri){
+          var cells = l.trim().replace(/^\||\|$/g,'').split('|');
+          var tg = ri===0 ? 'th' : 'td';
+          return '<tr>'+cells.map(function(c){ return '<'+tg+'>'+inl(c.trim())+'</'+tg+'>'; }).join('')+'</tr>';
+        }).join('')+'</table>'; return;
+      }
       if(b.split('\n').every(function(l){ return /^\s*(-|\d+\.)\s/.test(l); })){
         out += '<ul>'+b.split('\n').map(function(l){ return '<li>'+inl(l.replace(/^\s*(-|\d+\.)\s/,''))+'</li>'; }).join('')+'</ul>'; return;
       }
