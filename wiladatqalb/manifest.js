@@ -2,7 +2,7 @@
  * ولادة قلب — سلسلة منظور الفؤاد
  *  ⚠ كلّ فقرة في ملفّات الفصول لها sid ثابت (s1، s2…). لا تغيّره ولا تُعِد ترقيمه أبدًا؛
  *    الفقرة الجديدة تأخذ sid جديدًا لم يُستعمل (مثلًا s12a)، والمحذوفة يُحذف sid معها.
- * فهرس الكتاب (المايسترو) — النسخة ٤
+ * فهرس الكتاب (المايسترو) — النسخة ٥: كتاب «إنسان» بأقسامه الثلاثة
  *
  * ════════════════════════════════════════════════════════════
  *  كيف تستخدم هذا الملف (خطوتك الوحيدة عند أي تعديل):
@@ -27,15 +27,17 @@
 
 window.WQ_BOOK = {
 
-  title: 'ولادة قلب',
-  seriesTitle: 'سلسلة منظور الفؤاد',
+  title: 'إنسان',
+  seriesTitle: 'سلسلة ولادة قلب',
   bookLabel: 'الكتاب الأوّل',
   author: 'كوتش محمود فؤاد',
+  /* سطرٌ صغير على الغلاف: اسم الإطار */
+  brand: 'منظور الفؤاد',
 
   /* الجملة التي تظهر تحت العنوان في واجهة الكتاب — من الفصل الأوّل */
   epigraph: 'لست مريضًا، ولا مكسورًا، ولا ناقصًا. القلب فيك على الأصل الذي خُلق له.',
 
-  version: 6,
+  version: 7,
 
   contentPath: 'content/',
 
@@ -50,62 +52,98 @@ window.WQ_BOOK = {
     { code:'en',    label:'English',              short:'EN',     dir:'ltr' }
   ],
 
-  /* ─────────── الأجزاء ───────────
-     unit: اسم الوحدة داخل الجزء (الفصل / المرآة)
-     unitGender: 'm' أو 'f' — لضبط الترتيب: الفصل الأوّل / المرآة الأولى */
+  /* ─────────── الأقسام ───────────
+     sub:  السطر الذي يُكتب تحت اسم القسم (مؤجَّل — اتركه فارغًا حتى تحسمه)
+     gate: سطر يظهر في عتبة القسم قبل أوّل فصلٍ فيه (اختياريّ)
+     الفصل الذي بلا number يظهر بعلامةٍ لا برقم (فصول المعادن) */
   parts: [
-    { id:'part-1', label:'الجزء الأوّل', title:'الخريطة',      unit:'الفصل',  unitGender:'m' },
-    { id:'part-2', label:'الجزء الثاني', title:'المرايا السبع', unit:'المرآة', unitGender:'f' }
+    { id:'p-dar',   label:'القسم الأوّل',  title:'دارُه',   sub:'', unit:'الفصل', unitGender:'m' },
+    { id:'p-sai',   label:'القسم الثاني',  title:'سعيُه',   sub:'', unit:'الفصل', unitGender:'m' },
+    { id:'p-tina',  label:'القسم الثالث',  title:'طينتُه',  sub:'', unit:'الفصل', unitGender:'m' }
   ],
 
-  /* ─────────── المحطّات ─────────── */
+  /* ─────────── المحطّات ───────────
+     كلّ قسمٍ محطّةٌ واحدة باسمه (فلا يظهر عنوانها مرّتين)، إلّا «طينتُه» ففيها عائلات المعادن.
+     ⚠ معرّفات الفصول (ch-1…) لا تتغيّر أبدًا: بيانات القرّاء مربوطة بها.
+       الفصول القديمة التي لم يُرفع نصّها الجديد بعد تبقى منشورة بعناوينها القديمة،
+       وحين يُرفع نصّها الجديد يتغيّر عنوانها هنا في نفس المرّة. */
   stations: [
 
     {
-      id: 'st-nida',
-      part: 'part-1',
-      title: 'النداء',
-      gate: 'هنا يُسمّى الوجع الذي لم تجد له اسمًا، ويُفتح السؤال الذي لا يسكت.',
+      id: 'st-dar',
+      part: 'p-dar',
+      title: 'دارُه',
       chapters: [
-        { id:'ch-1', number:1, title:'الفراغ الساكن',        file:'ch-1.js', v:2, status:'published' },
-        { id:'ch-2', number:2, title:'السؤال الذي لا يسكت',  file:'ch-2.js', v:3, status:'published' },
-        { id:'ch-3', number:3, title:'ما لا يُمحى',           file:'ch-3.js', v:2, status:'published' }
+        { id:'ch-1',     number:1, title:'الفراغ الساكن',                     file:'ch-1.js',     v:3, status:'published' },
+        { id:'ch-2',     number:2, title:'السؤال الذي لا يسكت',              file:'ch-2.js',     v:3, status:'published' },  /* يصير: الذي تعرفه قبل أن يُقال */
+        { id:'ch-3',     number:3, title:'ما لا يُمحى',                       file:'ch-3.js',     v:2, status:'published' },
+        { id:'ch-4',     number:4, title:'الخريطة الداخليّة — الفؤاد والقلب', file:'ch-4.js',     v:2, status:'published' },  /* يصير: الفؤاد والقلب */
+        { id:'ch-5',     number:5, title:'الخريطة الداخليّة — النفس',          file:'ch-5.js',     v:2, status:'published' },  /* يصير: النفس */
+        { id:'ch-6',     number:6, title:'الخريطة الداخليّة — الصدر والمنظومة', file:'ch-6.js',    v:2, status:'published' },  /* يصير: الصدر */
+        { id:'ch-nur',   number:7, title:'حين يجري النور وحين ينقطع',          file:'ch-nur.js',   v:1, status:'draft' },
+        { id:'ch-qinaa', number:8, title:'القناع',                             file:'ch-qinaa.js', v:1, status:'draft' }
       ]
     },
 
     {
-      id: 'st-kharita',
-      part: 'part-1',
-      title: 'الخريطة',
-      gate: 'هنا تنزل في بنيتك طبقةً طبقة، وترى الخريطة وهي تتحرّك في حياتك.',
+      id: 'st-sai',
+      part: 'p-sai',
+      title: 'سعيُه',
       chapters: [
-        { id:'ch-4', number:4, title:'الخريطة الداخليّة — الفؤاد والقلب', file:'ch-4.js', v:2, status:'published' },
-        { id:'ch-5', number:5, title:'الخريطة الداخليّة — النفس',          file:'ch-5.js', v:2, status:'published' },
-        { id:'ch-6', number:6, title:'الخريطة الداخليّة — الصدر والمنظومة', file:'ch-6.js', v:2, status:'published' },
-        { id:'ch-7', number:7, title:'حين تتحرّك الخريطة',                  file:'ch-7.js', v:2, status:'published' },
-        { id:'ch-8', number:8, title:'خريطةٌ رآها كثيرون',                  file:'ch-8.js', v:2, status:'published' }
-        /* الفصل التاسع يُضاف هنا حين يُرفع ملفّه */
+        { id:'ch-7', number:9,  title:'حين تتحرّك الخريطة',  file:'ch-7.js', v:2, status:'published' },  /* يُقسَّم فصولًا */
+        { id:'ch-8', number:10, title:'خريطةٌ رآها كثيرون', file:'ch-8.js', v:2, status:'published' }   /* يصير: نوافذ على دارٍ واحدة */
       ]
     },
 
     {
-      id: 'st-maraya',
-      part: 'part-2',
-      title: 'المرايا السبع',
-      /* ⚠ جملة مؤقّتة — عدّلها بصياغتك */
-      gate: 'هنا تقف أمام سبع مرايا، كلّ واحدةٍ تريك من نفسك وجهًا لم تكن تنتبه إليه.',
+      id: 'st-tina',
+      part: 'p-tina',
+      title: 'طينتُه',
       chapters: [
-        /* number:0 يظهر «مدخل» بدل الترتيب */
-        { id:'m-0', number:0, title:'بين يدَي المرايا',        file:'m-0.js', v:1, status:'review' },
-        { id:'m-1', number:1, title:'السلوك',                 file:'m-1.js', v:2, status:'published' },
-        { id:'m-2', number:2, title:'الانتباه',               file:'m-2.js', v:1, status:'draft' },
-        { id:'m-3', number:3, title:'المشاعر',                file:'m-3.js', v:1, status:'draft' },
-        { id:'m-4', number:4, title:'النموذج الإدراكيّ',       file:'m-4.js', v:1, status:'draft' },
-        { id:'m-5', number:5, title:'الدوافع',                file:'m-5.js', v:1, status:'draft' },
-        { id:'m-6', number:6, title:'المعتقدات',              file:'m-6.js', v:1, status:'draft' },
-        { id:'m-7', number:7, title:'الجروح',                 file:'m-7.js', v:1, status:'draft' }
+        { id:'mt-intro', title:'الناس معادن',            file:'mt-intro.js', v:1, status:'draft' },
+        { id:'mt-ataba', title:'قبل أن تقرأ المعادن',    file:'mt-ataba.js', v:1, status:'draft' }
+      ]
+    },
+    {
+      id: 'st-himma',
+      part: 'p-tina',
+      title: 'الهمّة والعزيمة',
+      chapters: [
+        { id:'hm-1', title:'قلبٌ يأبى ما لم يستقم',       file:'hm-1.js', v:1, status:'draft' },
+        { id:'hm-2', title:'قلبٌ يدخل ما يدخله بجملته',   file:'hm-2.js', v:1, status:'draft' },
+        { id:'hm-3', title:'قلبٌ تجري إرادتُه مع ما حوله', file:'hm-3.js', v:1, status:'draft' }
+      ]
+    },
+    {
+      id: 'st-uns',
+      part: 'p-tina',
+      title: 'الأنس والقرب',
+      chapters: [
+        { id:'an-1', title:'قلبٌ يمكث فيما اشتدّ من التجربة', file:'an-1.js', v:1, status:'draft' },
+        { id:'an-2', title:'قلبٌ يلقى الناسَ لذواتهم',         file:'an-2.js', v:1, status:'draft' },
+        { id:'an-3', title:'قلبٌ تتعدّد هيئاتُه في الفعل',     file:'an-3.js', v:1, status:'draft' }
+      ]
+    },
+    {
+      id: 'st-yaqin',
+      part: 'p-tina',
+      title: 'اليقين والبيان',
+      chapters: [
+        { id:'yq-1', title:'قلبٌ يجتمع على ما عرف',            file:'yq-1.js', v:1, status:'draft' },
+        { id:'yq-2', title:'قلبٌ يكثُر عنده ما بين يديه',       file:'yq-2.js', v:1, status:'draft' },
+        { id:'yq-3', title:'قلبٌ يُخالط ما خفيت عاقبته',       file:'yq-3.js', v:1, status:'draft' }
+      ]
+    },
+    {
+      id: 'st-khatima',
+      part: 'p-tina',
+      title: 'الخاتمة',
+      chapters: [
+        { id:'ch-khatima', title:'أوّل الرجوع', file:'ch-khatima.js', v:1, status:'draft' }
       ]
     }
 
+    /* المرايا السبع خرجت من هذا الكتاب: صارت كتابًا مستقلًّا.
+       ملفّاتها (m-0.js… ) باقية في content/ لأنّ رابط المرايا العامّ (maraya/) يقرأ منها. */
   ]
 };
