@@ -37,7 +37,7 @@ window.WQ_BOOK = {
   /* الجملة التي تظهر تحت العنوان في واجهة الكتاب — من الفصل الأوّل */
   epigraph: 'لست مريضًا، ولا مكسورًا، ولا ناقصًا. القلب فيك على الأصل الذي خُلق له.',
 
-  version: 8,
+  version: 9,
 
   contentPath: 'content/',
 
@@ -76,7 +76,7 @@ window.WQ_BOOK = {
       chapters: [
         { id:'ch-1',     number:1, title:'الفراغ الساكن',                     file:'ch-1.js',     v:3, status:'published' },
         { id:'ch-2',     number:2, title:'الذي تعرفه قبل أن يُقال',          file:'ch-2.js',     v:4, status:'published' },
-        { id:'ch-3',     number:3, title:'ما لا يُمحى',                       file:'ch-3.js',     v:2, status:'published' },
+        { id:'ch-3',     number:3, title:'ما لا يُمحى',                       file:'ch-3.js',     v:3, status:'published' },
         { id:'ch-4',     number:4, title:'الخريطة الداخليّة — الفؤاد والقلب', file:'ch-4.js',     v:2, status:'published' },  /* يصير: الفؤاد والقلب */
         { id:'ch-5',     number:5, title:'الخريطة الداخليّة — النفس',          file:'ch-5.js',     v:2, status:'published' },  /* يصير: النفس */
         { id:'ch-6',     number:6, title:'الخريطة الداخليّة — الصدر والمنظومة', file:'ch-6.js',    v:2, status:'published' },  /* يصير: الصدر */
