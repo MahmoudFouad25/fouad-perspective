@@ -37,7 +37,7 @@ window.WQ_BOOK = {
   /* الجملة التي تظهر تحت العنوان في واجهة الكتاب — من الفصل الأوّل */
   epigraph: 'لست مريضًا، ولا مكسورًا، ولا ناقصًا. القلب فيك على الأصل الذي خُلق له.',
 
-  version: 16,
+  version: 17,
 
   contentPath: 'content/',
 
@@ -91,7 +91,8 @@ window.WQ_BOOK = {
       title: 'سعيُه',
       chapters: [
         { id:'ch-7', number:9,  title:'ما يجذبك وما يُقنعك', file:'ch-7.js', v:3, status:'published' },  /* أوّل فصول «سعيُه» — المواقف الستّة فصولٌ تليه */
-        { id:'ch-8', number:10, title:'خريطةٌ رآها كثيرون', file:'ch-8.js', v:2, status:'published' }   /* يصير: نوافذ على دارٍ واحدة */
+        { id:'ch-yawm', number:10, title:'يومٌ واحد، وقلبان', file:'ch-yawm.js', v:1, status:'published' },
+        { id:'ch-8', number:11, title:'خريطةٌ رآها كثيرون', file:'ch-8.js', v:2, status:'published' }   /* يصير: نوافذ على دارٍ واحدة */
       ]
     },
 
