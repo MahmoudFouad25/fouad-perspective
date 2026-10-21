@@ -37,7 +37,7 @@ window.WQ_BOOK = {
   /* الجملة التي تظهر تحت العنوان في واجهة الكتاب — من الفصل الأوّل */
   epigraph: 'لست مريضًا، ولا مكسورًا، ولا ناقصًا. القلب فيك على الأصل الذي خُلق له.',
 
-  version: 13,
+  version: 14,
 
   contentPath: 'content/',
 
@@ -80,7 +80,7 @@ window.WQ_BOOK = {
         { id:'ch-4',     number:4, title:'الخريطة الداخليّة: الفؤاد والقلب', file:'ch-4.js',     v:3, status:'published' },
         { id:'ch-5',     number:5, title:'الخريطة الداخليّة: النفس',          file:'ch-5.js',     v:3, status:'published' },
         { id:'ch-6',     number:6, title:'الخريطة الداخليّة: الصدر',          file:'ch-6.js',     v:3, status:'published' },
-        { id:'ch-nur',   number:7, title:'حين يجري النور وحين ينقطع',          file:'ch-nur.js',   v:1, status:'draft' },
+        { id:'ch-nur',   number:7, title:'حين يجري النور وحين ينقطع',          file:'ch-nur.js',   v:1, status:'published' },
         { id:'ch-qinaa', number:8, title:'القناع',                             file:'ch-qinaa.js', v:1, status:'draft' }
       ]
     },
