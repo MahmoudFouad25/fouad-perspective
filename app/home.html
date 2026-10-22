@@ -121,6 +121,7 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
   <script src="../js/wallet-coupon-limit.js"></script>
+  <script src="../js/wallet-client.js"></script>
   <script src="./core.js"></script>
 
   <script>
@@ -616,21 +617,11 @@
       const btn = $('createCouponBtn');
       btn.disabled = true;
       try {
-        const name = userName();
-        const code = `${name.split(' ')[0].toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-        await db.collection('coupons').add({
-          code, type: 'fixed', value: amount, limit: 1, used: 0,
-          source: 'wallet_points', createdBy: userId, createdByName: name,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          pointsDeducted: need, usedBy: null, usedByName: null, usedAt: null, usedInCourse: null,
-          status: 'active'
-        });
-        await db.collection('users').doc(userId).update({
-          'walletPoints.balance': firebase.firestore.FieldValue.increment(-need),
-          'walletPoints.lastUpdate': firebase.firestore.FieldValue.serverTimestamp()
-        });
+        // الكوبون بيتعمل على السيرفر، في نفس العملية اللي بتخصم النقاط
+        const created = await WalletServer.createCoupon(amount);
+        const code = created.code;
         userData.walletPoints = userData.walletPoints || {};
-        userData.walletPoints.balance = balance() - need;
+        userData.walletPoints.balance = created.balance;
         $('couponAmount').value = '';
         $('couponCalc').textContent = '';
         renderWalletHead();
@@ -649,7 +640,7 @@
         $('ccClose').onclick = () => closeSheet();
       } catch (e) {
         console.error(e);
-        toast('لم نتمكن من إنشاء الكوبون — حاول مرة أخرى', 'error');
+        toast(e.message || 'لم نتمكن من إنشاء الكوبون — حاول مرة أخرى', 'error');
       } finally {
         btn.disabled = false;
       }
@@ -671,11 +662,9 @@
         });
         if (!ok) return;
 
-        await db.collection('coupons').doc(id).delete();
-        await db.collection('users').doc(userId).update({
-          'walletPoints.balance': firebase.firestore.FieldValue.increment(pts),
-          'walletPoints.lastUpdate': firebase.firestore.FieldValue.serverTimestamp()
-        });
+        // الإلغاء ورجوع النقاط على السيرفر، بالرقم المسجّل في الكوبون نفسه
+        const cancelled = await WalletServer.cancelCoupon(id);
+        pts = cancelled.pointsReturned;
         userData.walletPoints = userData.walletPoints || {};
         userData.walletPoints.balance = balance() + pts;
         renderWalletHead();
@@ -683,7 +672,7 @@
         toast(`تم الحذف وعاد ${AR(pts)} نقطة إلى محفظتك`, 'success');
       } catch (e) {
         console.error(e);
-        toast('حدث خطأ في الحذف — حاول مرة أخرى', 'error');
+        toast(e.message || 'حدث خطأ في الحذف — حاول مرة أخرى', 'error');
       }
     }
 

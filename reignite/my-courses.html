@@ -3492,6 +3492,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     <script src="../js/wallet-coupon-limit.js"></script>
+    <script src="../js/wallet-client.js"></script>
     <script src="../js/booking-money.js"></script>
     <script src="../js/enrollment-access.js"></script>
     
@@ -5451,45 +5452,14 @@ async function createUserCoupon() {
             }
         });
         
-        // توليد كود الكوبون
-        const userName = userData?.personalInfo?.name || 'USER';
-        const firstName = userName.split(' ')[0].toUpperCase();
-        const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const couponCode = `${firstName}-${randomCode}`;
-        
-        // إنشاء الكوبون
-        const couponData = {
-            code: couponCode,
-            type: 'fixed',
-            value: amount,
-            limit: 1,
-            used: 0,
-            source: 'wallet_points',
-            createdBy: userId,
-            createdByName: userName,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            pointsDeducted: requiredPoints,
-            usedBy: null,
-            usedByName: null,
-            usedAt: null,
-            usedInCourse: null,
-            status: 'active'
-        };
-        
-        // حفظ في Firebase
-        await db.collection('coupons').add(couponData);
-        
-        // خصم النقاط من المحفظة
-        await db.collection('users').doc(userId).update({
-            'walletPoints.balance': firebase.firestore.FieldValue.increment(-requiredPoints),
-            'walletPoints.lastUpdate': firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
+        // الكوبون بيتعمل على السيرفر، في نفس العملية اللي بتخصم النقاط
+        const created = await WalletServer.createCoupon(amount);
+        const couponCode = created.code;
+
         // تحديث البيانات المحلية
-        if (userData.walletPoints) {
-            userData.walletPoints.balance -= requiredPoints;
-        }
-        
+        userData.walletPoints = userData.walletPoints || {};
+        userData.walletPoints.balance = created.balance;
+
         // مسح الـ input
         amountInput.value = '';
         
@@ -5552,8 +5522,8 @@ async function createUserCoupon() {
         console.error('خطأ في إنشاء الكوبون:', error);
         Swal.fire({
             icon: 'error',
-            title: 'حدث خطأ',
-            text: 'لم نتمكن من إنشاء الكوبون. حاول مرة أخرى.',
+            title: 'ما اتعملش الكوبون',
+            text: error.message || 'لم نتمكن من إنشاء الكوبون. حاول مرة أخرى.',
             confirmButtonColor: '#ef4444'
         });
     }
@@ -5639,20 +5609,12 @@ async function deleteCoupon(couponId, pointsToReturn) {
             }
         });
         
-        // حذف الكوبون
-        await db.collection('coupons').doc(couponId).delete();
-        
-        // إرجاع النقاط للمحفظة
-        await db.collection('users').doc(userId).update({
-            'walletPoints.balance': firebase.firestore.FieldValue.increment(pointsToReturn),
-            'walletPoints.lastUpdate': firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        // تحديث البيانات المحلية
-        if (userData.walletPoints) {
-            userData.walletPoints.balance += pointsToReturn;
-        }
-        
+        // الإلغاء ورجوع النقاط على السيرفر، بالرقم المسجّل في الكوبون نفسه
+        const cancelled = await WalletServer.cancelCoupon(couponId);
+        pointsToReturn = cancelled.pointsReturned;
+        userData.walletPoints = userData.walletPoints || {};
+        userData.walletPoints.balance = (userData.walletPoints.balance || 0) + pointsToReturn;
+
         // تحديث العرض
         updateWalletCouponsDisplay();
         
@@ -5687,7 +5649,7 @@ async function deleteCoupon(couponId, pointsToReturn) {
         Swal.fire({
             icon: 'error',
             title: 'حدث خطأ',
-            text: 'لم نتمكن من حذف الكوبون. حاول مرة أخرى.',
+            text: error.message || 'لم نتمكن من حذف الكوبون. حاول مرة أخرى.',
             confirmButtonColor: '#ef4444'
         });
     }
