@@ -134,11 +134,12 @@
     });
   }
 
-  // نفس منطق login.html في قراءة الباسورد المحفوظ
-  function savedPassword(userDoc) {
-    var t = userDoc && userDoc.auth && userDoc.auth.tempPassword;
-    if (!t) return null;
-    try { var d = atob(t); return /^[\x20-\x7E@.؀-ۿ]+$/.test(d) ? d : t; } catch (e) { return t; }
+  // الباسورد المحفوظ ما بيتقراش في المتصفح: السيرفر هو اللي بيقارنه (زي login.html)
+  var SERVER_LOGIN = "https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/auth/login-migrate";
+  function serverMigrate(email, password) {
+    return fetch(SERVER_LOGIN, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: lower(email), password: password }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }); }, function () { return { ok: false, error: "network" }; });
   }
 
   /* تأكيد الدخول بالباسورد. ← Promise<authUser> أو reject بـ {kind:"wrong"|"locked"|"network"|"help"} */
@@ -153,12 +154,16 @@
       if (code === "auth/network-request-failed") throw { kind: "network" };
       // مفيش حساب فايربيز، أو الباسورد مختلف عن اللي فيه. زي login.html بالظبط:
       // لو الباسورد هو المحفوظ في المنصة، نعمل حساب فايربيز بيه.
-      if (savedPassword(ctx.userDoc) !== password) throw { kind: "wrong" };
-      return F.auth.createUserWithEmailAndPassword(email, password).then(function (c) { return c.user; }).catch(function (e2) {
-        var c2 = (e2 && e2.code) || "";
-        if (c2 === "auth/network-request-failed") throw { kind: "network" };
-        if (c2 === "auth/too-many-requests") throw { kind: "locked" };
-        throw { kind: "help", code: c2 };   // الإيميل ليه حساب فايربيز بباسورد تاني ← محتاج محمود يظبطه
+      // السيرفر بيقارن الباسورد بالمحفوظ، ولو مطابق بيظبط حساب الدخول عليه
+      return serverMigrate(email, password).then(function (j) {
+        if (!j || !j.ok) {
+          var c = (j && j.error) || "";
+          if (c === "invalid") throw { kind: "wrong" };
+          if (c === "too-many") throw { kind: "locked" };
+          if (c === "network") throw { kind: "network" };
+          throw { kind: "help", code: c || "server" };
+        }
+        return F.auth.signInWithEmailAndPassword(lower(email), password).then(function (c) { return c.user; });
       });
     });
   }
