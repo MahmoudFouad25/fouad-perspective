@@ -12,6 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-storage-compat.js"></script>
 <script src="../js/admin-guard.js"></script>
+<script src="../js/bot-client.js"></script>
 <script src="../js/booking-money.js"></script>
 <script>
     // تأخير تحميل firebase-config.js حتى يتم تحميل Firebase بالكامل
@@ -3050,11 +3051,22 @@ document.querySelector('.password-text').textContent = '••••••••
 
     if (formValues) {
         try {
+            // السيرفر بيغيّر باسورد حساب الدخول نفسه (مش بس النسخة المحفوظة)
+            const r = await botFetch('https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot/auth/admin-set-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: currentUserId, password: formValues })
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok || !j.ok) {
+                const why = { 'no-email': 'العميل ده ما عندوش إيميل في ملفه', 'not-found': 'العميل مش موجود', 'bad-request': 'الباسورد لازم يكون ٦ حروف على الأقل' }[j.error];
+                throw new Error(why || ('السيرفر رفض التغيير' + (r.status === 401 || r.status === 403 ? ' — ادخل بحساب الأدمن تاني' : '')));
+            }
             await db.collection('users').doc(currentUserId).update({
-                'auth.tempPassword': btoa(formValues),
                 'auth.passwordResetAt': new Date().toISOString(),
                 'timestamps.lastUpdated': new Date().toISOString()
-            });
+            }).catch(() => {});
+            window.currentPassword = formValues;
 
             const whatsapp = currentUserData.personalInfo?.whatsapp;
             if (whatsapp) {
@@ -3090,7 +3102,7 @@ document.querySelector('.password-text').textContent = '••••••••
                 Swal.fire({
                     icon: 'success',
                     title: 'تم التحديث',
-                    html: `كلمة المرور الجديدة: <strong>${formValues}</strong>`,
+                    html: `كلمة المرور الجديدة: <strong>${escHtml(formValues)}</strong>`,
                     confirmButtonText: 'حسناً'
                 });
             }
@@ -3099,7 +3111,7 @@ document.querySelector('.password-text').textContent = '••••••••
             Swal.fire({
                 icon: 'error',
                 title: 'خطأ',
-                text: 'حدث خطأ أثناء تحديث كلمة المرور'
+                text: error.message || 'حدث خطأ أثناء تحديث كلمة المرور'
             });
         }
     }

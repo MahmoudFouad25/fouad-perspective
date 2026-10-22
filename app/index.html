@@ -79,11 +79,12 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
   <script src="./core.js"></script>
+  <script src="../js/server-login.js"></script>
 
   <script>
   (function () {
     'use strict';
-    const { auth, db, PATHS, Session, isBlocked, isAdmin, decodeTempPassword, openExternal, SUPPORT_WHATSAPP } = FP;
+    const { auth, db, PATHS, Session, isBlocked, isAdmin, openExternal, SUPPORT_WHATSAPP } = FP;
 
     const $ = id => document.getElementById(id);
     const splash = $('splash');
@@ -126,51 +127,17 @@
     // الدخول بالبريد وكلمة المرور — نفس منطق الموقع
     // ═══════════════════════════════════════════════
     async function login(email, password) {
+      // الدخول أولًا: لو حساب الدخول رفض الباسورد، السيرفر بيقارنه بالمحفوظ (المتصفح عمره ما بيشوفه)
+      const authMethod = await ServerLogin.signIn(email, password);
+
       const q = await db.collection('users').where('personalInfo.email', '==', email).limit(1).get();
-      if (q.empty) throw new Error('البيانات غير صحيحة… حاول مرة أخرى');
+      if (q.empty) { await auth.signOut(); throw new Error('الحساب ده مش متسجل عندنا. كلّمنا على تليجرام'); }
 
       const userDoc = q.docs[0];
       const userData = userDoc.data();
       const userId = userDoc.id;
 
-      if (isBlocked(userData)) throw new Error('روحك محجوبة عن الدخول… تواصل مع الحكماء');
-
-      let authMethod = null;
-
-      // المحاولة 1: Firebase Auth مباشرة
-      try {
-        await auth.signInWithEmailAndPassword(email, password);
-        authMethod = 'direct-auth';
-      } catch (authError) {
-        // المحاولة 2: كلمة المرور المخزّنة في Firestore
-        const temp = userData.auth?.tempPassword;
-        if (temp && password === decodeTempPassword(temp)) {
-          try {
-            await auth.createUserWithEmailAndPassword(email, password);
-            authMethod = 'created-new-auth';
-          } catch (createError) {
-            if (createError.code === 'auth/too-many-requests') {
-              throw new Error('تم حظر الدخول مؤقتًا بسبب المحاولات الكثيرة — انتظر ٥ دقائق وحاول مرة أخرى');
-            } else if (createError.code === 'auth/network-request-failed') {
-              throw new Error('مشكلة في الاتصال بالإنترنت — تحقق من اتصالك');
-            } else if (createError.code === 'auth/email-already-in-use') {
-              authMethod = 'firestore-only';
-            } else {
-              authMethod = 'firestore-fallback';
-            }
-          }
-        }
-
-        if (!authMethod) {
-          if (authError.code === 'auth/too-many-requests') {
-            throw new Error('تم حظر الدخول مؤقتًا — انتظر ٥ دقائق وحاول مرة أخرى');
-          }
-          if (authError.code === 'auth/network-request-failed') {
-            throw new Error('مشكلة في الاتصال بالإنترنت — تحقق من اتصالك');
-          }
-          throw new Error('الطريق مغلق… تأكد من مفتاحك');
-        }
-      }
+      if (isBlocked(userData)) { await auth.signOut(); throw new Error('الحساب ده متوقف. كلّمنا على تليجرام'); }
 
       await db.collection('users').doc(userId).update({
         'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
@@ -208,26 +175,13 @@
     // ═══════════════════════════════════════════════
     async function telegramAutoLogin(userId, token) {
       showSplash('جاري تسجيل دخولك…');
-      const snap = await db.collection('users').doc(userId).get();
+      // تذكرة دخول من السيرفر من غير أي باسورد
+      const tg = await ServerLogin.telegram(userId, token);
+      try { history.replaceState(null, '', location.pathname); } catch (e) {}
+      const snap = await db.collection('users').doc(tg.userId).get();
       if (!snap.exists) throw new Error('المستخدم غير موجود');
       const userData = snap.data();
-
-      if (!userData.auth?.telegramAutoLoginToken || userData.auth.telegramAutoLoginToken !== token) {
-        throw new Error('رابط غير صالح أو منتهي الصلاحية');
-      }
-      if (isBlocked(userData)) throw new Error('الحساب محجوب — تواصل مع الدعم');
-
-      const email = userData.personalInfo?.email;
-      const temp = userData.auth?.tempPassword;
-      if (!email || !temp) throw new Error('بيانات تسجيل الدخول غير مكتملة');
-      const password = decodeTempPassword(temp);
-
-      let ok = false;
-      try { await auth.signInWithEmailAndPassword(email, password); ok = true; }
-      catch (e) {
-        try { await auth.createUserWithEmailAndPassword(email, password); ok = true; } catch (e2) {}
-      }
-      if (!ok) throw new Error('فشل في تسجيل الدخول');
+      const email = tg.email || userData.personalInfo?.email;
 
       await db.collection('users').doc(userId).update({
         'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),

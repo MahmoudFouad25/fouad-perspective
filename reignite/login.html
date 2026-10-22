@@ -879,6 +879,7 @@ input, textarea {
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script src="../js/server-login.js"></script>
 
 
     <div class="portal-transition" id="portalTransition"></div>
@@ -1337,117 +1338,29 @@ async function handleLogin(event) {
     button.disabled = true;
     
     try {
-        console.log('🔵 [2] البحث عن المستخدم في Firestore...');
-        
-        // البحث عن المستخدم
+        // ١) الدخول: لو حساب الدخول رفض الباسورد، السيرفر بيقارنه بالمحفوظ (المتصفح عمره ما بيشوفه)
+        const authMethod = await ServerLogin.signIn(email, password);
+        const authSuccess = true;
+
+        // ٢) وثيقة العميل، بعد الدخول
         const usersQuery = await db.collection('users')
             .where('personalInfo.email', '==', email)
             .limit(1)
             .get();
-        
         if (usersQuery.empty) {
-            console.log('❌ المستخدم غير موجود في Firestore');
-            throw new Error('البيانات غير صحيحة... حاول مرة أخرى');
+            await auth.signOut();
+            throw new Error('الحساب ده مش متسجل عندنا. كلّمنا على تليجرام');
         }
-        
         const userDoc = usersQuery.docs[0];
         const userData = userDoc.data();
         const userId = userDoc.id;
-        
-        console.log('🔵 [3] تم العثور على المستخدم - ID:', userId);
-        
-        // التحقق من حالة الحساب
-        if (userData.accountStatus?.status === 'inactive' || 
-            userData.accountStatus?.suspended === true) {
-            console.log('❌ الحساب محجوب');
-            throw new Error('روحك محجوبة عن الدخول... تواصل مع الحكماء');
-        }
-        
-        console.log('🔵 [4] حالة الحساب: نشط ✓');
-        
-        // استراتيجية تسجيل دخول محسّنة
-        let authSuccess = false;
-        let authMethod = '';
-        
-        // المحاولة 1: تسجيل دخول مباشر عبر Firebase Auth
-        console.log('🔵 [5] محاولة 1: تسجيل دخول مباشر...');
-        try {
-            await auth.signInWithEmailAndPassword(email, password);
-            authSuccess = true;
-            authMethod = 'direct-auth';
-            console.log('✅ [6] نجح تسجيل الدخول المباشر');
-        } catch (authError) {
-            console.log('⚠️ [6] فشل تسجيل الدخول المباشر:', authError.code);
-            
-            // المحاولة 2: التحقق من كلمة المرور في Firestore
-            if (userData.auth?.tempPassword) {
-                console.log('🔵 [7] محاولة 2: التحقق من كلمة المرور المخزنة...');
-                
-                try {
-                    let savedPassword;
-try {
-    savedPassword = atob(userData.auth.tempPassword);
-    // التأكد إن الفك أنتج نص منطقي - لو رجع رموز غريبة يبقى مش Base64
-    if (!/^[\x20-\x7E@.\u0600-\u06FF]+$/.test(savedPassword)) {
-        savedPassword = userData.auth.tempPassword;
-    }
-} catch (e) {
-    // مش Base64 - استخدمها كما هي (نص خام)
-    savedPassword = userData.auth.tempPassword;
-}
 
-if (password === savedPassword) {
-                        console.log('✅ [8] كلمة المرور صحيحة');
-                        
-                        // كلمة المرور صحيحة - نحاول ننشئ حساب Auth جديد
-                        console.log('🔵 [9] محاولة إنشاء حساب Auth جديد...');
-                        
-                        try {
-                            await auth.createUserWithEmailAndPassword(email, password);
-                            authSuccess = true;
-                            authMethod = 'created-new-auth';
-                            console.log('✅ [10] تم إنشاء حساب Auth جديد بنجاح');
-                        } catch (createError) {
-                            console.log('⚠️ [10] خطأ في إنشاء الحساب:', createError.code);
-                            
-                            // إذا كان الحساب موجود بالفعل
-                            if (createError.code === 'auth/email-already-in-use') {
-                                console.log('🔵 [11] الحساب موجود في Auth - محاولة حذفه وإعادة إنشائه...');
-                                
-                                // نسمح بالدخول بدون Auth (استخدام Firestore فقط)
-                                authSuccess = true;
-                                authMethod = 'firestore-only';
-                                console.log('✅ [11] السماح بالدخول باستخدام Firestore');
-                                
-                            } else if (createError.code === 'auth/too-many-requests') {
-                                throw new Error('تم حظر الدخول مؤقتاً بسبب المحاولات الكثيرة - انتظر 5 دقائق وحاول مرة أخرى');
-                            } else if (createError.code === 'auth/network-request-failed') {
-                                throw new Error('مشكلة في الاتصال بالإنترنت - تحقق من اتصالك');
-                            } else {
-                                // في حالة أي خطأ آخر، نسمح بالدخول طالما كلمة المرور صحيحة
-                                console.log('⚠️ [11] خطأ غير متوقع - السماح بالدخول بناءً على Firestore');
-                                authSuccess = true;
-                                authMethod = 'firestore-fallback';
-                            }
-                        }
-                    } else {
-                        console.log('❌ [8] كلمة المرور غير صحيحة');
-                        throw new Error('الطريق مغلق... تأكد من مفتاحك');
-                    }
-                } catch (decodeError) {
-                    console.log('❌ خطأ في فك تشفير كلمة المرور:', decodeError);
-                }
-            }
-            
-            if (!authSuccess) {
-                if (authError.code === 'auth/too-many-requests') {
-                    throw new Error('تم حظر الدخول مؤقتاً - انتظر 5 دقائق وحاول مرة أخرى');
-                } else {
-                    throw new Error('الطريق مغلق... تأكد من مفتاحك');
-                }
-            }
+        if (userData.accountStatus?.status === 'inactive' ||
+            userData.accountStatus?.suspended === true) {
+            await auth.signOut();
+            throw new Error('الحساب ده متوقف. كلّمنا على تليجرام');
         }
-        
+
         if (authSuccess) {
             console.log('🔵 [12] تسجيل الدخول ناجح بطريقة:', authMethod);
             
@@ -1804,7 +1717,7 @@ async function handleAutoLogin() {
         }
         
         // ⏰ الانتظار الكامل (عدل الرقم ده على راحتك)
-        const waitTime = 6000; // 6 ثواني - عدل الرقم ده زي ما تحب
+        const waitTime = 600; // كانت ٦ ثواني
         
         console.log(`⏳ انتظار ${waitTime}ms...`);
         
@@ -1813,59 +1726,17 @@ async function handleAutoLogin() {
         // بدء تسجيل الدخول بدون رسائل إضافية
         console.log('✅ بدء تسجيل الدخول...');
         
-        // جلب بيانات المستخدم من Firebase
-        const userDoc = await db.collection('users').doc(userId).get();
-        
-                
+        // تذكرة دخول من السيرفر (من غير أي باسورد)، وبعدها وثيقة العميل
+        const tg = await ServerLogin.telegram(userId, token);
+        const userDoc = await db.collection('users').doc(tg.userId).get();
         if (!userDoc.exists) {
             throw new Error('المستخدم غير موجود');
         }
-        
         const userData = userDoc.data();
-        
-        // التحقق من الـ token
-        const savedToken = userData.auth?.telegramAutoLoginToken;
-        
-        if (!savedToken || savedToken !== token) {
-            throw new Error('رابط غير صالح أو منتهي الصلاحية');
-        }
-        
-        // التحقق من حالة الحساب
-        if (userData.accountStatus?.status === 'inactive' || 
-            userData.accountStatus?.suspended === true) {
-            throw new Error('الحساب محجوب - تواصل مع الدعم');
-        }
-        
-        // الحصول على البيانات
-        const email = userData.personalInfo?.email;
-        const tempPassword = userData.auth?.tempPassword;
-        
-        if (!email || !tempPassword) {
-            throw new Error('بيانات تسجيل الدخول غير مكتملة');
-        }
-        
-        const password = atob(tempPassword);
-        
-        // محاولة تسجيل الدخول
-        let authSuccess = false;
-        
-        try {
-            await auth.signInWithEmailAndPassword(email, password);
-            authSuccess = true;
-        } catch (authError) {
-            // محاولة إنشاء حساب إذا لم يكن موجود
-            try {
-                await auth.createUserWithEmailAndPassword(email, password);
-                authSuccess = true;
-            } catch (e) {
-                console.error('خطأ في المصادقة:', e);
-            }
-        }
-        
-        if (!authSuccess) {
-            throw new Error('فشل في تسجيل الدخول');
-        }
-        
+        const email = tg.email || userData.personalInfo?.email;
+        // الرابط ما يفضلش في سجل المتصفح
+        try { history.replaceState(null, '', location.pathname); } catch (e) {}
+
         // تحديث آخر دخول
         await db.collection('users').doc(userId).update({
             'auth.lastLogin': firebase.firestore.FieldValue.serverTimestamp(),
