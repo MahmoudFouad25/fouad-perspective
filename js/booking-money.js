@@ -118,7 +118,7 @@
         : 'upcoming';
       return {
         idx: idx, number: inst.installmentNumber != null ? inst.installmentNumber : idx,
-        label: idx === 0 && inst.installmentNumber === 0 ? 'الدفعة الأولى' : 'القسط ' + (inst.installmentNumber != null ? inst.installmentNumber : idx),
+        label: idx === 0 && inst.installmentNumber === 0 ? 'الدفعة الأولى' : 'القسط ' + Number(inst.installmentNumber != null ? inst.installmentNumber : idx).toLocaleString('ar-EG'),
         amount: amount, paidSoFar: already, left: open ? Math.max(0, amount - already) : 0,
         dueDate: inst.dueDate || null, daysLate: days !== null && days > 0 ? days : 0,
         daysUntil: days !== null && days <= 0 ? -days : null,

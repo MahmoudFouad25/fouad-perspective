@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>ربط الكورسات بالحجوزات — منظور الفؤاد</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#f4f6fb;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#1e3a8a;--ok:#047857;--ok-soft:#d1fae5;--warn:#b45309;--warn-soft:#fef3c7;--bad:#b91c1c}
+  *{box-sizing:border-box} [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Tajawal,system-ui,sans-serif;line-height:1.6}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 16px}
+  .bar{max-width:980px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .bar h1{font-size:1.1rem;margin:0} .bar a{color:var(--brand);text-decoration:none;font-size:.9rem}
+  main{max-width:980px;margin:0 auto;padding:20px 16px 48px;display:grid;gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .card h2{font-size:1rem;margin:0 0 6px} .hint{color:var(--muted);font-size:.9rem;margin:0 0 12px}
+  .btn{font:inherit;font-weight:700;padding:10px 18px;border-radius:9px;border:0;cursor:pointer}
+  .btn.primary{background:var(--brand);color:#fff} .btn.ok{background:var(--ok);color:#fff} .btn[disabled]{opacity:.5;cursor:wait}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+  .stat{border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat b{display:block;font-size:1.6rem}
+  table{width:100%;border-collapse:collapse;font-size:.88rem} th,td{text-align:right;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted)} .tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:.78rem;font-weight:700}
+  .tag.ok{background:var(--ok-soft);color:var(--ok)} .tag.warn{background:var(--warn-soft);color:var(--warn)}
+  .msg{font-size:.92rem} .msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+  .scroll{max-height:420px;overflow:auto}
+</style>
+</head>
+<body>
+<header><div class="bar"><h1>ربط الكورسات بالحجوزات</h1><a href="./admin-dashboard-secure.html">لوحة التحكم</a></div></header>
+<main id="app" hidden>
+  <section class="card">
+    <h2>الأداة دي بتعمل إيه</h2>
+    <p class="hint">كل كورس في حساب العميل لازم يعرف هو تبع أنهي حجز، علشان «كورساتي» وملف العميل يعرضوا الأقساط الحقيقية من صفحة الحجوزات.
+      الأداة بتدوّر على كل طالب، وتطابق الكورس اللي في حسابه بالكورس اللي في حجزه، وتضيف رقم الحجز بس. <strong>مش بتغيّر ولا بتمسح أي حاجة تانية.</strong></p>
+    <button class="btn primary" id="scanBtn">١. شوف هتعمل إيه (من غير ما تكتب)</button>
+    <span class="msg" id="scanMsg"></span>
+  </section>
+
+  <section class="card" id="result" hidden>
+    <h2>النتيجة</h2>
+    <div class="stats" id="stats"></div>
+    <div class="scroll"><table><thead><tr><th>العميل</th><th>الكورس في الحجز</th><th>اللي هيحصل</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <p class="hint" style="margin-top:12px">اللي «مش متطابق» هيتساب زي ما هو. تقدر تربطه بعدين يدوي من ملف العميل.</p>
+    <button class="btn ok" id="applyBtn">٢. اربط المتطابق</button>
+    <span class="msg" id="applyMsg"></span>
+  </section>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+<script src="../js/admin-guard.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"'`]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]; }); };
+  var norm = function (s) { return String(s || '').trim().replace(/\s+/g, ' '); };
+
+  AdminGuard.ready().then(function (ctx) {
+    var db = ctx.db;
+    var plan = [];          // [{userId, bookingId, name, course, enrollmentIds:[...] }]
+    $('app').hidden = false;
+
+    $('scanBtn').onclick = async function () {
+      var btn = this; btn.disabled = true; $('scanMsg').className = 'msg'; $('scanMsg').textContent = 'بيدوّر…';
+      plan = [];
+      var rows = [], linked = 0, already = 0, unmatched = 0, noUser = 0;
+      try {
+        var studs = await db.collection('individualStudents').get();
+        var userCache = {};
+        for (var i = 0; i < studs.docs.length; i++) {
+          var sd = studs.docs[i], s = sd.data();
+          var name = (s.customer && s.customer.name) || '—';
+          var course = s.courseName || '—';
+          if (!s.userId) { noUser++; continue; }
+          var u = userCache[s.userId];
+          if (u === undefined) { var us = await db.collection('users').doc(s.userId).get(); u = userCache[s.userId] = us.exists ? us.data() : null; }
+          if (!u) { noUser++; continue; }
+          var ens = u.enrollments || [];
+          if (ens.some(function (e) { return e.bookingId === sd.id; })) { already++; continue; }
+          var names = [norm(s.courseName)].concat((s.courseModules || []).map(function (m) { return norm(m && (m.name || m.title || m)); }));
+          var hits = ens.filter(function (e) { return !e.bookingId && names.indexOf(norm(e.title || e.courseName)) >= 0; });
+          if (hits.length) {
+            linked++;
+            plan.push({ userId: s.userId, bookingId: sd.id, names: names });
+            rows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td><span class="tag ok">هيتربط (' + hits.length + ')</span></td></tr>');
+          } else {
+            unmatched++;
+            rows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td><span class="tag warn">مش متطابق بالاسم</span></td></tr>');
+          }
+        }
+        $('stats').innerHTML =
+          '<div class="stat"><b>' + linked + '</b>هيتربطوا</div>' +
+          '<div class="stat"><b>' + already + '</b>متربطين أصلًا</div>' +
+          '<div class="stat"><b>' + unmatched + '</b>مش متطابقين</div>' +
+          '<div class="stat"><b>' + noUser + '</b>من غير حساب</div>';
+        $('rows').innerHTML = rows.join('') || '<tr><td colspan="3">مفيش حاجة محتاجة ربط.</td></tr>';
+        $('result').hidden = false;
+        $('applyBtn').disabled = !plan.length;
+        $('scanMsg').textContent = '';
+      } catch (e) {
+        $('scanMsg').className = 'msg bad'; $('scanMsg').textContent = 'حصل خطأ: ' + e.message;
+      }
+      btn.disabled = false;
+    };
+
+    $('applyBtn').onclick = async function () {
+      if (!plan.length) return;
+      if (!confirm('هيتضاف رقم الحجز لـ ' + plan.length + ' كورس في حسابات العملاء. أكمل؟')) return;
+      var btn = this; btn.disabled = true; var done = 0, failed = 0;
+      for (var i = 0; i < plan.length; i++) {
+        var p = plan[i];
+        try {
+          // transaction: بنقرا آخر نسخة من الحساب ونضيف الرقم بس، علشان ما نكتبش فوق تغيير حصل في نفس اللحظة
+          await db.runTransaction(async function (tx) {
+            var ref = db.collection('users').doc(p.userId);
+            var snap = await tx.get(ref);
+            var ens = (snap.data() || {}).enrollments || [];
+            var changed = false;
+            ens = ens.map(function (e) {
+              if (!e.bookingId && p.names.indexOf(norm(e.title || e.courseName)) >= 0) { changed = true; return Object.assign({}, e, { bookingId: p.bookingId }); }
+              return e;
+            });
+            if (changed) tx.update(ref, { enrollments: ens });
+          });
+          done++;
+        } catch (e) { failed++; console.warn('ربط', p.userId, e); }
+        $('applyMsg').className = 'msg'; $('applyMsg').textContent = 'اتربط ' + done + ' من ' + plan.length + (failed ? ' — فشل ' + failed : '');
+      }
+      $('applyMsg').className = failed ? 'msg bad' : 'msg ok';
+      $('applyMsg').textContent = 'خلص: اتربط ' + done + (failed ? '، وفشل ' + failed + ' (شوف الـConsole)' : '') + '.';
+      plan = [];
+    };
+  });
+})();
+</script>
+</body>
+</html>
