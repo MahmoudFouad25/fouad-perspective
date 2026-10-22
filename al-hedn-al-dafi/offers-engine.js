@@ -385,7 +385,7 @@
 
     if (fbReady && db) {
       try {
-        const snap = await db.collection("coupons").where("code", "==", code).limit(1).get();
+        const snap = await CouponServer.findByCode(code);
         if (!snap.empty) {
           const doc = snap.docs[0];
           const data = doc.data();
@@ -921,12 +921,7 @@
         firebaseSaved = true;
         if (fullRecord.coupon && fullRecord.coupon.isFirebase && fullRecord.coupon.id) {
           try {
-            await db.collection("coupons").doc(fullRecord.coupon.id).update({
-              used: firebase.firestore.FieldValue.increment(1),
-              status: "used",
-              usedAt: firebase.firestore.FieldValue.serverTimestamp(),
-              bookingId: docRef.id,
-            });
+            await CouponServer.redeem(fullRecord.coupon.id, docRef.id);
           } catch (e) { console.warn("Coupon update failed:", e); }
         }
       } catch (e) { console.error("Firebase save failed:", e); }
