@@ -43,9 +43,22 @@
     <h2>النتيجة</h2>
     <div class="stats" id="stats"></div>
     <div class="scroll"><table><thead><tr><th>العميل</th><th>الكورس في الحجز</th><th>اللي هيحصل</th></tr></thead><tbody id="rows"></tbody></table></div>
-    <p class="hint" style="margin-top:12px">اللي «مش متطابق» هيتساب زي ما هو. تقدر تربطه بعدين يدوي من ملف العميل.</p>
-    <button class="btn ok" id="applyBtn">٢. اربط المتطابق</button>
+    <button class="btn ok" id="applyBtn" style="margin-top:12px">٢. اربط المتطابق</button>
     <span class="msg" id="applyMsg"></span>
+  </section>
+
+  <section class="card" id="missingBox" hidden>
+    <h2>محتاجين مراجعة: دفعوا والكورس مش في حسابهم</h2>
+    <p class="hint">الحجز متعلّم إنه اتدفع واتخصص، بس الكورس مش موجود في حساب العميل.
+      ممكن يكون اتمسح بالغلط وقت ما الصفحات القديمة كانت بتكتب فوق بعض، أو اتخصص بالاسم غلط.
+      افتح الحجز وادّيله الكورس، أو افتح ملفه واتأكد. <strong>الأداة مش بتدّي كورسات لوحدها.</strong></p>
+    <div class="scroll"><table><thead><tr><th>العميل</th><th>الكورس</th><th>اتدفع / الإجمالي</th><th></th></tr></thead><tbody id="missingRows"></tbody></table></div>
+  </section>
+
+  <section class="card" id="dupBox" hidden>
+    <h2>حجوزات مكررة</h2>
+    <p class="hint">نفس العميل حجز نفس الكورس مرتين، والكورس متربط بالحجز التاني. راجع لو الحجز ده المفروض يتلغي، أو لو العميل دفع مرتين.</p>
+    <div class="scroll"><table><thead><tr><th>العميل</th><th>الكورس</th><th></th><th></th></tr></thead><tbody id="dupRows"></tbody></table></div>
   </section>
 </main>
 
@@ -58,7 +71,14 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"'`]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]; }); };
-  var norm = function (s) { return String(s || '').trim().replace(/\s+/g, ' '); };
+  // مقارنة أسماء الكورسات من غير ما الفروق الصغيرة تفرق: أ/إ/آ، ى/ي، ة/ه، التشكيل، الشرطة والمسافات، كبير/صغير
+  // («Insight Out» = «insight-out»، و«جاهز للتحوّل» = «جاهز للتحول»)
+  var norm = function (s) {
+    return String(s || '').toLowerCase()
+      .replace(/[\u064B-\u0652\u0640]/g, '')
+      .replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+      .replace(/[\s\-_—–]+/g, '').trim();
+  };
 
   AdminGuard.ready().then(function (ctx) {
     var db = ctx.db;
@@ -68,7 +88,7 @@
     $('scanBtn').onclick = async function () {
       var btn = this; btn.disabled = true; $('scanMsg').className = 'msg'; $('scanMsg').textContent = 'بيدوّر…';
       plan = [];
-      var rows = [], linked = 0, already = 0, unmatched = 0, noUser = 0;
+      var rows = [], missingRows = [], dupRows = [], linked = 0, already = 0, missing = 0, dup = 0, noUser = 0;
       try {
         var studs = await db.collection('individualStudents').get();
         var userCache = {};
@@ -88,17 +108,30 @@
             linked++;
             plan.push({ userId: s.userId, bookingId: sd.id, names: names });
             rows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td><span class="tag ok">هيتربط (' + hits.length + ')</span></td></tr>');
+          } else if (ens.some(function (e) { return e.bookingId && names.indexOf(norm(e.title || e.courseName)) >= 0; })) {
+            // نفس الكورس متربط بحجز تاني: العميل حجز مرتين
+            dup++;
+            dupRows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td><span class="tag warn">حجز مكرر</span></td><td><a href="bookings/creat%26allow.html?id=' + encodeURIComponent(sd.id) + '&action=new" target="_blank" rel="noopener">افتح الحجز</a></td></tr>');
           } else {
-            unmatched++;
-            rows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td><span class="tag warn">مش متطابق بالاسم</span></td></tr>');
+            // الحجز اتدفع واتعلّم «اتخصص»، بس الكورس مش في حساب العميل خالص
+            missing++;
+            var tb = await db.collection('tempBookings').doc(sd.id).get();
+            var pd = (tb.exists && tb.data().paymentDetails) || {};
+            var money = (pd.paidAmount != null ? Number(pd.paidAmount).toLocaleString('ar-EG') : '—') + ' / ' + (pd.totalAmount != null ? Number(pd.totalAmount).toLocaleString('ar-EG') : '—');
+            missingRows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td>' + money + '</td><td><a href="bookings/creat%26allow.html?id=' + encodeURIComponent(sd.id) + '&action=new" target="_blank" rel="noopener">ادّيله الكورس</a> · <a href="edite-user.html?id=' + encodeURIComponent(s.userId) + '" target="_blank" rel="noopener">ملفه</a></td></tr>');
           }
         }
         $('stats').innerHTML =
           '<div class="stat"><b>' + linked + '</b>هيتربطوا</div>' +
           '<div class="stat"><b>' + already + '</b>متربطين أصلًا</div>' +
-          '<div class="stat"><b>' + unmatched + '</b>مش متطابقين</div>' +
+          '<div class="stat"><b>' + missing + '</b>الكورس مش في حسابه</div>' +
+          '<div class="stat"><b>' + dup + '</b>حجز مكرر</div>' +
           '<div class="stat"><b>' + noUser + '</b>من غير حساب</div>';
         $('rows').innerHTML = rows.join('') || '<tr><td colspan="3">مفيش حاجة محتاجة ربط.</td></tr>';
+        $('missingRows').innerHTML = missingRows.join('');
+        $('missingBox').hidden = !missingRows.length;
+        $('dupRows').innerHTML = dupRows.join('');
+        $('dupBox').hidden = !dupRows.length;
         $('result').hidden = false;
         $('applyBtn').disabled = !plan.length;
         $('scanMsg').textContent = '';
