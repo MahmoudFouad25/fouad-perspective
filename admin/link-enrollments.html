@@ -84,17 +84,41 @@
     var db = ctx.db;
     var plan = [];          // [{userId, bookingId, names }]
     var missingList = [];   // اللي دفعوا والكورس مش في حسابهم
+    var fixes = [];         // روابط غلط تتصلّح: {userId, enrollmentId, bookingId?, endDate?}
     $('app').hidden = false;
 
     $('scanBtn').onclick = async function () {
       var btn = this; btn.disabled = true; $('scanMsg').className = 'msg'; $('scanMsg').textContent = 'بيدوّر…';
-      plan = []; missingList = [];
+      plan = []; missingList = []; fixes = [];
       var rows = [], missingRows = [], dupRows = [], linked = 0, already = 0, missing = 0, dup = 0, noUser = 0;
       try {
         var studs = await db.collection('individualStudents').get();
         var userCache = {};
+        // الروابط اللي اتعملت بكود العرض (BK_…) بدل رقم الحجز، وسجلات «منتهي» بتاريخ في المستقبل
+        var tbIds = new Set((await db.collection('tempBookings').get()).docs.map(function (d) { return d.id; }));
+        var stuById = {}, codeToId = {};
+        studs.forEach(function (d) { stuById[d.id] = d.data(); if (d.data().bookingId) codeToId[d.data().bookingId] = d.id; });
+        var allUsers = await db.collection('users').get();
+        allUsers.forEach(function (u) {
+          userCache[u.id] = u.data();
+          (u.data().enrollments || []).forEach(function (e) {
+            if (e.bookingId && !tbIds.has(e.bookingId) && !stuById[e.bookingId] && codeToId[e.bookingId]) {
+              fixes.push({ userId: u.id, enrollmentId: e.id, bookingId: codeToId[e.bookingId], label: (u.data().personalInfo || {}).name || u.id, course: e.title });
+            }
+            var end = e.dates && e.dates.endDate;
+            if (e.status && e.status.reason === 'restored-history' && end && Date.parse(end) > Date.now()) {
+              var s0 = stuById[e.bookingId] || {};
+              var start = s0.transferredAt || s0.paidAt || s0.paymentConfirmedAt || s0.timestamp || s0.bookingDate;
+              start = start && start.toDate ? start.toDate().toISOString() : start;
+              var newEnd = start ? addMonths(start, 6) : new Date().toISOString().slice(0, 10);
+              if (Date.parse(newEnd) > Date.now()) newEnd = new Date().toISOString().slice(0, 10);
+              fixes.push({ userId: u.id, enrollmentId: e.id, endDate: newEnd, label: (u.data().personalInfo || {}).name || u.id, course: e.title });
+            }
+          });
+        });
         for (var i = 0; i < studs.docs.length; i++) {
           var sd = studs.docs[i], s = sd.data();
+          if (s.isTest) continue;   // حجوزات تجريبية اتأرشفت
           var name = (s.customer && s.customer.name) || '—';
           var course = s.courseName || '—';
           if (!s.userId) { noUser++; continue; }
@@ -102,7 +126,7 @@
           if (u === undefined) { var us = await db.collection('users').doc(s.userId).get(); u = userCache[s.userId] = us.exists ? us.data() : null; }
           if (!u) { noUser++; continue; }
           var ens = u.enrollments || [];
-          if (ens.some(function (e) { return e.bookingId === sd.id; })) { already++; continue; }
+          if (ens.some(function (e) { return e.bookingId === sd.id || (e.bookingId && codeToId[e.bookingId] === sd.id); })) { already++; continue; }
           var names = [norm(s.courseName)].concat((s.courseModules || []).map(function (m) { return norm(m && (m.name || m.title || m)); }));
           var hits = ens.filter(function (e) { return !e.bookingId && names.indexOf(norm(e.title || e.courseName)) >= 0; });
           if (hits.length) {
@@ -120,8 +144,8 @@
             var pd = (tb.exists && tb.data().paymentDetails) || {};
             var money = (pd.paidAmount != null ? Number(pd.paidAmount).toLocaleString('ar-EG') : '—') + ' / ' + (pd.totalAmount != null ? Number(pd.totalAmount).toLocaleString('ar-EG') : '—');
             missingList.push({ userId: s.userId, bookingId: sd.id, course: s.courseName || '', name: name,
-              transferredAt: s.transferredAt || (tb.exists && tb.data().transferredAt) || null });
-            missingRows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td>' + money + '</td><td><a href="bookings/creat%26allow.html?id=' + encodeURIComponent(sd.id) + '&action=new" target="_blank" rel="noopener">ادّيله الكورس</a> · <button class="btn" style="padding:4px 10px;font-size:.82rem" data-hist="' + (missingList.length - 1) + '">سجّله كاشتراك منتهي</button> · <a href="edite-user.html?id=' + encodeURIComponent(s.userId) + '" target="_blank" rel="noopener">ملفه</a></td></tr>');
+              transferredAt: s.transferredAt || (tb.exists && tb.data().transferredAt) || s.paidAt || s.paymentConfirmedAt || s.timestamp || s.bookingDate || null });
+            missingRows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td>' + money + '</td><td><a href="bookings/creat%26allow.html?id=' + encodeURIComponent(sd.id) + '&action=assign" target="_blank" rel="noopener">ادّيله الكورس</a> · <button class="btn" style="padding:4px 10px;font-size:.82rem" data-hist="' + (missingList.length - 1) + '">سجّله كاشتراك منتهي</button> · <a href="edite-user.html?id=' + encodeURIComponent(s.userId) + '" target="_blank" rel="noopener">ملفه</a></td></tr>');
           }
         }
         $('stats').innerHTML =
@@ -129,6 +153,7 @@
           '<div class="stat"><b>' + already + '</b>متربطين أصلًا</div>' +
           '<div class="stat"><b>' + missing + '</b>الكورس مش في حسابه</div>' +
           '<div class="stat"><b>' + dup + '</b>حجز مكرر</div>' +
+          '<div class="stat"><b>' + fixes.length + '</b>روابط غلط هتتصلّح</div>' +
           '<div class="stat"><b>' + noUser + '</b>من غير حساب</div>';
         $('rows').innerHTML = rows.join('') || '<tr><td colspan="3">مفيش حاجة محتاجة ربط.</td></tr>';
         $('missingRows').innerHTML = missingRows.join('');
@@ -136,7 +161,9 @@
         $('dupRows').innerHTML = dupRows.join('');
         $('dupBox').hidden = !dupRows.length;
         $('result').hidden = false;
-        $('applyBtn').disabled = !plan.length;
+        $('applyBtn').disabled = !plan.length && !fixes.length;
+        if (fixes.length) rows = fixes.map(function (f) { return '<tr><td>' + esc(f.label) + '</td><td>' + esc(f.course) + '</td><td><span class="tag ok">' + (f.bookingId ? 'رقم الحجز هيتصلّح' : 'تاريخ الانتهاء هيتصلّح لـ ' + f.endDate) + '</span></td></tr>'; }).concat(rows);
+        $('rows').innerHTML = rows.join('') || '<tr><td colspan="3">مفيش حاجة محتاجة ربط.</td></tr>';
         $('scanMsg').textContent = '';
       } catch (e) {
         $('scanMsg').className = 'msg bad'; $('scanMsg').textContent = 'حصل خطأ: ' + e.message;
@@ -189,9 +216,28 @@
     });
 
     $('applyBtn').onclick = async function () {
-      if (!plan.length) return;
-      if (!confirm('هيتضاف رقم الحجز لـ ' + plan.length + ' كورس في حسابات العملاء. أكمل؟')) return;
+      if (!plan.length && !fixes.length) return;
+      if (!confirm('هيتضاف رقم الحجز لـ ' + plan.length + ' كورس، ويتصلّح ' + fixes.length + ' رابط. أكمل؟')) return;
       var btn = this; btn.disabled = true; var done = 0, failed = 0;
+      for (var k = 0; k < fixes.length; k++) {
+        var f = fixes[k];
+        try {
+          await db.runTransaction(async function (tx) {
+            var ref = db.collection('users').doc(f.userId);
+            var snap = await tx.get(ref);
+            var ens = ((snap.data() || {}).enrollments || []).map(function (e) {
+              if (e.id !== f.enrollmentId) return e;
+              var n = Object.assign({}, e);
+              if (f.bookingId) n.bookingId = f.bookingId;
+              if (f.endDate) n.dates = Object.assign({}, e.dates || {}, { endDate: f.endDate });
+              return n;
+            });
+            tx.update(ref, { enrollments: ens });
+          });
+          done++;
+        } catch (e) { failed++; console.warn('تصليح', f, e); }
+      }
+      fixes = [];
       for (var i = 0; i < plan.length; i++) {
         var p = plan[i];
         try {
