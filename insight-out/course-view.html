@@ -11418,13 +11418,10 @@ async function addPointsToPillar(pillarKey, points, details) {
                 balance: firebase.firestore.FieldValue.increment(points),
                 lifetime: firebase.firestore.FieldValue.increment(points),
                 lastUpdated: new Date().toISOString()
-            },
-            walletPoints: {
-                balance: firebase.firestore.FieldValue.increment(points),
-                lifetime: firebase.firestore.FieldValue.increment(points),
-                lastUpdated: new Date().toISOString()
             }
         }, { merge: true });
+        // نقاط المحفظة للتمرين: السيرفر بياخدها من إعدادات المحتوى، مرة واحدة — js/points-client.js
+        try { await PointsServer.pillar(currentCourseId, pillarKey, details); } catch (e) { console.warn('نقاط المحفظة:', e); }
         
         console.log(`✅ تمت إضافة ${points} نقطة لـ ${pillarKey}`);
         
@@ -11859,39 +11856,11 @@ completedLessons.push(lessonIndex);
             [`progress.${courseId}`]: updatedProgress
         };
         
-        // إضافة النقاط التفصيلية
-        if (pointsToAward > 0) {
-            // نقاط الرحلة
-            updateData['journeyPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
-            updateData['journeyPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
-            
-            // نقاط المحفظة
-            updateData['walletPoints.balance'] = firebase.firestore.FieldValue.increment(pointsToAward);
-            updateData['walletPoints.lifetime'] = firebase.firestore.FieldValue.increment(pointsToAward);
-            
-            // سجل النقاط مع التفاصيل
-            const pointsHistory = {
-                amount: pointsToAward,
-                timestamp: new Date().toISOString(),
-                type: 'journey',
-                reason: `إكمال درس: ${lesson.title}`,
-                description: `حصلت على ${pointsToAward} نقطة`,
-                details: {
-                    achievement: pointsDetail.achievement || 0,
-                    bonus: pointsDetail.bonus || 0,
-                    participation: pointsDetail.participationValue || pointsDetail.participation || 0,
-                    speed: pointsDetail.speedValue || pointsDetail.speed || 0,
-                    multiplier: pointsDetail.multiplierValue || pointsDetail.multiplier || 0
-                }
-            };
-            
-            updateData['journeyPoints.history'] = firebase.firestore.FieldValue.arrayUnion(pointsHistory);
-            updateData['walletPoints.history'] = firebase.firestore.FieldValue.arrayUnion({
-                ...pointsHistory,
-                type: 'wallet'
-            });
-        }
-        
+        // النقاط بتتحسب وتتسجل على السيرفر بس (مرة واحدة لكل درس) — js/points-client.js
+        try {
+            await PointsServer.lesson(courseId, lessonIndex, lesson && lesson.libraryContentId);
+        } catch (e) { console.warn('نقاط الدرس:', e); }
+
         // إضافة الشارات المكتسبة
         if (earnedBadges && earnedBadges.length > 0) {
             console.log('💾 حفظ الشارات الجديدة:', earnedBadges);
@@ -15923,8 +15892,6 @@ async function recordAttendance(sessionId) {
             },
             'journeyPoints.balance': currentJourneyPoints + totalPoints,
             'journeyPoints.lifetime': firebase.firestore.FieldValue.increment(totalPoints),
-            'walletPoints.balance': currentWalletPoints + totalPoints,
-            'walletPoints.lifetime': firebase.firestore.FieldValue.increment(totalPoints)
         });
         
         // إضافة للسجل
@@ -15938,12 +15905,11 @@ async function recordAttendance(sessionId) {
         
         await userRef.update({
             'journeyPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory),
-            'walletPoints.history': firebase.firestore.FieldValue.arrayUnion(pointsHistory)
         });
         
         // تحديث المتغيرات المحلية
         userJourneyPoints = currentJourneyPoints + totalPoints;
-        userWalletPoints = currentWalletPoints + totalPoints;
+        userWalletPoints = currentWalletPoints; // نقاط اللقاءات المباشرة بقت نقاط رحلة بس
         
         console.log('✅ تم منح', totalPoints, 'نقطة');
         
@@ -17198,6 +17164,7 @@ console.log('✅ نظام استقبال التمارين الخارجية جا�
 }
 </style>
 
+<script src="../js/points-client.js"></script>
 <script src="../js/session-check.js" data-login="../login.html"></script>
 </body>
 </html>
