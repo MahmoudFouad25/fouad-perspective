@@ -3493,6 +3493,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     <script src="../js/wallet-coupon-limit.js"></script>
     <script src="../js/booking-money.js"></script>
+    <script src="../js/enrollment-access.js"></script>
     
     <script>
         // Firebase Configuration
@@ -3955,13 +3956,16 @@ async function loadAllCourses() {
                 thumbnail: courseData?.thumbnailUrl || courseData?.thumbnail || enrollment.thumbnailUrl || enrollment.thumbnail || null,
 
                 // 📱 رابط مجموعة الواتساب
-                whatsappGroupLink: courseData?.whatsappGroupLink || null
+                whatsappGroupLink: courseData?.whatsappGroupLink || null,
+
+                // ⏳ مدة الاشتراك (js/enrollment-access.js)
+                access: typeof EnrollmentAccess !== 'undefined' ? EnrollmentAccess.status(enrollment) : null
             });
         }
         
+        allCourses = dedupeCoursesByAccess(allCourses);
         filteredCourses = [...allCourses];
         console.log('✅ تم تحميل', allCourses.length, 'دورة');
-        console.log('📊 بيانات الدورات:', allCourses);
         
     } catch (error) {
         console.error('خطأ في تحميل الدورات:', error);
@@ -4088,6 +4092,12 @@ function createCourseCard(course) {
         statusIcon = 'seedling';
     }
 
+    // ⏳ مدة الاشتراك: المنتهي يتعلّم وزرار الفتح يبقى «جدّد»
+    const acc = course.access || { state: 'active', open: true };
+    const accMsg = (typeof EnrollmentAccess !== 'undefined' && acc.state) ? EnrollmentAccess.message(acc) : '';
+    if (acc.state === 'locked') { statusText = 'انتهى الاشتراك'; statusClass = 'status-pending'; statusIcon = 'hourglass-end'; }
+    else if (acc.state === 'grace') { statusText = 'المدة خلصت'; statusIcon = 'hourglass-half'; }
+
     // الإنجازات
     let achievementBadges = '';
     if (actualProgress >= 100) {
@@ -4136,7 +4146,7 @@ function createCourseCard(course) {
     const formattedDescription = formatText(course.description);
 
     return `
-        <div class="course-card" style="
+        <div class="course-card${acc.state === 'locked' ? ' course-locked' : ''}" style="${acc.state === 'locked' ? 'filter:grayscale(.65);opacity:.82;' : ''}
             background: rgba(30, 41, 59, 0.6);
             backdrop-filter: blur(15px);
             border-radius: 20px;
@@ -4342,7 +4352,8 @@ function createCourseCard(course) {
                     gap: 1rem;
                     flex-wrap: wrap;
                 ">
-                    <button class="btn btn-primary" onclick="openContent('${course.id}', '${course.type}')" style="
+                    ${accMsg ? `<div role="status" style="flex:1 1 100%;padding:.75rem 1rem;border-radius:14px;font-size:.92rem;line-height:1.7;text-align:right;background:${acc.state === 'locked' ? 'rgba(148,163,184,.15)' : acc.state === 'grace' ? 'rgba(245,158,11,.15)' : 'rgba(59,130,246,.15)'};color:${acc.state === 'grace' ? '#fcd34d' : '#e2e8f0'}">${accMsg}${acc.state === 'locked' ? '<br><span style="color:#94a3b8">رحلتك وتقدّمك محفوظين.</span>' : ''}</div>` : ''}
+                    <button class="btn btn-primary" onclick="${acc.open === false ? `window.open('${EnrollmentAccess.RENEW_URL}','_blank','noopener')` : `openContent('${course.id}', '${course.type}')`}" style="
                         flex: 1;
                         padding: 1rem 1.8rem;
                         background: linear-gradient(135deg, var(--primary-blue), var(--primary-blue-dark));
@@ -4361,8 +4372,8 @@ function createCourseCard(course) {
                         box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
                         transform: scale(1);
                     " onmouseover="this.style.transform='scale(1.05) translateY(-2px)'; this.style.boxShadow='0 8px 25px rgba(59, 130, 246, 0.6)'" onmouseout="this.style.transform='scale(1) translateY(0)'; this.style.boxShadow='0 4px 15px rgba(59, 130, 246, 0.4)'" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1.05) translateY(-2px)'">
-                        <i class="fas fa-${buttonIcon}"></i>
-                        ${buttonText}
+                        <i class="fas fa-${acc.open === false ? 'rotate' : buttonIcon}"></i>
+                        ${acc.open === false ? 'جدّد اشتراكك' : buttonText}
                     </button>
                     <button class="btn btn-secondary" onclick="showDetails('${course.id}')" style="
                         padding: 1rem 1.8rem;
@@ -4700,6 +4711,18 @@ async function handleLogout() {
     // معرّف دورة reignite كما هو مخزّن في كولكشن courses (نفس اسم الفولدر).
     // لو طلع عندك مختلف، غيّر الكلمة دي بس وخلاص.
     const LOCAL_COURSE_ID = 'reignite';
+
+    // لو للكورس أكتر من اشتراك (قديم منتهي + تجديد)، يظهر مرة واحدة بالاشتراك المفتوح
+    function dedupeCoursesByAccess(list) {
+        if (typeof EnrollmentAccess === 'undefined') return list;
+        const rank = c => { const a = c.access || {}; return (a.open === false ? 0 : 2) + (a.state === 'unlimited' ? 1 : 0); };
+        const byId = new Map();
+        for (const c of list) {
+            const prev = byId.get(c.id);
+            if (!prev || rank(c) > rank(prev) || (rank(c) === rank(prev) && ((c.access && c.access.endMs) || 0) > ((prev.access && prev.access.endMs) || 0))) byId.set(c.id, c);
+        }
+        return list.filter(c => byId.get(c.id) === c);
+    }
 
     function openContent(courseId, courseType) {
     localStorage.setItem('currentCourseId', courseId);

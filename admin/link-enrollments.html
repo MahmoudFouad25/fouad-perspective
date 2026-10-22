@@ -51,7 +51,7 @@
     <h2>محتاجين مراجعة: دفعوا والكورس مش في حسابهم</h2>
     <p class="hint">الحجز متعلّم إنه اتدفع واتخصص، بس الكورس مش موجود في حساب العميل.
       ممكن يكون اتمسح بالغلط وقت ما الصفحات القديمة كانت بتكتب فوق بعض، أو اتخصص بالاسم غلط.
-      افتح الحجز وادّيله الكورس، أو افتح ملفه واتأكد. <strong>الأداة مش بتدّي كورسات لوحدها.</strong></p>
+      لو عايزه يكمّل: «ادّيله الكورس». لو مش عايز تخصصه دلوقتي (زي ملاذ الحيارى): «سجّله كاشتراك منتهي»، فيبان في حسابه وفي صفحة التجديدات إنه كان مشترك، من غير ما الكورس يفتح. <strong>الأداة مش بتدّي كورسات لوحدها.</strong></p>
     <div class="scroll"><table><thead><tr><th>العميل</th><th>الكورس</th><th>اتدفع / الإجمالي</th><th></th></tr></thead><tbody id="missingRows"></tbody></table></div>
   </section>
 
@@ -82,12 +82,13 @@
 
   AdminGuard.ready().then(function (ctx) {
     var db = ctx.db;
-    var plan = [];          // [{userId, bookingId, name, course, enrollmentIds:[...] }]
+    var plan = [];          // [{userId, bookingId, names }]
+    var missingList = [];   // اللي دفعوا والكورس مش في حسابهم
     $('app').hidden = false;
 
     $('scanBtn').onclick = async function () {
       var btn = this; btn.disabled = true; $('scanMsg').className = 'msg'; $('scanMsg').textContent = 'بيدوّر…';
-      plan = [];
+      plan = []; missingList = [];
       var rows = [], missingRows = [], dupRows = [], linked = 0, already = 0, missing = 0, dup = 0, noUser = 0;
       try {
         var studs = await db.collection('individualStudents').get();
@@ -118,7 +119,9 @@
             var tb = await db.collection('tempBookings').doc(sd.id).get();
             var pd = (tb.exists && tb.data().paymentDetails) || {};
             var money = (pd.paidAmount != null ? Number(pd.paidAmount).toLocaleString('ar-EG') : '—') + ' / ' + (pd.totalAmount != null ? Number(pd.totalAmount).toLocaleString('ar-EG') : '—');
-            missingRows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td>' + money + '</td><td><a href="bookings/creat%26allow.html?id=' + encodeURIComponent(sd.id) + '&action=new" target="_blank" rel="noopener">ادّيله الكورس</a> · <a href="edite-user.html?id=' + encodeURIComponent(s.userId) + '" target="_blank" rel="noopener">ملفه</a></td></tr>');
+            missingList.push({ userId: s.userId, bookingId: sd.id, course: s.courseName || '', name: name,
+              transferredAt: s.transferredAt || (tb.exists && tb.data().transferredAt) || null });
+            missingRows.push('<tr><td>' + esc(name) + '</td><td>' + esc(course) + '</td><td>' + money + '</td><td><a href="bookings/creat%26allow.html?id=' + encodeURIComponent(sd.id) + '&action=new" target="_blank" rel="noopener">ادّيله الكورس</a> · <button class="btn" style="padding:4px 10px;font-size:.82rem" data-hist="' + (missingList.length - 1) + '">سجّله كاشتراك منتهي</button> · <a href="edite-user.html?id=' + encodeURIComponent(s.userId) + '" target="_blank" rel="noopener">ملفه</a></td></tr>');
           }
         }
         $('stats').innerHTML =
@@ -140,6 +143,50 @@
       }
       btn.disabled = false;
     };
+
+    // سجّل الكورس في حساب العميل كاشتراك منتهي: يبان في السجل إنه كان مشترك، ومن غير ما الكورس يفتح
+    // المدة: ٦ شهور من يوم التحويل (نفس مدة التخصيص التلقائي)
+    function addMonths(iso, n) {
+      var d = new Date(iso || Date.now());
+      var y = d.getUTCFullYear(), m = d.getUTCMonth() + n, day = d.getUTCDate();
+      var last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      return new Date(Date.UTC(y, m, Math.min(day, last))).toISOString().slice(0, 10);
+    }
+    async function courseIdFor(title) {
+      // من اشتراك تاني لنفس الكورس عند أي عميل، أو من مجموعة courses
+      var users = await db.collection('users').get();
+      var id = null;
+      users.forEach(function (u) { (u.data().enrollments || []).forEach(function (e) { if (!id && e.courseId && norm(e.title) === norm(title)) id = e.courseId; }); });
+      if (id) return id;
+      var c = await db.collection('courses').where('title', '==', title).limit(1).get();
+      return c.empty ? null : c.docs[0].id;
+    }
+    document.addEventListener('click', async function (ev) {
+      var b = ev.target.closest('[data-hist]'); if (!b) return;
+      var m = missingList[+b.dataset.hist]; if (!m) return;
+      if (!confirm('هيتسجل «' + m.course + '» في حساب ' + m.name + ' كاشتراك منتهي (مش هيفتح). أكمل؟')) return;
+      b.disabled = true; b.textContent = 'بيتسجل…';
+      try {
+        var cid = await courseIdFor(m.course);
+        var start = m.transferredAt ? new Date(m.transferredAt).toISOString() : new Date().toISOString();
+        var end = addMonths(start, 6);
+        var nowIso = new Date().toISOString();
+        await db.runTransaction(async function (tx) {
+          var ref = db.collection('users').doc(m.userId);
+          var snap = await tx.get(ref);
+          var ens = ((snap.data() || {}).enrollments || []).slice();
+          if (ens.some(function (e) { return e.bookingId === m.bookingId; })) return;   // اتسجل قبل كده
+          ens.push({
+            id: 'enrollment-hist-' + m.bookingId, bookingId: m.bookingId, courseId: cid, title: m.course,
+            dates: { enrolledAt: start, startDate: start.slice(0, 10), endDate: end, expiredAt: nowIso },
+            status: { current: 'expired', isActive: false, isExpired: true, reason: 'restored-history', updatedAt: nowIso },
+            restoredAt: nowIso, restoredBy: ctx.user.email
+          });
+          tx.update(ref, { enrollments: ens });
+        });
+        b.textContent = 'اتسجل ✓ (لحد ' + end + ')';
+      } catch (err) { b.disabled = false; b.textContent = 'فشل، جرّب تاني'; console.warn(err); }
+    });
 
     $('applyBtn').onclick = async function () {
       if (!plan.length) return;
