@@ -3250,6 +3250,36 @@ document.addEventListener('DOMContentLoaded', function() {
 
 </script>
 
+    <!-- 💰 فلوسك: الأقساط من صفحة الحجوزات نفسها (المصدر الوحيد) -->
+<style>
+  #myPaymentsSection{max-width:1400px;margin:2rem auto;padding:0 2rem}
+  #myPaymentsSection h2{font-size:1.5rem;font-weight:800;color:var(--golden);margin:0 0 1rem;text-align:right}
+  .pay-card{background:var(--card-bg);border:1px solid rgba(148,163,184,.18);border-radius:18px;padding:1.4rem 1.5rem;margin-bottom:1rem;text-align:right}
+  .pay-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap}
+  .pay-head h3{margin:0;font-size:1.15rem;color:#f1f5f9}
+  .pay-sum{color:var(--text-secondary);font-size:.95rem}
+  .pay-sum strong{color:#f1f5f9}
+  .pay-bar{height:8px;border-radius:99px;background:rgba(148,163,184,.2);margin:.9rem 0 1rem;overflow:hidden}
+  .pay-bar span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#10b981,#34d399)}
+  .pay-next{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;padding:.9rem 1rem;border-radius:12px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3)}
+  .pay-next.late{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.4)}
+  .pay-next.done{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35)}
+  .pay-next b{font-size:1.1rem;color:#f8fafc}
+  .pay-next .when{color:var(--text-secondary);font-size:.92rem}
+  .pay-next.late .when{color:#fca5a5;font-weight:700}
+  .pay-btn{display:inline-block;padding:.55rem 1rem;border-radius:10px;background:#229ED9;color:#fff;font-weight:700;text-decoration:none;font-size:.92rem}
+  .pay-list{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
+  .pay-chip{font-size:.82rem;padding:.3rem .7rem;border-radius:99px;border:1px solid rgba(148,163,184,.25);color:var(--text-secondary)}
+  .pay-chip.paid{color:#6ee7b7;border-color:rgba(16,185,129,.4)}
+  .pay-chip.overdue{color:#fca5a5;border-color:rgba(239,68,68,.5)}
+  .pay-chip.partial{color:#fcd34d;border-color:rgba(245,158,11,.5)}
+  @media (max-width:640px){#myPaymentsSection{padding:0 1rem}.pay-card{padding:1.1rem}}
+</style>
+<section id="myPaymentsSection" hidden aria-labelledby="myPaymentsTitle">
+  <h2 id="myPaymentsTitle">فلوسك</h2>
+  <div id="myPaymentsList"></div>
+</section>
+
     <!-- 💳 قسم إدارة كوبونات الخصم -->
 <section id="walletCouponsSection" style="
     max-width: 1400px;
@@ -3462,6 +3492,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     <script src="js/wallet-coupon-limit.js"></script>
+    <script src="js/booking-money.js"></script>
     
     <script>
         // Firebase Configuration
@@ -3681,6 +3712,54 @@ function checkCoursesAvailability() {
      // تحديث initializePage
 // تحديث initializePage
 // تحديث initializePage
+// ==================== 💰 فلوسك ====================
+// كل كورس متربط بحجز (enrollment.bookingId) بيقرا أقساطه من الحجز نفسه، مش من نسخة في الحساب
+async function renderMyPayments() {
+    const section = document.getElementById('myPaymentsSection');
+    const list = document.getElementById('myPaymentsList');
+    if (!section || !list || typeof BookingMoney === 'undefined' || !userData) return;
+    const esc = v => String(v == null ? '' : v).replace(/[&<>"'`]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c]));
+    const seen = new Set();
+    const ens = (userData.enrollments || []).filter(e => e.bookingId && !e.includedInPackage && !seen.has(e.bookingId) && seen.add(e.bookingId));
+    if (!ens.length) return;
+    const db = firebase.firestore();
+    const cards = [];
+    for (const en of ens) {
+        try {
+            const snap = await db.collection('tempBookings').doc(en.bookingId).get();
+            if (!snap.exists) continue;
+            const s = BookingMoney.summarize({ id: snap.id, ...snap.data() });
+            if (!s.total) continue;
+            const pct = Math.min(100, Math.round((s.paid / s.total) * 100));
+            let next = '';
+            if (s.fullyPaid) {
+                next = `<div class="pay-next done"><b>اتدفع بالكامل ✓</b><span class="when">شكرًا لالتزامك</span></div>`;
+            } else if (s.overdueCount) {
+                const r = s.overdue[0];
+                next = `<div class="pay-next late"><div><b>${BookingMoney.egp(s.overdueAmount)}</b> <span class="when">متأخر ${r.daysLate.toLocaleString('ar-EG')} يوم${s.overdueCount > 1 ? ' (' + s.overdueCount.toLocaleString('ar-EG') + ' أقساط)' : ''}</span></div><a class="pay-btn" href="https://t.me/fouad_academy_bot" target="_blank" rel="noopener">ابعت الإيصال على تليجرام</a></div>`;
+            } else if (s.next) {
+                const when = s.next.daysUntil === 0 ? 'النهارده' : s.next.daysUntil === 1 ? 'بكرة' : BookingMoney.formatDate(s.next.dueDate);
+                next = `<div class="pay-next"><div><b>${BookingMoney.egp(s.next.left)}</b> <span class="when">القسط الجاي: ${esc(when)}</span></div><a class="pay-btn" href="https://t.me/fouad_academy_bot" target="_blank" rel="noopener">ابعت الإيصال على تليجرام</a></div>`;
+            } else if (s.remaining > 0) {
+                next = `<div class="pay-next"><div><b>${BookingMoney.egp(s.remaining)}</b> <span class="when">باقي</span></div><a class="pay-btn" href="https://t.me/fouad_academy_bot" target="_blank" rel="noopener">كلّمنا على تليجرام</a></div>`;
+            }
+            const chips = s.rows.length > 1 ? '<div class="pay-list">' + s.rows.map(r => {
+                const cls = r.state === 'paid' ? 'paid' : r.state === 'overdue' ? 'overdue' : r.partial ? 'partial' : '';
+                const tag = r.state === 'paid' ? '✓' : r.state === 'overdue' ? 'متأخر' : r.partial ? 'جزئي' : BookingMoney.formatDate(r.dueDate);
+                return `<span class="pay-chip ${cls}">${esc(r.label)} · ${BookingMoney.egp(r.amount)} · ${esc(tag)}</span>`;
+            }).join('') + '</div>' : '';
+            cards.push(`<article class="pay-card">
+                <div class="pay-head"><h3>${esc(en.title || snap.data().courseName || 'الكورس')}</h3>
+                <span class="pay-sum">اتدفع <strong>${BookingMoney.egp(s.paid)}</strong> من <strong>${BookingMoney.egp(s.total)}</strong></span></div>
+                <div class="pay-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
+                ${next}${chips}</article>`);
+        } catch (e) { console.warn('فلوسك:', e && e.code); }
+    }
+    if (!cards.length) return;
+    list.innerHTML = cards.join('');
+    section.hidden = false;
+}
+
 async function initializePage() {
     try {
         console.log('🚀 بدء تهيئة الصفحة...');
@@ -3695,6 +3774,7 @@ async function initializePage() {
         
         console.log('🎨 تحديث واجهة المستخدم...');
         refreshAllSections();
+        renderMyPayments();
         
         console.log('✅ تم تهيئة الصفحة بنجاح!');
     } catch (error) {

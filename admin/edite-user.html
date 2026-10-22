@@ -12,6 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-storage-compat.js"></script>
 <script src="../js/admin-guard.js"></script>
+<script src="../js/booking-money.js"></script>
 <script>
     // تأخير تحميل firebase-config.js حتى يتم تحميل Firebase بالكامل
     window.addEventListener('load', function() {
@@ -2988,7 +2989,8 @@ document.querySelector('.password-text').textContent = '••••••••
         } else if (tabName === 'financial' && currentUserData) {
             const financialContent = document.getElementById('financialContent');
             if (financialContent) {
-                financialContent.innerHTML = displayFinancialData();
+                financialContent.innerHTML = '<div id="bookingMoneyPanel"></div>' + displayFinancialData();
+                renderBookingMoneyPanel();
             }
         } else if (tabName === 'progress' && currentUserData) {
             const progressContent = document.getElementById('progressContent');
@@ -4317,6 +4319,13 @@ async function manageUserInstallments() {
     }
     
     const enrollments = currentUserData.enrollments || [];
+    // الكورسات المتربطة بحجز: الدفع بيتسجل في صفحة الحجوزات (المصدر الوحيد)، مش هنا
+    const linked = enrollments.filter(e => e.bookingId && !e.includedInPackage);
+    if (linked.length) {
+        const links = linked.map(e => `<a href="${bookingInstallmentsUrl(e.bookingId)}" target="_blank" rel="noopener" style="display:block;margin:8px 0;padding:10px;border-radius:8px;background:#EEF2FF;color:#1E3A8A;font-weight:700;text-decoration:none">${escHtml(e.title || 'الكورس')} ←</a>`).join('');
+        Swal.fire({ title: 'تسجيل الأقساط', html: '<p style="text-align:right">الأقساط بقت بتتسجل من صفحة الحجوزات، علشان «كورساتي» وملف العميل والبوت يشوفوا نفس الرقم. اختار الكورس:</p>' + links, showConfirmButton: false, showCloseButton: true });
+        return;
+    }
     
     // جمع كل الأقساط من كل الدورات
     let allInstallments = [];
@@ -5226,6 +5235,55 @@ async function upgradeJourney() {
 
         // ==================== عرض البيانات المالية ====================
 // ==================== عرض البيانات المالية المحدثة مع النظامين ====================
+// ==================== فلوس العميل من صفحة الحجوزات (المصدر الوحيد) ====================
+function bookingInstallmentsUrl(bookingId) {
+    return 'book-bot-online.html?installments=' + encodeURIComponent(bookingId);
+}
+async function renderBookingMoneyPanel() {
+    const box = document.getElementById('bookingMoneyPanel');
+    if (!box || !currentUserData) return;
+    const seen = new Set();
+    const ens = (currentUserData.enrollments || []).filter(e => e.bookingId && !e.includedInPackage && !seen.has(e.bookingId) && seen.add(e.bookingId));
+    const unlinked = (currentUserData.enrollments || []).filter(e => !e.bookingId && !e.includedInPackage).length;
+    if (!ens.length) {
+        box.innerHTML = `<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:12px;padding:14px 16px;margin-bottom:16px;color:#92400E;font-weight:600">
+            كورسات العميل ده لسه مش متربطة بحجوزاتها، فالأرقام اللي تحت ممكن تكون قديمة.
+            اربطها من <a href="link-enrollments.html" style="color:#1E3A8A;font-weight:700">ربط الكورسات بالحجوزات</a>.</div>`;
+        return;
+    }
+    box.innerHTML = '<p style="color:#6B7280">بيحمّل الفلوس من صفحة الحجوزات…</p>';
+    const parts = [];
+    for (const en of ens) {
+        try {
+            const snap = await db.collection('tempBookings').doc(en.bookingId).get();
+            if (!snap.exists) { parts.push(`<div style="padding:10px;color:#B91C1C">الحجز ${escHtml(en.bookingId)} مش موجود.</div>`); continue; }
+            const s = BookingMoney.summarize({ id: snap.id, ...snap.data() });
+            const status = s.fullyPaid ? '<span style="color:#047857;font-weight:700">مدفوع بالكامل ✓</span>'
+                : s.overdueCount ? `<span style="color:#B91C1C;font-weight:700">متأخر ${s.maxDaysLate.toLocaleString('ar-EG')} يوم · ${BookingMoney.egp(s.overdueAmount)}</span>`
+                : s.next ? `القسط الجاي ${BookingMoney.egp(s.next.left)} يوم ${BookingMoney.formatDate(s.next.dueDate)}` : '';
+            const rows = s.rows.map(r => `<tr>
+                <td style="padding:6px">${escHtml(r.label)}</td>
+                <td style="padding:6px">${BookingMoney.egp(r.amount)}</td>
+                <td style="padding:6px">${BookingMoney.formatDate(r.dueDate)}</td>
+                <td style="padding:6px;color:${r.state==='paid'?'#047857':r.state==='overdue'?'#B91C1C':'#374151'}">${r.state==='paid'?'اتدفع':r.state==='overdue'?'متأخر '+r.daysLate.toLocaleString('ar-EG')+' يوم'+(r.partial?' (باقي '+BookingMoney.egp(r.left)+')':''):r.partial?'جزئي (باقي '+BookingMoney.egp(r.left)+')':'لسه'}</td></tr>`).join('');
+            parts.push(`<div style="border:1px solid #E5E7EB;border-radius:12px;padding:14px;margin-bottom:12px;background:#fff;color:#111827">
+                <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+                    <strong style="font-size:1.05rem">${escHtml(en.title || snap.data().courseName || 'الكورس')}</strong>
+                    <a href="${bookingInstallmentsUrl(en.bookingId)}" target="_blank" rel="noopener" style="background:#1E3A8A;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-weight:700">سجّل دفعة</a>
+                </div>
+                <div style="margin:8px 0;color:#374151">اتدفع <strong>${BookingMoney.egp(s.paid)}</strong> من <strong>${BookingMoney.egp(s.total)}</strong> · باقي <strong>${BookingMoney.egp(s.remaining)}</strong> · ${status}</div>
+                ${s.scheduleMismatch ? '<div style="color:#B45309;font-size:.9rem">مجموع الأقساط مش مساوي لسعر الكورس، راجع الجدول.</div>' : ''}
+                ${rows ? `<table style="width:100%;border-collapse:collapse;font-size:.9rem;margin-top:6px;color:#111827"><thead><tr style="color:#6B7280;text-align:right"><th style="padding:6px">القسط</th><th style="padding:6px">المبلغ</th><th style="padding:6px">الميعاد</th><th style="padding:6px">الحالة</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+            </div>`);
+        } catch (e) { parts.push(`<div style="padding:10px;color:#B91C1C">مقدرتش أحمّل الحجز ${escHtml(en.bookingId)}.</div>`); }
+    }
+    box.innerHTML = `<div style="margin-bottom:18px">
+        <h3 style="margin:0 0 6px">الفلوس (من صفحة الحجوزات)</h3>
+        <p style="margin:0 0 12px;color:#6B7280;font-size:.9rem">دي الأرقام الصح. الدفع بيتسجل من صفحة الحجوزات بس، علشان ما يبقاش فيه نسختين مختلفين.${unlinked ? ' فيه ' + unlinked.toLocaleString('ar-EG') + ' كورس مش متربط بحجز، <a href="link-enrollments.html" style="color:#93C5FD">اربطه من هنا</a>.' : ''}</p>
+        ${parts.join('')}</div>
+        <h4 style="color:#9CA3AF;margin:8px 0">بيانات قديمة محفوظة في الحساب (للرجوع بس)</h4>`;
+}
+
 function displayFinancialData() {
     if (!currentUserData) return '';
     
@@ -5976,7 +6034,7 @@ function displayCoursesFinancial() {
     
     currentUserData.enrollments.forEach(enrollment => {
         const isPaid = enrollment.payment?.status === 'paid';
-        const hasInstallments = enrollment.payment?.installments !== null;
+        const hasInstallments = !!enrollment.payment?.installments;   // كان undefined !== null = true فالصفحة بتقع
         
         html += `
             <div class="course-financial-item">
