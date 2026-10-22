@@ -19,6 +19,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
 <script src="../js/admin-guard.js"></script>
+<script src="../js/bot-client.js"></script>
+<script src="../js/password-safe.js"></script>
 
 <!-- Firebase Config -->
 <script src="../js/firebase-config.js"></script>
@@ -1517,11 +1519,18 @@ const UserStructure = {
         
         if (isEditMode && currentUserId) {
             // تحديث مستخدم موجود
+            // auth ما بيتكتبش من هنا (بيمسح توكن الدخول السريع)، والباسورد بيتظبط من السيرفر بس
+            const { auth: _authFromForm, ...formNoAuth } = formData;
             await db.collection('users').doc(currentUserId).update({
-                ...formData,
+                ...formNoAuth,
                 'accountStatus.updatedAt': new Date().toISOString(),
                 'metadata.adminNotes': adminNotes
             });
+            const typedPassword = (document.getElementById('userPassword').value || '').trim();
+            if (typedPassword) {
+                await PasswordSafe.setPassword(currentUserId, typedPassword);
+                document.getElementById('userPassword').value = '';
+            }
             
             // إعادة تحميل البيانات
             await loadUserData(currentUserId);
@@ -1560,6 +1569,8 @@ const UserStructure = {
             
             // حفظ في Firebase
             await db.collection('users').doc(userSlug).set(newUser);
+            // الباسورد يتنقل لحساب الدخول المحمي، والنسخة المكتوبة تتمسح (المرحلة ٦)
+            try { await PasswordSafe.secure(userSlug); } catch (e) { console.warn('تأمين الباسورد:', e); }
             
             // إضافة نقاط الترحيب
             await addDualPoints(userSlug, 50, 'إنشاء حساب جديد', 'نقاط ترحيبية');
@@ -1695,13 +1706,7 @@ function populateUserData() {
     
     // ملء معلومات الحساب
     document.getElementById('userSlug').value = currentUserId || '';
-    if (currentUserData.auth?.tempPassword) {
-        try {
-            document.getElementById('userPassword').value = atob(currentUserData.auth.tempPassword);
-        } catch(e) {
-            document.getElementById('userPassword').value = currentUserData.auth.tempPassword || '';
-        }
-    }
+    document.getElementById('userPassword').value = '';   // مش محفوظ؛ اكتب باسورد جديد لو عايز تغيّره
     document.getElementById('accountStatus').value = currentUserData.accountStatus?.status || 'active';
     document.getElementById('journeyStage').value = currentUserData.accountStatus?.journeyStage || 1;
     
@@ -3086,6 +3091,8 @@ window.createAccount = async function() {
         
         // حفظ في Firebase
         await db.collection('users').doc(userSlug).set(newUser);
+        // الباسورد يتنقل لحساب الدخول المحمي، والنسخة المكتوبة تتمسح (المرحلة ٦)
+        try { await PasswordSafe.secure(userSlug); } catch (e) { console.warn('تأمين الباسورد:', e); }
         
         // إضافة نقاط الترحيب
         await addDualPoints(userSlug, 50, 'إنشاء حساب جديد', 'نقاط ترحيبية عند الانضمام لمنظور الفؤاد');
