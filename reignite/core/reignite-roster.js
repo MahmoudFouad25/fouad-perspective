@@ -101,7 +101,7 @@
       var doc=snap.docs[i], u=doc.data()||{}, enr=u.enrollments||[];
       var inR=enr.some(function(e){ var t=(e.title||'').toString().toLowerCase(), c=(e.courseId||'').toString().toLowerCase(); return t.indexOf('reignite')>=0||c.indexOf('reignite')>=0; });
       if(!inR) continue; found++;
-      var pass=''; try{ if(u.auth&&u.auth.tempPassword) pass=atob(u.auth.tempPassword); }catch(e){ pass=''; }
+      var pass='';   // الباسورد ما بيتنسخش للسجل (الدخول بقى على السيرفر، والعميل بيدخل برابط الدخول السريع)
       var rec={ userId:doc.id, courseId:COURSE_ID,
         name:(u.personalInfo&&u.personalInfo.name)||'—', email:(u.personalInfo&&u.personalInfo.email)||'',
         whatsapp:(u.personalInfo&&u.personalInfo.whatsapp)||'', password:pass,

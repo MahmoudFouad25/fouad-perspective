@@ -116,6 +116,7 @@
       <div class="tab" data-tab="roster">العملاء والمجموعات</div>
       <div class="tab" data-tab="library">مكتبة اليوم</div>
       <div class="tab" data-tab="states">حالة الأيام</div>
+      <div class="tab" data-tab="requests">طلبات التسجيل <span id="reqCount" style="display:none;background:var(--red);color:#fff;border-radius:999px;padding:0 8px;font-size:12px;margin-inline-start:4px"></span></div>
     </div>
 
     <!-- ═══ تبويب التحكّم ═══ -->
@@ -201,6 +202,22 @@
       </div>
     </div>
 
+    <!-- ═══ تبويب طلبات التسجيل ═══ -->
+    <div class="panel" id="panel-requests">
+      <div class="card">
+        <div class="h">طلبات التسجيل في Reignite</div>
+        <div class="toolbar">
+          <button class="btn ghost sm" id="btnReqPending">مستنية رد</button>
+          <button class="btn ghost sm" id="btnReqAll">كل الطلبات</button>
+        </div>
+        <div id="reqList"><div class="empty">نحمّل الطلبات…</div></div>
+        <div class="note">
+          <b>القبول</b> بيعمل حساب للعميل، ويخصّصله دورة Reignite سنة، ويولّد باسورد، ويديك زرار تبعتله بيه بيانات الدخول على الواتساب.
+          <b>الرفض</b> بيقفل الطلب من غير ما يعمل أي حساب.
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ تبويب مكتبة اليوم ═══ -->
     <div class="panel" id="panel-library">
       <div class="card">
@@ -234,6 +251,10 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
   <script src="../../js/firebase-config.js"></script>
+  <script src="../../js/admin-guard.js"></script>
+  <script>AdminGuard.protect(); // الكابينة للأدمن بس</script>
+  <script src="../../js/bot-client.js"></script>
+  <script src="../core/reignite-account.js"></script>
   <script src="../scale/axes-config.js"></script>
   <script src="../core/axes-session.js"></script>
   <script src="../core/flow-loader.js"></script>
@@ -596,6 +617,106 @@
     LIVE.onResponsesChange(function(arr){ responses=arr; renderLiveMini(); });
 
     loadAll();
+  })();
+  </script>
+  <script>
+  /* ════════ طلبات التسجيل ════════ */
+  (function(){
+    "use strict";
+    var BOT = 'https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot';
+    var showAll = false, reqs = [];
+    function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function when(ts){ try{ var d = ts && ts.toDate ? ts.toDate() : null; return d ? d.toLocaleString('ar-EG',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : ''; }catch(e){ return ''; } }
+    var STATUS = { pending:'مستني رد', approved:'اتقبل', rejected:'اترفض' };
+
+    function render(){
+      var box = document.getElementById('reqList');
+      var list = reqs.filter(function(r){ return showAll || r.status === 'pending'; });
+      var pending = reqs.filter(function(r){ return r.status === 'pending'; }).length;
+      var badge = document.getElementById('reqCount');
+      badge.style.display = pending ? 'inline-block' : 'none'; badge.textContent = pending;
+      if(!list.length){ box.innerHTML = '<div class="empty">' + (showAll ? 'مفيش طلبات لسه.' : 'مفيش طلبات مستنية رد.') + '</div>'; return; }
+      box.innerHTML = list.map(function(r){
+        var actions = r.status === 'pending'
+          ? '<button class="btn green sm" data-ok="'+esc(r.id)+'">قبول</button> <button class="btn red sm" data-no="'+esc(r.id)+'">رفض</button>'
+          : '<span style="color:var(--muted);font-size:13px">'+esc(STATUS[r.status]||r.status)+(r.userId?' · <a style="color:var(--blue)" target="_blank" href="../../admin/edite-user.html?id='+encodeURIComponent(r.userId)+'">ملفه</a>':'')+'</span>';
+        return '<div style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid var(--line)">'
+          + '<div><b>'+esc(r.name)+'</b><div style="color:var(--muted);font-size:13px;direction:ltr;text-align:right">'+esc(r.email)+' · +'+esc(r.whatsapp)+'</div>'
+          + '<div style="color:var(--muted);font-size:12px">'+esc(when(r.createdAt))+'</div></div>'
+          + '<div>'+actions+'</div></div>';
+      }).join('');
+    }
+
+    function start(){
+      window.db.collection('reignite_requests').orderBy('createdAt','desc').limit(300).onSnapshot(function(snap){
+        reqs = snap.docs.map(function(d){ var x = d.data(); x.id = d.id; return x; }); render();
+      }, function(e){ document.getElementById('reqList').innerHTML = '<div class="empty">ما قدرناش نجيب الطلبات: '+esc(e.code||e.message)+'</div>'; });
+    }
+
+    function msgFor(acc){
+      var base = location.origin + location.pathname.replace(/live\/[^/]*$/, '');
+      var quick = base + 'login.html?uid=' + encodeURIComponent(acc.userId) + '&token=' + encodeURIComponent(acc.token);
+      return 'أهلًا ' + acc.name + ' 🌟\n\nاتعمل حسابك في Reignite واتخصصتلك الدورة.\n\n'
+        + 'رابط الدخول السريع:\n' + quick + '\n\n'
+        + 'أو ادخل بالإيميل والباسورد:\nالإيميل: ' + acc.email + '\nالباسورد: ' + acc.password + '\n\nمنظور الفؤاد';
+    }
+
+    async function approve(id, btn){
+      var r = reqs.find(function(x){ return x.id === id; }); if(!r) return;
+      if(!confirm('تقبل طلب ' + r.name + '؟ هيتعمل له حساب ويتخصص له Reignite.')) return;
+      btn.disabled = true; btn.textContent = 'بنعمل الحساب…';
+      try{
+        var acc = await ReigniteAccount.create(window.db, r);
+        var res = await botFetch(BOT + '/auth/admin-set-password', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ userId: acc.userId, password: acc.password }) });
+        var j = await res.json().catch(function(){ return {}; });
+        if(!res.ok || !j.ok) throw new Error('الحساب اتعمل بس الباسورد ما اتظبطش (' + (j.error || res.status) + '). غيّره من ملف العميل.');
+        try{ if(window.REIGNITE_ROSTER) await window.REIGNITE_ROSTER.enroll(acc.userId, { name: acc.name, email: acc.email, whatsapp: acc.whatsapp, token: acc.token, status: 'active' }); }catch(e){ console.warn('roster', e); }
+        await window.db.collection('reignite_requests').doc(id).update({ status:'approved', userId: acc.userId,
+          decidedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        var wa = 'https://wa.me/' + String(acc.whatsapp).replace(/[^0-9]/g,'') + '?text=' + encodeURIComponent(msgFor(acc));
+        showDone(acc, wa);
+      }catch(e){
+        console.error(e);
+        if(e.code === 'exists'){
+          alert('الإيميل ده عنده حساب بالفعل. افتح ملفه وخصّصله الدورة من هناك.');
+          await window.db.collection('reignite_requests').doc(id).update({ status:'approved', userId: e.userId || null, note:'حساب موجود',
+            decidedAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(function(){});
+        } else { alert(e.message || 'حصلت مشكلة'); }
+        btn.disabled = false; btn.textContent = 'قبول';
+      }
+    }
+
+    function showDone(acc, wa){
+      var o = document.createElement('div');
+      o.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+      o.innerHTML = '<div class="card" style="max-width:420px;width:100%;text-align:center">'
+        + '<div class="h">اتعمل حساب ' + esc(acc.name) + ' ✅</div>'
+        + '<p style="color:var(--muted)">ابعتله بيانات الدخول على الواتساب. الباسورد مش هيظهر تاني هنا.</p>'
+        + '<p style="direction:ltr;font-family:monospace;background:#101a28;border-radius:10px;padding:10px">' + esc(acc.email) + '<br>' + esc(acc.password) + '</p>'
+        + '<a class="btn green" style="display:inline-block;text-decoration:none;margin:6px" target="_blank" rel="noopener" href="' + esc(wa) + '">ابعت على واتساب</a>'
+        + '<button class="btn ghost" style="margin:6px" id="reqDoneClose">تم</button></div>';
+      document.body.appendChild(o);
+      document.getElementById('reqDoneClose').onclick = function(){ o.remove(); };
+    }
+
+    async function reject(id, btn){
+      var r = reqs.find(function(x){ return x.id === id; }); if(!r) return;
+      if(!confirm('ترفض طلب ' + r.name + '؟')) return;
+      btn.disabled = true;
+      try{ await window.db.collection('reignite_requests').doc(id).update({ status:'rejected', decidedAt: firebase.firestore.FieldValue.serverTimestamp() }); }
+      catch(e){ alert(e.message || 'حصلت مشكلة'); btn.disabled = false; }
+    }
+
+    document.getElementById('reqList').addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.ok) approve(b.dataset.ok, b);
+      if(b.dataset.no) reject(b.dataset.no, b);
+    });
+    document.getElementById('btnReqPending').onclick = function(){ showAll = false; render(); };
+    document.getElementById('btnReqAll').onclick = function(){ showAll = true; render(); };
+
+    AdminGuard.protect().then(start);
   })();
   </script>
 </body>
