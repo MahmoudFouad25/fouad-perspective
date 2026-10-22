@@ -27,6 +27,7 @@
   };
 
   var readyPromise = null;
+  var firstWasAdmin = null;   // حالة الدخول أول ما الصفحة فتحت
 
   function isAdminUser(user) {
     return !!(user && user.email && user.email.toLowerCase() === ADMIN_EMAIL);
@@ -93,6 +94,7 @@
         var resolved = false;
 
         auth.onAuthStateChanged(function (user) {
+          if (firstWasAdmin === null) firstWasAdmin = isAdminUser(user);
           if (isAdminUser(user)) {
             overlay.style.display = 'none';
             if (!resolved) { resolved = true; resolve({ db: db, auth: auth, user: user }); }
@@ -129,5 +131,15 @@
     return firebase.auth().signOut();
   }
 
-  window.AdminGuard = { ready: ready, signOut: signOut, ADMIN_EMAIL: ADMIN_EMAIL };
+  // للصفحات القديمة اللي بتبدأ لوحدها من غير ما تستنى ready():
+  // لو الأدمن داخل أصلًا، مفيش أي تغيير. لو مش داخل، الفورم بيظهر فوق الصفحة،
+  // وبعد الدخول الصفحة بتعمل reload مرة واحدة علشان تبدأ وهي داخلة.
+  function protect() {
+    return ready().then(function (r) {
+      if (firstWasAdmin === false) { location.reload(); return new Promise(function () {}); }
+      return r;
+    });
+  }
+
+  window.AdminGuard = { ready: ready, protect: protect, signOut: signOut, ADMIN_EMAIL: ADMIN_EMAIL };
 })();
