@@ -20,6 +20,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <script src="../../js/admin-guard.js"></script>
     <script src="../../js/bot-client.js"></script>
+<script src="../../js/password-safe.js"></script>
     
     <style>
         * {
@@ -3051,14 +3052,19 @@ async function sendCredentials(studentId) {
         return;
     }
     
-// فك تشفير كلمة المرور من المكان الجديد
-const password = userData.auth?.tempPassword ? atob(userData.auth.tempPassword) : '[كلمة المرور غير متاحة]';
+// الباسورد مش محفوظ في أي مكان يتقري (المرحلة ٦): الرسايل بتبعت رابط الدخول السريع،
+// و«باسورد جديد» بيعمل باسورد جديد للعميل ده ويبعته.
+const quickLoginUrl = userData.auth?.telegramAutoLoginToken
+    ? `https://mahmoudfouad25.github.io/fouad-perspective/login.html?uid=${encodeURIComponent(userData.id || student.userId)}&token=${encodeURIComponent(userData.auth.telegramAutoLoginToken)}`
+    : 'https://mahmoudfouad25.github.io/fouad-perspective/login.html';
+let password = 'الباسورد اللي وصلك وقت إنشاء الحساب';
     
-    const { value: messageType } = await Swal.fire({
+    let { value: messageType } = await Swal.fire({
         title: 'اختر نوع الرسالة',
         input: 'select',
         inputOptions: {
             credentials: '📧 بيانات الدخول فقط',
+            newpass: '🔐 باسورد جديد + بيانات الدخول',
             welcome: '🎉 رسالة ترحيب كاملة',
             reminder: '🔔 تذكير بالبيانات'
         },
@@ -3070,6 +3076,24 @@ const password = userData.auth?.tempPassword ? atob(userData.auth.tempPassword) 
     });
     
     if (!messageType) return;
+
+    if (messageType === 'newpass') {
+        const ok = await Swal.fire({ icon: 'question', title: 'باسورد جديد؟',
+            text: 'هيتعمل باسورد جديد للعميل ده، والقديم هيبطل. الرابط السريع هيفضل شغال.',
+            showCancelButton: true, confirmButtonText: 'أيوه، اعمل باسورد جديد', cancelButtonText: 'إلغاء' });
+        if (!ok.isConfirmed) return;
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+        const rnd = new Uint32Array(10); crypto.getRandomValues(rnd);
+        const newPass = Array.from(rnd, n => chars[n % chars.length]).join('');
+        try {
+            await PasswordSafe.setPassword(userData.id || student.userId, newPass);
+        } catch (e) {
+            Swal.fire('ما اتغيّرش الباسورد', e.message || 'حصلت مشكلة', 'error');
+            return;
+        }
+        password = newPass;
+        messageType = 'credentials';
+    }
     
     let message = '';
     
@@ -3081,6 +3105,8 @@ const password = userData.auth?.tempPassword ? atob(userData.auth.tempPassword) 
 👤 *الاسم:* ${customer.name}
 📧 *البريد:* ${userData.personalInfo.email}
 🔑 *كلمة المرور:* ${password}
+⚡ *دخول سريع من غير باسورد:*
+${quickLoginUrl}
 🆔 *المعرف:* ${userData.id}
 
 🔗 *رابط الدخول:*
@@ -3104,6 +3130,8 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
 *بيانات الدخول:*
 📧 *البريد:* ${userData.personalInfo.email}
 🔑 *كلمة المرور:* ${password}
+⚡ *دخول سريع من غير باسورد:*
+${quickLoginUrl}
 🆔 *معرف الحساب:* ${userData.id}
 
 🔗 *روابط مهمة:*
@@ -3130,6 +3158,8 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
 
 📧 *البريد:* ${userData.personalInfo.email}
 🔑 *كلمة المرور:* ${password}
+⚡ *دخول سريع من غير باسورد:*
+${quickLoginUrl}
 
 🔗 *للدخول المباشر:*
 https://mahmoudfouad25.github.io/fouad-perspective/login.html
@@ -3484,6 +3514,8 @@ if (student.paymentInfo?.isInstallment) {
         
         // حفظ في Firebase
         await db.collection('users').doc(formData.slug).set(newUser);
+        // الباسورد يتنقل لحساب الدخول المحمي، والنسخة المكتوبة تتمسح (المرحلة ٦)
+        try { await PasswordSafe.secure(formData.slug); } catch (e) { console.warn('تأمين الباسورد:', e); }
         
         // تحديث individualStudents
         await db.collection('individualStudents').doc(studentId).update({
@@ -4742,6 +4774,8 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
         
         // حفظ في Firebase
         await db.collection('users').doc(autoAccountData.slug).set(newUser);
+        // الباسورد يتنقل لحساب الدخول المحمي، والنسخة المكتوبة تتمسح (المرحلة ٦)
+        try { await PasswordSafe.secure(autoAccountData.slug); } catch (e) { console.warn('تأمين الباسورد:', e); }
         console.log('✅ تم حفظ المستخدم في Firebase');
         
         // تحديث individualStudents
@@ -4751,7 +4785,6 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
             accountStatus: 'active',
             userId: autoAccountData.slug,
             userEmail: autoAccountData.email,
-            accountPassword: autoAccountData.password,
             automationCompleted: {
                 accountCreation: true,
                 timestamp: new Date().toISOString()
@@ -6655,9 +6688,8 @@ async function sendQuickLoginMessages() {
             
             const userData = userDoc.data();
             const email = userData.personalInfo?.email;
-            const tempPassword = userData.auth?.tempPassword;
             
-            if (!email || !tempPassword) {
+            if (!email) {
                 console.error('❌ بيانات الدخول غير متوفرة:', student.userId);
                 errorCount++;
                 errors.push(`${student.customer?.name || 'غير معروف'}: بيانات الدخول غير متوفرة`);
@@ -6696,13 +6728,10 @@ async function sendQuickLoginMessages() {
 *للدخول السريع:*
 اضغط على الزرار أدناه .. المكتوب عليه "⚡دخول سريع للمنصة" 👇
 
-أو استخدم بيانات الدخول التالية:
+أو ادخل بالإيميل والباسورد اللي وصلك وقت إنشاء الحساب:
 
 📧 *البريد الإلكتروني:*
 \`${email}\`
-
-🔑 *كلمة المرور:*
-\`${atob(tempPassword)}\`
 
 🌐 *رابط المنصة:*
 https://mahmoudfouad25.github.io/fouad-perspective/login.html
@@ -6710,7 +6739,7 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
 ━━━━━━━━━━━━━━━━━━
 ⚠️ *مهم جداً:*
 - احفظ هذه البيانات في مكان آمن 🔐
-- يمكنك تغيير كلمة المرور من إعدادات حسابك
+- لو نسيت الباسورد، ادخل بزرار الدخول السريع أو كلّمنا ونبعتلك باسورد جديد
 - رابط "الدخول السريع" خاص بك - لا تشاركه مع أحد
 
 مع تحيات فريق منظور الفؤاد 💜
@@ -6727,7 +6756,6 @@ https://mahmoudfouad25.github.io/fouad-perspective/login.html
                     message: message,
                     buttons: [
                         [{ text: '⚡ دخول سريع للمنصة', url: autoLoginUrl }],
-                        [{ text: '🔐 تغيير كلمة المرور', callback_data: 'change_password' }],
                         [{ text: '🆘 أحتاج مساعدة', callback_data: 'need_help_login' }]
                     ]
                 })
