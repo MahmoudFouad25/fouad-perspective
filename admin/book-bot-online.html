@@ -13,6 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <script src="../js/admin-guard.js"></script>
 <script src="../js/bot-client.js"></script>
+<script src="../js/booking-money.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <style>
@@ -460,7 +461,8 @@ function getPaymentMethodText(m){return {vodafone:'فودافون كاش',instap
 function getEmploymentText(s){return {student:'طالب',employed:'موظف',freelance:'عمل حر',unemployed:'بدون عمل',retired:'متقاعد',other:'أخرى'}[s]||s||'غير محدد';}
 function commitmentLabel(k){return {fullAttendance:'التعهد بالحضور الكامل',activeParticipation:'المشاركة الفعالة',truthfulInfo:'صحة المعلومات المقدمة',volunteerWork:'التطوع بمساعدة الآخرين',attendance:'الالتزام بالحضور',homework:'تسليم الواجبات',interaction:'التفاعل في الدورة',payment:'الالتزام بالدفع',rules:'الالتزام بالقواعد'}[k]||k;}
 
-function extractNumberFromArabicText(text){
+function extractNumberFromArabicText(text){ return BookingMoney.num(text); }
+function _oldExtractNumberFromArabicText(text){
   if(!text) return 0;
   const ar=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
   let r=text.toString();
@@ -1085,9 +1087,8 @@ async function markAsPaid(bookingId){
     if(result.value.isInstallment){
       const fp=result.value.firstPayment, ni=result.value.numInstallments;
       const remaining=Math.max(0,totalAmount-fp);
-      const monthly=Math.ceil(remaining/ni);
-      const schedule=[{installmentNumber:0,amount:fp,dueDate:new Date().toISOString(),status:'paid',paidAt:new Date().toISOString(),paymentMethod:result.value.method,reference:result.value.reference}];
-      for(let i=1;i<=ni;i++){const d=new Date();d.setMonth(d.getMonth()+i);schedule.push({installmentNumber:i,amount:monthly,dueDate:d.toISOString(),status:'pending',paidAt:null,paymentMethod:null,reference:null});}
+      // جدول بالجنيه الصحيح، والكسر على آخر قسط، وتواريخ القاهرة (من js/booking-money.js)
+      const schedule=BookingMoney.buildSchedule(totalAmount,fp,ni,{method:result.value.method,reference:result.value.reference});
       upd.paymentDetails={type:'installment',totalAmount,paidAmount:fp,remainingAmount:remaining,installmentSchedule:schedule,totalInstallments:ni+1,paidInstallments:1,nextDueDate:schedule[1]?.dueDate||null,fullyPaid:false};
     } else {
       upd.paymentDetails={type:'full',totalAmount,paidAmount:totalAmount,remainingAmount:0,fullyPaid:true,paidAt:new Date().toISOString()};
@@ -1103,11 +1104,11 @@ function calcInstPreview(total){
   const fp=parseFloat(fpEl.value)||0, ni=parseInt(niEl.value)||0;
   const prev=document.getElementById('instPreview'); const det=document.getElementById('instDetails');
   if(fp>0&&ni>0&&total>0&&fp<=total){
-    const remaining=Math.max(0,total-fp); const monthly=Math.ceil(remaining/ni);
+    const remaining=Math.max(0,total-fp); const sch=BookingMoney.buildSchedule(total,fp,ni); const monthly=sch[1]?sch[1].amount:0;
     let html='<div style="display:grid;gap:8px"><div style="display:flex;justify-content:space-between;padding:8px;background:#DCFCE7;border-radius:6px"><span>الدفعة الأولى (اليوم)</span><strong>'+fp.toLocaleString('ar-EG')+' ج.م</strong></div>';
     const today=new Date();
-    for(let i=1;i<=ni;i++){const d=new Date(today);d.setMonth(d.getMonth()+i);html+='<div style="display:flex;justify-content:space-between;padding:8px;background:#F9FAFB;border-radius:6px"><span>القسط '+i+' - '+d.toLocaleDateString('ar-EG',{month:'long',year:'numeric'})+'</span><strong>'+monthly.toLocaleString('ar-EG')+' ج.م</strong></div>';}
-    html+='<div style="display:flex;justify-content:space-between;padding:8px;background:#DBEAFE;border-radius:6px;border-top:2px solid #3B82F6"><strong>الإجمالي</strong><strong style="color:#1E40AF">'+(fp+monthly*ni).toLocaleString('ar-EG')+' ج.م</strong></div></div>';
+    for(let i=1;i<=ni;i++){const it=sch[i];html+='<div style="display:flex;justify-content:space-between;padding:8px;background:#F9FAFB;border-radius:6px"><span>القسط '+i+' - '+BookingMoney.formatDate(it.dueDate)+'</span><strong>'+it.amount.toLocaleString('ar-EG')+' ج.م</strong></div>';}
+    html+='<div style="display:flex;justify-content:space-between;padding:8px;background:#DBEAFE;border-radius:6px;border-top:2px solid #3B82F6"><strong>الإجمالي</strong><strong style="color:#1E40AF">'+sch.reduce((a,x)=>a+x.amount,0).toLocaleString('ar-EG')+' ج.م</strong></div></div>';
     det.innerHTML=html; prev.style.display='block';
   } else prev.style.display='none';
 }
@@ -1474,7 +1475,7 @@ async function transferToSpecialized(bookingId,type){
    نظام الأقساط: الجدول + التسجيل بالتوزيع الذكي
 ============================================================ */
 async function showInstallmentSchedule(bookingId){
-  const b=allBookings.find(x=>x.id===bookingId);
+  const b=findBooking(x=>x.id===bookingId);
   if(!b?.paymentDetails?.installmentSchedule){ Swal.fire('خطأ!','لا توجد بيانات أقساط','error'); return; }
   const s=b.paymentDetails.installmentSchedule; const now=new Date();
   let html='<div style="text-align:right"><div style="background:#EFF6FF;padding:14px;border-radius:10px;margin-bottom:16px"><h3>'+esc(b.customer?.name||'')+'</h3><p>📚 '+esc(b.courseName||'')+' | 💰 '+(b.paymentDetails.totalAmount||0).toLocaleString('ar-EG')+' ج.م</p></div><div style="overflow-x:auto"><table class="installment-table"><thead><tr><th>القسط</th><th>المبلغ</th><th>التاريخ</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>';
@@ -1508,12 +1509,12 @@ async function markInstallmentAsPaid(bookingId,idx){
     html:'<div style="text-align:right">'
       +'<div style="background:#EFF6FF;padding:14px;border-radius:10px;margin-bottom:16px;border:2px solid #3B82F6"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="color:#6B7280">العميل:</span><br><strong>'+esc(b.customer?.name||'')+'</strong></div><div><span style="color:#6B7280">رقم القسط:</span><br><strong style="color:#3B82F6">'+(inst.installmentNumber+1)+' من '+b.paymentDetails.totalInstallments+'</strong></div><div><span style="color:#6B7280">قيمة القسط:</span><br><strong style="color:#DC2626">'+inst.amount.toLocaleString('ar-EG')+' ج.م</strong></div><div><span style="color:#6B7280">المتبقي الكلي:</span><br><strong style="color:#F59E0B">'+remainingTotal.toLocaleString('ar-EG')+' ج.م</strong></div></div></div>'
       +(inst.receiptReceived&&inst.receiptImageUrl?'<div style="background:#F0FDF4;padding:12px;border-radius:10px;margin-bottom:14px;border:2px solid #10B981"><p style="color:#065F46;font-weight:700;margin-bottom:8px"><i class="fas fa-check-circle"></i> الإيصال المرفق:</p><img src="'+inst.receiptImageUrl+'" style="max-width:100%;max-height:250px;border-radius:8px;cursor:pointer" onclick="window.open(\''+inst.receiptImageUrl+'\',\'_blank\')"></div>':'')
-      +'<div style="background:#fff;padding:14px;border-radius:10px;margin-bottom:14px;border:3px solid #8B5CF6"><label style="font-weight:800;display:block;margin-bottom:8px">💰 المبلغ المدفوع فعلياً: *</label><input type="number" id="actualPaidAmount" class="swal2-input" value="'+inst.amount+'" data-inst="'+inst.amount+'" data-rem="'+remainingTotal+'" style="width:90%;font-size:1.3rem;text-align:center;font-weight:800;color:#7C3AED;border:3px solid #8B5CF6" oninput="calcDistribution(\''+bookingId+'\','+idx+')"><div style="display:flex;gap:8px;margin-top:10px"><button type="button" onclick="document.getElementById(\'actualPaidAmount\').value='+inst.amount+';calcDistribution(\''+bookingId+'\','+idx+')" style="flex:1;padding:8px;background:#E0E7FF;border:2px solid #6366F1;border-radius:6px;cursor:pointer;font-weight:700;color:#4338CA">القسط فقط ('+inst.amount.toLocaleString('ar-EG')+')</button><button type="button" onclick="document.getElementById(\'actualPaidAmount\').value='+remainingTotal+';calcDistribution(\''+bookingId+'\','+idx+')" style="flex:1;padding:8px;background:#FEF3C7;border:2px solid #F59E0B;border-radius:6px;cursor:pointer;font-weight:700;color:#D97706">الباقي كله ('+remainingTotal.toLocaleString('ar-EG')+')</button></div></div>'
+      +'<div style="background:#fff;padding:14px;border-radius:10px;margin-bottom:14px;border:3px solid #8B5CF6"><label style="font-weight:800;display:block;margin-bottom:8px">💰 المبلغ المدفوع فعلياً: *</label><input type="number" id="actualPaidAmount" class="swal2-input" value="'+(inst.amount-BookingMoney.paidOn(inst))+'" data-inst="'+(inst.amount-BookingMoney.paidOn(inst))+'" data-rem="'+remainingTotal+'" style="width:90%;font-size:1.3rem;text-align:center;font-weight:800;color:#7C3AED;border:3px solid #8B5CF6" oninput="calcDistribution(\''+bookingId+'\','+idx+')"><div style="display:flex;gap:8px;margin-top:10px"><button type="button" onclick="document.getElementById(\'actualPaidAmount\').value='+inst.amount+';calcDistribution(\''+bookingId+'\','+idx+')" style="flex:1;padding:8px;background:#E0E7FF;border:2px solid #6366F1;border-radius:6px;cursor:pointer;font-weight:700;color:#4338CA">القسط فقط ('+inst.amount.toLocaleString('ar-EG')+')</button><button type="button" onclick="document.getElementById(\'actualPaidAmount\').value='+remainingTotal+';calcDistribution(\''+bookingId+'\','+idx+')" style="flex:1;padding:8px;background:#FEF3C7;border:2px solid #F59E0B;border-radius:6px;cursor:pointer;font-weight:700;color:#D97706">الباقي كله ('+remainingTotal.toLocaleString('ar-EG')+')</button></div></div>'
       +'<div id="distMsg" style="display:none;margin-bottom:14px"></div>'
       +'<div id="distPreview" style="display:none;background:linear-gradient(135deg,#F0FDF4,#D1FAE5);padding:16px;border-radius:10px;margin-bottom:14px;border:3px solid #10B981"><h4 style="color:#065F46;margin:0 0 12px"><i class="fas fa-calculator"></i> 📊 التوزيع التلقائي للمبلغ الزائد</h4><div id="distDetails"></div></div>'
       +'<label style="font-weight:700;display:block;margin-bottom:6px">💳 طريقة الدفع: *</label><select id="instMethod" class="swal2-input" style="width:90%"><option value="">اختر</option><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option><option value="bank">تحويل بنكي</option><option value="card">بطاقة بنكية</option><option value="cash">كاش</option><option value="western_union">ويسترن يونيون</option><option value="other">أخرى</option></select>'
       +'<label style="font-weight:700;display:block;margin:12px 0 6px">📝 رقم المرجع: (اختياري)</label><input id="instRef" class="swal2-input" style="width:90%;direction:ltr">'
-      +'<label style="font-weight:700;display:block;margin:12px 0 6px">📅 تاريخ الدفع:</label><input type="date" id="instDate" class="swal2-input" value="'+new Date().toISOString().split('T')[0]+'" style="width:90%">'
+      +'<label style="font-weight:700;display:block;margin:12px 0 6px">📅 تاريخ الدفع:</label><input type="date" id="instDate" class="swal2-input" value="'+BookingMoney.cairoDateString(new Date())+'" style="width:90%">'
       +'</div>',
     width:'700px',showCancelButton:true,confirmButtonText:'✅ تأكيد الدفع',cancelButtonText:'إلغاء',confirmButtonColor:'#10B981',
     didOpen:()=>{ window.__instCtx={bookingId,idx,collection}; calcDistribution(bookingId,idx); },
@@ -1522,7 +1523,7 @@ async function markInstallmentAsPaid(bookingId,idx){
       const amt=parseFloat(document.getElementById('actualPaidAmount').value);
       if(!m){Swal.showValidationMessage('⚠️ اختر طريقة الدفع');return false;}
       if(!amt||amt<=0){Swal.showValidationMessage('⚠️ أدخل المبلغ المدفوع');return false;}
-      if(amt>remainingTotal*1.5){Swal.showValidationMessage('⚠️ المبلغ كبير جداً! المتبقي: '+remainingTotal.toLocaleString('ar-EG')+' ج.م');return false;}
+      if(amt>remainingTotal+0.5){Swal.showValidationMessage('⚠️ المبلغ أكبر من الباقي على الكورس كله ('+remainingTotal.toLocaleString('ar-EG')+' ج.م). لو العميل دفع زيادة، سجّل الباقي بس واكتب الزيادة في ملاحظة.');return false;}
       return {method:m,reference:document.getElementById('instRef').value||'لا يوجد',date:document.getElementById('instDate').value,actualAmount:amt};
     }
   });
@@ -1531,28 +1532,33 @@ async function markInstallmentAsPaid(bookingId,idx){
     Swal.fire({title:'جاري تسجيل الدفع...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
     const actual=r.value.actualAmount;
     const installmentAmount=inst.amount;
-    const paidDate=new Date(r.value.date).toISOString();
-    inst.status=actual>=installmentAmount?'paid':'partial';
-    inst.paidAt=paidDate; inst.paymentMethod=r.value.method; inst.reference=r.value.reference; inst.paidBy='admin'; inst.actualPaidAmount=actual;
+    // التاريخ ضهر اليوم بتوقيت القاهرة (كان بيتقري بتوقيت جرينتش فيطلع اليوم اللي قبله)
+    const paidDate=new Date(r.value.date+'T12:00:00+03:00').toISOString();
+    // القسط الجزئي بيتجمع: لو اتدفع على كذا مرة، بيتقفل لما المجموع يوصل لقيمته
+    const before=BookingMoney.paidOn(inst);
+    const cum=before+actual;
+    inst.paidSoFar=Math.min(cum,installmentAmount);
+    inst.status=cum>=installmentAmount?'paid':'partial';
+    inst.paidAt=paidDate; inst.paymentMethod=r.value.method; inst.reference=r.value.reference; inst.paidBy='admin'; inst.actualPaidAmount=(inst.actualPaidAmount||0)+actual;
+    inst.payments=(inst.payments||[]).concat([{amount:actual,date:paidDate,method:r.value.method,reference:r.value.reference}]);
     if(inst.receiptReceived){ inst.receiptProcessed=true; inst.receiptProcessedAt=new Date().toISOString(); }
 
-    let extra=actual-installmentAmount, paidCount=actual>=installmentAmount?1:0;
-    const distributionLog=[{installmentNumber:inst.installmentNumber+1,amount:Math.min(actual,installmentAmount),status:inst.status,isOriginal:true}];
+    let extra=Math.max(0,cum-installmentAmount), paidCount=inst.status==='paid'?1:0;
+    const distributionLog=[{installmentNumber:inst.installmentNumber+1,amount:Math.min(actual,installmentAmount-before),status:inst.status,isOriginal:true,newAmount:Math.max(0,installmentAmount-inst.paidSoFar)}];
     if(extra>0){
-      for(let i=idx+1;i<b.paymentDetails.installmentSchedule.length;i++){
+      // الزيادة بتروح للأقساط اللي بعده بالترتيب، من غير ما نغيّر قيمة أي قسط
+      for(let i=idx+1;i<b.paymentDetails.installmentSchedule.length && extra>0;i++){
         const next=b.paymentDetails.installmentSchedule[i];
-        if(next.status!=='pending'||extra<=0) continue;
-        if(extra>=next.amount){
-          next.status='paid'; next.paidAt=paidDate; next.paymentMethod=r.value.method+' (من دفعة سابقة)'; next.reference=r.value.reference; next.paidBy='admin'; next.actualPaidAmount=next.amount; next.paidFromExtra=true; next.linkedToInstallment=idx;
-          distributionLog.push({installmentNumber:next.installmentNumber+1,amount:next.amount,status:'paid',fromExtra:true});
-          extra-=next.amount; paidCount++;
-        } else {
-          const orig=next.amount; next.amount=orig-extra;
-          next.partialPayments=next.partialPayments||[];
-          next.partialPayments.push({amount:extra,date:paidDate,method:r.value.method,reference:r.value.reference,linkedToInstallment:idx});
-          distributionLog.push({installmentNumber:next.installmentNumber+1,amount:extra,originalAmount:orig,newAmount:next.amount,status:'partial',fromExtra:true});
-          extra=0; break;
-        }
+        if(next.status==='paid') continue;
+        const need=Math.max(0,next.amount-BookingMoney.paidOn(next));
+        const put=Math.min(need,extra);
+        if(put<=0) continue;
+        next.paidSoFar=BookingMoney.paidOn(next)+put;
+        next.payments=(next.payments||[]).concat([{amount:put,date:paidDate,method:r.value.method+' (من دفعة سابقة)',reference:r.value.reference,linkedToInstallment:idx}]);
+        if(next.paidSoFar>=next.amount){ next.status='paid'; next.paidAt=paidDate; next.paymentMethod=r.value.method+' (من دفعة سابقة)'; next.reference=r.value.reference; next.paidBy='admin'; next.paidFromExtra=true; next.linkedToInstallment=idx; paidCount++; }
+        else next.status='partial';
+        distributionLog.push({installmentNumber:next.installmentNumber+1,amount:put,status:next.status,fromExtra:true,newAmount:Math.max(0,next.amount-next.paidSoFar)});
+        extra-=put;
       }
     }
     const pd=b.paymentDetails;
@@ -1597,14 +1603,15 @@ function calcDistribution(bookingId,idx){
   msg.style.display='none'; prev.style.display='none';
   if(actual<=0){ msg.style.display='block'; msg.style.cssText='display:block;background:#FEE2E2;border:2px solid #DC2626;border-radius:10px;padding:14px;color:#991B1B;font-weight:700'; msg.innerHTML='<i class="fas fa-exclamation-triangle"></i> يجب إدخال مبلغ أكبر من صفر'; input.style.borderColor='#DC2626'; return; }
   if(actual>installmentAmount){
-    const b=allBookings.find(x=>x.id===bookingId)||(window.__instCtx?null:null);
-    const booking=allBookings.find(x=>x.id===bookingId);
+    const b=findBooking(x=>x.id===bookingId)||(window.__instCtx?null:null);
+    const booking=findBooking(x=>x.id===bookingId);
     const sched=booking?.paymentDetails?.installmentSchedule||[];
     let extra=actual-installmentAmount, items=[], count=1;
     for(let i=idx+1;i<sched.length;i++){
-      const next=sched[i]; if(next.status!=='pending'||extra<=0) continue;
-      if(extra>=next.amount){ items.push({n:next.installmentNumber+1,paid:next.amount,full:true}); extra-=next.amount; count++; }
-      else { items.push({n:next.installmentNumber+1,paid:extra,orig:next.amount,newAmt:next.amount-extra,full:false}); extra=0; break; }
+      const next=sched[i]; if(next.status==='paid'||extra<=0) continue;
+      const need=Math.max(0,next.amount-BookingMoney.paidOn(next)); if(need<=0) continue;
+      if(extra>=need){ items.push({n:next.installmentNumber+1,paid:need,full:true}); extra-=need; count++; }
+      else { items.push({n:next.installmentNumber+1,paid:extra,orig:need,newAmt:need-extra,full:false}); extra=0; break; }
     }
     prev.style.display='block'; input.style.borderColor='#10B981'; input.style.background='#F0FDF4';
     let html='<div style="background:#fff;padding:12px;border-radius:8px;margin-bottom:10px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center"><div style="padding:8px;background:#EFF6FF;border-radius:6px"><div style="font-size:.8rem;color:#6B7280">المبلغ المدفوع</div><div style="font-size:1.3rem;font-weight:800;color:#3B82F6">'+actual.toLocaleString('ar-EG')+'</div></div><div style="padding:8px;background:#FEF3C7;border-radius:6px"><div style="font-size:.8rem;color:#6B7280">المبلغ الزائد</div><div style="font-size:1.3rem;font-weight:800;color:#F59E0B">'+(actual-installmentAmount).toLocaleString('ar-EG')+'</div></div></div></div>';
@@ -1618,32 +1625,42 @@ function calcDistribution(bookingId,idx){
    مدير الأقساط الشهرية (فلاتر + تذكير فردي + تذكير جماعي + إعدادات)
 ============================================================ */
 function calcInstallmentsStats(bookings){
-  const now=new Date(); const cm=now.getMonth(); const cy=now.getFullYear();
+  // نفس حساب js/booking-money.js: الأيام بتوقيت القاهرة، والمبلغ الباقي من القسط الجزئي بس
+  const now=new Date(); const ym=BookingMoney.cairoDateString(now).slice(0,7);
   const minDays=parseInt(localStorage.getItem('installmentReminderMinDays')||'7');
   let s={total:0,totalAmount:0,paid:0,paidAmount:0,dueThisMonth:0,dueThisMonthAmount:0,overdue:0,overdueAmount:0,readyForReminder:0,recentlyReminded:0,receiptsReceived:0,monthlyIncome:0,dueIn3Days:0,dueIn7Days:0};
-  bookings.forEach(b=>{(b.paymentDetails?.installmentSchedule||[]).forEach(inst=>{
-    s.total++; s.totalAmount+=inst.amount;
-    if(inst.status==='paid'){ s.paid++; s.paidAmount+=inst.amount; const pd=new Date(inst.paidAt); if(pd.getMonth()===cm&&pd.getFullYear()===cy) s.monthlyIncome+=inst.amount; }
-    else {
-      const due=new Date(inst.dueDate); const d=Math.floor((due-now)/86400000);
-      if(due.getMonth()===cm&&due.getFullYear()===cy){ s.dueThisMonth++; s.dueThisMonthAmount+=inst.amount; }
-      if(d<0){ s.overdue++; s.overdueAmount+=inst.amount; }
-      if(d>=0&&d<=3) s.dueIn3Days++;
-      if(d>=0&&d<=7) s.dueIn7Days++;
-      const last=inst.reminders?.[inst.reminders.length-1];
-      if(!last) s.readyForReminder++;
-      else { const ds=Math.floor((now-new Date(last.sentAt))/86400000); if(ds>=minDays||d<-7) s.readyForReminder++; else s.recentlyReminded++; }
-      if(inst.receiptReceived) s.receiptsReceived++;
-    }
-  });});
+  bookings.forEach(b=>{ BookingMoney.summarize(b,now).rows.forEach(r=>{
+    const inst=r.raw;
+    s.total++; s.totalAmount+=r.amount;
+    if(r.state==='paid'){ s.paid++; s.paidAmount+=r.amount; if(inst.paidAt && BookingMoney.cairoDateString(new Date(inst.paidAt)).slice(0,7)===ym) s.monthlyIncome+=r.amount; return; }
+    if(r.dueDate && BookingMoney.cairoDateString(new Date(r.dueDate)).slice(0,7)===ym){ s.dueThisMonth++; s.dueThisMonthAmount+=r.left; }
+    if(r.state==='overdue'){ s.overdue++; s.overdueAmount+=r.left; }
+    if(r.daysUntil!==null && r.daysUntil<=3) s.dueIn3Days++;
+    if(r.daysUntil!==null && r.daysUntil<=7) s.dueIn7Days++;
+    const last=inst.reminders?.[inst.reminders.length-1];
+    if(!last) s.readyForReminder++;
+    else { const ds=BookingMoney.cairoDayDiff(new Date(last.sentAt),now); if(ds>=minDays||r.daysLate>7) s.readyForReminder++; else s.recentlyReminded++; }
+    if(inst.receiptReceived) s.receiptsReceived++;
+  }); });
   return s;
 }
 
+// الحجوزات اللي عليها أقساط، بما فيها اللي اتحوّلت (القايمة الرئيسية بتستبعدها)
+let instBookings=[];
+function findBooking(id){ return allBookings.find(x=>x.id===id) || instBookings.find(x=>x.id===id); }
+async function loadInstallmentBookings(){
+  if(DEMO_MODE){ instBookings=allBookings.slice(); return instBookings; }
+  const snap=await db.collection('tempBookings').where('paymentDetails.type','==','installment').get();
+  instBookings=[]; snap.forEach(d=>instBookings.push({id:d.id,...d.data()}));
+  return instBookings;
+}
 async function showInstallmentsManager(){
-  const list=allBookings.filter(b=>b.paymentDetails?.type==='installment'&&b.status!=='cancelled'&&!b.paymentDetails?.fullyPaid);
+  Swal.fire({title:'جاري تحميل الأقساط…',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
+  try{ await loadInstallmentBookings(); }catch(e){ console.error(e); Swal.fire('خطأ!','مقدرتش أحمّل الأقساط: '+e.message,'error'); return; }
+  const list=instBookings.filter(b=>b.status!=='cancelled'&&!BookingMoney.summarize(b).fullyPaid);
   if(!list.length){ Swal.fire({icon:'info',title:'لا توجد أقساط نشطة',text:'لا توجد حجوزات بنظام التقسيط حالياً'}); return; }
   const stats=calcInstallmentsStats(list);
-  Swal.fire({title:'💳 متابعة الأقساط الشهرية',html:buildInstManagerHTML(list,stats),width:'95%',showConfirmButton:false,showCloseButton:true,didOpen:()=>{const sv=localStorage.getItem('installmentReminderMinDays')||'7';const sel=document.getElementById('reminderMinDays');if(sel)sel.value=sv;}});
+  Swal.fire({title:'💳 متابعة الأقساط الشهرية',html:buildInstManagerHTML(list,stats),width:'95%',showConfirmButton:false,showCloseButton:true,didOpen:()=>{Swal.hideLoading();const sv=localStorage.getItem('installmentReminderMinDays')||'7';const sel=document.getElementById('reminderMinDays');if(sel)sel.value=sv;}});
 }
 
 function buildInstManagerHTML(list,stats){
@@ -1675,7 +1692,7 @@ function buildInstList(bookings){
   let html=''; const now=new Date();
   const minDays=parseInt(localStorage.getItem('installmentReminderMinDays')||'7');
   bookings.forEach(b=>{(b.paymentDetails?.installmentSchedule||[]).forEach((inst,idx)=>{
-    const due=new Date(inst.dueDate); const d=Math.floor((now-due)/86400000);
+    const due=new Date(inst.dueDate); const d=BookingMoney.cairoDayDiff(due,now); const left=inst.amount-BookingMoney.paidOn(inst);
     let cls='',icon='',txt='',overdue=false,canRemind=false,disable=false;
     if(inst.status==='paid'){ cls='ist-paid'; icon='✅'; txt='مدفوع '+new Date(inst.paidAt).toLocaleDateString('ar-EG'); disable=true; }
     else {
@@ -1686,10 +1703,10 @@ function buildInstList(bookings){
       if(!last) canRemind=true;
       else { const ds=Math.floor((now-new Date(last.sentAt))/86400000); canRemind=ds>=minDays||d>7; if(!canRemind) disable=true; }
     }
-    html+='<div class="im-row" data-bid="'+b.id+'" data-idx="'+idx+'" data-status="'+inst.status+'" data-overdue="'+overdue+'" data-receipt="'+(inst.receiptReceived||false)+'" data-due="'+inst.dueDate+'" data-canremind="'+canRemind+'" style="border-right:5px solid '+(d>0?'#DC2626':inst.status==='paid'?'#10B981':'#3B82F6')+'">'
+    html+='<div class="im-row" data-bid="'+b.id+'" data-idx="'+idx+'" data-status="'+inst.status+'" data-overdue="'+overdue+'" data-receipt="'+(inst.receiptReceived||false)+'" data-due="'+inst.dueDate+'" data-canremind="'+canRemind+'" style="border-right:5px solid '+(inst.status==='paid'?'#10B981':d>0?'#DC2626':'#3B82F6')+'">'
       +'<div style="display:flex;justify-content:space-between;align-items:start;gap:12px">'
       +'<input type="checkbox" class="inst-check" data-bid="'+b.id+'" data-idx="'+idx+'" onchange="updateSelCount()" '+(disable?'disabled':'')+' style="width:20px;height:20px;cursor:pointer;margin-top:4px">'
-      +'<div style="flex:1"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><strong style="font-size:1.05rem">'+icon+' '+esc(b.customer?.name||'---')+'</strong><span style="font-size:1.2rem;font-weight:800;color:#DC2626">'+inst.amount.toLocaleString('ar-EG')+' ج.م</span></div>'
+      +'<div style="flex:1"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><strong style="font-size:1.05rem">'+icon+' '+esc(b.customer?.name||'---')+'</strong><span style="font-size:1.2rem;font-weight:800;color:#DC2626">'+(inst.status==='paid'?inst.amount:left).toLocaleString('ar-EG')+' ج.م'+(inst.status==='partial'?' <small style="color:#92400E;font-weight:600">(باقي من '+inst.amount.toLocaleString('ar-EG')+')</small>':'')+'</span></div>'
       +'<div style="color:#6B7280;font-size:.88rem;margin-top:5px">'+esc(b.courseName||'---')+' | القسط '+(inst.installmentNumber+1)+'/'+b.paymentDetails.totalInstallments+' | <span class="ist-badge '+cls+'">'+txt+'</span></div>'
       +(inst.status!=='paid'?'<div style="display:flex;gap:14px;margin-top:8px;font-size:.85rem">'+(inst.reminders?.length?'<span style="color:'+(canRemind?'#10B981':'#F59E0B')+'">💬 آخر تذكير: '+new Date(inst.reminders[inst.reminders.length-1].sentAt).toLocaleDateString('ar-EG')+(!canRemind&&!overdue?' (يمكن التذكير بعد '+minDays+' أيام)':'')+'</span>':'<span style="color:#10B981">✅ لم يُرسل تذكير — جاهز</span>')+(inst.receiptReceived?'<span style="color:#8B5CF6">📸 إيصال مستلم</span>':'')+'</div>':'')
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
@@ -1747,7 +1764,7 @@ function updateSelCount(){
 }
 
 async function sendInstallmentReminder(bookingId,idx){
-  const b=allBookings.find(x=>x.id===bookingId); if(!b) return;
+  const b=findBooking(x=>x.id===bookingId); if(!b) return;
   const inst=b.paymentDetails.installmentSchedule[idx];
   const name=(b.customer?.name||'').split(' ')[0]||'عميلنا العزيز';
   const due=new Date(inst.dueDate);
@@ -1766,7 +1783,7 @@ async function sendBulkReminders(){
   const checked=document.querySelectorAll('.inst-check:checked');
   if(!checked.length){ Swal.fire('تنبيه','لم يتم تحديد أي عميل','warning'); return; }
   const items=[]; let total=0;
-  checked.forEach(cb=>{ const b=allBookings.find(x=>x.id===cb.getAttribute('data-bid')); if(b){ const inst=b.paymentDetails.installmentSchedule[parseInt(cb.getAttribute('data-idx'))]; items.push({b,inst,idx:parseInt(cb.getAttribute('data-idx'))}); total+=inst.amount; } });
+  checked.forEach(cb=>{ const b=findBooking(x=>x.id===cb.getAttribute('data-bid')); if(b){ const inst=b.paymentDetails.installmentSchedule[parseInt(cb.getAttribute('data-idx'))]; items.push({b,inst,idx:parseInt(cb.getAttribute('data-idx'))}); total+=inst.amount; } });
   const r=await Swal.fire({title:'💬 تأكيد إرسال التذكيرات',html:'<div style="text-align:right"><p>سيتم إرسال تذكير لـ <strong>'+items.length+'</strong> عميل</p><div style="max-height:250px;overflow-y:auto;margin:12px 0">'+items.map((it,i)=>'<div style="background:#F0FDF4;padding:9px;border-radius:8px;margin-bottom:6px;border-right:3px solid #10B981"><strong>'+(i+1)+'. '+esc(it.b.customer?.name||'')+'</strong> — '+it.inst.amount.toLocaleString('ar-EG')+' ج.م</div>').join('')+'</div><div style="background:#EFF6FF;padding:12px;border-radius:8px"><strong>📊 الإجمالي: '+total.toLocaleString('ar-EG')+' ج.م</strong></div></div>',showCancelButton:true,confirmButtonText:'إرسال',cancelButtonText:'إلغاء',confirmButtonColor:'#10B981',width:'600px'});
   if(!r.isConfirmed) return;
   Swal.fire({title:'جاري الإرسال...',html:'<div class="loading-spinner" style="margin:20px auto"></div><p><strong><span id="prog">0</span> من '+items.length+'</strong></p>',allowOutsideClick:false,showConfirmButton:false});
@@ -1787,7 +1804,7 @@ async function sendBulkReminders(){
 
 /* مراجعة الإيصالات */
 async function viewInstallmentReceipt(bookingId,idx){
-  const b=allBookings.find(x=>x.id===bookingId); if(!b) return;
+  const b=findBooking(x=>x.id===bookingId); if(!b) return;
   const inst=b.paymentDetails.installmentSchedule[idx];
   if(!inst.receiptImageUrl){ Swal.fire('تنبيه','لا يوجد إيصال مرفق','warning'); return; }
   Swal.fire({title:'📸 إيصال الدفع',html:'<div style="text-align:right"><p><strong>العميل:</strong> '+esc(b.customer?.name||'')+'</p><p><strong>القسط:</strong> '+(inst.installmentNumber+1)+' | '+inst.amount.toLocaleString('ar-EG')+' ج.م</p><p><strong>تاريخ الاستلام:</strong> '+(inst.receiptReceivedAt?new Date(inst.receiptReceivedAt).toLocaleString('ar-EG'):'-')+'</p><div style="margin:18px 0"><img src="'+inst.receiptImageUrl+'" style="max-width:100%;border-radius:10px;border:2px solid #E5E7EB"></div><div style="display:flex;gap:10px;justify-content:center"><button onclick="approveReceipt(\''+bookingId+'\','+idx+')" style="background:#10B981;color:#fff;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:700"><i class="fas fa-check"></i> قبول وتسجيل دفع</button><button onclick="rejectReceipt(\''+bookingId+'\','+idx+')" style="background:#EF4444;color:#fff;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:700"><i class="fas fa-times"></i> رفض الإيصال</button></div></div>',width:'700px',showConfirmButton:false,showCloseButton:true});
@@ -1796,7 +1813,7 @@ async function approveReceipt(bookingId,idx){ Swal.close(); await markInstallmen
 async function rejectReceipt(bookingId,idx){
   const r=await Swal.fire({title:'رفض الإيصال',input:'textarea',inputLabel:'سبب الرفض',inputPlaceholder:'مثال: الإيصال غير واضح...',showCancelButton:true,confirmButtonText:'رفض',cancelButtonText:'إلغاء',confirmButtonColor:'#EF4444',inputValidator:v=>!v?'يجب كتابة السبب':undefined});
   if(!r.isConfirmed) return;
-  const b=allBookings.find(x=>x.id===bookingId); const inst=b.paymentDetails.installmentSchedule[idx];
+  const b=findBooking(x=>x.id===bookingId); const inst=b.paymentDetails.installmentSchedule[idx];
   inst.receiptRejected=true; inst.receiptRejectionReason=r.value; inst.receiptRejectedAt=new Date().toISOString();
   await dbUpdate('tempBookings',bookingId,{'paymentDetails.installmentSchedule':b.paymentDetails.installmentSchedule});
   if(b.telegramChatId) await sendTelegramMessage(b.telegramChatId,'❌ *تم رفض الإيصال*\n\nالسبب: '+r.value+'\n\nيرجى إرسال إيصال صحيح وواضح.');
