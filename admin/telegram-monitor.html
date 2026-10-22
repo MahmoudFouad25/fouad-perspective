@@ -181,6 +181,10 @@ input,textarea{font-family:inherit;font-size:inherit}
 .icon-btn{width:36px;height:36px;border-radius:9px;border:1px solid var(--line);color:var(--mut);display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .12s;background:var(--panel)}
 .icon-btn:hover{color:var(--emerald);border-color:var(--emerald)}
 .icon-btn.on{color:#fff;background:var(--emerald);border-color:var(--emerald)}
+.icon-btn[hidden]{display:none}
+.icon-btn.help-open{width:auto;padding:0 12px;gap:6px;font-size:13px;font-weight:700;color:#fff;background:var(--crimson);border-color:var(--crimson)}
+.icon-btn.help-open:hover{color:#fff;opacity:.9}
+@media (max-width:900px){.icon-btn.help-open{width:36px;padding:0}.icon-btn.help-open .lbl{display:none}}
 
 #msgScroll{flex:1;overflow-y:auto;min-height:0;padding:20px 24px 12px;scroll-behavior:smooth}
 #loadOlderBtn{display:block;margin:0 auto 16px;padding:6px 18px;border:1px solid var(--line);background:var(--panel);border-radius:20px;color:var(--mut);font-size:12.5px}
@@ -524,6 +528,7 @@ input,textarea{font-family:inherit;font-size:inherit}
             <div class="sub" id="chSub"></div>
           </div>
           <div class="ch-actions">
+            <button class="icon-btn help-open" id="helpHeadBtn" title="المحادثة دي عليها طلب مساعدة مفتوح، والبوت مش بيرد تلقائي لحد ما تقفله" hidden aria-label="حل طلب المساعدة"><i class="fas fa-circle-question"></i><span class="lbl">حل المساعدة</span></button>
             <button class="icon-btn" id="archiveBtn" title="أرشفة"><i class="fas fa-box-archive"></i></button>
             <button class="icon-btn" id="ctxToggle" title="لوحة العميل"><i class="fas fa-id-card"></i></button>
           </div>
@@ -1178,7 +1183,7 @@ function renderList(){
   });
   $('loadMoreBtn').style.display = (!DEMO && ['all','archived'].includes(currentQueue) && chats.size >= PAGE_CHATS) ? 'block' : 'none';
 }
-const renderAll = () => { renderQueues(); renderList(); if (currentChatId) renderContext(currentChatId); };
+const renderAll = () => { renderQueues(); renderList(); if (currentChatId){ renderContext(currentChatId); renderChatHeader(currentChatId); } };
 
 /* ═══ الاستماع الفوري لقائمة المحادثات ═══ */
 function listenChats(){
@@ -1293,6 +1298,8 @@ function renderChatHeader(chatId){
   const arch = c.archived === true;
   $('archiveBtn').innerHTML = `<i class="fas ${arch ? 'fa-box-open' : 'fa-box-archive'}"></i>`;
   $('archiveBtn').title = arch ? 'إخراج من الأرشيف' : 'أرشفة المحادثة';
+  // زرار حل المساعدة فوق، طول ما فيه طلب مفتوح (مش بس جوه الكارت القديم في الرسايل)
+  $('helpHeadBtn').hidden = !helpOpen(c);
 }
 function markRead(chatId){
   if (DEMO) return;
@@ -2080,6 +2087,7 @@ $('ctxToggle').onclick = ()=>{
 };
 
 /* ═══ حل طلب المساعدة — نفس تحديثات المنصة الحالية ═══ */
+$('helpHeadBtn').onclick = ()=>{ $('helpReplyText').value = ''; openSheet('helpSheet'); };
 $('helpResolveBtn').onclick = async ()=>{
   const chatId = currentChatId; if (!chatId) return;
   const replyText = $('helpReplyText').value.trim();
@@ -2091,13 +2099,20 @@ $('helpResolveBtn').onclick = async ()=>{
     if (replyText) await sendToBot(chatId, replyText);
     if (c.bookingId){
       try{
-        await db.collection('tempBookings').doc(c.bookingId).update({
+        // الحالة ترجع «مستني إيصال» بس لو الحجز لسه ما اتدفعش (كانت بترجّع أي حجز، حتى المدفوع)
+        const bSnap = await db.collection('tempBookings').doc(c.bookingId).get();
+        const b = bSnap.exists ? bSnap.data() : {};
+        const unpaid = ['pending','pending_review','confirmed'].includes(b.status) && !b.paymentConfirmed;
+        const wasHelpState = (b.automationWorkflow || {}).currentState === 'help_mode';
+        const upd = {
           'automationWorkflow.helpModeActivated': false,
-          'automationWorkflow.currentState': 'awaiting_receipt',
           'automationWorkflow.helpResolvedAt': new Date(),
           'automationWorkflow.helpResolvedBy': 'admin',
           'automationWorkflow.adminResponse': msg
-        });
+        };
+        // حالات البوت نفسه: قبل الدفع awaiting_receipt، وبعده awaiting_account_creation
+        if (wasHelpState) upd['automationWorkflow.currentState'] = unpaid ? 'awaiting_receipt' : 'awaiting_account_creation';
+        await db.collection('tempBookings').doc(c.bookingId).update(upd);
       }catch(e){ console.warn('تحديث الحجز أثناء حل المساعدة:', e); }
     }
     await db.collection('telegramChats').doc(chatId).update({
