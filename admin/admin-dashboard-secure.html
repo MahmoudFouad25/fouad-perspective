@@ -703,6 +703,7 @@
 
         <!-- شريط الإحصائيات -->
         <div class="stats-bar">
+            <div style="font-size:12px;opacity:.75;text-align:left;padding:0 4px 6px">الأرقام <span id="statsAge">—</span> · <a href="#" onclick="loadStatistics(true);return false" style="color:inherit;text-decoration:underline">حدّث</a></div>
             <div class="stats-container">
                 <div class="stat-card">
                     <div class="stat-icon blue">📚</div>
@@ -1127,31 +1128,38 @@
             }
         });
 
-        // تحميل الإحصائيات من Firestore
-        async function loadStatistics() {
+        // الإحصائيات: الأرقام دي بتحتاج تقرا كل المستخدمين والدورات، فبنحفظها ١٢ ساعة
+        // وبتتحدّث لما تدوس «حدّث» بس (كانت بتتقري كلها كل ٣٠ ثانية والصفحة مفتوحة)
+        const STATS_KEY = 'dash_stats_v1', STATS_TTL = 12 * 60 * 60 * 1000;
+        function showStats(o) {
+            document.getElementById('coursesCount').textContent = o.c;
+            document.getElementById('usersCount').textContent = o.u;
+            document.getElementById('bookingsCount').textContent = o.b;
+            document.getElementById('testimonialsCount').textContent = o.s;
+            const el = document.getElementById('statsAge');
+            if (el) {
+                const m = Math.round((Date.now() - o.t) / 60000);
+                el.textContent = m < 1 ? 'محدّثة دلوقتي' : m < 60 ? 'من ' + m.toLocaleString('ar-EG') + ' دقيقة' : 'من ' + Math.round(m / 60).toLocaleString('ar-EG') + ' ساعة';
+            }
+        }
+        async function loadStatistics(force) {
             try {
+                if (!force) {
+                    const c = JSON.parse(localStorage.getItem(STATS_KEY) || 'null');
+                    if (c && Date.now() - c.t < STATS_TTL) { showStats(c); return; }
+                }
                 const db = firebase.firestore();
-                
-                // جلب عدد الدورات
-                const coursesSnapshot = await db.collection('courses').get();
-                document.getElementById('coursesCount').textContent = coursesSnapshot.size;
-                
-                // جلب عدد المستخدمين
-                const usersSnapshot = await db.collection('users').get();
-                document.getElementById('usersCount').textContent = usersSnapshot.size;
-                
-                // جلب عدد الحجوزات الجديدة (آخر 7 أيام)
                 const sevenDaysAgo = new Date();
                 sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-                const bookingsSnapshot = await db.collection('bookings')
-                    .where('createdAt', '>=', sevenDaysAgo)
-                    .get();
-                document.getElementById('bookingsCount').textContent = bookingsSnapshot.size;
-                
-                // جلب عدد الاستشهادات
-                const testimonialsSnapshot = await db.collection('testimonials').get();
-                document.getElementById('testimonialsCount').textContent = testimonialsSnapshot.size;
-                
+                const [courses, users, bookings, testimonials] = await Promise.all([
+                    db.collection('courses').get(),
+                    db.collection('users').get(),
+                    db.collection('bookings').where('createdAt', '>=', sevenDaysAgo).get(),
+                    db.collection('testimonials').get()
+                ]);
+                const o = { t: Date.now(), c: courses.size, u: users.size, b: bookings.size, s: testimonials.size };
+                try { localStorage.setItem(STATS_KEY, JSON.stringify(o)); } catch (e) {}
+                showStats(o);
             } catch (error) {
                 console.error('خطأ في تحميل الإحصائيات:', error);
             }
@@ -1248,12 +1256,7 @@
             showNotification('تبديل الوضع', 'تم تغيير وضع العرض');
         }
 
-        // تحديث الإحصائيات تلقائياً كل 30 ثانية
-        setInterval(() => {
-            if (currentUser && currentUser.email === 'admin@fouad-academy.com') {
-                loadStatistics();
-            }
-        }, 30000);
+        // مفيش تحديث تلقائي للإحصائيات: «حدّث» جنبها بيعمل كده لما تحتاجه
 
         // حماية ضد محاولة فتح أدوات المطور
         document.addEventListener('contextmenu', (e) => {
