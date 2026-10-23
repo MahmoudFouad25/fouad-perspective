@@ -92,6 +92,14 @@
         if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
         var auth = firebase.auth();
         var db = firebase.firestore();
+        // نسخة محلية من البيانات على جهاز الأدمن: لو رجعت لصفحة خلال نص ساعة، المتابعة الحية بتكمّل من مكانها
+        // وبتقرا اللي اتغيّر بس، بدل ما تقرا كل حاجة من الأول. ولو المتصفح ما يدعمهاش، الصفحة بتشتغل عادي.
+        try {
+          if (!window.__fuCache && db.enablePersistence) {
+            window.__fuCache = true;
+            db.enablePersistence({ synchronizeTabs: true }).catch(function (e) { console.warn('النسخة المحلية مش متاحة:', e && e.code); });
+          }
+        } catch (e) {}
         var overlay = buildOverlay();
         var resolved = false;
 
