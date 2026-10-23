@@ -68,7 +68,10 @@
           '<span class="fu-nav__mark">ف</span><span class="t">منظور الفؤاد<small>' + esc(sec.title) + '</small></span>' +
         '</a>' +
         '<div class="fu-nav__links">' + links + '</div>' +
-        (darkAllowed() ? '<div class="fu-nav__end"><button type="button" class="fu-nav__theme"></button></div>' : '') +
+        '<div class="fu-nav__end">' +
+          (key === 'bookings' ? '<form class="fu-nav__find" action="' + esc(root + 'admin/client.html') + '" method="get" role="search"><input name="q" type="search" placeholder="افتح ملف عميل…" aria-label="دوّر على عميل بالاسم أو الرقم أو الإيميل" autocomplete="off"></form>' : '') +
+          (darkAllowed() ? '<button type="button" class="fu-nav__theme"></button>' : '') +
+        '</div>' +
       '</div>';
     document.body.insertBefore(nav, document.body.firstChild);
     var tb = nav.querySelector('.fu-nav__theme');
