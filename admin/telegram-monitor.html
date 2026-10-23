@@ -933,13 +933,13 @@ function deepPlain(v, depth){
   return v;
 }
 const IDX_KEY = 'tm_jidx_v1', IDX_TTL = 60 * 60 * 1000; /* الفهرس الكامل (لوحة الأقساط والدورات بس): ساعة */
-const LAZY_KEY = 'tm_jlazy_v1', LAZY_TTL = 60 * 60 * 1000; /* رحلات المحادثات اللي ظاهرة بس: ساعة */
+const LAZY_KEY = 'tm_jlazy_v1', LAZY_TTL = 30 * 60 * 1000; /* رحلات المحادثات اللي ظاهرة بس: نص ساعة، وأي محادثة تتحرّك بتتجاب من جديد */
 let fullIndexAt = 0;
 /* ── الرحلات عند الطلب: بنجيب حجوزات المحادثات اللي ظاهرة في القايمة بس، مش كل الحجوزات ── */
 const fetchedJ = new Set();
 const jQueue = new Set(); let jTimer = null;
 function wantJourneys(ids){
-  if (DEMO || fullIndexAt) return;
+  if (DEMO) return;
   ids.forEach(id => { id = String(id); if (!fetchedJ.has(id)) jQueue.add(id); });
   if (!jQueue.size) return;
   clearTimeout(jTimer); jTimer = setTimeout(flushJourneys, 250);
@@ -1011,6 +1011,7 @@ async function loadJourneyIndex(force){
         if (o && Array.isArray(o.j) && (Date.now() - o.t) < IDX_TTL){
           buildFromPacked(o.j);
           fullIndexAt = o.t;
+          chats.forEach((c, id) => fetchedJ.add(String(id)));
           return;
         }
       }
@@ -1037,6 +1038,7 @@ async function loadJourneyIndex(force){
     });
     buildFromPacked(packed);
     fullIndexAt = Date.now();
+    chats.forEach((c, id) => fetchedJ.add(String(id)));
     try{ localStorage.setItem(IDX_KEY, JSON.stringify({t: Date.now(), j: packed})); }catch(e){}
   }catch(e){
     console.error('فشل تحميل فهرس الحجوزات:', e);
@@ -1375,6 +1377,8 @@ function listenChats(){
         const prev = seenActivity.get(id);
         const act = toDate(data.lastActivity)?.getTime() || 0;
         chats.set(id, data);
+        /* المحادثة اتحرّكت (رسالة، إيصال، زرار): ممكن حجزها اتغيّر، فنجيب رحلاتها تاني */
+        if (prev !== undefined && act > prev) fetchedJ.delete(id);
         if (prev !== undefined && act > prev && id !== currentChatId){
           const nowHelp = helpOpen(data);
           notifyEvent(nowHelp ? 'help' : 'msg', id, data);
