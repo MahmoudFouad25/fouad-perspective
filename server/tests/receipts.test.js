@@ -53,7 +53,7 @@ let n=0; const ok=(c,m)=>{assert(c,m);n++;console.log('✓',m)};
  await rcOnText(111,'هو فاضل عليا كام؟');
  ok(/حسابك/.test(last().text)&&/الحضن الدافئ/.test(last().text)&&/في المراجعة/.test(last().text),'«فاضل كام»: حسابه وفيه الإيصال اللي في المراجعة');
  // رسالة عادية من طالب: رد هادي مرة واحدة
- const before=sent.length; ok(await rcOnText(111,'السلام عليكم')===true&&sent.length===before+1&&/وصلت رسالتك/.test(last().text),'طالب كتب رسالة: رد هادي بدل القائمة الرئيسية');
+ const before=sent.length; ok(await rcOnText(111,'عندي سؤال عن المحاضرة')===true&&sent.length===before+1&&/وصلت رسالتك/.test(last().text),'طالب كتب رسالة: رد هادي بدل القائمة الرئيسية');
  ok(await rcOnText(111,'محتاج حاجة')===true&&sent.length===before+1,'الرسالة التانية: من غير رد تاني (مش سبام)');
  ok(await rcOnText(999,'السلام عليكم')===false,'زائر: القائمة الرئيسية زي ما هي');
  await rcOnCallback(111,{id:'c'},['menu']); ok(last().text==='WELCOME','زرار القائمة الرئيسية شغال');
@@ -153,6 +153,17 @@ let n=0; const ok=(c,m)=>{assert(c,m);n++;console.log('✓',m)};
  store.tempBookings.d6={status:'transferred',paymentConfirmed:true,telegramChatId:'2001',courseName:'الحضن الدافئ',customer:{name:'ماما'},paymentDetails:{type:'installment',paidAmount:1000,installmentSchedule:sched(1,[-30,5],1000)}};
  await rcOnCallback(2001,{id:'c'},['delayany']); ok(/أنهي كورس/.test(last().text)&&cbs(last()).length===2,'أكتر من كورس عليه أقساط: بيسأل يأجل أنهي');
  const n9=sent.length; await rcOnText(2001,'عاجل لو سمحت'); ok(!sent.slice(n9).some(m=>/تحب نأجل/.test(m.text)),'«عاجل» مش بتتفهم تأجيل');
+ // ===== ١٠: التحية والشكر و«تمام» وطرق الدفع =====
+ store.telegramChats['2001']={}; let k10=sent.length;
+ await rcOnText(2001,'السلام عليكم'); ok(/وعليكم السلام ورحمة الله يا ماما/.test(last().text)&&cbs(last()).includes('rcpt_status'),'«السلام عليكم»: رد السلام والقايمة');
+ await rcOnText(2001,'شكرا جدا'); ok(/العفو/.test(last().text),'«شكرًا»: العفو');
+ k10=sent.length; await rcOnText(2001,'متشكر'); ok(sent.length===k10,'شكر تاني على طول: مفيش ردّ على ردّ');
+ await rcOnText(2001,'تمام'); await rcOnText(2001,'👍🙏'); ok(sent.length===k10,'«تمام» وإيموجي: مفيش رد');
+ store.telegramChats['2001']={}; await rcOnText(2001,'صباح الخير'); ok(/صباح النور/.test(last().text),'«صباح الخير»: صباح النور');
+ await rcOnText(2001,'السلام عليكم'); ok(/وعليكم السلام/.test(last().text)&&!cbs(last()).length,'سلام تاني: بيترد عليه، من غير ما القايمة تتكرر');
+ await rcOnText(2001,'ازاي احول القسط؟ انستاباي ولا فودافون'); ok(/طرق الدفع/.test(last().text)&&cbs(last()).includes('rcpt_any'),'سأل عن طرق الدفع: الطرق وزرار الإيصال');
+ store.telegramChats['2001']={}; await rcOnText(2001,'السلام عليكم انا عندي مشكلة في الدخول على المنصة من امبارح'); ok(/وعليكم السلام/.test(last().text)&&/وصلت رسالتك/.test(last().text),'سلام ومعاه سؤال: سلام و«وصلت رسالتك»');
+ ok(await rcOnText(999,'السلام عليكم')===false,'زائر بيسلّم: القائمة الرئيسية زي ما هي');
  // كل الأزرار تحت حد تليجرام (٦٤ بايت)
  const all=sent.flatMap(m=>cbs(m)); ok(all.every(c=>Buffer.byteLength(c)<=64),'كل بيانات الأزرار أقل من ٦٤ بايت');
  console.log(`\nكل الاختبارات عدّت (${n})`);

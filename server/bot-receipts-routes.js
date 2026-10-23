@@ -378,6 +378,20 @@ async function rcAck(chatId, b, idx, receiptId, guessed) {
 }
 
 // ---------- الرسايل النصية ----------
+const RC_SMALL_MS = 30 * 60 * 1000;         // رد التحية أو الشكر مرة كل نص ساعة بالكتير
+// النص هنا متنضّف: أ إ آ ← ا، ى ← ي، ة ← ه، ومن غير تشكيل
+function rcSmallTalk(t) {
+    const x = String(t).trim();
+    if (!x) return null;
+    if (/^[\s\p{Extended_Pictographic}\u200d\ufe0f!.،,]+$/u.test(x)) return 'ack';
+    if (/^(تمام|تمام تمام|اوك|اوكي|ok|okay|حاضر|ماشي|طيب|اه|ايوه|ايوا|خلاص|مفهوم|فهمت|تم)[\s!.،]*$/i.test(x)) return 'ack';
+    if (/(شكرا|متشكر|متشكرين|تسلم|تسلمي|تسلموا|ربنا يكرمك|ربنا يكرمكم|جزاك الله|جزاكم الله|الف شكر|ميرسي|thanks|thank you)/i.test(x)) return 'thanks';
+    if (/(السلام عليكم|سلام عليكم|السلام عليكو)/.test(x)) return 'salam';
+    if (/صباح (الخير|النور|الفل)/.test(x)) return 'morning';
+    if (/مساء (الخير|النور|الفل)/.test(x)) return 'evening';
+    if (/^(اهلا|اهلين|هاي|هلا|مرحبا|ازيك|ازيكم|عامل ايه|عاملين ايه|hi|hello)(\s|$|!)/i.test(x)) return 'hello';
+    return null;
+}
 // بيرجّع true لو الرسالة اتعامل معاها هنا (ومش هتطلع القائمة الرئيسية للطالب المسجل)
 async function rcOnText(chatId, text) {
     try {
@@ -422,11 +436,40 @@ async function rcOnText(chatId, text) {
             await rcSendStatus(chatId, bookings);
             return true;
         }
+        // طرق الدفع
+        if (/(طرق الدفع|طريقه الدفع|ادفع ازاي|احول ازاي|احول علي ايه|رقم فودافون|فودافون كاش|انستاباي|انستا باي|رقم الحساب|حساب البنك)/.test(t)) {
+            const pay = ['vodafone', 'instapay', 'bank'].map(m => getPaymentDetails(m)).join('\n');
+            const open = rcOpenList(bookings);
+            await bot.sendMessage(chatId, `*طرق الدفع*\n${pay}\nبعد التحويل ابعت صورة الإيصال هنا.`, {
+                parse_mode: 'Markdown', disable_web_page_preview: true,
+                reply_markup: open.length ? { inline_keyboard: [[{ text: '📸 ابعت إيصال قسط', callback_data: 'rcpt_any' }]] } : undefined
+            });
+            return true;
+        }
+        // كلام صغير: تحية، شكر، «تمام». الرد بشري وقصير، ومن غير ما يبقى ردّ على ردّ
+        const small = rcSmallTalk(t);
+        const words = t.trim().split(/\s+/).filter(Boolean).length;
+        const name = rcFirstName(bookings.find(rcIsStudent));
+        const panelDue = Date.now() - rcMs(cd.rcPanelAt) > RC_PANEL_MS;
+        if (small === 'ack') return true;                                    // «تمام» و«ماشي» و👍: مفيش رد
+        if (small && words <= 6) {
+            if (Date.now() - rcMs((cd.rcSmall || {})[small]) < RC_SMALL_MS && small !== 'salam') return true;
+            const reply = small === 'thanks' ? 'العفو 🌿 ربنا يبارك فيك.'
+                : small === 'salam' ? `وعليكم السلام ورحمة الله${name ? ' يا ' + rcEsc(name) : ''} 🌿`
+                : small === 'morning' ? `صباح النور${name ? ' يا ' + rcEsc(name) : ''} 🌿`
+                : small === 'evening' ? `مساء النور${name ? ' يا ' + rcEsc(name) : ''} 🌿`
+                : `أهلًا بيك${name ? ' يا ' + rcEsc(name) : ''} 🌿`;
+            const upd = { rcSmall: { [small]: Date.now() } };
+            if (small !== 'thanks' && panelDue) upd.rcPanelAt = Date.now();
+            await chatRef.set(upd, { merge: true });
+            await rcSend(chatId, small === 'thanks' ? reply : reply + '\nتحت أمرك، اكتب محتاج إيه.', small !== 'thanks' && panelDue ? rcStudentKeyboard(bookings) : null);
+            return true;
+        }
         // طالب مسجل: رد هادي مرة كل كام ساعة، والأدمن بيشوف الرسالة في المكتب
-        if (Date.now() - rcMs(cd.rcPanelAt) > RC_PANEL_MS) {
+        if (panelDue) {
             await chatRef.set({ rcPanelAt: Date.now() }, { merge: true });
-            const name = rcFirstName(bookings.find(rcIsStudent));
-            await rcSend(chatId, `أهلًا${name ? ' ' + rcEsc(name) : ''} 🌿\nوصلت رسالتك، وهنرد عليك هنا.`, rcStudentKeyboard(bookings));
+            const hi = small === 'salam' ? `وعليكم السلام${name ? ' يا ' + rcEsc(name) : ''} 🌿` : `أهلًا${name ? ' ' + rcEsc(name) : ''} 🌿`;
+            await rcSend(chatId, `${hi}\nوصلت رسالتك، وهنرد عليك هنا.`, rcStudentKeyboard(bookings));
         }
         return true;
     } catch (e) {
