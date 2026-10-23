@@ -2541,66 +2541,85 @@ window.showError=function(msg){$('bookingsContainer').innerHTML='<div class="kem
 /* البحث عن حجز بالرقم أو بشرط (الكود القديم كان بيبعت شرط فما كانش بيلاقي حاجة) */
 window.findBooking=function(q){var f=typeof q==='function'?q:function(x){return x.id===q};return allBookings.find(f)||instBookings.find(f)};
 window.toggleArchive=async function(){showingArchive=!showingArchive;await loadBookings({full:true})};
+/* ---------- الحجوزات الشغالة «حيّة» ----------
+   بدل ما نقرا كل الحجوزات من الأول كل شوية، بنفتح متابعة (listener) على الحجوزات الشغالة والأقساط والإيصالات المستنية.
+   أول مرة بتتقري كلها، وبعد كده Firestore بيبعت اللي اتغيّر بس (حجز جديد، دفعة اتسجلت، إيصال وصل من البوت)،
+   والقراية بتتحسب على الحجز اللي اتغيّر بس. الأرشيف (القديم) بيتقري لما تطلبه بس. */
+var live={on:false,unsub:[],A:new Map(),I:new Map(),X:new Map(),xTried:{},timer:null};
+function stopLive(){live.unsub.forEach(function(u){try{u()}catch(e){}});live.unsub=[];live.on=false}
+function liveCompose(){
+  var seen={},list=[];
+  live.A.forEach(function(b,id){seen[id]=1;list.push(b)});
+  live.I.forEach(function(b,id){if(!seen[id]&&b.status==='transferred'){seen[id]=1;list.push(b)}});
+  live.X.forEach(function(b,id){if(!seen[id]){seen[id]=1;list.push(b)}});
+  allBookings=list;instBookings=Array.from(live.I.values());
+}
+function liveHas(id){return live.A.has(id)||(live.I.has(id)&&live.I.get(id).status==='transferred')}
+async function liveExtra(id,force){
+  if(!id||(!force&&(liveHas(id)||live.xTried[id])))return;
+  live.xTried[id]=1;
+  try{var d=await getBookingDoc(id);if(d.exists)live.X.set(id,Object.assign({id:d.id},d.data()));else live.X.delete(id)}catch(e){console.warn('حجز',id,e)}
+}
+function liveRender(){
+  clearTimeout(live.timer);
+  live.timer=setTimeout(async function(){
+    if(K.open&&!liveHas(K.open)&&!live.X.has(K.open))await liveExtra(K.open,true);
+    liveCompose();render();
+    $('lastUpdate').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+  },120);
+}
+function startLive(){
+  stopLive();live.on=true;
+  return new Promise(function(resolve){
+    var left=3,done=function(){if(--left===0)resolve()},first=[true,true,true];
+    var step=function(k,fn){return function(snap){fn(snap);if(first[k]){first[k]=false;done()}else liveRender()}};
+    var fail=function(k,label){return function(e){console.warn(label,e);if(first[k]){first[k]=false;done()}}};
+    live.unsub.push(db.collection('tempBookings').where('status','in',['pending','pending_review','confirmed','paid']).orderBy('timestamp','desc')
+      .onSnapshot(step(0,function(snap){var m=new Map();snap.forEach(function(d){m.set(d.id,Object.assign({id:d.id},d.data()))});live.A=m}),fail(0,'الحجوزات')));
+    live.unsub.push(db.collection('tempBookings').where('paymentDetails.type','==','installment')
+      .onSnapshot(step(1,function(snap){var m=new Map();snap.forEach(function(d){m.set(d.id,Object.assign({id:d.id},d.data()))});live.I=m}),fail(1,'الأقساط')));
+    live.unsub.push(db.collection('receipts').where('status','==','pending')
+      .onSnapshot(step(2,function(snap){
+        K.receipts={};K.unknownReceipts=0;var miss=[];
+        snap.forEach(function(d){var r=Object.assign({id:d.id},d.data());addReceipt(r);if(r.bookingId&&!liveHas(r.bookingId))miss.push(r.bookingId)});
+        if(miss.length)Promise.all(miss.map(function(id){return liveExtra(id)})).then(liveRender);
+      }),fail(2,'الإيصالات')));
+  });
+}
 var fullLoad=async function(){
   touched.clear();
   if(!allBookings.length)$('bookingsContainer').innerHTML='<div class="kempty"><div class="spin"></div>بنحمّل الحجوزات…</div>';
   try{
     if(DEMO_MODE){allBookings=getDemoBookings()}
-    else{
-      var q=showingArchive?db.collection('tempBookings').orderBy('timestamp','desc'):db.collection('tempBookings').where('status','in',['pending','pending_review','confirmed','paid']).orderBy('timestamp','desc');
-      var res=await Promise.all([q.get(),showingArchive?null:loadInstallmentBookings().catch(function(e){console.warn('أقساط',e);return []})]);
-      var list=[],seen={};res[0].forEach(function(d){seen[d.id]=1;list.push(Object.assign({id:d.id},d.data()))});
-      (res[1]||[]).forEach(function(b){if(!seen[b.id]&&b.status==='transferred'){seen[b.id]=1;list.push(b)}});
+    else if(!showingArchive){
+      live.X=new Map();live.xTried={};
+      await startLive();
+      var want=new URLSearchParams(location.search).get('open');
+      await Promise.all([want?liveExtra(want):null].concat(Object.keys(K.receipts||{}).map(function(id){return liveExtra(id)})));
+      liveCompose();
+    }else{
+      stopLive();
+      var snap=await db.collection('tempBookings').orderBy('timestamp','desc').get(),list=[];
+      snap.forEach(function(d){list.push(Object.assign({id:d.id},d.data()))});
       allBookings=list;
       K.receipts={};K.unknownReceipts=0;
-      try{
-        var rs=await db.collection('receipts').where('status','==','pending').get(),miss=[];
-        rs.forEach(function(d){var r=Object.assign({id:d.id},d.data());if(!r.bookingId){if(r.kind!=='postpone')K.unknownReceipts++;return}(K.receipts[r.bookingId]=K.receipts[r.bookingId]||[]).push(r);if(!seen[r.bookingId]&&miss.indexOf(r.bookingId)<0)miss.push(r.bookingId)});
-        var got=await Promise.all(miss.map(function(id){return db.collection('tempBookings').doc(id).get()}));
-        got.forEach(function(d){if(d.exists){seen[d.id]=1;allBookings.push(Object.assign({id:d.id},d.data()))}});
-      }catch(e){console.warn('الإيصالات',e)}
-      /* رابط ?open لحجز برا القائمة (اتحوّل وخلص، أو اتلغى): نجيبه هو بالذات */
-      var want=new URLSearchParams(location.search).get('open');
-      if(want&&!seen[want]){try{
-        var w1=await db.collection('tempBookings').doc(want).get();
-        if(!w1.exists)w1=await db.collection('individualStudents').doc(want).get();
-        if(w1.exists){seen[want]=1;allBookings.push(Object.assign({id:w1.id},w1.data()))}
-      }catch(e){console.warn('الحجز المطلوب',e)}}
+      try{var rs=await db.collection('receipts').where('status','==','pending').get();rs.forEach(function(d){addReceipt(Object.assign({id:d.id},d.data()))})}catch(e){console.warn('الإيصالات',e)}
     }
     if(K.open&&!bk(K.open))closeD();
     K.chats={};render();
     var qs=new URLSearchParams(location.search),oid=qs.get('open');if(oid&&!K.opened&&bk(oid)){K.opened=1;openD(oid,qs.get('tab')||'overview')}
     $('lastUpdate').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
-    K.loaded=true;K.fullAt=Date.now();
+    K.loaded=true;
   }catch(e){console.error('خطأ في تحميل الحجوزات:',e);showError('مقدرتش أحمّل الحجوزات. اتأكد من النت ومن دخول الأدمن.')}
 };
 /* ---------- قراءات على قد الحاجة ----------
-   - أول فتح للصفحة، أو زرار «حدّث»: تحميل كامل.
-   - بعد أي عملية (تأكيد، تسجيل قسط، ملاحظة…): بنعيد قراية الحجوزات اللي اتعدّلت بس، مش كل الحجوزات.
+   - أول فتح للصفحة: متابعة حيّة للحجوزات الشغالة (فوق)، والتغييرات بتوصل لوحدها.
    - جوه مكتب المتابعة (embed): الحجز المفتوح بس. */
 var touched=new Set();
 (function(){try{var P=firebase.firestore.DocumentReference.prototype;['update','set','delete'].forEach(function(m){var o=P[m];P[m]=function(){try{var c=this.parent&&this.parent.id;if(c==='tempBookings'||c==='individualStudents')touched.add(this.id)}catch(e){}return o.apply(this,arguments)}})}catch(e){}})();
 function addReceipt(r){if(!r.bookingId){if(r.kind!=='postpone')K.unknownReceipts++;return}(K.receipts[r.bookingId]=K.receipts[r.bookingId]||[]).push(r)}
 function keepInList(b){return ['pending','pending_review','confirmed','paid'].indexOf(b.status)>-1||(b.status==='transferred'&&(b.paymentDetails||{}).type==='installment')||b.id===K.open}
 async function getBookingDoc(id){var d=await db.collection('tempBookings').doc(id).get();if(!d.exists)d=await db.collection('individualStudents').doc(id).get();return d}
-var partialLoad=async function(){
-  var ids=Array.from(touched);touched.clear();
-  try{
-    var docs=await Promise.all(ids.map(function(id){return getBookingDoc(id).then(function(d){return {id:id,d:d}})}));
-    docs.forEach(function(x){
-      var i=allBookings.findIndex(function(b){return b.id===x.id});
-      if(!x.d.exists){if(i>-1)allBookings.splice(i,1);return}
-      var b=Object.assign({id:x.id},x.d.data());
-      if(i>-1){if(keepInList(b))allBookings[i]=b;else allBookings.splice(i,1)}else if(keepInList(b))allBookings.unshift(b);
-      if(K.chats)delete K.chats[x.id];
-    });
-    K.receipts={};K.unknownReceipts=0;
-    var rs=await db.collection('receipts').where('status','==','pending').get();
-    rs.forEach(function(d){addReceipt(Object.assign({id:d.id},d.data()))});
-    render();
-    $('lastUpdate').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
-  }catch(e){console.warn('تحديث جزئي',e);return fullLoad()}
-};
 var embedLoad=async function(){
   var qs=new URLSearchParams(location.search),id=qs.get('open');touched.clear();
   try{
@@ -2615,9 +2634,14 @@ var embedLoad=async function(){
 window.loadBookings=async function(opts){
   opts=opts||{};
   if(!DEMO_MODE&&document.body.classList.contains('embed'))return embedLoad();
-  /* لو آخر تحميل كامل عدّى عليه أكتر من ١٠ دقايق، بنعمل كامل علشان اللي حصل برا الصفحة (حجز جديد، إيصال من البوت) يبان */
-  var fresh=K.fullAt&&Date.now()-K.fullAt<10*60*1000;
-  if(!DEMO_MODE&&!opts.full&&K.loaded&&fresh&&!showingArchive&&touched.size<=15&&(touched.size||opts.afterAction))return partialLoad();
+  /* والمتابعة شغالة: التغييرات بتوصل لوحدها، فبعد أي عملية مفيش قراية تانية.
+     بس الحجز اللي اتعدّل وخرج من القايمة الشغالة (اتلغى، أو اتحوّل وخلص) واللي إنت فاتحه، بنجيبه هو بس علشان اللوحة تفضل مفتوحة عليه */
+  if(!DEMO_MODE&&!opts.full&&K.loaded&&live.on&&!showingArchive){
+    var ids=Array.from(touched);touched.clear();
+    await Promise.all(ids.filter(function(id){return !liveHas(id)&&(id===K.open||live.X.has(id))}).map(function(id){return liveExtra(id,true)}));
+    if(K.chats)ids.forEach(function(id){delete K.chats[id]});
+    liveRender();return;
+  }
   return fullLoad();
 };
 
