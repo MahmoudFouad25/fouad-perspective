@@ -18,7 +18,7 @@
         ['admin/bookings.html', 'الحجوزات'],
         ['admin/telegram-monitor.html', 'مكتب المتابعة'],
         ['admin/bookings/creat&allow.html', 'الحجوزات الفردية'],
-        ['admin/edite-user.html', 'ملف العميل'],
+        ['admin/client.html', 'ملف العميل'],
         ['admin/renewals.html', 'التجديدات'],
         ['admin/coupon-settings.html', 'حد الكوبونات']
       ]
