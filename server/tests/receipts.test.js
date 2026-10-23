@@ -136,6 +136,23 @@ let n=0; const ok=(c,m)=>{assert(c,m);n++;console.log('✓',m)};
  // أسماء فيها HTML
  store.tempBookings.h={status:'transferred',paymentConfirmed:true,telegramChatId:'1009',courseName:'<b>x</b>',customer:{name:'<script>'},paymentDetails:{type:'installment',installmentSchedule:sched(1,[-40,3])}};
  await call('/installments/remind',{bookingId:'h',idx:1},{admin:1}); ok(!/<script>/.test(last().text)&&/&lt;script&gt;/.test(last().text),'الأسماء بتتنضّف');
+ // ===== ٩: «حسابي» مع حجوزات مكررة، والطلبات المكتوبة =====
+ store.tempBookings.d1={status:'paid',paymentConfirmed:true,telegramChatId:'2001',courseName:'ملاذ الحيارى',customer:{name:'ماما'},paymentDetails:{type:'full'},timestamp:iso(-50)};
+ store.tempBookings.d2={status:'paid',paymentConfirmed:true,telegramChatId:'2001',courseName:'ملاذ الحيارى',customer:{name:'ماما'},paymentDetails:{type:'full'},timestamp:iso(-40)};
+ store.tempBookings.d3={status:'transferred',paymentConfirmed:true,telegramChatId:'2001',courseName:'ملاذ الحيارى',customer:{name:'ماما'},paymentDetails:{type:'installment',paidAmount:1000,installmentSchedule:sched(1,[-30,-2],1000)},timestamp:iso(-30)};
+ store.tempBookings.d4={status:'paid',paymentConfirmed:true,telegramChatId:'2001',courseName:'المحراب',customer:{name:'ماما'},paymentDetails:{type:'full'}};
+ store.tempBookings.d5={status:'paid',paymentConfirmed:true,archivedAsTest:true,telegramChatId:'2001',courseName:'جاهز للتحول',paymentDetails:{type:'full'}};
+ await rcOnText(2001,'حسابي'); const st9=last().text;
+ ok((st9.match(/ملاذ الحيارى/g)||[]).length===1&&(st9.match(/المحراب/g)||[]).length===1&&!/جاهز للتحول/.test(st9),'«حسابي»: كل كورس مرة واحدة، والحجز التجريبي مش ظاهر');
+ ok(st9.indexOf('ملاذ الحيارى')<st9.indexOf('المحراب')&&/اللي عليك دلوقتي: القسط التاني/.test(st9),'الكورس اللي عليه قسط مفتوح ظاهر الأول، وبالقسط بتاعه');
+ ok(cbs(last()).includes('rcpt_delayany')&&cbs(last()).includes('rcpt_any'),'تحت «حسابي»: ابعت إيصال، ومحتاج أأجل');
+ await rcOnText(2001,'محتاج أأجل'); ok(/تحب نأجل/.test(last().text)&&cbs(last()).includes('rcpt_dly_d3_1_7'),'كتب «محتاج أأجل»: البوت فهم وعرض المدد');
+ await rcOnText(2001,'ممكن تأجيل القسط؟'); ok(/تحب نأجل/.test(last().text),'كتب «تأجيل»: نفس الحاجة');
+ await rcOnText(2001,'انا حولت'); ok(/ابعت صورة إيصال/.test(last().text)&&store.telegramChats['2001'].pendingReceipt.bookingId==='d3','كتب «حولت»: البوت مستني الإيصال للقسط الصح');
+ await rcOnCallback(2001,{id:'c'},['cancel']);
+ store.tempBookings.d6={status:'transferred',paymentConfirmed:true,telegramChatId:'2001',courseName:'الحضن الدافئ',customer:{name:'ماما'},paymentDetails:{type:'installment',paidAmount:1000,installmentSchedule:sched(1,[-30,5],1000)}};
+ await rcOnCallback(2001,{id:'c'},['delayany']); ok(/أنهي كورس/.test(last().text)&&cbs(last()).length===2,'أكتر من كورس عليه أقساط: بيسأل يأجل أنهي');
+ const n9=sent.length; await rcOnText(2001,'عاجل لو سمحت'); ok(!sent.slice(n9).some(m=>/تحب نأجل/.test(m.text)),'«عاجل» مش بتتفهم تأجيل');
  // كل الأزرار تحت حد تليجرام (٦٤ بايت)
  const all=sent.flatMap(m=>cbs(m)); ok(all.every(c=>Buffer.byteLength(c)<=64),'كل بيانات الأزرار أقل من ٦٤ بايت');
  console.log(`\nكل الاختبارات عدّت (${n})`);

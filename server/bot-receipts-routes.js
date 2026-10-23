@@ -190,7 +190,7 @@ function rcReminderKeyboard(bookingId, idx) {
 function rcStudentKeyboard(bookings) {
     const anyId = (bookings.find(rcIsStudent) || bookings[0] || {}).id;
     const kb = [];
-    if (rcOpenList(bookings).length) kb.push([{ text: '📸 ابعت إيصال قسط', callback_data: 'rcpt_any' }]);
+    if (rcOpenList(bookings).length) kb.push([{ text: '📸 ابعت إيصال قسط', callback_data: 'rcpt_any' }, { text: '🗓️ محتاج أأجل', callback_data: 'rcpt_delayany' }]);
     kb.push([{ text: '📊 حسابي', callback_data: 'rcpt_status' }].concat(anyId ? [{ text: '🙋 محتاج مساعدة', callback_data: `support_${anyId}` }] : []));
     kb.push([{ text: '🏠 القائمة الرئيسية', callback_data: 'rcpt_menu' }]);
     return kb;
@@ -408,8 +408,16 @@ async function rcOnText(chatId, text) {
 
         if (!bookings.some(rcIsStudent)) return false;          // زائر: القائمة الرئيسية زي ما هي
 
-        // بيسأل عن حسابه
-        const t = String(text).replace(/[إأآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه');
+        // الطالب كتب طلبه بدل ما يدوس الزرار
+        const t = ' ' + String(text).replace(/[\u064B-\u0652\u0640]/g, '').replace(/[إأآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').trim() + ' ';
+        if (/\s(ا?اجل|اجله|اجلها|تاجيل|اتاخر في القسط|مش هقدر ادفع|مش هعرف ادفع)/.test(t)) {
+            await rcStartDelay(chatId, bookings);
+            return true;
+        }
+        if (/(ابعت|ارسل|ابعتلكم|هبعت|عايز ابعت|عاوز ابعت)\s*(ال)?ايصال|\s(حولت|دفعت|سددت|حولتلكم|دفعتلكم)\s/.test(t)) {
+            await rcStartAny(chatId, bookings);
+            return true;
+        }
         if (/(حسابي|فاضل|الباقي|باقي عليا|متبقي|المتبقي|اقساطي|كام قسط|القسط الجاي|ميعاد القسط)/.test(t)) {
             await rcSendStatus(chatId, bookings);
             return true;
@@ -428,10 +436,28 @@ async function rcOnText(chatId, text) {
 }
 
 // ---------- «حسابي» ----------
+// كورس واحد = سطر واحد، حتى لو الطالب له أكتر من حجز في نفس الكورس (اتحجز تاني، أو حجز قديم)
+function rcStudentCourses(bookings) {
+    const groups = new Map();
+    bookings.filter(rcIsStudent).forEach(b => {
+        const k = String(b.courseName || b.courseId || b.id).trim().replace(/\s+/g, ' ');
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(b);
+    });
+    const t = b => rcMs(b.timestamp) || rcMs(b.createdAt) || 0;
+    const out = [];
+    groups.forEach(list => {
+        const open = rcOpenList(list)[0];
+        const pick = open ? open.b : (list.filter(rcInstallmentLive).sort((a, b) => t(b) - t(a))[0] || list.sort((a, b) => t(b) - t(a))[0]);
+        out.push({ b: pick, ids: list.map(x => x.id), open: !!open });
+    });
+    return out.sort((x, y) => (y.open - x.open));
+}
 async function rcStatusText(chatId, bookings) {
     const pend = await rcPendingForChat(chatId);
     const blocks = [];
-    bookings.filter(rcIsStudent).forEach(b => {
+    const courses = rcStudentCourses(bookings);
+    courses.slice(0, 10).forEach(({ b, ids }) => {
         const pd = b.paymentDetails || {};
         const s = rcSchedule(b);
         let h = `<b>${rcEsc(b.courseName || 'كورس')}</b>`;
@@ -439,7 +465,7 @@ async function rcStatusText(chatId, bookings) {
         const total = rcNum(pd.totalAmount) || s.reduce((a, x) => a + rcNum(x.amount), 0);
         const paid = s.reduce((a, x) => a + rcPaidOn(x), 0);
         h += `\nاتدفع ${rcMoney(paid)} من ${rcMoney(total)}`;
-        pend.filter(r => r.bookingId === b.id).forEach(r => {
+        pend.filter(r => ids.includes(r.bookingId)).forEach(r => {
             const inst = r.idx != null ? s[r.idx] : null;
             h += r.kind === 'postpone'
                 ? `\n🗓️ طلب تأجيل ${rcEsc(rcInstName(inst, r.idx))} في المراجعة`
@@ -455,12 +481,39 @@ async function rcStatusText(chatId, bookings) {
         blocks.push(h);
     });
     if (!blocks.length) return 'مفيش كورسات مسجلة باسمك هنا لسه.';
-    return '📊 <b>حسابك</b>\n\n' + blocks.join('\n\n');
+    return '📊 <b>حسابك</b>\n\n' + blocks.join('\n\n') + (courses.length > 10 ? `\n\nو${(courses.length - 10).toLocaleString('ar-EG')} كورسات تانية اتدفعت كامل ✅` : '');
 }
 async function rcSendStatus(chatId, bookings) {
     const text = await rcStatusText(chatId, bookings);
-    const kb = rcOpenList(bookings).length ? [[{ text: '📸 ابعت إيصال قسط', callback_data: 'rcpt_any' }]] : null;
+    const kb = rcOpenList(bookings).length ? [[{ text: '📸 ابعت إيصال قسط', callback_data: 'rcpt_any' }, { text: '🗓️ محتاج أأجل', callback_data: 'rcpt_delayany' }]] : null;
     await rcSend(chatId, text, kb);
+}
+// «ابعت إيصال قسط» من غير ما نعرف أنهي قسط: لو واحد بس نستناه، لو أكتر نسأل
+async function rcStartAny(chatId, bookings) {
+    const open = rcOpenList(bookings);
+    if (!open.length) { await rcSend(chatId, 'مفيش أقساط مستنية عندك دلوقتي ✅\nلو بعتّ صورة إيصال، هنراجعها ونرد عليك هنا.'); return; }
+    if (open.length === 1) {
+        const { b, o } = open[0];
+        await db.collection('telegramChats').doc(String(chatId)).set({ pendingReceipt: { bookingId: b.id, idx: o.idx, at: Date.now() } }, { merge: true });
+        await rcSend(chatId, `تمام. ابعت صورة إيصال <b>${rcEsc(rcInstName(o.inst, o.idx))}</b> في <b>${rcEsc(b.courseName || 'الكورس')}</b> (${rcMoney(rcLeft(o.inst))}) هنا دلوقتي 📎`, [[{ text: 'إلغاء', callback_data: 'rcpt_cancel' }]]);
+        return;
+    }
+    await rcSend(chatId, 'الإيصال ده لأنهي كورس؟', open.slice(0, 6).map(x => [{ text: `${x.b.courseName || 'كورس'} · ${rcInstName(x.o.inst, x.o.idx)} · ${rcMoney(rcLeft(x.o.inst))}`, callback_data: `rcpt_send_${x.b.id}_${x.o.idx}` }]));
+}
+// «محتاج أأجل» من غير ما نعرف أنهي قسط
+function rcDelayOptions(b, idx) {
+    const inst = rcSchedule(b)[idx];
+    const opt = d => ({ text: `لحد ${rcDateText(rcDayPlus(inst.dueDate, d))}`, callback_data: `rcpt_dly_${b.id}_${idx}_${d}` });
+    return {
+        text: `تحب نأجل <b>${rcEsc(rcInstName(inst, idx))}</b> في <b>${rcEsc(b.courseName || 'الكورس')}</b> (${rcMoney(rcLeft(inst))}) لحد إمتى؟`,
+        kb: [[opt(7)], [opt(14)], [opt(30)], [{ text: '✍️ هكتب الظروف', callback_data: `support_${b.id}` }]]
+    };
+}
+async function rcStartDelay(chatId, bookings) {
+    const open = rcOpenList(bookings);
+    if (!open.length) { await rcSend(chatId, 'مفيش أقساط عليك دلوقتي محتاجة تأجيل ✅'); return; }
+    if (open.length === 1) { const o = rcDelayOptions(open[0].b, open[0].o.idx); await rcSend(chatId, o.text, o.kb); return; }
+    await rcSend(chatId, 'تحب تأجل قسط أنهي كورس؟', open.slice(0, 6).map(x => [{ text: `${x.b.courseName || 'كورس'} · ${rcInstName(x.o.inst, x.o.idx)} · ${rcMoney(rcLeft(x.o.inst))}`, callback_data: `rcpt_delay_${x.b.id}_${x.o.idx}` }]));
 }
 
 // ---------- الأزرار ----------
@@ -489,16 +542,12 @@ async function rcOnCallback(chatId, cq, params) {
         }
         if (kind === 'any') {
             await answer();
-            const bookings = await rcBookingsForChat(chatId);
-            const open = rcOpenList(bookings);
-            if (!open.length) { await rcSend(chatId, 'مفيش أقساط مستنية عندك دلوقتي ✅'); return; }
-            if (open.length === 1) {
-                const { b, o } = open[0];
-                await chatRef.set({ pendingReceipt: { bookingId: b.id, idx: o.idx, at: Date.now() } }, { merge: true });
-                await rcSend(chatId, `تمام. ابعت صورة إيصال <b>${rcEsc(rcInstName(o.inst, o.idx))}</b> في <b>${rcEsc(b.courseName || 'الكورس')}</b> هنا دلوقتي 📎`);
-                return;
-            }
-            await rcSend(chatId, 'الإيصال ده لأنهي كورس؟', open.slice(0, 6).map(x => [{ text: `${x.b.courseName || 'كورس'} · ${rcInstName(x.o.inst, x.o.idx)} · ${rcMoney(rcLeft(x.o.inst))}`, callback_data: `rcpt_send_${x.b.id}_${x.o.idx}` }]));
+            await rcStartAny(chatId, await rcBookingsForChat(chatId));
+            return;
+        }
+        if (kind === 'delayany') {
+            await answer();
+            await rcStartDelay(chatId, await rcBookingsForChat(chatId));
             return;
         }
         if (kind === 'cancel') {
@@ -583,9 +632,8 @@ async function rcOnCallback(chatId, cq, params) {
             if (!b || String(b.telegramChatId) !== String(chatId) || !inst) { await answer('الزرار ده مش متاح'); return; }
             await answer();
             if (rcLeft(inst) <= 0) { await rcSend(chatId, `<b>${rcEsc(rcInstName(inst, idx))}</b> اتسجل خلاص ✅ مش محتاج تأجيل.`); return; }
-            const opt = d => ({ text: `لحد ${rcDateText(rcDayPlus(inst.dueDate, d))}`, callback_data: `rcpt_dly_${b.id}_${idx}_${d}` });
-            await rcSend(chatId, `تحب نأجل <b>${rcEsc(rcInstName(inst, idx))}</b> في <b>${rcEsc(b.courseName || 'الكورس')}</b> لحد إمتى؟`,
-                [[opt(7)], [opt(14)], [opt(30)], [{ text: '✍️ هكتب الظروف', callback_data: `support_${b.id}` }]]);
+            const o = rcDelayOptions(b, idx);
+            await rcSend(chatId, o.text, o.kb);
             return;
         }
         if (kind === 'dly') {
