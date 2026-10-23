@@ -218,6 +218,8 @@ body.demo .demo-pill{display:inline-block}
 /* كارت إيصال القسط */
 .rc{border-color:var(--info);box-shadow:0 0 0 1px var(--info)}
 .rcb{display:flex;gap:12px;align-items:flex-start;font-size:14px}
+.rcpics{display:flex;gap:6px;flex-wrap:wrap;flex:none;max-width:240px}
+.rc.pp{border-color:var(--accent,#B45309);box-shadow:0 0 0 1px var(--accent,#B45309)}
 .rcb img{width:110px;max-height:150px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;flex:none}
 .rcs{color:var(--muted);font-size:12.5px;margin-top:4px}
 .rcw{color:var(--danger);font-size:12.5px;margin-top:4px;font-weight:600}
@@ -1621,7 +1623,7 @@ async function markInstallmentAsPaid(bookingId,idx){
   const remainingTotal=b.paymentDetails.remainingAmount||0;
 
   const r=await Swal.fire({
-    title:'✅ تسجيل دفع القسط '+(inst.installmentNumber+1),
+    title:'✅ تسجيل '+BookingMoney.instName(inst.installmentNumber!=null?inst.installmentNumber:idx),
     html:'<div style="text-align:right">'
       +'<div style="background:var(--fu-info-soft);padding:14px;border-radius:10px;margin-bottom:16px;border:2px solid #3B82F6"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="color:var(--fu-muted)">العميل:</span><br><strong>'+esc(b.customer?.name||'')+'</strong></div><div><span style="color:var(--fu-muted)">رقم القسط:</span><br><strong style="color:#3B82F6">'+(inst.installmentNumber+1)+' من '+b.paymentDetails.totalInstallments+'</strong></div><div><span style="color:var(--fu-muted)">قيمة القسط:</span><br><strong style="color:#DC2626">'+inst.amount.toLocaleString('ar-EG')+' ج.م</strong></div><div><span style="color:var(--fu-muted)">المتبقي الكلي:</span><br><strong style="color:#F59E0B">'+remainingTotal.toLocaleString('ar-EG')+' ج.م</strong></div></div></div>'
       +(inst.receiptReceived&&inst.receiptImageUrl?'<div style="background:var(--fu-primary-soft);padding:12px;border-radius:10px;margin-bottom:14px;border:2px solid #10B981"><p style="color:var(--fu-primary);font-weight:700;margin-bottom:8px"><i class="fas fa-check-circle"></i> الإيصال المرفق:</p><img src="'+inst.receiptImageUrl+'" style="max-width:100%;max-height:250px;border-radius:8px;cursor:pointer" onclick="window.open(\''+inst.receiptImageUrl+'\',\'_blank\')"></div>':'')
@@ -1661,6 +1663,7 @@ async function markInstallmentAsPaid(bookingId,idx){
 
     let extra=Math.max(0,cum-installmentAmount), paidCount=inst.status==='paid'?1:0;
     const distributionLog=[{installmentNumber:inst.installmentNumber+1,amount:Math.min(actual,installmentAmount-before),status:inst.status,isOriginal:true,newAmount:Math.max(0,installmentAmount-inst.paidSoFar)}];
+    const covered=[{idx:idx,amount:Math.min(actual,installmentAmount-before),status:inst.status}];
     if(extra>0){
       // الزيادة بتروح للأقساط اللي بعده بالترتيب، من غير ما نغيّر قيمة أي قسط
       for(let i=idx+1;i<b.paymentDetails.installmentSchedule.length && extra>0;i++){
@@ -1674,6 +1677,7 @@ async function markInstallmentAsPaid(bookingId,idx){
         if(next.paidSoFar>=next.amount){ next.status='paid'; next.paidAt=paidDate; next.paymentMethod=r.value.method+' (من دفعة سابقة)'; next.reference=r.value.reference; next.paidBy='admin'; next.paidFromExtra=true; next.linkedToInstallment=idx; paidCount++; }
         else next.status='partial';
         distributionLog.push({installmentNumber:next.installmentNumber+1,amount:put,status:next.status,fromExtra:true,newAmount:Math.max(0,next.amount-next.paidSoFar)});
+        covered.push({idx:i,amount:put,status:next.status});
         extra-=put;
       }
     }
@@ -1687,7 +1691,18 @@ async function markInstallmentAsPaid(bookingId,idx){
 
     await dbUpdate(collection,bookingId,{paymentDetails:cleanDataForFirebase(pd)});
 
-    if(b.telegramChatId){
+    /* رسالة تأكيد واحدة من البوت (بنفس أسماء الأقساط اللي الطالب شافها)، وبتقفل الإيصال وطلب التأجيل بتوع القسط ده */
+    window.__lastNotify=null;
+    if(!DEMO_MODE){
+      try{
+        const nr=await botFetch(TELEGRAM_BASE+'/installments/paid-notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookingId,idx,amount:actual,covered,receiptId:window.__rcReceiptId||null})});
+        window.__lastNotify=await nr.json().catch(()=>({ok:false}));
+        if(!nr.ok) window.__lastNotify.ok=false;
+      }catch(e){ window.__lastNotify={ok:false,error:'network'}; }
+    }
+    window.__rcReceiptId=null;
+    /* لو البوت ما ردش: الرسالة القديمة احتياطي، علشان الطالب ما يفضلش مستني */
+    if(b.telegramChatId && !DEMO_MODE && !(window.__lastNotify&&window.__lastNotify.ok)){
       const name=(b.customer?.name||'').split(' ')[0]||'عميلنا العزيز';
       let msg;
       if(pd.fullyPaid){
@@ -1703,6 +1718,7 @@ async function markInstallmentAsPaid(bookingId,idx){
       await sendTelegramMessage(b.telegramChatId,msg);
     }
     let succ='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;margin-bottom:12px"><div style="padding:11px;background:var(--fu-info-soft);border-radius:8px"><div style="font-size:.82rem;color:var(--fu-muted)">المدفوع</div><div style="font-size:1.2rem;font-weight:800;color:#3B82F6">'+actual.toLocaleString('ar-EG')+'</div></div><div style="padding:11px;background:var(--fu-primary-soft);border-radius:8px"><div style="font-size:.82rem;color:var(--fu-muted)">الأقساط</div><div style="font-size:1.2rem;font-weight:800;color:#10B981">'+pd.paidInstallments+'/'+pd.totalInstallments+'</div></div><div style="padding:11px;background:var(--fu-accent-soft);border-radius:8px"><div style="font-size:.82rem;color:var(--fu-muted)">المتبقي</div><div style="font-size:1.2rem;font-weight:800;color:#DC2626">'+pd.remainingAmount.toLocaleString('ar-EG')+'</div></div></div>';
+    {const ln=window.__lastNotify; const t=!b.telegramChatId?'الطالب مش متوصل بالتليجرام، بلّغه بالطريقة اللي تناسبك.':!ln?'':ln.ok&&ln.sent?'اتبعت التأكيد للطالب على التليجرام.':ln.error==='blocked'?'الطالب قافل البوت، فالتأكيد ما وصلوش. كلّمه واتساب.':ln.ok?'':'البوت ما ردش، فاتبعتت الرسالة القديمة بدالها.'; if(t) succ+='<div style="padding:10px;border-radius:8px;margin-bottom:10px;background:var(--fu-sunken,#f3f1ea);font-size:.92rem">'+t+'</div>';}
     if(paidCount>1) succ+='<div style="padding:10px;background:var(--fu-surface);border-radius:8px;border:1px solid #E5E7EB"><strong>📊 تم توزيع المبلغ على '+paidCount+' أقساط تلقائياً</strong></div>';
     Swal.fire({icon:'success',title:pd.fullyPaid?'🎊 تم إكمال الدفع!':'✅ تم تسجيل الدفع!',html:succ,confirmButtonColor:'#10B981'});
     reload();
@@ -2170,6 +2186,7 @@ document.addEventListener('keydown',e=>{
 'use strict';
 var $=function(id){return document.getElementById(id)};
 var K={view:'list',queue:null,tab:'active',type:'all',q:'',open:null,dtab:'overview',chats:{},menuFor:null};
+if(DEMO_MODE)window.__bk={get K(){return K},openD:function(a,b){openD(a,b)}};
 try{var sv=JSON.parse(localStorage.getItem('fu-bookings-ui')||'{}');if(sv.view)K.view=sv.view;}catch(e){}
 var DAY=864e5;
 var fmt=function(n){return Math.round(+n||0).toLocaleString('ar-EG')};
@@ -2185,7 +2202,9 @@ function sm(b){try{return BookingMoney.summarize(b)}catch(e){return {total:0,pai
 function price(b){return BookingMoney.num(b.pricing&&(b.pricing.finalPriceNumber!=null?b.pricing.finalPriceNumber:b.pricing.finalPrice))}
 function receipt(b){return !!(b.automationWorkflow&&b.automationWorkflow.receiptReceived)}
 /* إيصالات الأقساط اللي البوت سجّلها (receipts) ولسه مستنية قرارك */
-function rcs(b){return (K.receipts&&K.receipts[b.id])||[]}
+function rcs(b){return ((K.receipts&&K.receipts[b.id])||[]).filter(function(r){return r.kind!=='postpone'})}
+function pps(b){return ((K.receipts&&K.receipts[b.id])||[]).filter(function(r){return r.kind==='postpone'})}
+var RC_SRC={button:'الطالب داس «ابعت إيصال القسط»',auto:'البوت ربطه بالقسط المفتوح الوحيد',choice:'الطالب اختار الكورس بنفسه',unknown:'البوت ما عرفش هو لأنهي قسط',help:'وصل وهو في محادثة مساعدة، ممكن يكون مش إيصال',text:'الطالب كتب بيانات التحويل بدل الصورة'};
 function rcInstLabel(b,idx){var r=sm(b).rows.find(function(x){return x.idx===idx});return r?r.label:'قسط'}
 function grantOk(b){return b.grantStatus==='approved'}
 function sel(b){return b.customerSelectedOffer&&(b.negotiationOffers||[])[b.customerSelectedOfferIndex||0]}
@@ -2212,9 +2231,11 @@ function stage(b){
 function badge(b){
   var lt=late(b);
   if(stage(b)==='student'&&rcs(b).length)return ['b-info','إيصال قسط وصل'];
+  if(stage(b)==='student'&&pps(b).length)return ['b-wait','طلب تأجيل'];
   if(stage(b)==='student')return lt?['b-bad','قسط متأخر']:['','اتحوّل لطالب'];
   if(b.status==='cancelled')return ['','ملغي'];
   if(rcs(b).length)return ['b-info','إيصال قسط وصل'];
+  if(pps(b).length)return ['b-wait','طلب تأجيل'];
   if(b.status==='paid')return ['b-ok','اتدفع'];
   if(receipt(b))return ['b-info','الإيصال وصل'];
   if(isGrant(b)){
@@ -2235,6 +2256,7 @@ function acts(b){
   var add=function(k,label,fn,opt){A.push({k:k,t:label,fn:fn,d:opt==='d',ghost:opt==='ghost'})};
   var rq=rcs(b);
   if(rq.length&&b.status!=='cancelled'){add('reviewrcpt','راجع إيصال القسط',function(){openD(id,'money')});why='الطالب بعت إيصال '+rcInstLabel(b,rq[0].idx)+' على التليجرام. قارنه بالمبلغ وسجّله.'}
+  else if(pps(b).length&&b.status!=='cancelled'){add('reviewpp','راجع طلب التأجيل',function(){openD(id,'money')});var p0=pps(b)[0];why='الطالب طالب يأجّل '+rcInstLabel(b,p0.idx)+' لحد '+dT(p0.requestedDue)+'.'}
   else if(b.status==='cancelled'){why='الحجز ملغي'+(b.cancellationReason?': '+b.cancellationReason:'.')}
   else if(stage(b)==='student'){
     if(lt){add('remind','ذكّره بالقسط',function(){sendInstallmentReminder(id,lt.idx)});add('payinst','سجّل دفعة',function(){markInstallmentAsPaid(id,lt.idx)});why='قسط '+fmt(lt.left)+' ج.م متأخر '+fmt(lt.daysLate)+' يوم.'}
@@ -2261,7 +2283,7 @@ function needsMe(b){var p=primary(b);return !!(p&&!p.ghost)}
 
 var QUEUES=[
   {id:'new',l:'حجوزات جديدة',s:'مستنية تأكيد أو قرار منحة',c:'var(--accent)',f:function(b){var p=primary(b);return !!p&&['confirm','offer','approve'].indexOf(p.k)>-1}},
-  {id:'receipt',l:'إيصالات وصلت',s:'دفعة أولى أو قسط، مستنية تأكيدك',c:'var(--info)',f:function(b){return (b.status==='confirmed'&&receipt(b))||rcs(b).length>0}},
+  {id:'receipt',l:'إيصالات وطلبات',s:'إيصال دفعة أولى أو قسط، أو طلب تأجيل، مستني قرارك',c:'var(--info)',f:function(b){return (b.status==='confirmed'&&receipt(b))||rcs(b).length>0||pps(b).length>0}},
   {id:'convert',l:'اتدفع ومستني تحويل',s:'حوّله لطالب واعمله الحساب',c:'var(--primary)',f:function(b){var p=primary(b);return !!p&&(p.k==='transfer'||p.k==='grantpay')}},
   {id:'late',l:'أقساط متأخرة',s:'عدّى ميعادها ومتسجلتش',c:'var(--danger)',f:function(b){return !!late(b)}}
 ];
@@ -2394,23 +2416,38 @@ function ovHtml(b){
   return h;
 }
 function rcCard(b,r){
-  var when=r.createdAt&&r.createdAt.toDate?r.createdAt.toDate().getTime():Date.parse(r.createdAt||'')||0;
-  var src={button:'الطالب داس «ابعت إيصال القسط»',auto:'البوت ربطه بأقرب قسط مفتوح',choice:'الطالب اختار الكورس بنفسه',unknown:'البوت ما عرفش هو لأنهي قسط'}[r.source]||'';
+  var when=r.createdMs||(r.createdAt&&r.createdAt.toDate?r.createdAt.toDate().getTime():Date.parse(r.createdAt||'')||0);
+  var src=r.assignedBy==='admin'?'إنت حددت القسط ده':(RC_SRC[r.source]||'');
   var img=/^https:\/\//.test(String(r.url||''))?r.url:'';
-  return '<div class="ksec rc"><h4>إيصال وصل على التليجرام · '+rel(when)+'</h4><div class="rcb">'
-   +(img&&r.attachmentType==='photo'?'<img src="'+esc(img)+'" alt="صورة الإيصال" data-zoom="'+esc(img)+'">':(img?'<a class="kbtn" href="'+esc(img)+'" target="_blank" rel="noopener">افتح الملف</a>':''))
-   +'<div><b>'+(r.idx!=null?esc(rcInstLabel(b,r.idx)):'لسه مش متحدد')+'</b>'+(r.amountExpected?' · المتوقع <b class="num">'+fmt(r.amountExpected)+' ج.م</b>':'')
-   +'<div class="rcs">'+esc(src)+'</div>'+(r.studentSaysWrong?'<div class="rcw">الطالب قال إن ده مش القسط ده</div>':'')+(r.caption?'<div class="rcs">كتب: '+esc(r.caption)+'</div>':'')+'</div></div>'
-   +'<div class="rca">'+(r.idx!=null?'<button class="kbtn p" type="button" data-rc="approve" data-rid="'+esc(r.id)+'">سجّل القسط</button>':'')
+  var row=r.idx!=null?sm(b).rows.find(function(x){return x.idx===r.idx}):null, done=row&&row.state==='paid';
+  var pics=(img?[{url:img,attachmentType:r.attachmentType}]:[]).concat((r.extra||[]).filter(function(x){return /^https:\/\//.test(String(x.url||''))}));
+  var ph=pics.map(function(x){return x.attachmentType==='photo'?'<img src="'+esc(x.url)+'" alt="صورة الإيصال" data-zoom="'+esc(x.url)+'">':'<a class="kbtn" href="'+esc(x.url)+'" target="_blank" rel="noopener">افتح الملف</a>'}).join('');
+  var h='<div class="ksec rc"><h4>'+(r.source==='text'?'بيانات تحويل وصلت':'إيصال وصل')+' على التليجرام · '+rel(when)+(pics.length>1?' · '+fmt(pics.length)+' صور':'')+'</h4><div class="rcb">'+(ph?'<div class="rcpics">'+ph+'</div>':'')
+   +'<div><b>'+(r.idx!=null?esc(rcInstLabel(b,r.idx)):'لسه مش متحدد')+'</b>'+(r.amountExpected&&!done?' · المتوقع <b class="num">'+fmt(r.amountExpected)+' ج.م</b>':'')
+   +'<div class="rcs">'+esc(src)+'</div>'+(r.text?'<div class="rcs">كتب: <b dir="auto">'+esc(r.text)+'</b></div>':'')+(r.studentSaysWrong?'<div class="rcw">الطالب قال إن ده مش القسط ده</div>':'')+(r.caption?'<div class="rcs">كتب: '+esc(r.caption)+'</div>':'')
+   +(done?'<div class="rcw" style="color:var(--ok,#0B7A56)">القسط ده اتسجل خلاص. اقفل الإيصال، أو ابعت للطالب التأكيد لو ما وصلوش.</div>':'')+'</div></div><div class="rca">';
+  if(done)h+='<button class="kbtn p" type="button" data-rc="confirm" data-rid="'+esc(r.id)+'">ابعت التأكيد واقفله</button><button class="kbtn" type="button" data-rc="dismiss" data-rid="'+esc(r.id)+'">اقفله بس</button>';
+  else h+=(r.idx!=null?'<button class="kbtn p" type="button" data-rc="approve" data-rid="'+esc(r.id)+'">سجّل القسط</button>':'')
    +'<button class="kbtn" type="button" data-rc="assign" data-rid="'+esc(r.id)+'">'+(r.idx!=null?'ده لقسط تاني':'حدد القسط')+'</button>'
    +'<button class="kbtn d" type="button" data-rc="reject" data-rid="'+esc(r.id)+'">ارفض</button>'
-   +'<button class="kbtn ghost" type="button" data-rc="dismiss" data-rid="'+esc(r.id)+'">مش إيصال</button></div></div>';
+   +'<button class="kbtn ghost" type="button" data-rc="dismiss" data-rid="'+esc(r.id)+'">مش إيصال</button>';
+  return h+'</div></div>';
+}
+function ppCard(b,r){
+  var when=r.createdMs||0;
+  return '<div class="ksec rc pp"><h4>طلب تأجيل من الطالب · '+rel(when)+'</h4>'
+   +'<div><b>'+esc(rcInstLabel(b,r.idx))+'</b> · '+fmt(r.amountExpected||0)+' ج.م · كان ميعاده '+dT(r.dueDate)+'</div>'
+   +'<div style="margin-top:4px">عايز يأجله لحد <b>'+dT(r.requestedDue)+'</b> ('+fmt(r.days||0)+' يوم)</div>'
+   +'<div class="rca"><button class="kbtn p" type="button" data-pp="approve" data-rid="'+esc(r.id)+'">وافق</button>'
+   +'<button class="kbtn" type="button" data-pp="date" data-rid="'+esc(r.id)+'">ميعاد تاني</button>'
+   +'<button class="kbtn d" type="button" data-pp="reject" data-rid="'+esc(r.id)+'">ارفض</button></div></div>';
 }
 function moneyHtml(b){
   var s=sm(b),total=s.total||price(b),pct=total?Math.min(100,Math.round(s.paid/total*100)):0,lt=late(b),h='';
   if(isGrant(b)&&!grantOk(b))return '<div class="kalert info"><svg><use href="#i-info"/></svg><div>المبلغ والخطة بيتحددوا لما توافق على المنحة.</div></div>'+moneyPlain(b);
   h+='<div class="ksec"><h4>المدفوع</h4><div class="bigmoney"><span class="m num">'+fmt(s.paid)+' ج.م</span><span class="of">من '+fmt(total)+' ج.م'+(s.remaining?' · باقي '+fmt(s.remaining):'')+'</span></div><div class="meter"><i style="width:'+pct+'%"></i></div></div>';
   rcs(b).forEach(function(r){h+=rcCard(b,r)});
+  pps(b).forEach(function(r){h+=ppCard(b,r)});
   if(lt&&!rcs(b).length)h+='<div class="kalert wait"><svg><use href="#i-info"/></svg><div>'+esc(lt.label)+' ('+fmt(lt.left)+' ج.م) كان ميعاده '+dT(lt.dueDate)+'. لو اتدفع ومتسجلش، سجّله من الجدول.</div></div>';
   if(s.scheduleMismatch)h+='<div class="kalert wait"><svg><use href="#i-info"/></svg><div>مجموع الأقساط مش مساوي لسعر الكورس. راجع الخطة من «⋯» ← تعديل خطة الدفع.</div></div>';
   if(s.rows.length){
@@ -2517,7 +2554,7 @@ window.loadBookings=async function(){
       K.receipts={};K.unknownReceipts=0;
       try{
         var rs=await db.collection('receipts').where('status','==','pending').get(),miss=[];
-        rs.forEach(function(d){var r=Object.assign({id:d.id},d.data());if(!r.bookingId){K.unknownReceipts++;return}(K.receipts[r.bookingId]=K.receipts[r.bookingId]||[]).push(r);if(!seen[r.bookingId]&&miss.indexOf(r.bookingId)<0)miss.push(r.bookingId)});
+        rs.forEach(function(d){var r=Object.assign({id:d.id},d.data());if(!r.bookingId){if(r.kind!=='postpone')K.unknownReceipts++;return}(K.receipts[r.bookingId]=K.receipts[r.bookingId]||[]).push(r);if(!seen[r.bookingId]&&miss.indexOf(r.bookingId)<0)miss.push(r.bookingId)});
         var got=await Promise.all(miss.map(function(id){return db.collection('tempBookings').doc(id).get()}));
         got.forEach(function(d){if(d.exists){seen[d.id]=1;allBookings.push(Object.assign({id:d.id},d.data()))}});
       }catch(e){console.warn('الإيصالات',e)}
@@ -2537,20 +2574,47 @@ window.loadBookings=async function(){
 };
 
 /* ---------- قرارات إيصالات الأقساط ---------- */
-function rcFind(rid){var b=bk(K.open);return b?{b:b,r:rcs(b).find(function(x){return x.id===rid})}:{}}
+function rcFind(rid){var b=bk(K.open);return b?{b:b,r:((K.receipts&&K.receipts[b.id])||[]).find(function(x){return x.id===rid})}:{}}
+function errText(e){return {blocked:'الطالب قافل البوت، فالرسالة ما وصلتوش. كلّمه واتساب.','no-telegram':'الطالب مش متوصل بالتليجرام.','not-open':'القسط ده اتدفع خلاص.',decided:'الطلب ده اتقرر قبل كده.'}[e]||('حصلت مشكلة ('+e+')')}
 async function rcDecide(rid,decision,reason){
   var res=await botFetch(TELEGRAM_BASE+'/receipts/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({receiptId:rid,decision:decision,reason:reason||''})});
   var j=await res.json().catch(function(){return {}});if(!res.ok||!j.ok)throw new Error(j.error||res.status);return j;
+}
+async function ppAction(kind,rid){
+  var x=rcFind(rid),b=x.b,r=x.r;if(!b||!r)return;
+  var body={requestId:rid};
+  try{
+    if(kind==='approve'){body.decision='approved'}
+    else if(kind==='date'){
+      var q=await Swal.fire({title:'تأجيل لحد إمتى؟',input:'date',inputValue:String(r.requestedDue||'').slice(0,10),showCancelButton:true,confirmButtonText:'وافق على الميعاد ده',cancelButtonText:'رجوع',inputValidator:function(v){if(!v)return 'اختار ميعاد'}});
+      if(!q.isConfirmed)return;body.decision='approved';body.newDate=q.value;
+    }else{
+      var q2=await Swal.fire({title:'ترفض طلب التأجيل؟',input:'text',inputLabel:'السبب، وهيتبعت للطالب كده',inputValue:'مش هنقدر نأجل القسط ده المرة دي',showCancelButton:true,confirmButtonText:'ارفض وابعت',cancelButtonText:'رجوع'});
+      if(!q2.isConfirmed)return;body.decision='rejected';body.reason=q2.value;
+    }
+    var res=await botFetch(TELEGRAM_BASE+'/installments/postpone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var j=await res.json().catch(function(){return {}});
+    if(!res.ok||!j.ok){FU.toast(errText(j.error||res.status),{type:'bad'});return}
+    FU.toast(body.decision==='approved'?(j.sent?'اتأجل القسط والطالب عرف':'اتأجل القسط. '+errText(j.error)):(j.sent?'اترفض الطلب واتبعت السبب للطالب':'اترفض الطلب. '+errText(j.error)),{type:j.sent?'ok':'wait'});
+    await loadBookings();
+  }catch(e){console.error('تأجيل',e);FU.toast('حصلت مشكلة: '+e.message,{type:'bad'})}
 }
 async function rcAction(kind,rid){
   var x=rcFind(rid),b=x.b,r=x.r;if(!b||!r)return;
   try{
     if(kind==='approve'){
       var before=JSON.stringify(((b.paymentDetails||{}).installmentSchedule||[])[r.idx]||{});
+      window.__rcReceiptId=rid;
       await markInstallmentAsPaid(b.id,r.idx);
-      var d=await db.collection('tempBookings').doc(b.id).get(),after=JSON.stringify(((d.data()||{}).paymentDetails||{}).installmentSchedule?d.data().paymentDetails.installmentSchedule[r.idx]:{});
+      window.__rcReceiptId=null;
+      var d=await db.collection('tempBookings').doc(b.id).get();if(!d.exists)d=await db.collection('individualStudents').doc(b.id).get();var after=JSON.stringify(((d.data()||{}).paymentDetails||{}).installmentSchedule?d.data().paymentDetails.installmentSchedule[r.idx]:{});
       if(after===before){FU.toast('القسط ما اتسجلش، فالإيصال لسه مستني',{type:'wait'});return}
-      await rcDecide(rid,'approved');FU.toast('اتسجل القسط واتبعت التأكيد للطالب');
+      var ln=window.__lastNotify||{};
+      if(ln.ok&&ln.sent)FU.toast('اتسجل القسط واتبعت التأكيد للطالب');
+      else if(ln.ok)FU.toast('اتسجل القسط. '+errText(ln.error),{type:'wait'});
+      else {await rcDecide(rid,'dismissed').catch(function(){});FU.toast('اتسجل القسط، والتأكيد اتبعت بالرسالة القديمة',{type:'wait'})}
+    }else if(kind==='confirm'){
+      var cj=await rcDecide(rid,'approved');FU.toast(cj.sent?'اتبعت التأكيد للطالب':errText(cj.error),{type:cj.sent?'ok':'wait'});
     }else if(kind==='reject'){
       var q=await Swal.fire({title:'ترفض الإيصال ده؟',input:'text',inputLabel:'السبب، وهيتبعت للطالب كده',inputValue:'الإيصال مش واضح، والمبلغ مش باين فيه',showCancelButton:true,confirmButtonText:'ارفض وابعت',cancelButtonText:'رجوع'});
       if(!q.isConfirmed)return;await rcDecide(rid,'rejected',q.value);FU.toast('اترفض الإيصال واتبعت السبب للطالب');
@@ -2573,7 +2637,7 @@ window.sendInstallmentReminder=async function(bookingId,idx){
   var b=findBooking(bookingId);if(!b)return;
   if(!b.telegramChatId){var inst=b.paymentDetails.installmentSchedule[idx];if(b.customer&&b.customer.whatsapp)openWhatsAppUnified(b.customer.whatsapp,'تذكير بقسط '+(b.courseName||'')+': '+(inst.amount||0)+' ج.م');return}
   try{var res=await botFetch(TELEGRAM_BASE+'/installments/remind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookingId:bookingId,idx:idx})});var j=await res.json().catch(function(){return {}});
-    if(res.ok&&j.ok)FU.toast('اتبعت التذكير على التليجرام، وفيه زرار إرسال الإيصال');else FU.toast('التذكير ما اتبعتش ('+(j.error||res.status)+')',{type:'bad'});
+    if(res.ok&&j.ok)FU.toast('اتبعت التذكير على التليجرام، وفيه زرار إرسال الإيصال');else FU.toast('التذكير ما اتبعتش: '+errText(j.error||res.status),{type:'bad'});
   }catch(e){FU.toast('التذكير ما اتبعتش',{type:'bad'})}
 };
 /* ---------- الأحداث ---------- */
@@ -2593,6 +2657,7 @@ document.addEventListener('click',function(e){
   var dt=t.closest('[data-dtab]');if(dt){K.dtab=dt.dataset.dtab;renderDrawer();return}
   var pi=t.closest('[data-payinst]');if(pi){markInstallmentAsPaid(K.open,+pi.dataset.payinst);return}
   var rc=t.closest('[data-rc]');if(rc){rcAction(rc.dataset.rc,rc.dataset.rid);return}
+  var pp=t.closest('[data-pp]');if(pp){ppAction(pp.dataset.pp,pp.dataset.rid);return}
   var cp=t.closest('[data-copy]');if(cp){var v=cp.dataset.copy;try{navigator.clipboard.writeText(v).then(function(){FU.toast('اتنسخ الرقم')},function(){FU.toast(v)})}catch(x){FU.toast(v)}return}
   var qk=t.closest('[data-quick]');if(qk){$('replyTxt').value=qk.dataset.quick;$('replyTxt').focus();return}
   var z=t.closest('[data-zoom]');if(z){$('lightboxImg').src=z.dataset.zoom;$('lightbox').hidden=false;return}
