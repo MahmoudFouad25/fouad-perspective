@@ -1,6 +1,6 @@
 // ==================== إيصالات الأقساط والتذكير التلقائي (المرحلة ٧) ====================
 // بيتحط في telegram-bot-server.js بعد دوال المحفظة والنقاط، وبيستعمل اللي موجود هناك:
-//   app, db, admin, bot, crypto, logMessage, getPaymentDetails, requireAdmin
+//   app, db, admin, bot, fetch, logMessage, getPaymentDetails, requireAdmin
 //
 // نقطتين ربط جوه /webhook (سطر واحد في كل واحدة):
 //   ١) بعد ما المرفق يتحفظ:   if (await rcOnAttachment(chatId, result, firstName)) return res.sendStatus(200);
@@ -9,7 +9,6 @@
 // الدوال الجديدة:
 //   /installments/remind     (الأدمن)            تذكير بقسط واحد، فيه زرار «ابعت إيصال القسط»
 //   /installments/run        (الأدمن أو المجدول)  التذكير التلقائي: قبل الميعاد بـ٣ أيام، ويوم الميعاد، وبعده بـ٣ أيام
-//   /installments/cron-key   (الأدمن)            مفتاح المهمة المجدولة (بيتعمل مرة واحدة)
 //   /receipts/decision       (الأدمن)            اتسجل / اترفض / مش إيصال، والرسالة للطالب بتتبعت لوحدها
 //
 // كل إيصال بيتسجل في receipts/{id}:
@@ -278,28 +277,24 @@ app.post('/installments/remind', requireAdmin, async (req, res) => {
     } catch (e) { console.error('/installments/remind', e); res.status(500).json({ ok: false, error: 'server' }); }
 });
 
-async function rcCronKey(create) {
-    const ref = db.collection('app_secrets').doc('installments_cron');
-    const s = await ref.get();
-    if (s.exists && s.data().key) return s.data().key;
-    if (!create) return null;
-    const key = crypto.randomBytes(24).toString('hex');
-    await ref.set({ key, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-    return key;
+// المهمة المجدولة (Cloud Scheduler) بتبعت توقيع جوجل (OIDC) بحساب الخدمة بتاع المشروع.
+// البوت بيتأكد من التوقيع عند جوجل نفسه، فمفيش أي مفتاح سري متخزن أو متكتب في أي مكان.
+const RC_SCHEDULER_SA = '1068763865336-compute@developer.gserviceaccount.com';
+const RC_SCHEDULER_AUD = 'https://us-central1-fouad-perspective.cloudfunctions.net/telegramBot';
+async function rcIsScheduler(req) {
+    const m = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+    if (!m) return false;
+    try {
+        const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(m[1]));
+        if (!r.ok) return false;
+        const t = await r.json();
+        return t.email === RC_SCHEDULER_SA && String(t.email_verified) === 'true'
+            && String(t.aud || '').indexOf(RC_SCHEDULER_AUD) === 0
+            && Number(t.exp || 0) * 1000 > Date.now();
+    } catch (e) { return false; }
 }
-app.post('/installments/cron-key', requireAdmin, async (req, res) => {
-    try { res.json({ ok: true, key: await rcCronKey(true) }); }
-    catch (e) { console.error('/installments/cron-key', e); res.status(500).json({ ok: false }); }
-});
 async function rcCronOrAdmin(req, res, next) {
-    const given = String(req.headers['x-cron-key'] || '');
-    if (given) {
-        try {
-            const key = await rcCronKey(false);
-            if (key && given.length === key.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(key))) return next();
-        } catch (e) {}
-        return res.status(401).json({ ok: false });
-    }
+    if (await rcIsScheduler(req)) { req.fromScheduler = true; return next(); }
     return requireAdmin(req, res, next);
 }
 // المرحلة اللي يستاهلها القسط النهارده (لو يوم فات، بنلحقه في اللي بعده)
