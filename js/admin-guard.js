@@ -34,22 +34,24 @@
   }
 
   function buildOverlay() {
+    // نفس هوية «المحراب الهادي»؛ القيم بعد الفاصلة للصفحات اللي لسه ما حمّلتش css/fouad-ui.css
     var css =
       '#ag-overlay{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;' +
-      'background:rgba(15,23,42,.92);font-family:Tajawal,system-ui,sans-serif;direction:rtl;padding:16px}' +
-      '#ag-card{background:#fff;color:#0f172a;border-radius:14px;width:100%;max-width:360px;padding:28px 24px;' +
-      'box-shadow:0 20px 50px rgba(0,0,0,.35)}' +
-      '#ag-card h2{margin:0 0 4px;font-size:1.25rem}' +
-      '#ag-card p{margin:0 0 18px;color:#475569;font-size:.9rem;line-height:1.6}' +
-      '#ag-card label{display:block;font-size:.85rem;font-weight:700;margin:12px 0 6px}' +
-      '#ag-card input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;' +
-      'font-size:1rem;font-family:inherit;direction:ltr;text-align:left}' +
-      '#ag-card input:focus{outline:2px solid #2563eb;outline-offset:1px;border-color:#2563eb}' +
-      '#ag-card button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:9px;background:#1e3a8a;color:#fff;' +
-      'font-size:1rem;font-weight:700;font-family:inherit;cursor:pointer}' +
+      'background:var(--fu-paper,#F6F4EE);font-family:var(--fu-font,"IBM Plex Sans Arabic",Tajawal,system-ui,sans-serif);direction:rtl;padding:16px}' +
+      '#ag-card{background:var(--fu-surface,#fff);color:var(--fu-ink,#1F2A24);border:1px solid var(--fu-line,#E2DED3);border-radius:16px;width:100%;max-width:380px;padding:28px 24px;' +
+      'box-shadow:0 1px 2px rgba(31,42,36,.06),0 12px 32px rgba(31,42,36,.08)}' +
+      '#ag-card .ag-mark{width:36px;height:36px;border-radius:10px;background:var(--fu-primary,#0B7A56);color:#fff;display:grid;place-items:center;font-weight:700;margin-bottom:14px}' +
+      '#ag-card h2{margin:0 0 4px;font-size:20px;font-weight:700}' +
+      '#ag-card p{margin:0 0 18px;color:var(--fu-muted,#6B7468);font-size:14px;line-height:1.6}' +
+      '#ag-card label{display:block;font-size:13.5px;font-weight:600;margin:12px 0 6px}' +
+      '#ag-card input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--fu-line-2,#CFCAB9);border-radius:8px;background:var(--fu-surface,#fff);color:inherit;' +
+      'font-size:15px;font-family:inherit;direction:ltr;text-align:left}' +
+      '#ag-card input:focus{outline:2px solid var(--fu-primary,#0B7A56);outline-offset:1px;border-color:var(--fu-primary,#0B7A56)}' +
+      '#ag-card button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:8px;background:var(--fu-primary,#0B7A56);color:#fff;' +
+      'font-size:15px;font-weight:600;font-family:inherit;cursor:pointer}' +
       '#ag-card button[disabled]{opacity:.6;cursor:wait}' +
-      '#ag-error{display:none;margin-top:12px;color:#b91c1c;font-size:.85rem}' +
-      '#ag-wait{text-align:center;color:#e2e8f0;font-size:1rem}';
+      '#ag-error{display:none;margin-top:12px;color:var(--fu-danger,#B42318);font-size:13.5px}' +
+      '#ag-wait{text-align:center;color:var(--fu-muted,#6B7468);font-size:15px}';
     var style = document.createElement('style');
     style.textContent = css;
     document.head.appendChild(style);
@@ -59,7 +61,7 @@
     overlay.innerHTML =
       '<div id="ag-wait">جاري التأكد من الدخول…</div>' +
       '<form id="ag-card" style="display:none" autocomplete="on">' +
-      '<h2>دخول الأدمن</h2>' +
+      '<div class="ag-mark">ف</div><h2>دخول الأدمن</h2>' +
       '<p>الصفحة دي للأدمن بس. ادخل بحساب الأدمن علشان تكمل.</p>' +
       '<label for="ag-email">الإيميل</label>' +
       '<input id="ag-email" type="email" autocomplete="username" required>' +
