@@ -20,7 +20,6 @@
 const RC_TZ = 'Africa/Cairo';
 const RC_DAY = 86400000;
 const RC_INTENT_MS = 48 * 3600 * 1000;        // زرار «ابعت إيصال القسط» صالح ٤٨ ساعة
-const RC_REVIEW_PROMISE = 'خلال يوم عمل';
 
 function rcEsc(s) {
     return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -92,8 +91,7 @@ function rcAwaitingFirstReceipt(b) {
 async function rcSend(chatId, text, keyboard, extra) {
     const opts = { parse_mode: 'HTML', disable_web_page_preview: true };
     if (keyboard) opts.reply_markup = { inline_keyboard: keyboard };
-    await bot.sendMessage(chatId, text, opts);
-    try { await logMessage(chatId, text.replace(/<[^>]+>/g, ''), 'bot', extra || {}); } catch (e) { console.warn('rc log', e.message); }
+    await bot.sendMessage(chatId, text, opts);     // البوت بيسجّل رسايله في المحادثة لوحده
 }
 function rcKeyboard(bookingId, idx) {
     return [
@@ -199,7 +197,7 @@ async function rcOnAttachment(chatId, result) {
         // ٥) مفيش حاجة مفتوحة
         const anyB = bookings[0];
         const rid = await rcSaveReceipt(chatId, result, { bookingId: anyB ? anyB.id : null, idx: null, source: 'unknown', studentName: anyB && anyB.customer ? anyB.customer.name : null });
-        await rcSend(chatId, `وصلت الصورة ✅\nهنراجعها ونرد عليك ${RC_REVIEW_PROMISE}.`, null, { action: 'receipt_unknown', receiptId: rid });
+        await rcSend(chatId, 'وصلت الصورة ✅\nهنراجعها ونرد عليك هنا.', null, { action: 'receipt_unknown', receiptId: rid });
         return true;
     } catch (e) {
         console.error('rcOnAttachment:', e);
@@ -209,7 +207,7 @@ async function rcOnAttachment(chatId, result) {
 
 async function rcAck(chatId, b, idx, receiptId, guessed) {
     const inst = b.paymentDetails.installmentSchedule[idx];
-    const text = `وصل إيصال <b>${rcEsc(rcInstName(inst, idx))}</b> في <b>${rcEsc(b.courseName || 'الكورس')}</b> (${rcMoney(rcLeft(inst))}) ✅\nهنراجعه ونأكدلك ${RC_REVIEW_PROMISE}.`;
+    const text = `وصل إيصال <b>${rcEsc(rcInstName(inst, idx))}</b> في <b>${rcEsc(b.courseName || 'الكورس')}</b> (${rcMoney(rcLeft(inst))}) ✅\nهنراجعه ونبعتلك التأكيد هنا.`;
     await rcSend(chatId, text, guessed ? [[{ text: 'مش ده القسط', callback_data: `rcpt_wrong_${receiptId}` }]] : null,
         { action: 'receipt_received', bookingId: b.id, installmentIndex: idx, receiptId });
 }
@@ -233,7 +231,6 @@ async function rcOnCallback(chatId, cq, params) {
                 parse_mode: 'Markdown', disable_web_page_preview: true,
                 reply_markup: { inline_keyboard: [[{ text: '📸 ابعت إيصال القسط', callback_data: `rcpt_send_${bookingId}_${idx}` }]] }
             });
-            try { await logMessage(chatId, 'طرق الدفع', 'bot', { action: 'payment_methods', bookingId }); } catch (e) {}
             return;
         }
         if (kind === 'pick') {
