@@ -97,6 +97,13 @@
    * ملخص فلوس حجز واحد: الإجمالي، والمدفوع، والباقي، والقسط الجاي، والمتأخر.
    * المدفوع = paymentDetails.paidAmount (اللي صفحة الحجوزات بتجمعه مع كل دفعة).
    */
+  // نفس الأسماء اللي الطالب بيشوفها من البوت: الدفعة الأولى، القسط التاني، التالت…
+  var ORD = ['الأولى', 'التاني', 'التالت', 'الرابع', 'الخامس', 'السادس', 'السابع', 'التامن', 'التاسع', 'العاشر', 'الحداشر', 'الاتناشر'];
+  function instName(n) {
+    n = Number(n) || 0;
+    return n === 0 ? 'الدفعة الأولى' : 'القسط ' + (ORD[n] || ('رقم ' + n.toLocaleString('ar-EG')));
+  }
+
   function summarize(booking, now) {
     now = now || new Date();
     var b = booking || {};
@@ -118,7 +125,7 @@
         : 'upcoming';
       return {
         idx: idx, number: inst.installmentNumber != null ? inst.installmentNumber : idx,
-        label: idx === 0 && inst.installmentNumber === 0 ? 'الدفعة الأولى' : 'القسط ' + Number(inst.installmentNumber != null ? inst.installmentNumber : idx).toLocaleString('ar-EG'),
+        label: instName(inst.installmentNumber != null ? inst.installmentNumber : idx),
         amount: amount, paidSoFar: already, left: open ? Math.max(0, amount - already) : 0,
         dueDate: inst.dueDate || null, daysLate: days !== null && days > 0 ? days : 0,
         daysUntil: days !== null && days <= 0 ? -days : null,
@@ -154,7 +161,7 @@
   var api = {
     num: num, cairoDateString: cairoDateString, cairoDayDiff: cairoDayDiff,
     addMonthsClamped: addMonthsClamped, dueIso: dueIso,
-    buildSchedule: buildSchedule, paidOn: paidOn, summarize: summarize,
+    buildSchedule: buildSchedule, paidOn: paidOn, summarize: summarize, instName: instName,
     egp: egp, formatDate: formatDate
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
