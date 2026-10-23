@@ -4353,14 +4353,35 @@ await refreshCurrentView();
 window.assignCourseToStudent = assignCourseToStudent;
         // ==================== 🤖 نظام الأتمتة الذكي ====================
        // دالة البحث عن حساب موجود - محسّنة
+// أي حساب جديد بيتعمل: نمسح كاش البحث علشان يبان في البحث اللي بعده
+(function () { try { const P = firebase.firestore.DocumentReference.prototype, o = P.set; P.set = function () { try { if (this.parent && this.parent.id === 'users') window.__usersScan = null; } catch (e) {} return o.apply(this, arguments); }; } catch (e) {} })();
 async function findExistingUserAccount(phone, email) {
     try {
         console.log('🔍 البحث عن حساب موجود...');
         console.log('📱 التليفون:', phone);
         console.log('📧 الإيميل:', email);
         
-        // البحث في users collection
-        const usersSnapshot = await db.collection('users').get();
+        // ١) بحث مباشر بالإيميل والتليفون (قراءات قليلة)، ولو لقيناه خلصنا
+        const digits = String(phone || '').replace(/\D/g, '');
+        const last10 = digits.slice(-10);
+        const phoneVars = phone ? [...new Set([String(phone).trim(), digits, last10 ? '0' + last10 : '', last10 ? '20' + last10 : '', last10 ? '+20' + last10 : ''].filter(Boolean))].slice(0, 10) : [];
+        const emailVars = email ? [...new Set([String(email).trim(), String(email).trim().toLowerCase()])] : [];
+        const quick = [];
+        if (phoneVars.length) {
+            quick.push(db.collection('users').where('personalInfo.phone', 'in', phoneVars).limit(1).get().then(q => q.empty ? null : { id: q.docs[0].id, t: 'phone' }));
+            quick.push(db.collection('users').where('personalInfo.whatsapp', 'in', phoneVars).limit(1).get().then(q => q.empty ? null : { id: q.docs[0].id, t: 'phone' }));
+        }
+        if (emailVars.length) quick.push(db.collection('users').where('personalInfo.email', 'in', emailVars).limit(1).get().then(q => q.empty ? null : { id: q.docs[0].id, t: 'email' }));
+        const hit = (await Promise.all(quick)).find(Boolean);
+        if (hit) return { found: true, userId: hit.id, matchType: hit.t };
+
+        // ٢) احتياطي للأرقام المكتوبة بشكل مختلف: مسح كل المستخدمين، مرة واحدة كل ١٠ دقايق في نفس الجلسة
+        const SCAN_TTL = 10 * 60 * 1000;
+        if (!window.__usersScan || Date.now() - window.__usersScan.t > SCAN_TTL) {
+            const snap = await db.collection('users').get();
+            window.__usersScan = { t: Date.now(), docs: snap.docs.map(d => ({ id: d.id, p: (d.data().personalInfo || {}) })) };
+        }
+        const usersSnapshot = { docs: window.__usersScan.docs.map(x => ({ id: x.id, data: () => ({ personalInfo: x.p }) })) };
         
         for (const userDoc of usersSnapshot.docs) {
             const userData = userDoc.data();

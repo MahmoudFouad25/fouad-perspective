@@ -932,7 +932,64 @@ function deepPlain(v, depth){
   }
   return v;
 }
-const IDX_KEY = 'tm_jidx_v1', IDX_TTL = 15 * 60 * 1000; /* كاش الفهرس ١٥ دقيقة */
+const IDX_KEY = 'tm_jidx_v1', IDX_TTL = 60 * 60 * 1000; /* الفهرس الكامل (لوحة الأقساط والدورات بس): ساعة */
+const LAZY_KEY = 'tm_jlazy_v1', LAZY_TTL = 60 * 60 * 1000; /* رحلات المحادثات اللي ظاهرة بس: ساعة */
+let fullIndexAt = 0;
+/* ── الرحلات عند الطلب: بنجيب حجوزات المحادثات اللي ظاهرة في القايمة بس، مش كل الحجوزات ── */
+const fetchedJ = new Set();
+const jQueue = new Set(); let jTimer = null;
+function wantJourneys(ids){
+  if (DEMO || fullIndexAt) return;
+  ids.forEach(id => { id = String(id); if (!fetchedJ.has(id)) jQueue.add(id); });
+  if (!jQueue.size) return;
+  clearTimeout(jTimer); jTimer = setTimeout(flushJourneys, 250);
+}
+async function flushJourneys(){
+  const ids = [...jQueue]; jQueue.clear();
+  if (!ids.length) return;
+  ids.forEach(id => fetchedJ.add(id));
+  for (let i = 0; i < ids.length; i += 5){
+    const g = ids.slice(i, i + 5), keys = [];
+    g.forEach(id => { keys.push(id); const n = Number(id); if (!isNaN(n)) keys.push(n); });
+    try{
+      const [tb, st] = await Promise.all([
+        db.collection('tempBookings').where('telegramChatId', 'in', keys).get(),
+        db.collection('individualStudents').where('telegramChatId', 'in', keys).get()
+      ]);
+      const found = new Map();
+      tb.forEach(doc => found.set(doc.id, {d: doc.data(), s: false}));
+      st.forEach(doc => { const b = found.get(doc.id); found.set(doc.id, {d: Object.assign({}, b ? b.d : {}, doc.data()), s: true}); });
+      const per = new Map(g.map(id => [id, []]));
+      found.forEach((v, id) => { const cid = String(v.d.telegramChatId || ''); if (per.has(cid)) per.get(cid).push(mkJourney(id, deepPlain(v.d), v.s)); });
+      per.forEach((list, cid) => { list.sort((a, b) => b.t - a.t); journeys.set(cid, list); });
+    }catch(e){ console.error('رحلات المحادثات:', e); g.forEach(id => fetchedJ.delete(id)); }
+  }
+  saveLazyCache();
+  renderAll();
+  if (currentChatId) renderContext(currentChatId);
+}
+function saveLazyCache(){
+  try{
+    const packed = [];
+    fetchedJ.forEach(cid => (journeys.get(cid) || []).forEach(j => packed.push({id: j.id, cid, s: j.inStudents ? 1 : 0, d: j.d})));
+    localStorage.setItem(LAZY_KEY, JSON.stringify({t: Date.now(), c: [...fetchedJ], j: packed}));
+  }catch(e){}
+}
+function loadLazyCache(){
+  indexReady = true;
+  try{
+    const o = JSON.parse(localStorage.getItem(LAZY_KEY) || 'null');
+    if (!o || Date.now() - o.t > LAZY_TTL) return;
+    buildFromPacked(o.j);
+    (o.c || []).forEach(cid => fetchedJ.add(String(cid)));
+  }catch(e){}
+}
+/* لوحة الأقساط والدورات محتاجين كل الحجوزات: بنجيبها لما تفتحهم بس */
+async function ensureFullIndex(){
+  if (DEMO || fullIndexAt) return;
+  toast('بيحمّل كل الحجوزات…', 'ok', 1500);
+  await loadJourneyIndex(false);
+}
 function buildFromPacked(packed){
   journeys.clear();
   packed.forEach(x => {
@@ -953,6 +1010,7 @@ async function loadJourneyIndex(force){
         const o = JSON.parse(raw);
         if (o && Array.isArray(o.j) && (Date.now() - o.t) < IDX_TTL){
           buildFromPacked(o.j);
+          fullIndexAt = o.t;
           return;
         }
       }
@@ -978,6 +1036,7 @@ async function loadJourneyIndex(force){
       packed.push({id, cid, s: v.inStudents ? 1 : 0, d: deepPlain(v.d)});
     });
     buildFromPacked(packed);
+    fullIndexAt = Date.now();
     try{ localStorage.setItem(IDX_KEY, JSON.stringify({t: Date.now(), j: packed})); }catch(e){}
   }catch(e){
     console.error('فشل تحميل فهرس الحجوزات:', e);
@@ -1006,6 +1065,7 @@ async function refreshJourneysFor(chatId){
     found.forEach((v, id) => list.push(mkJourney(id, v.d, v.inStudents)));
     list.sort((a,b) => b.t - a.t);
     journeys.set(String(chatId), list);
+    fetchedJ.add(String(chatId)); saveLazyCache();
   }catch(e){ console.error('تحديث رحلات المحادثة:', e); }
 }
 
@@ -1323,6 +1383,7 @@ function listenChats(){
         if (act && (!oldestChatTs || act < oldestChatTs)) oldestChatTs = act;
       });
       renderAll();
+      wantJourneys([...chats.keys()]);
       if (currentChatId && chats.get(currentChatId)) markRead(currentChatId);
     }, err => {
       console.error('استماع المحادثات:', err);
@@ -1347,6 +1408,7 @@ async function loadMoreChats(){
     });
     if (snap.empty){ $('loadMoreBtn').textContent = 'لا محادثات أقدم'; }
     renderList();
+    wantJourneys(snap.docs.map(d => d.id));
   }catch(e){ toast('تعذّر تحميل المزيد', 'bad'); }
   $('loadMoreBtn').disabled = false;
 }
@@ -2243,7 +2305,7 @@ function renderInstallments(){
   note.textContent = 'تسجيل سداد قسط جديد يتم من مدير الأقساط في صفحة إدارة الحجوزات';
   b.appendChild(note);
 }
-function openInstallments(){ renderInstallments(); openSheet('instSheet'); }
+async function openInstallments(){ await ensureFullIndex(); renderInstallments(); openSheet('instSheet'); }
 $('instBtn').onclick = openInstallments;
 $('mInstBtn').onclick = openInstallments;
 $('instRefreshBtn').onclick = async ()=>{
@@ -2378,7 +2440,7 @@ function renderCourses(){
       crsTab === 'running' ? 'لا رحلات جارية الآن' : 'لا حجوزات في السجل بعد'}</div>`;
   }
 }
-function openCoursesBoard(){ renderCourses(); openSheet('crsSheet'); }
+async function openCoursesBoard(){ await ensureFullIndex(); renderCourses(); openSheet('crsSheet'); }
 $('crsBtn').onclick = openCoursesBoard;
 $('mCrsBtn').onclick = openCoursesBoard;
 $('crsTabs').addEventListener('click', e => {
@@ -2725,10 +2787,11 @@ async function startApp(){
     demoReceipts(); currentQueue = 'receipts'; renderAll();
     return;
   }
-  await Promise.all([loadJourneyIndex(), loadQuickReplies()]);
+  loadLazyCache();
+  await loadQuickReplies();
   listenChats();
   listenReceipts();
-  pollBot(); setInterval(pollBot, 90000);
+  pollBot(); setInterval(() => { if (!document.hidden) pollBot(); }, 5 * 60 * 1000);
 }
 function initFirebase(){
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);

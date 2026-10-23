@@ -656,7 +656,7 @@ async function dbSet(collection,id,data){
   return db.collection(collection).doc(id).set(data);
 }
 function refreshAfter(){ updateStats(); updateQuickFilters(); applyFilters(); if(currentOpenDetails){ const b=allBookings.find(x=>x.id===currentOpenDetails); if(b) document.getElementById('floatingBody').innerHTML=getFullDetailsContent(b); else closeFloatingDetails(); } }
-async function reload(){ if(DEMO_MODE){ refreshAfter(); } else { await loadBookings(); } }
+async function reload(){ if(DEMO_MODE){ refreshAfter(); } else { await loadBookings({afterAction:true}); } }
 
 /* ============================================================
    بناء بطاقة الحجز
@@ -2173,7 +2173,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){ closeFloatingDetails(); closePaymentEditor(); }
-  if((e.ctrlKey||e.metaKey)&&e.key==='r'){ e.preventDefault(); loadBookings(); }
+  if((e.ctrlKey||e.metaKey)&&e.key==='r'){ e.preventDefault(); loadBookings({full:true}); }
   if((e.ctrlKey||e.metaKey)&&e.key==='f'){ e.preventDefault(); document.getElementById('searchBox').focus(); }
 });
 </script>
@@ -2540,8 +2540,9 @@ window.closeFloatingDetails=function(){if(K.open)closeD()};
 window.showError=function(msg){$('bookingsContainer').innerHTML='<div class="kempty"><b>'+esc(msg)+'</b><button class="kbtn p" type="button" style="margin-top:12px" onclick="loadBookings()">جرّب تاني</button></div>'};
 /* البحث عن حجز بالرقم أو بشرط (الكود القديم كان بيبعت شرط فما كانش بيلاقي حاجة) */
 window.findBooking=function(q){var f=typeof q==='function'?q:function(x){return x.id===q};return allBookings.find(f)||instBookings.find(f)};
-window.toggleArchive=async function(){showingArchive=!showingArchive;await loadBookings()};
-window.loadBookings=async function(){
+window.toggleArchive=async function(){showingArchive=!showingArchive;await loadBookings({full:true})};
+var fullLoad=async function(){
+  touched.clear();
   if(!allBookings.length)$('bookingsContainer').innerHTML='<div class="kempty"><div class="spin"></div>بنحمّل الحجوزات…</div>';
   try{
     if(DEMO_MODE){allBookings=getDemoBookings()}
@@ -2570,7 +2571,52 @@ window.loadBookings=async function(){
     K.chats={};render();
     var qs=new URLSearchParams(location.search),oid=qs.get('open');if(oid&&!K.opened&&bk(oid)){K.opened=1;openD(oid,qs.get('tab')||'overview')}
     $('lastUpdate').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+    K.loaded=true;
   }catch(e){console.error('خطأ في تحميل الحجوزات:',e);showError('مقدرتش أحمّل الحجوزات. اتأكد من النت ومن دخول الأدمن.')}
+};
+/* ---------- قراءات على قد الحاجة ----------
+   - أول فتح للصفحة، أو زرار «حدّث»: تحميل كامل.
+   - بعد أي عملية (تأكيد، تسجيل قسط، ملاحظة…): بنعيد قراية الحجوزات اللي اتعدّلت بس، مش كل الحجوزات.
+   - جوه مكتب المتابعة (embed): الحجز المفتوح بس. */
+var touched=new Set();
+(function(){try{var P=firebase.firestore.DocumentReference.prototype;['update','set','delete'].forEach(function(m){var o=P[m];P[m]=function(){try{var c=this.parent&&this.parent.id;if(c==='tempBookings'||c==='individualStudents')touched.add(this.id)}catch(e){}return o.apply(this,arguments)}})}catch(e){}})();
+function addReceipt(r){if(!r.bookingId){if(r.kind!=='postpone')K.unknownReceipts++;return}(K.receipts[r.bookingId]=K.receipts[r.bookingId]||[]).push(r)}
+function keepInList(b){return ['pending','pending_review','confirmed','paid'].indexOf(b.status)>-1||(b.status==='transferred'&&(b.paymentDetails||{}).type==='installment')||b.id===K.open}
+async function getBookingDoc(id){var d=await db.collection('tempBookings').doc(id).get();if(!d.exists)d=await db.collection('individualStudents').doc(id).get();return d}
+var partialLoad=async function(){
+  var ids=Array.from(touched);touched.clear();
+  try{
+    var docs=await Promise.all(ids.map(function(id){return getBookingDoc(id).then(function(d){return {id:id,d:d}})}));
+    docs.forEach(function(x){
+      var i=allBookings.findIndex(function(b){return b.id===x.id});
+      if(!x.d.exists){if(i>-1)allBookings.splice(i,1);return}
+      var b=Object.assign({id:x.id},x.d.data());
+      if(i>-1){if(keepInList(b))allBookings[i]=b;else allBookings.splice(i,1)}else if(keepInList(b))allBookings.unshift(b);
+      if(K.chats)delete K.chats[x.id];
+    });
+    K.receipts={};K.unknownReceipts=0;
+    var rs=await db.collection('receipts').where('status','==','pending').get();
+    rs.forEach(function(d){addReceipt(Object.assign({id:d.id},d.data()))});
+    render();
+    $('lastUpdate').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){console.warn('تحديث جزئي',e);return fullLoad()}
+};
+var embedLoad=async function(){
+  var qs=new URLSearchParams(location.search),id=qs.get('open');touched.clear();
+  try{
+    var d=id?await getBookingDoc(id):{exists:false};
+    allBookings=d.exists?[Object.assign({id:d.id},d.data())]:[];
+    K.receipts={};K.unknownReceipts=0;
+    if(id){var rs=await db.collection('receipts').where('bookingId','==',id).where('status','==','pending').get();rs.forEach(function(x){addReceipt(Object.assign({id:x.id},x.data()))})}
+    render();
+    if(!K.opened&&bk(id)){K.opened=1;openD(id,qs.get('tab')||'overview')}
+  }catch(e){console.error('الحجز',e);showError('مقدرتش أحمّل الحجز ده.')}
+};
+window.loadBookings=async function(opts){
+  opts=opts||{};
+  if(!DEMO_MODE&&document.body.classList.contains('embed'))return embedLoad();
+  if(!DEMO_MODE&&!opts.full&&K.loaded&&!showingArchive&&touched.size<=15&&(touched.size||opts.afterAction))return partialLoad();
+  return fullLoad();
 };
 
 /* ---------- قرارات إيصالات الأقساط ---------- */
@@ -2596,7 +2642,7 @@ async function ppAction(kind,rid){
     var j=await res.json().catch(function(){return {}});
     if(!res.ok||!j.ok){FU.toast(errText(j.error||res.status),{type:'bad'});return}
     FU.toast(body.decision==='approved'?(j.sent?'اتأجل القسط والطالب عرف':'اتأجل القسط. '+errText(j.error)):(j.sent?'اترفض الطلب واتبعت السبب للطالب':'اترفض الطلب. '+errText(j.error)),{type:j.sent?'ok':'wait'});
-    await loadBookings();
+    await loadBookings({afterAction:true});
   }catch(e){console.error('تأجيل',e);FU.toast('حصلت مشكلة: '+e.message,{type:'bad'})}
 }
 async function rcAction(kind,rid){
@@ -2629,7 +2675,7 @@ async function rcAction(kind,rid){
       await db.collection('receipts').doc(rid).update({bookingId:b.id,idx:i,installmentNumber:row.number,amountExpected:row.left,dueDate:row.dueDate,assignedBy:'admin'});
       FU.toast('اتحدد القسط');
     }
-    await loadBookings();
+    await loadBookings({afterAction:true});
   }catch(e){console.error('إيصال',e);FU.toast('حصلت مشكلة: '+e.message,{type:'bad'})}
 }
 /* التذكير بالقسط بقى من البوت وفيه زرار «ابعت إيصال القسط» */
@@ -2685,7 +2731,7 @@ document.addEventListener('keydown',function(e){
 var st;$('searchBox').addEventListener('input',function(){var v=this.value;clearTimeout(st);st=setTimeout(function(){K.q=v.toLowerCase().trim();render()},120)});
 $('vList').onclick=function(){K.view='list';render()};
 $('vBoard').onclick=function(){K.view='board';render()};
-$('refreshBtn').onclick=function(){loadBookings()};
+$('refreshBtn').onclick=function(){loadBookings({full:true})};
 $('scrim').onclick=closeD;$('dClose').onclick=closeD;$('dPrev').onclick=function(){step(-1)};$('dNext').onclick=function(){step(1)};
 })();
 </script>
