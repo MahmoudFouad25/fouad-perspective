@@ -2064,38 +2064,58 @@ async function useWalletPoints(userId, amount, reason, description) {
             }, 5000);
         }
 
-       // تحميل الطلبات المعلقة فقط — أول ما الصفحة تفتح (قراءات أقل بكثير)
+       // الطلبات المعلقة «حيّة»: أول فتح بيقرا الطلاب المدفوعين مرة واحدة، وبعد كده اللي يتغيّر بس
+       // (طالب جديد اتحوّل، حساب اتعمل، دورة اتخصصت) بيوصل لوحده، فمفيش إعادة تحميل بعد كل عملية
+let pendingUnsub = null;
+function applyPendingSnap(snap) {
+    const extras = allStudents.filter(s => s._h);          // طلاب اتجابوا من وضع التصفّح: نسيبهم
+    const list = [], ids = new Set();
+    snap.forEach(doc => {
+        const d = doc.data();
+        if (bookingNeedsProcessing(d) && d.customer && d.customer.name) { list.push({ id: doc.id, ...d }); ids.add(doc.id); }
+    });
+    allStudents = list.concat(extras.filter(s => !ids.has(s.id)));
+}
+function showPending() {
+    const grid = document.getElementById('studentsGrid');
+    // عداد زرار «معالجة الطلبات المعلقة» فوق: يتحدّث مع أي تغيير
+    const badge = document.querySelector('#auto-process-btn span');
+    if (badge) {
+        const n = allStudents.filter(s => bookingNeedsProcessing(s)).length;
+        badge.textContent = n;
+        document.getElementById('auto-process-btn').style.display = n ? '' : 'none';
+    }
+    filteredStudents = allStudents.filter(s => bookingNeedsProcessing(s) && s.customer && s.customer.name);
+    if (filteredStudents.length === 0 && grid) {
+        grid.innerHTML = '<div class="no-data"><i class="fas fa-check-circle" style="color:#10B981;"></i><h3>لا توجد طلبات معلقة</h3><p>كل الطلبات المدفوعة تمت معالجتها 🎉</p></div>';
+    } else {
+        displayStudents();
+    }
+    try {
+        if (typeof populateCourseFilter === 'function') populateCourseFilter();
+        if (typeof checkForNewTransfer === 'function') checkForNewTransfer();
+    } catch (fErr) { console.warn('⚠️ فلاتر:', fErr); }
+}
 async function loadPendingOnly() {
     try {
         const grid = document.getElementById('studentsGrid');
-        if (grid) grid.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p style="margin-top:20px;color:white;">جاري تحميل الطلبات المعلقة...</p></div>';
-
-        const snap = await db.collection('individualStudents')
-            .where('paymentConfirmed', '==', true).get();
-
-        allStudents = [];
-        snap.forEach(doc => {
-            const d = doc.data();
-            if (bookingNeedsProcessing(d) && d.customer && d.customer.name) {
-                allStudents.push({ id: doc.id, ...d });
-            }
-        });
-
-        viewMode = 'pending';
-        filteredStudents = [...allStudents];
-
-        if (filteredStudents.length === 0 && grid) {
-            grid.innerHTML = '<div class="no-data"><i class="fas fa-check-circle" style="color:#10B981;"></i><h3>لا توجد طلبات معلقة</h3><p>كل الطلبات المدفوعة تمت معالجتها 🎉</p></div>';
-        } else {
-            displayStudents();
+        if (!pendingUnsub) {
+            if (grid) grid.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p style="margin-top:20px;color:white;">جاري تحميل الطلبات المعلقة...</p></div>';
+            await new Promise(resolve => {
+                let first = true;
+                pendingUnsub = db.collection('individualStudents').where('paymentConfirmed', '==', true).onSnapshot(snap => {
+                    applyPendingSnap(snap);
+                    if (first) { first = false; resolve(); }
+                    else if (viewMode === 'pending') showPending();
+                }, err => {
+                    console.error('❌ متابعة المعلقة:', err);
+                    pendingUnsub = null;
+                    if (first) { first = false; resolve(); }
+                });
+            });
         }
-        console.log('✅ معلقة فقط:', allStudents.length, '— بدون استدعاء باقي الحجوزات');
-
-        // ملء فلتر الدورات من البيانات المحمّلة + تمييز التحويل الجديد لو موجود
-        try {
-            if (typeof populateCourseFilter === 'function') populateCourseFilter();
-            if (typeof checkForNewTransfer === 'function') checkForNewTransfer();
-        } catch (fErr) { console.warn('⚠️ فلاتر:', fErr); }
+        viewMode = 'pending';
+        showPending();
     } catch (e) {
         console.error('❌ خطأ في تحميل المعلقة:', e);
     }
@@ -5153,6 +5173,7 @@ async function hydrateStudent(studentId) {
     const data = studentDoc.data();
 
     student = {
+        _h: true,
         id: studentDoc.id,
         ...data,
         transferredAt: data.transferredAt || data.transferInfo?.transferredAt || new Date().toISOString(),
