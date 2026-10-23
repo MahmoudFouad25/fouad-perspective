@@ -15,7 +15,7 @@
     bookings: {
       title: 'إدارة الحجوزات والمستخدمين',
       links: [
-        ['admin/book-bot-online.html', 'الحجوزات'],
+        ['admin/bookings.html', 'الحجوزات'],
         ['admin/telegram-monitor.html', 'مكتب المتابعة'],
         ['admin/bookings/creat&allow.html', 'الحجوزات الفردية'],
         ['admin/edite-user.html', 'ملف العميل'],
