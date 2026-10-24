@@ -862,7 +862,75 @@
     return welcomeText(o, url, null).replace(/[`*\\]/g, '') + '\n\n' + url;
   }
 
+  // المعالجة الجماعية: الحجز اللي محتاج قرار بيتعلّم «مستني قرارك» ويستنى (زي القديم بالظبط)
+  function markReview(p) {
+    if (!p || !p.candidate) return Promise.resolve();
+    return sdb().doc(p.bookingId).update({
+      needsAccountReview: true,
+      accountReviewReason: 'matched_existing_' + (p.candidate.how || 'saved'),
+      accountReviewCandidate: p.candidate.userId,
+      accountReviewAt: nowIso()
+    });
+  }
+  function skipWelcome(bookingId) { return sdb().doc(bookingId).update({ welcomeSkipped: true, welcomeSkippedAt: nowIso() }); }
+
+  // ==================== حجز يدوي ====================
+  // للي دفع برّه البوت: بيتعمل حجز (tempBookings) وطالب (individualStudents) بنفس الرقم، فيظهر في الطابور
+  // o: { name, whatsapp, email, courseName, price, plan: 'full'|'installment'|'grant', firstPayment, count, method, reference, note }
+  function createManualBooking(o) {
+    o = o || {};
+    var name = String(o.name || '').trim(), wa = String(o.whatsapp || '').trim(), email = String(o.email || '').trim();
+    if (!name) return Promise.reject(new Error('اكتب اسم العميل'));
+    if (!wa && !email) return Promise.reject(new Error('اكتب رقم الواتساب أو الإيميل'));
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Promise.reject(new Error('الإيميل مش مظبوط'));
+    if (!o.courseName) return Promise.reject(new Error('اختار الكورس'));
+    var plan = o.plan || 'full', price = Math.max(0, Math.round(Number(o.price) || 0));
+    if (plan !== 'grant' && !(price > 0)) return Promise.reject(new Error('اكتب سعر الكورس'));
+    var now = nowIso(), method = o.method || (plan === 'grant' ? 'منحة كاملة 100%' : ''), ref = o.reference || 'لا يوجد';
+    if (plan !== 'grant' && !method) return Promise.reject(new Error('اختار طريقة الدفع'));
+    var pd;
+    if (plan === 'grant') { price = 0; pd = { type: 'full_grant', totalAmount: 0, paidAmount: 0, remainingAmount: 0, fullyPaid: true, grantType: 'full' }; }
+    else if (plan === 'installment') {
+      var fp = Math.round(Number(o.firstPayment) || 0), n = Math.round(Number(o.count) || 0);
+      if (!(fp > 0)) return Promise.reject(new Error('اكتب الدفعة الأولى'));
+      if (fp >= price) return Promise.reject(new Error('الدفعة الأولى قد السعر أو أكتر — اختار «دفع كامل»'));
+      if (!(n >= 1 && n <= 18)) return Promise.reject(new Error('عدد الأقساط الباقية من ١ لـ ١٨'));
+      if (!window.BookingMoney) return Promise.reject(new Error('booking-money.js مش محمّل'));
+      var sch = BookingMoney.buildSchedule(price, fp, n, { method: method, reference: ref });
+      pd = { type: 'installment', totalAmount: price, paidAmount: fp, remainingAmount: price - fp, installmentSchedule: sch, totalInstallments: n + 1, paidInstallments: 1, nextDueDate: sch[1] ? sch[1].dueDate : null, fullyPaid: false };
+    } else pd = { type: 'full', totalAmount: price, paidAmount: price, remainingAmount: 0, fullyPaid: true, paidAt: now };
+    var priceText = price.toLocaleString('ar-EG') + ' ج.م';
+    var ref0 = db().collection('tempBookings').doc(), id = ref0.id;
+    var customer = { name: name, whatsapp: wa, phone: wa, email: email, notes: o.note || '' };
+    var bookingDoc = {
+      customer: customer, courseName: o.courseName, bookingType: plan === 'grant' ? 'grant_request' : 'direct', source: 'manual',
+      pricing: { basePrice: priceText, basePriceNumber: price, finalPrice: priceText, finalPriceNumber: price },
+      status: 'transferred', paidAt: now, paymentMethod: method, paymentReference: ref,
+      paymentConfirmed: true, paymentConfirmedAt: now, paymentConfirmedBy: 'admin', paymentDetails: pd,
+      createdAt: now, lastUpdated: now, manualBooking: true, manualNote: o.note || '',
+      transferredAt: now, transferredTo: 'individualStudents', transferredToPage: 'bookings/creat&allow.html'
+    };
+    var studentDoc = Object.assign({}, bookingDoc, {
+      status: 'paid', bookingSource: 'manual', isGrant: plan === 'grant',
+      paymentInfo: {
+        status: 'paid', paymentConfirmed: true, paymentMethod: method, paymentReference: ref, paymentDetails: pd, paidAt: now,
+        paymentConfirmedAt: now, paymentConfirmedBy: 'admin', isInstallment: pd.type === 'installment', fullyPaid: !!pd.fullyPaid,
+        totalAmount: pd.totalAmount, paidAmount: pd.paidAmount, remainingAmount: pd.remainingAmount,
+        installmentSchedule: pd.installmentSchedule || [], nextDueDate: pd.nextDueDate || null,
+        totalInstallments: pd.totalInstallments || 0, paidInstallments: pd.paidInstallments || 0
+      },
+      transferInfo: { transferredAt: now, transferredFrom: 'manual', transferredBy: 'admin', originalBookingId: id, displayBookingId: id.slice(-8).toUpperCase() },
+      accountStatus: 'pending_creation', accountCreated: false, userId: null, courseAssigned: false,
+      progress: { accountSetup: 0, courseAssignment: 0, firstPayment: 100, welcomeMessage: 0, totalProgress: 25 }
+    });
+    delete studentDoc.transferredTo; delete studentDoc.transferredToPage;
+    return ref0.set(bookingDoc).then(function () { return sdb().doc(id).set(studentDoc); }).then(function () { return id; });
+  }
+
   window.StudentSetup = {
+    markReview: markReview,
+    skipWelcome: skipWelcome,
+    createManualBooking: createManualBooking,
     UserStructure: UserStructure,
     EnrollmentManager: EnrollmentManager,
     normalize: normalize,
