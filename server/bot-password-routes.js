@@ -21,6 +21,7 @@ async function pwSecureOne(ref, u) {
         else {
             const rec = await upsertAuthUser(email, plain);
             await ref.update({ 'auth.authUid': rec.uid });
+            if (typeof clVaultStore === 'function') await clVaultStore(ref.id, plain, 'إنشاء حساب');   // نسخة في خزنة ملف العميل
         }
     }
     const upd = { 'auth.passwordSecuredAt': FV.serverTimestamp() };

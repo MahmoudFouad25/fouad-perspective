@@ -7,6 +7,7 @@
  *  - بعد السماح: الكورس بيتقفل، بس عمره ما بيتمسح من الحساب (بيفضل في السجل «كان مشترك»).
  *  - اللي مدتهم كانت خلصت قبل يوم التفعيل: مهلة ١٤ يوم من يوم التفعيل، علشان محدش يتفاجئ.
  *  - كورس متعلّم يدويًا expired أو cancelled: مقفول.
+ *  - كورس موقوف مؤقتًا (status.current = paused): مقفول، و paused: true، والمدة بتتمد لما يرجع (من ملف العميل).
  *  - من غير تاريخ نهاية، أو تاريخ ٢٠٩٩ («غير محدود»): مفتوح على طول.
  *
  * ملحوظة: ده قفل في الصفحات. القفل الكامل على قاعدة البيانات بييجي مع مرحلة قفل users.
@@ -45,6 +46,9 @@
     var end = parseDay(endRaw);
     var base = { endDate: endRaw, endMs: end, lockAt: null, daysLeft: null, daysLocked: null, renewUrl: RENEW_URL };
 
+    if (cur === 'paused') {
+      return Object.assign(base, { state: 'locked', open: false, manual: true, paused: true, pausedAt: (e.status && e.status.pausedAt) || null });
+    }
     if (cur === 'cancelled' || cur === 'expired' || (e.status && e.status.isExpired === true)) {
       base.endMs = end; return Object.assign(base, { state: 'locked', open: false, manual: true, cancelled: cur === 'cancelled' });
     }
@@ -81,6 +85,7 @@
   function message(st) {
     if (st.state === 'ending') return 'فاضل ' + st.daysLeft.toLocaleString('ar-EG') + ' يوم على نهاية اشتراكك (' + fmt(st.endMs) + ')';
     if (st.state === 'grace') return 'مدة اشتراكك خلصت يوم ' + fmt(st.endMs) + '. الكورس هيفضل مفتوح لحد ' + fmt(st.lockAt) + '، جدّد علشان تكمل.';
+    if (st.paused) return 'اشتراكك في الكورس ده متوقف مؤقتًا، ومدتك محفوظة. لما يرجع هتكمّل من مكانك.';
     if (st.state === 'locked') return (st.manual && (st.cancelled || !st.endMs)) ? 'الاشتراك في الكورس ده متوقف.' : 'مدة اشتراكك خلصت يوم ' + fmt(st.endMs) + '.';
     return '';
   }
