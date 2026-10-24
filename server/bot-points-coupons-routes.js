@@ -19,7 +19,7 @@ function ptsParseDay(v) {
 function ptsEnrollmentOpen(e, now) {
     e = e || {};
     const cur = e.status && e.status.current;
-    if (cur === 'cancelled' || cur === 'expired' || (e.status && e.status.isExpired === true)) return false;
+    if (cur === 'cancelled' || cur === 'expired' || cur === 'paused' || (e.status && e.status.isExpired === true)) return false;
     const end = ptsParseDay((e.dates && e.dates.endDate) || e.endDate || null);
     if (!end || new Date(end).getUTCFullYear() >= 2099) return true;
     let lockAt = end + PTS_GRACE_DAYS * PTS_DAY;

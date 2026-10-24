@@ -396,6 +396,7 @@ function rcSmallTalk(t) {
 async function rcOnText(chatId, text) {
     try {
         if (!text || String(text).startsWith('/')) return false;
+        if (typeof clOnText === 'function' && await clOnText(chatId, text)) return true;   // «نسيت الباسورد» (موديول ملف العميل)
         const chatRef = db.collection('telegramChats').doc(String(chatId));
         const chatSnap = await chatRef.get();
         const cd = chatSnap.exists ? chatSnap.data() : {};
