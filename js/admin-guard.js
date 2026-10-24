@@ -94,8 +94,11 @@
         var db = firebase.firestore();
         // نسخة محلية من البيانات على جهاز الأدمن: لو رجعت لصفحة خلال نص ساعة، المتابعة الحية بتكمّل من مكانها
         // وبتقرا اللي اتغيّر بس، بدل ما تقرا كل حاجة من الأول. ولو المتصفح ما يدعمهاش، الصفحة بتشتغل عادي.
+        // النسخة المحلية بتتشارك بين كل تابات الموقع، فلازم كلهم يبقوا على نفس نسخة Firebase.
+        // نسختين مختلفتين على نفس النسخة المحلية بيعلّقوا القراية. علشان كده بتشتغل على FU_SDK بس (صفحات القسم كلها عليها).
+        var FU_SDK = '10.7.1';
         try {
-          if (!window.__fuCache && db.enablePersistence) {
+          if (!window.__fuCache && db.enablePersistence && firebase.SDK_VERSION === FU_SDK) {
             window.__fuCache = true;
             db.enablePersistence({ synchronizeTabs: true }).catch(function (e) { console.warn('النسخة المحلية مش متاحة:', e && e.code); });
           }
