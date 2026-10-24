@@ -4,6 +4,9 @@
    - FU.toast(نص, {type:'ok'|'bad'|'wait', undo:fn})   رسالة تأكيد تحت
    - FU.confirm(عنوان, نص, {ok:'امسح', danger:true})  → Promise<boolean>
    - FU.badge(حالة)  → HTML شارة حالة بالكلمة واللون
+   - FU.ask({ title, sub, body, ok, danger, wide, run(form), mount(dialog) }) → Promise<نتيجة run أو null>
+       نافذة فيها خانات. run بترمي Error برسالة → الرسالة بتظهر جوه النافذة وهي مفتوحة.
+       ok: false = نافذة عرض بس (زرار «اقفل»). الخانات: .fu-f / .fu-seg / .fu-sum / .fu-rows (css/fouad-ui.css)
    ما بيلمسش أي بيانات ولا Firebase.
    ===================================================================== */
 (function () {
@@ -99,6 +102,12 @@
     var t = document.createElement('div');
     t.className = 'fu-toast' + (opts.type && opts.type !== 'ok' ? ' fu-toast--' + opts.type : '');
     t.innerHTML = '<span>' + esc(text) + '</span>';
+    if (opts.action && typeof opts.action.fn === 'function') {
+      var ab = document.createElement('button');
+      ab.type = 'button'; ab.textContent = opts.action.label || 'افتح';
+      ab.onclick = function () { opts.action.fn(); t.remove(); };
+      t.appendChild(ab);
+    }
     if (typeof opts.undo === 'function') {
       var u = document.createElement('button');
       u.type = 'button'; u.textContent = 'تراجع';
@@ -106,7 +115,7 @@
       t.appendChild(u);
     }
     box.appendChild(t);
-    setTimeout(function () { t.remove(); }, opts.ms || (opts.undo ? 6000 : 3200));
+    setTimeout(function () { t.remove(); }, opts.ms || (opts.undo || opts.action ? 7000 : 3200));
     return t;
   }
 
@@ -135,6 +144,57 @@
     });
   }
 
+
+  // ---------- نافذة فيها خانات ----------
+  var askEl = null;
+  function askDialog() {
+    if (askEl) return askEl;
+    askEl = document.createElement('dialog');
+    askEl.className = 'fu-ask';
+    askEl.innerHTML = '<form method="dialog" novalidate>' +
+      '<div class="fu-ask__h"><div><h2></h2><p></p></div><button class="fu-ask__x" value="cancel" type="submit" formnovalidate aria-label="اقفل">×</button></div>' +
+      '<div class="fu-ask__b"></div>' +
+      '<div class="fu-ask__f"><span class="fu-ask__m" role="alert"></span><button class="fu-btn" value="cancel" type="submit" formnovalidate></button><button class="fu-btn fu-btn--primary" value="ok" type="submit"></button></div></form>';
+    document.body.appendChild(askEl);
+    return askEl;
+  }
+  function ask(o) {
+    o = o || {};
+    return new Promise(function (resolve) {
+      var d = askDialog(), f = d.querySelector('form');
+      if (typeof d.showModal !== 'function') { resolve(null); return; }
+      if (d.open) d.close();
+      f.onchange = f.oninput = f.onclick = null;
+      d.classList.toggle('fu-ask--wide', !!o.wide);
+      d.querySelector('h2').textContent = o.title || '';
+      var sub = d.querySelector('.fu-ask__h p'); sub.textContent = o.sub || ''; sub.hidden = !o.sub;
+      d.querySelector('.fu-ask__b').innerHTML = o.body || '';
+      var msg = d.querySelector('.fu-ask__m'); msg.textContent = '';
+      var okB = d.querySelector('[value=ok]'), noB = d.querySelector('.fu-ask__f [value=cancel]');
+      okB.textContent = o.ok || 'حفظ'; okB.hidden = o.ok === false; okB.disabled = false;
+      okB.className = 'fu-btn ' + (o.danger ? 'fu-btn--danger' : 'fu-btn--primary');
+      noB.textContent = o.ok === false ? (o.close || 'اقفل') : (o.cancel || 'رجوع');
+      var done = false;
+      function finish(v) { if (done) return; done = true; f.onsubmit = null; d.onclose = null; if (d.open) d.close(); resolve(v); }
+      f.onsubmit = async function (e) {
+        var btn = e.submitter && e.submitter.value;
+        if (btn !== 'ok') { finish(null); return; }
+        e.preventDefault();
+        okB.disabled = true; msg.textContent = '';
+        try { var v = o.run ? await o.run(f, d) : true; if (v === false) { okB.disabled = false; return; } finish(v === undefined ? true : v); }
+        catch (err) { msg.textContent = err && err.message ? err.message : String(err); okB.disabled = false; }
+      };
+      d.onclose = function () { if (!d.open) finish(null); };   // حدث القفل بتاع نافذة قبلها ممكن يوصل متأخر
+      d.showModal();
+      var first = d.querySelector('.fu-ask__b input:not([type=radio]):not([type=checkbox]):not([readonly]),.fu-ask__b select,.fu-ask__b textarea');
+      if (first) setTimeout(function () { first.focus(); }, 30);
+      if (o.mount) o.mount(d, f, function (v) { finish(v); });
+    });
+  }
+  // قيمة خانة من فورم النافذة
+  function val(f, name) { var x = f.elements[name]; if (!x) return ''; if (x.type === 'checkbox') return x.checked; return String(x.value == null ? '' : x.value).trim(); }
+  function fail(m) { throw new Error(m); }
+
   // ---------- شارة الحالة ----------
   var BADGES = {
     pending: ['wait', 'مستني رد'], awaiting_receipt: ['wait', 'مستني إيصال'], receipt_sent: ['info', 'الإيصال وصل'],
@@ -147,7 +207,7 @@
     return '<span class="fu-badge' + (b[0] ? ' fu-badge--' + b[0] : '') + '">' + esc(label || b[1]) + '</span>';
   }
 
-  window.FU = { toast: toast, confirm: confirmBox, badge: badge, esc: esc, toggleTheme: toggleTheme, root: root };
+  window.FU = { toast: toast, confirm: confirmBox, ask: ask, val: val, fail: fail, isOpen: function () { return !!(askEl && askEl.open) || !!document.querySelector('dialog.fu-dialog[open]'); }, badge: badge, esc: esc, toggleTheme: toggleTheme, root: root };
 
   function boot() { initTheme(); buildNav(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
