@@ -343,5 +343,19 @@ function userOf(w, exclude) { const ids = Object.keys(w.DATA.users || {}).filter
     ok(w.DATA.tempBookings[gid].paymentDetails.type === 'full_grant' && w.DATA.individualStudents[gid].pricing.finalPriceNumber === 0, 'حجز يدوي: منحة كاملة');
   }
 
+  // ١١) الحجز الأصلي بياخد رقم الحساب، والكورس بيتلاقى برقمه لو الاسم مختلف، والسجل
+  {
+    const seed = { courses: { 'ready-to-transform': { title: 'جاهز للتحول', whatsappGroupLink: 'https://chat.whatsapp.com/r', accessMonths: 4 } }, users: {},
+      tempBookings: { b11: { status: 'transferred' } }, individualStudents: { b11: booking({ courseName: 'جاهز للتحوّل', courseId: 'ready-to-transform' }) } };
+    const w = makeWorld(seed);
+    const c = context(w); vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'student-setup.js'), 'utf8'), c);
+    const r = await c.StudentSetup.run(await c.StudentSetup.plan('b11'), { welcome: true });
+    const u = w.DATA.users[r.userId];
+    ok(w.DATA.tempBookings.b11.userId === r.userId, 'الحجز الأصلي (tempBookings) اتربط برقم الحساب');
+    ok(u.enrollments[0].courseInfo.duration === '4 شهر' && w.DATA.individualStudents.b11.assignedCourseId === 'ready-to-transform', 'الكورس اتلقى برقمه رغم اختلاف التشكيل، ومدته من إعداده');
+    ok(w.sent[0].buttons.some(b => b[0].url === 'https://chat.whatsapp.com/r'), 'زرار جروب الواتساب طلع');
+    ok(w.DATA.client_log && w.DATA.client_log[r.userId].items.some(i => /تجهيز الطلاب/.test(i.text)), 'سطر في سجل العميل');
+  }
+
   console.log('\n' + n + ' اختبار عدّى');
 })().catch(e => { console.error('✗', e && e.stack || e); process.exit(1); });
