@@ -38,7 +38,8 @@ function makeWorld(seed) {
   Q.prototype.where = function (a, op, v) { return new Q(this.col, this.f.concat([[a, op, v]]), this.lim); };
   Q.prototype.limit = function (n) { return new Q(this.col, this.f, n); };
   Q.prototype.orderBy = function () { return this; };
-  Q.prototype.doc = function (id) { return new Ref(this.col, id); };
+  let autoId = 0;
+  Q.prototype.doc = function (id) { return new Ref(this.col, id || ('auto' + (++autoId))); };
   Q.prototype.get = function () {
     let ids = Object.keys(rows(this.col)).filter(id => this.f.every(([a, op, v]) => {
       const x = getp(rows(this.col)[id], a);
@@ -313,6 +314,33 @@ function userOf(w, exclude) { const ids = Object.keys(w.DATA.users || {}).filter
     ok(S.queueState({ paymentConfirmed: true, userId: 'u', courseAssigned: true, telegramChatId: 1, courseAssignedAt: old }) === 'done', 'ترحيب قديم ناقص (أكتر من أسبوعين): ما بيرجعش الطابور');
     ok(S.queueState({ paymentConfirmed: true, userId: 'u', courseAssigned: true, courseAssignedAt: new Date().toISOString() }) === 'done', 'من غير تليجرام: خلص');
     ok(S.queueState({ paymentConfirmed: true, userId: 'u', courseAssigned: true, telegramChatId: 1, courseAssignedAt: new Date().toISOString(), welcomeSkipped: true }) === 'done', '«مش محتاج ترحيب»: خلص');
+  }
+
+  // ١٠) حجز يدوي: بيدخل الطابور ويتجهّز زي أي حجز
+  {
+    const w = makeWorld({ courses: COURSES, users: {}, individualStudents: {} });
+    const c = context(w);
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'booking-money.js'), 'utf8'), c);
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'student-setup.js'), 'utf8'), c);
+    const S = c.StudentSetup;
+    let bad = 0;
+    for (const o of [{}, { name: 'س' }, { name: 'س', whatsapp: '010', courseName: 'المرايا', price: 0 }, { name: 'س', email: 'x@', courseName: 'المرايا', price: 10, method: 'cash' },
+      { name: 'س', whatsapp: '010', courseName: 'المرايا', price: 1000, plan: 'installment', firstPayment: 1000, count: 2, method: 'cash' }]) {
+      try { await S.createManualBooking(o); } catch (e) { bad++; }
+    }
+    ok(bad === 5 && !Object.keys(w.DATA.tempBookings || {}).length, 'حجز يدوي: البيانات الناقصة أو الغلط بتترفض ومش بيتكتب حاجة');
+    const id = await S.createManualBooking({ name: 'نور', whatsapp: '01011112222', courseName: 'المرايا', price: 1500, plan: 'installment', firstPayment: 500, count: 2, method: 'instapay' });
+    const tb = w.DATA.tempBookings[id], st = w.DATA.individualStudents[id];
+    ok(tb && st && tb.status === 'transferred' && st.paymentConfirmed === true, 'حجز يدوي: حجز وطالب بنفس الرقم');
+    ok(tb.paymentDetails.installmentSchedule.length === 3 && tb.paymentDetails.remainingAmount === 1000 && st.paymentInfo.isInstallment, 'حجز يدوي: جدول أقساط (دفعة + ٢)');
+    ok(S.queueState(st) === 'new', 'حجز يدوي: في الطابور «جديد»');
+    const p = await S.plan(id);
+    const r = await S.run(p, { welcome: true });
+    const u = w.DATA.users[r.userId];
+    ok(p.kind === 'create' && u.enrollments[0].payment.paidAmount === 500 && u.enrollments[0].payment.method === 'installment-3months', 'حجز يدوي: الحساب والاشتراك بالأقساط (٣ دفعات)');
+    ok(r.welcome && r.welcome.reason === 'no-telegram' && !w.sent.length, 'حجز يدوي من غير تليجرام: ما بيتبعتش ترحيب');
+    const gid = await S.createManualBooking({ name: 'منحة', email: 'g@g.com', courseName: 'سبورة', plan: 'grant' });
+    ok(w.DATA.tempBookings[gid].paymentDetails.type === 'full_grant' && w.DATA.individualStudents[gid].pricing.finalPriceNumber === 0, 'حجز يدوي: منحة كاملة');
   }
 
   console.log('\n' + n + ' اختبار عدّى');
