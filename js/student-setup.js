@@ -185,6 +185,17 @@
     }).then(function (c) { courseCache[courseName] = c; return c; })
       .catch(function (e) { console.error('الكورس', courseName, e); return null; });
   }
+  // الكورس بالاسم، ولو الاسم مش مطابق (تشكيل أو مسافة) بنجرب رقم الكورس اللي في الحجز
+  function getCourseFor(name, fallbackId) {
+    return getCourseByName(name).then(function (c) {
+      if (c || !fallbackId) return c;
+      return db().collection('courses').doc(String(fallbackId)).get().then(function (d) {
+        var x = d.exists ? { id: d.id, data: d.data() || {} } : null;
+        if (x) courseCache[name] = x;
+        return x;
+      }).catch(function () { return null; });
+    });
+  }
   // مدة الوصول الافتراضية للكورس: لو الكورس عليه accessMonths بنستعمله، غير كده ٦ شهور
   function courseMonths(course) {
     var m = course && course.data && Number(course.data.accessMonths || course.data.defaultAccessMonths);
@@ -566,6 +577,7 @@
 
     return account.then(function (a) {
       out.userId = a.userId; out.isNew = a.isNew; out.email = a.email || null;
+      linkTempBooking(id, a.userId);
       if (a.password) Object.defineProperty(out, 'password', { value: a.password, enumerable: false });   // للواتساب بس، ما بيتحفظش
       return assignModules(id, a.userId).then(function (r) {
         out.assigned = r;
@@ -577,7 +589,28 @@
       return sendWelcome({ student: s, userId: out.userId, isNew: out.isNew, email: out.email, password: out.password, modules: p.modules })
         .then(function () { out.welcome = { sent: true }; did('welcome', 'اتبعتله رسالة الترحيب'); })
         .catch(function (e) { out.welcome = { sent: false, reason: e.message }; did('welcome-fail', 'رسالة الترحيب ما اتبعتتش: ' + e.message); });
-    }).then(function () { return out; });
+    }).then(function () {
+      logClient(out.userId, (out.isNew ? 'اتعمله حساب واتجهّز' : decision === 'assign' ? 'اتخصصله الكورس' : 'اتربط بالحجز واتجهّز') + ' من «تجهيز الطلاب»' +
+        (out.assigned && out.assigned.count ? ': ' + out.assigned.modules.join('، ') : '') + (out.welcome && out.welcome.sent ? ' · اتبعتله الترحيب' : ''));
+      return out;
+    });
+  }
+
+  // الحجز الأصلي (tempBookings بنفس الرقم) ياخد رقم الحساب، علشان ملف العميل وعلامة «تجريبي» والبوت يلاقوه
+  function linkTempBooking(id, userId) {
+    var ref = db().collection('tempBookings').doc(id);
+    return ref.get().then(function (d) {
+      if (d.exists && (d.data() || {}).userId !== userId) return ref.update({ userId: userId, userLinkedAt: nowIso() });
+    }).catch(function (e) { console.warn('ربط الحجز بالحساب:', e && e.message); });
+  }
+  // سطر في سجل العميل (نفس سجل ملف العميل)
+  function logClient(userId, text) {
+    if (!userId) return Promise.resolve();
+    var by = 'admin';
+    try { by = (firebase.auth().currentUser || {}).email || 'admin'; } catch (e) {}
+    var item = { at: nowIso(), by: by, kind: 'course', text: text };
+    return db().collection('client_log').doc(userId).set({ userId: userId, items: FV().arrayUnion(item), updatedAt: FV().serverTimestamp() }, { merge: true })
+      .catch(function (e) { console.warn('السجل:', e && e.message); });
   }
 
   // حساب جديد — نفس خطوات autoCreateAccountAndAssignCourse القديمة
@@ -643,7 +676,7 @@
       student = Object.assign({ id: sd.id }, sd.data());
       modules = modulesOf(student);
       if (!modules.length) return { count: 0, modules: [] };
-      return Promise.all(modules.map(getCourseByName)).then(function (courses) {
+      return Promise.all(modules.map(function (n) { return getCourseFor(n, modules.length === 1 ? student.courseId : null); })).then(function (courses) {
         var userRef = udb().doc(userId), added = [], assignedIds = [];
         return db().runTransaction(function (tx) {
           added = []; assignedIds = [];
@@ -839,7 +872,7 @@
     var s = o.student || {}, chatId = s.telegramChatId;
     if (!chatId) return Promise.reject(new Error('الحجز ده مالوش تليجرام'));
     var mods = o.modules && o.modules.length ? o.modules : modulesOf(s);
-    return Promise.all([loginLink(o.userId, false), getCourseByName(mods[0])]).then(function (r) {
+    return Promise.all([loginLink(o.userId, false), getCourseFor(mods[0], mods.length === 1 ? s.courseId : null)]).then(function (r) {
       var url = r[0], wa = r[1] && r[1].data && r[1].data.whatsappGroupLink || null;
       var buttons = [[{ text: '⚡ ادخل المنصة', url: url }]];
       if (wa) buttons.push([{ text: '📱 جروب الواتساب', url: wa }]);
@@ -941,6 +974,8 @@
     findExisting: findExisting,
     forgetScan: forgetScan,
     getCourseByName: getCourseByName,
+    getCourseFor: getCourseFor,
+    linkTempBooking: linkTempBooking,
     listCourses: listCourses,
     courseMonths: courseMonths,
     addMonthsIso: addMonthsIso,
