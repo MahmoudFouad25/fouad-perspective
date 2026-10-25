@@ -673,6 +673,16 @@ function schedPreview(total,fp,ni){
   const sch=BookingMoney.buildSchedule(total,fp,ni);
   return '<table class="fu-tbl"><thead><tr><th>الدفعة</th><th>الميعاد</th><th>المبلغ</th></tr></thead><tbody>'+sch.map((it,i)=>'<tr><td>'+BookingMoney.instName(i)+'</td><td>'+(i===0?'النهارده':BookingMoney.formatDate(it.dueDate))+'</td><td class="num">'+egp(it.amount)+'</td></tr>').join('')+'</tbody></table>';
 }
+// الدفعة الأولى وعدد الأقساط الباقية من نص الخطة اللي العميل اختارها في الحجز
+//  «دفعة أولى ١٬٨٠٠ ج.م + 2 قسط × ١٬٣٥٠ ج.م» → ١٨٠٠ و٢ ·  «3 أقساط × 1500 ج» → ١٥٠٠ و٢
+function parsePlan(plan,total){
+  const t=String(plan||'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/(\d)[٬,](?=\d{3})/g,'$1');
+  let m=t.match(/(?:دفعة|الدفعة)\s*(?:أولى|الأولى|اولى|مقدمة)\s*:?\s*(\d+(?:\.\d+)?)/)||t.match(/مقدم\s*:?\s*(\d+(?:\.\d+)?)/);
+  const rest=t.match(/(\d+)\s*(?:قسط|أقساط|اقساط)\s*[×x*]\s*(\d+(?:\.\d+)?)/);
+  if(m){const fp=Math.round(parseFloat(m[1]));const n=rest?parseInt(rest[1]):0;if(fp>0&&(!total||fp<=total))return {fp:fp,n:n>=1&&n<=18?n:0};}
+  if(rest){const n=parseInt(rest[1]),each=Math.round(parseFloat(rest[2]));if(n>=2&&n<=19&&each>0&&(!total||each<total))return {fp:each,n:n-1};}
+  return {fp:0,n:0};
+}
 async function markAsPaid(bookingId){
   const doc=await dbGet('tempBookings',bookingId);
   if(!doc.exists){FU.toast('الحجز ده مش موجود',{type:'bad'});return false;}
@@ -681,11 +691,11 @@ async function markAsPaid(bookingId){
   const isInstallment=p.code==='installment'||(p.code&&p.code.startsWith('installment_'))||(p.method&&p.method.includes('قسط'))||!!p.installmentDetails||(booking.paymentDetails&&booking.paymentDetails.type==='installment');
   const plan=p.installmentDetails||p.installmentHTML||'';
   const total=(booking.pricing&&booking.pricing.finalPriceNumber)||extractNumberFromArabicText(booking.pricing&&booking.pricing.finalPrice)||0;
-  let guess=3;{const m=String(plan).match(/(\d+)/);if(m){const v=parseInt(m[1]);if(v>=1&&v<=18)guess=v;}}
+  const pp=parsePlan(plan,total);let guess=pp.n||3,fpGuess=pp.fp||'';
   const r=await FU.ask({
     title:isInstallment?'تسجيل الدفعة الأولى':'تسجيل الدفع الكامل',sub:nameOf(booking)+' · '+(booking.courseName||''),ok:isInstallment?'سجّل الدفعة الأولى':'سجّل الدفع',wide:isInstallment,
     body:'<div class="fu-figs"><div><span>سعر الكورس</span><b>'+(total?egp(total):esc(booking.pricing&&booking.pricing.finalPrice||'—'))+'</b></div><div><span>طريقة الدفع</span><b>'+(isInstallment?'أقساط':'دفعة واحدة')+'</b></div>'+(plan?'<div><span>الخطة اللي اختارها</span><b style="font-size:14px;white-space:normal">'+esc(plan)+'</b></div>':'')+'</div>'+
-      (isInstallment?'<div class="fu-2"><label class="fu-f"><span>الدفعة الأولى</span><input type="number" name="fp" min="1" inputmode="numeric" required placeholder="بالجنيه"></label><label class="fu-f"><span>عدد الأقساط الباقية</span><input type="number" name="ni" min="1" max="18" inputmode="numeric" value="'+guess+'" required></label></div><div id="mpPrev" style="margin-top:12px"></div>':'')+
+      (isInstallment?'<div class="fu-2"><label class="fu-f"><span>الدفعة الأولى</span><input type="number" name="fp" min="1" inputmode="numeric" required placeholder="بالجنيه" value="'+fpGuess+'">'+(pp.fp?'<small>من الخطة اللي اختارها. غيّره لو دفع مبلغ تاني.</small>':'')+'</label><label class="fu-f"><span>عدد الأقساط الباقية</span><input type="number" name="ni" min="1" max="18" inputmode="numeric" value="'+guess+'" required></label></div><div id="mpPrev" style="margin-top:12px"></div>':'')+
       methodSelect('m')+'<label class="fu-f"><span>رقم العملية <small style="display:inline;color:var(--fu-muted);font-weight:400">(اختياري)</small></span><input name="ref" dir="ltr" placeholder="TRX123456789"></label>',
     mount:(d,f)=>{if(!isInstallment)return;const u=()=>{const fp=parseFloat(FU.val(f,'fp'))||0,ni=parseInt(FU.val(f,'ni'))||0;d.querySelector('#mpPrev').innerHTML=fp>total&&total?'<div class="fu-sum bad">الدفعة الأولى أكبر من سعر الكورس.</div>':schedPreview(total,fp,Math.min(18,ni));};f.oninput=u;u();},
     run:async f=>{
