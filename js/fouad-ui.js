@@ -20,7 +20,7 @@
       links: [
         ['admin/bookings.html', 'الحجوزات'],
         ['admin/telegram-monitor.html', 'مكتب المتابعة'],
-        ['admin/bookings/creat&allow.html', 'الحجوزات الفردية'],
+        ['admin/bookings/creat&allow.html', 'تجهيز الطلاب'],
         ['admin/client.html', 'ملف العميل'],
         ['admin/renewals.html', 'التجديدات'],
         ['admin/coupon-settings.html', 'حد الكوبونات']
