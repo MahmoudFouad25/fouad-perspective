@@ -196,20 +196,44 @@
       }).catch(function () { return null; });
     });
   }
-  // مدة الوصول الافتراضية للكورس: لو الكورس عليه accessMonths بنستعمله، غير كده ٦ شهور
-  function courseMonths(course) {
-    var m = course && course.data && Number(course.data.accessMonths || course.data.defaultAccessMonths);
-    return m > 0 && m <= 120 ? Math.round(m) : DEFAULT_MONTHS;
+  // ==================== مدة الاشتراك لكل كورس ====================
+  // بتتظبط من صفحة «مدة الكورسات» (app_settings/course_durations): { months: { رقم الكورس: عدد الشهور أو 'unlimited' }, defaultMonths }
+  // الترتيب: إعداد الصفحة ← accessMonths على الكورس نفسه ← الافتراضي (٦ شهور)
+  var DUR_DOC = ['app_settings', 'course_durations'];
+  var durations = null, durLoad = null;
+  function loadDurations(force) {
+    if (durations && !force) return Promise.resolve(durations);
+    if (durLoad && !force) return durLoad;
+    durLoad = db().collection(DUR_DOC[0]).doc(DUR_DOC[1]).get().then(function (d) {
+      var x = (d.exists && d.data()) || {};
+      durations = { months: x.months || {}, defaultMonths: validMonths(x.defaultMonths) || DEFAULT_MONTHS };
+      return durations;
+    }).catch(function (e) { console.warn('مدة الكورسات:', e && e.message); durations = { months: {}, defaultMonths: DEFAULT_MONTHS }; return durations; });
+    return durLoad;
   }
+  function validMonths(v) {
+    if (v === 'unlimited') return 'unlimited';
+    var n = Number(v);
+    return n > 0 && n <= 120 ? Math.round(n) : null;
+  }
+  // المدة للكورس ده (لازم loadDurations تكون اتنادت قبلها علشان إعداد الصفحة يدخل)
+  function courseMonths(course) {
+    var d = durations || { months: {}, defaultMonths: DEFAULT_MONTHS };
+    var set = course && course.id && validMonths(d.months[course.id]);
+    if (set) return set;
+    var own = course && course.data && validMonths(course.data.accessMonths || course.data.defaultAccessMonths);
+    return own || d.defaultMonths;
+  }
+  function monthsText(m) { return m === 'unlimited' ? 'مفتوح على طول' : m + ' شهر'; }
   var coursesList = null;
   function listCourses() {
     if (coursesList) return Promise.resolve(coursesList);
-    return db().collection('courses').get().then(function (s) {
+    return loadDurations().then(function () { return db().collection('courses').get(); }).then(function (s) {
       var out = [];
       s.forEach(function (d) {
         var x = d.data() || {};
         if (x.isActive === false) return;
-        out.push({ id: d.id, title: x.title || 'كورس من غير اسم', price: Number(x.pricing && x.pricing.basePrice) || 0, months: courseMonths({ data: x }), whatsappGroupLink: x.whatsappGroupLink || null });
+        out.push({ id: d.id, title: x.title || 'كورس من غير اسم', price: Number(x.pricing && x.pricing.basePrice) || 0, months: courseMonths({ id: d.id, data: x }), whatsappGroupLink: x.whatsappGroupLink || null });
         courseCache[x.title] = { id: d.id, data: x };
       });
       out.sort(function (a, b) { return a.title.localeCompare(b.title, 'ar'); });
@@ -676,7 +700,8 @@
       student = Object.assign({ id: sd.id }, sd.data());
       modules = modulesOf(student);
       if (!modules.length) return { count: 0, modules: [] };
-      return Promise.all(modules.map(function (n) { return getCourseFor(n, modules.length === 1 ? student.courseId : null); })).then(function (courses) {
+      return Promise.all([loadDurations()].concat(modules.map(function (n) { return getCourseFor(n, modules.length === 1 ? student.courseId : null); }))).then(function (all) {
+        var courses = all.slice(1);
         var userRef = udb().doc(userId), added = [], assignedIds = [];
         return db().runTransaction(function (tx) {
           added = []; assignedIds = [];
@@ -696,7 +721,7 @@
                 ms.paymentInfo = Object.assign({}, student.paymentInfo || {}, { isInstallment: false, paidAmount: 0, remainingAmount: 0, totalAmount: 0 });
               }
               var en = EnrollmentManager.createEnrollment(ms, {
-                enrollmentType: 'new', startDate: start, endDate: addMonthsIso(start, months), duration: months + ' شهر',
+                enrollmentType: 'new', startDate: start, endDate: addMonthsIso(start, months), duration: months === 'unlimited' ? 'غير محدود' : months + ' شهر',
                 usePoints: false, pointsToUse: 0, notes: 'تخصيص تلقائي عبر نظام الأتمتة' + (primary ? '' : ' — مشمول ضمن الباقة'),
                 isRenewal: false, automatedAssignment: true
               });
@@ -978,6 +1003,10 @@
     linkTempBooking: linkTempBooking,
     listCourses: listCourses,
     courseMonths: courseMonths,
+    loadDurations: loadDurations,
+    MONTH_CHOICES: [['1', 'شهر'], ['2', 'شهرين'], ['3', '٣ شهور'], ['4', '٤ شهور'], ['6', '٦ شهور'], ['9', '٩ شهور'], ['12', 'سنة'], ['18', 'سنة ونص'], ['24', 'سنتين'], ['unlimited', 'مفتوح على طول']],
+    monthsText: monthsText,
+    validMonths: validMonths,
     addMonthsIso: addMonthsIso,
     addDualPoints: addDualPoints,
     plan: plan,

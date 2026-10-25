@@ -357,5 +357,19 @@ function userOf(w, exclude) { const ids = Object.keys(w.DATA.users || {}).filter
     ok(w.DATA.client_log && w.DATA.client_log[r.userId].items.some(i => /تجهيز الطلاب/.test(i.text)), 'سطر في سجل العميل');
   }
 
+  // ١٢) مدة الكورس من صفحة «مدة الكورسات»: إعداد الصفحة ← إعداد الكورس ← الافتراضي
+  {
+    const seed = { courses: { k1: { title: 'أ' }, k2: { title: 'ب', accessMonths: 3 }, k3: { title: 'ج', accessMonths: 3 } }, users: {},
+      app_settings: { course_durations: { months: { k3: 'unlimited' }, defaultMonths: 9 } },
+      individualStudents: { d1: booking({ courseName: 'أ', courseModules: ['أ', 'ب', 'ج'] }) } };
+    const w = makeWorld(seed);
+    const c = context(w); vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'student-setup.js'), 'utf8'), c);
+    const r = await c.StudentSetup.run(await c.StudentSetup.plan('d1'), { welcome: false });
+    const ens = w.DATA.users[r.userId].enrollments;
+    ok(ens[0].courseInfo.duration === '9 شهر', 'كورس مالوش مدة: الافتراضي من الصفحة (٩)');
+    ok(ens[1].courseInfo.duration === '3 شهر', 'كورس عليه accessMonths ومالوش في الصفحة: ٣');
+    ok(ens[2].courseInfo.duration === 'غير محدود' && ens[2].dates.endDate === '2099-12-31', 'إعداد الصفحة بيغلب: مفتوح على طول');
+  }
+
   console.log('\n' + n + ' اختبار عدّى');
 })().catch(e => { console.error('✗', e && e.stack || e); process.exit(1); });

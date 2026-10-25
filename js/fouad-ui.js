@@ -23,7 +23,8 @@
         ['admin/bookings/creat&allow.html', 'تجهيز الطلاب'],
         ['admin/client.html', 'ملف العميل'],
         ['admin/renewals.html', 'التجديدات'],
-        ['admin/coupon-settings.html', 'حد الكوبونات']
+        ['admin/coupon-settings.html', 'حد الكوبونات'],
+        ['admin/course-durations.html', 'مدة الكورسات']
       ]
     }
   };
