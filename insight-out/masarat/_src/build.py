@@ -66,6 +66,7 @@ def hand(state, label=''):
     return '<svg class="hand" viewBox="0 0 300 230">%s</svg>%s' % (body, lab)
 
 SVGS = {
+  'rock': '<svg class="draw" viewBox="0 0 520 330" width="440" height="280"><path d="M120,150 C118,112 160,92 205,96 C228,74 300,74 322,96 C370,94 404,118 400,150 C398,176 360,186 260,186 C160,186 122,176 120,150 Z" fill="rgba(140,120,100,.14)" stroke="#8A7A66" stroke-width="5" style="--len:900"/><path d="M200,120 L232,142 M300,112 L284,140" stroke="#8A7A66" stroke-width="3" stroke-linecap="round" style="--len:60"/><path d="M38,174 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M58,205 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M90,232 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M131,254 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M180,269 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M233,277 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M287,277 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M340,269 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M389,254 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M430,232 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M462,205 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/><path d="M482,174 c6,10 11,16 11,22 a11,11 0 0 1 -22,0 c0,-6 5,-12 11,-22 z" fill="#8CC0CC" stroke="#5E9AA8" stroke-width="3" style="--len:120"/></svg>',
   'chest': '<svg class="chest" viewBox="0 0 420 420"><circle class="ring" cx="210" cy="210" r="150"/></svg>',
   'chest-tight': '<svg class="chest tight" viewBox="0 0 420 420"><circle class="ring" cx="210" cy="210" r="150"/></svg>',
   'earth': '<svg class="draw" viewBox="0 0 400 400" width="360" height="360"><circle cx="200" cy="200" r="150" fill="none" stroke="#B5842E" stroke-width="5" style="--len:960"/><path d="M70,170 C130,150 160,190 220,170 C270,152 300,180 335,165" fill="none" stroke="#B5842E" stroke-width="4" style="--len:320"/><path d="M80,250 C140,236 190,262 250,246 C290,236 310,250 325,246" fill="none" stroke="#B5842E" stroke-width="4" style="--len:300"/></svg>',
@@ -147,6 +148,12 @@ def element(line):
         add_item(hand(st, lab), 'handbox')
     elif typ == 'svg':
         add_item(SVGS[rest], 'keep')
+    elif typ == 'mirrors':
+        n = int(parts[0]); lab = parts[1] if len(parts) > 1 else ''
+        h = ''.join('<i class="%s"></i>' % ('now on' if k == n else ('on' if k < n else ('later' if k > 5 else ''))) for k in range(1, 8))
+        add_item('<div class="mirs">%s%s</div>' % (h, ('<b>%s</b>' % lab) if lab else ''), 'keep')
+    elif typ == 'mirror':
+        add_item('<div class="mirror">%s</div>' % rest, 'keep')
     elif typ == 'light':
         add_item('', 'light keep')
     elif typ == 'cdn':
