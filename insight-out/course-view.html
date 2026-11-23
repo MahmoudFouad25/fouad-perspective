@@ -5631,6 +5631,13 @@ window.formatDateGregorian = function(date) {
    
     let currentLessonIndex = null;
     let allLessons = [];
+    // 🔑 مفتاح إكمال ثابت لكل درس: محتوى المكتبة بالـ ID بتاعه، والفيديو المباشر بـ id الدرس
+    function lessonKey(l) {
+        if (!l) return null;
+        if (l.libraryContentId) return l.libraryContentId;
+        return l.id ? 'direct_' + l.id : null;
+    }
+    window.lessonKey = lessonKey;
     let allModules = [];
     let enrollmentData = null;
 let userJourneyPoints = 0;
@@ -5912,7 +5919,7 @@ async function loadAllData() {
             // تحديث indexes من IDs (للتوافق)
             if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0 && allLessons && allLessons.length > 0) {
                 const syncedIndexes = userProgress.completedLessonsIds
-                    .map(id => allLessons.findIndex(l => l.libraryContentId === id))
+                    .map(id => allLessons.findIndex(l => lessonKey(l) === id))
                     .filter(idx => idx >= 0);
                 userProgress.completedLessons = syncedIndexes;
                 console.log('🔄 Sync indexes:', syncedIndexes.length);
@@ -5920,7 +5927,7 @@ async function loadAllData() {
             
             // تنضيف IDs لدروس محذوفة (فقط لو allLessons فيها دروس)
             if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0 && allLessons && allLessons.length > 0) {
-                const validIds = new Set(allLessons.map(l => l.libraryContentId).filter(id => id));
+                const validIds = new Set(allLessons.map(l => lessonKey(l)).filter(id => id));
                 
                 // فقط لو فيه IDs صالحة
                 if (validIds.size > 0) {
@@ -6277,6 +6284,17 @@ async function loadLessonPoints() {
             }
         }
         
+        // 🎬 نقاط الفيديوهات المباشرة (اختيارية — مكتوبة على الدرس نفسه)
+        allLessons.forEach(lesson => {
+            if (lesson.libraryContentId) return;
+            const pts = Math.max(0, Number(lesson.points) || 0);
+            const key = lessonKey(lesson);
+            if (pts > 0 && key) {
+                lessonPoints[key] = pts;
+                courseTotalPoints += pts;
+            }
+        });
+
         // حساب نقاط الوحدات
         calculateModulesPoints();
         
@@ -6365,6 +6383,16 @@ function calculateModulesPoints() {
         );
         
         moduleLessons.forEach(lesson => {
+    // 🎬 فيديو مباشر بنقاط اختيارية
+    if (!lesson.libraryContentId && Number(lesson.points) > 0) {
+        const pts = Number(lesson.points);
+        const key = lessonKey(lesson);
+        const done = !!(key && userProgress.completedLessonsIds && userProgress.completedLessonsIds.includes(key));
+        modulePoints.total += pts;
+        if (done) modulePoints.earned += pts;
+        modulePoints.lessons.push({ title: lesson.title, points: pts, completed: done });
+        return;
+    }
     if (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
         const content = courseContentDetails[lesson.libraryContentId];
         let lessonPoints = 0;
@@ -6387,8 +6415,8 @@ function calculateModulesPoints() {
 let lessonCompleted = false;
 
 // أولاً: فحص بنظام الـ IDs
-if (userProgress.completedLessonsIds && lesson.libraryContentId) {
-    lessonCompleted = userProgress.completedLessonsIds.includes(lesson.libraryContentId);
+if (userProgress.completedLessonsIds && lessonKey(lesson)) {
+    lessonCompleted = userProgress.completedLessonsIds.includes(lessonKey(lesson));
 }
 
 // ثانياً: Fallback للـ indexes (للمستخدمين القدامى)
@@ -7679,8 +7707,8 @@ function renderModuleLessons(lessons) {
 let isCompleted = false;
 
 // أولاً: فحص بنظام الـ IDs (النظام الجديد)
-if (lesson.libraryContentId && userProgress.completedLessonsIds) {
-    isCompleted = userProgress.completedLessonsIds.includes(lesson.libraryContentId);
+if (lessonKey(lesson) && userProgress.completedLessonsIds) {
+    isCompleted = userProgress.completedLessonsIds.includes(lessonKey(lesson));
 }
 
 // ثانياً: Fallback للـ indexes (للمستخدمين اللي لسه مفتحوش الصفحة)
@@ -7763,7 +7791,13 @@ if (lesson.libraryContentType === 'pillar-exercise' ||
 
         // 🔵 حساب النقاط حسب نوع المحتوى
         let lessonPointsHTML = '';
-        if (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
+        if (!lesson.libraryContentId && Number(lesson.points) > 0) {
+            lessonPointsHTML = `
+                <span style="background: linear-gradient(135deg, rgba(87, 210, 196, 0.15), rgba(67, 191, 174, 0.1)); padding: 4px 12px; border-radius: 15px; border: 2px solid rgba(87, 210, 196, 0.4); display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #57D2C4; font-size: 0.85rem;">
+                    🏆 ${Number(lesson.points)} نقطة
+                </span>
+            `;
+        } else if (lesson.libraryContentId && courseContentDetails[lesson.libraryContentId]) {
             const content = courseContentDetails[lesson.libraryContentId];
             
             if (content.pointsSystem) {
@@ -8355,6 +8389,10 @@ async function startVideoJourney() {
         const lesson = allLessons[currentLessonIndex];
         if (lesson.libraryContentId) {
             await displayLibraryContent(lesson);
+        } else if (lesson.type === 'text') {
+            displayTextContent(lesson);
+        } else if (lesson.type === 'file') {
+            displayFileContent(lesson);
         } else {
             displayVideoContent(lesson);
         }
@@ -11091,7 +11129,11 @@ document.addEventListener('DOMContentLoaded', function() {
            
            if (lesson.videoUrl) {
                const videoHtml = createVideoEmbed(lesson.videoUrl);
-               container.innerHTML = videoHtml;
+               const desc = (lesson.description || '').trim();
+               const safeDesc = desc.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+               container.innerHTML = videoHtml + (desc ? `
+                   <div style="background: rgba(87, 210, 196, 0.1); border: 1px solid rgba(87, 210, 196, 0.3); border-radius: 12px; padding: 18px 20px; color: #f1f5f9; line-height: 1.9; font-size: 1.05rem; white-space: pre-line;">${safeDesc}</div>
+               ` : '');
            } else {
                container.innerHTML = `
                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: var(--dark-bg);">
@@ -11608,12 +11650,17 @@ async function addPointsToPillar(pillarKey, points, details) {
      function createVideoEmbed(url) {
     let iframeCode = '';
     
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    const driveMatch = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=)([\w-]+)/);
+    if (driveMatch) {
+        iframeCode = `<iframe src="https://drive.google.com/file/d/${driveMatch[1]}/preview" allow="autoplay" allowfullscreen></iframe>`;
+    } else if (url.includes('youtube.com') || url.includes('youtu.be')) {
         const videoId = extractYouTubeId(url);
         iframeCode = `<iframe src="https://www.youtube.com/embed/${videoId}" allowfullscreen></iframe>`;
     } else if (url.includes('vimeo.com')) {
-        const videoId = url.split('/').pop();
-        iframeCode = `<iframe src="https://player.vimeo.com/video/${videoId}" allowfullscreen></iframe>`;
+        const vm = url.match(/vimeo\.com\/(?:video\/)?(\d+)(?:\/(\w+))?/);
+        const videoId = vm ? vm[1] : url.split('/').pop();
+        const hash = vm && vm[2] ? `?h=${vm[2]}` : '';
+        iframeCode = `<iframe src="https://player.vimeo.com/video/${videoId}${hash}" allowfullscreen></iframe>`;
     } else {
         return `<video controls style="width: 100%; max-width: 100%; height: auto; border-radius: 12px;"><source src="${url}" type="video/mp4">متصفحك لا يدعم تشغيل الفيديو</video>`;
     }
@@ -11645,7 +11692,7 @@ async function addPointsToPillar(pillarKey, points, details) {
 
        // Extract YouTube ID
        function extractYouTubeId(url) {
-           const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+           const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
            const match = url.match(regex);
            return match ? match[1] : '';
        }
@@ -11664,8 +11711,8 @@ function updateNavigationButtons() {
     let isCompleted = false;
     
     // أولاً: فحص بنظام الـ IDs (النظام الجديد)
-    if (currentLesson?.libraryContentId && userProgress.completedLessonsIds) {
-        isCompleted = userProgress.completedLessonsIds.includes(currentLesson.libraryContentId);
+    if (lessonKey(currentLesson) && userProgress.completedLessonsIds) {
+        isCompleted = userProgress.completedLessonsIds.includes(lessonKey(currentLesson));
     }
     // ثانياً: Fallback للـ indexes (للمستخدمين القدامى)
     else if (userProgress.completedLessons && !userProgress.completedLessonsIds) {
@@ -11731,7 +11778,7 @@ let lastCompletedLesson = null;
 if (userProgress.completedLessonsIds && userProgress.completedLessonsIds.length > 0) {
     // إيجاد آخر درس مكتمل بناءً على الترتيب الحالي
     for (let i = allLessons.length - 1; i >= 0; i--) {
-        if (userProgress.completedLessonsIds.includes(allLessons[i].libraryContentId)) {
+        if (userProgress.completedLessonsIds.includes(lessonKey(allLessons[i]))) {
             lastCompletedLesson = allLessons[i];
             break;
         }
@@ -11807,14 +11854,15 @@ async function markLessonCompleted(lessonIndex) {
         const completedLessonsIds = userProgress.completedLessonsIds || [];
         
         // ✅ فحص إذا كان مكتمل بالفعل (بالـ ID فقط)
-if (lesson.libraryContentId && completedLessonsIds.includes(lesson.libraryContentId)) {
+const completionKey = lessonKey(lesson);
+if (completionKey && completedLessonsIds.includes(completionKey)) {
     console.log('⚠️ الدرس مكتمل بالفعل');
     return;
 }
         
         // ✅ إضافة بالـ ID (الأساس)
-if (lesson.libraryContentId) {
-    completedLessonsIds.push(lesson.libraryContentId);
+if (completionKey) {
+    completedLessonsIds.push(completionKey);
 }
 
 // إضافة بالـ index (للتوافق فقط - سيتم تحديثه لاحقاً)
@@ -11834,13 +11882,16 @@ completedLessons.push(lessonIndex);
             earnedBadges = await checkLessonBadges(lesson, completedLessons.length);
         }
         
-        const pointsToAward = pointsDetail?.totalPossible || 0;
+        // الفيديو المباشر: نقاطه اختيارية ومكتوبة على الدرس نفسه (لو مفيش = صفر)
+        const pointsToAward = lesson.libraryContentId
+            ? (pointsDetail?.totalPossible || 0)
+            : Math.max(0, Number(lesson.points) || 0);
         
         // تحديث البيانات
         // إنشاء سجل تفصيلي للدرس
         const detailedLessonRecord = {
             lessonIndex: lessonIndex,
-            lessonId: lesson.libraryContentId,  // 🆕 إضافة الـ ID
+            lessonId: completionKey || null,  // 🆕 إضافة الـ ID
             lessonTitle: lesson.title,
             moduleIndex: lesson.moduleIndex,
             moduleName: lesson.moduleName,

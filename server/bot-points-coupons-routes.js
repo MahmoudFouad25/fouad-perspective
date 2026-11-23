@@ -31,14 +31,22 @@ function ptsFlatLessons(modules) {
     const out = [];
     (Array.isArray(modules) ? modules : []).forEach((m, mi) => {
         (Array.isArray(m && m.lessons) ? m.lessons : []).forEach((l, li) => {
-            out.push({ title: (l && l.title) || '', contentId: (l && l.libraryContentId) || null, moduleIndex: mi, lessonIndex: li });
+            out.push({
+                title: (l && l.title) || '',
+                contentId: (l && l.libraryContentId) || null,
+                lessonId: (l && l.id) || null,
+                // نقاط الفيديو المباشر (اختيارية، الأدمن بيكتبها على الدرس نفسه في الكورس)
+                directPoints: (l && !l.libraryContentId) ? Number(l.points) || 0 : 0,
+                moduleIndex: mi, lessonIndex: li
+            });
         });
     });
     return out;
 }
 
 function ptsLedgerId(userId, courseId, lesson, index) {
-    const part = lesson.contentId ? 'c_' + lesson.contentId : 'i_' + index;
+    const part = lesson.contentId ? 'c_' + lesson.contentId
+        : (lesson.lessonId && lesson.directPoints > 0 ? 'd_' + lesson.lessonId : 'i_' + index);
     return (userId + '__' + courseId + '__' + part).replace(/\//g, '_').slice(0, 700);
 }
 
@@ -73,7 +81,8 @@ app.post('/points/lesson', requireClient, async (req, res) => {
             const c = await db.collection('courseContentLibrary').doc(lesson.contentId).get();
             ps = c.exists ? (c.data().pointsSystem || null) : null;
         }
-        const points = Math.max(0, Math.min(100000, Math.round(Number((ps && ps.totalPossible) || 0))));
+        const raw = lesson.contentId ? ((ps && ps.totalPossible) || 0) : lesson.directPoints;
+        const points = Math.max(0, Math.min(100000, Math.round(Number(raw) || 0)));
 
         const ledgerRef = db.collection('points_ledger').doc(ptsLedgerId(req.client.userId, courseId, lesson, idx));
         let out;
