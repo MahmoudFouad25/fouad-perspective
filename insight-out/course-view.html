@@ -3509,7 +3509,7 @@
             <!-- كارت المقياس: بيتفتح مع بداية المرحلة، وبيفتح البوابة (three-axes/course-view.html). ولو خلّص، بيفتح التقرير. -->
             <div class="io-scale" id="ioPathsScale" data-state="locked">
               <div class="io-scale-ic"><i class="fas fa-compass"></i></div>
-              <div class="io-scale-body"><b>مقياس مسارات الطاقة</b><span id="ioPathsScaleTxt">بيتفتح الاثنين ١٧ أغسطس، مع بداية المرحلة.</span></div>
+              <div class="io-scale-body"><b>مقياس مسارات الطاقة</b><span id="ioPathsScaleTxt">بيتفتح مع بداية المرحلة.</span></div>
               <a class="io-scale-btn" id="ioPathsScaleBtn" href="../three-axes/course-view.html">بيتفتح قريب</a>
             </div>
           </div>
@@ -3632,7 +3632,7 @@
     <div class="io-wrap">
       <div class="io-section-head io-reveal">
         <h2>جدولك من أول يوم لآخر يوم</h2>
-        <p>كل محطة وميعادها. الجدول بيتعلّم عليه أوتوماتيك: اللي عدّى، واللي إنت فيه دلوقتي.</p>
+        <p>كل محطة وميعادها. الجدول بيتعلّم عليه أوتوماتيك أول ما تسجيل المحطة يترفع: اللي عدّى، واللي إنت فيه دلوقتي.</p>
       </div>
 
       <div class="io-tl io-reveal" id="ioTimeline">
@@ -3750,7 +3750,8 @@
 <script>
 (function(){
   'use strict';
-  /* مراحل الرحلة — الحالة تُحسب تلقائيًا من تاريخ اليوم */
+  /* مراحل الرحلة — الحالة بتتحسب من الفيديوهات المرفوعة والمفعّلة في وحدات الأدمن، مش من التاريخ.
+     (start/end هنا للعرض والمرجع بس — مبقوش بيأثروا على الحالة) */
   var STAGES=[
     {id:'opening',    start:'2026-07-22', end:'2026-07-22', name:'اللقاء الافتتاحي'},
     {id:'mirrors',    start:'2026-07-26', end:'2026-08-14', name:'المرايا السبع'},
@@ -3764,12 +3765,14 @@
   window.IO_STAGES=STAGES;
   /* كارت مقياس مسارات الطاقة: الحالة من تاريخ المرحلة، وبعدين من وثيقة العميل (لو خلّص ← «تقريرك جاهز»).
      والكلام بصيغة العميل لو اختارها (users/{id}.personalInfo.address). */
+  var scaleDone=false;
   function paintScale(){
     var box=document.getElementById('ioPathsScale'); if(!box)return;
     var txt=document.getElementById('ioPathsScaleTxt'), btn=document.getElementById('ioPathsScaleBtn');
-    var now=new Date(), st=null, fem=false, doc=null;
-    for(var i=0;i<STAGES.length;i++){if(STAGES[i].id==='paths')st=STAGES[i];}
-    if(!st||now<new Date(st.start+'T00:00:00'))return;   // لسه: يفضل مقفول
+    var fem=false, doc=null;
+    if(scaleDone)return;
+    if(ioStatus('paths')==='upcoming')return;   // لسه موصلناش للمرحلة: يفضل مقفول
+    scaleDone=true;
     var GATE='../three-axes/course-view.html', REPORT='../three-axes/v2/app/report.html';
     function G(m,f){return fem?f:m;}
     function draw(){
@@ -3798,24 +3801,80 @@
     })();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',paintScale); else paintScale();
-  var START=new Date('2026-07-22T00:00:00'), END=new Date('2026-11-16T23:59:59');
   var AR=['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
   function toAr(n){return String(n).replace(/\d/g,function(d){return AR[d];});}
-  function dS(s){return new Date(s+'T00:00:00');}
-  function dE(s){return new Date(s+'T23:59:59');}
-  function status(st,now){ if(now>dE(st.end))return 'done'; if(now>=dS(st.start))return 'active'; return 'upcoming';}
-  var LBL={done:'تمّت ✓',active:'جارية دلوقتي',upcoming:'قادمة'};
-  window.ioStageStatus=function(id){var st=null;for(var i=0;i<STAGES.length;i++){if(STAGES[i].id===id)st=STAGES[i];}
-    return st?status(st,new Date()):'upcoming';};
+  /* ══ الحالة من الفيديوهات ══
+     المحطة «تمّت» لو وحدتها في الأدمن فيها فيديو مرفوع ومفعّل،
+     أو لو أي محطة بعدها اتعلّمت إنها تمّت (عشان الجلسات الفردية اللي مالهاش فيديو متفضلش معلّقة).
+     أول محطة مش متمّة = «إنت هنا»، والباقي «قادمة». */
+  var HAS_VIDEO={};          // id -> true لو الوحدة فيها فيديو مفعّل
+  var LIB={};                // cache: libraryContentId -> true/false (فيديو ليه رابط)
+  function computeStatus(){
+    var res={}, i, lastDone=-1;
+    for(i=0;i<STAGES.length;i++){ if(HAS_VIDEO[STAGES[i].id]) lastDone=i; }
+    var cur=-1;
+    for(i=0;i<STAGES.length;i++){
+      if(i<=lastDone){ res[STAGES[i].id]='done'; continue; }
+      if(cur<0){ cur=i; res[STAGES[i].id]='active'; }
+      else res[STAGES[i].id]='upcoming';
+    }
+    return res;
+  }
+  var STATUS=computeStatus();
+  function ioStatus(id){ return (STATUS&&STATUS[id])||'upcoming'; }
+  function status(st){ return ioStatus(st.id); }
+  var LBL={done:'تمّت ✓',active:'إنت هنا',upcoming:'قادمة'};
+  window.ioStageStatus=ioStatus;
+
+  function nonEmpty(u){ return typeof u==='string' && u.trim().length>0; }
+  function lessonDirectVideo(l){
+    return nonEmpty(l.videoUrl) || (l.videoData && nonEmpty(l.videoData.url));
+  }
+  /* بيقرا وحدات الكورس ويحدّد فين فيه فيديو مفعّل */
+  function refreshFromVideos(){
+    var cd=(typeof courseData!=='undefined')?courseData:null;
+    var map=window.IO_STATION_MODULES;
+    if(!cd||!cd.modules||!map)return;
+    var need=[], perStage={}, ids=Object.keys(map), i, j;
+    for(i=0;i<ids.length;i++){
+      var num=map[ids[i]]; var mod=(num>0)?cd.modules[num-1]:null;
+      var ls=(mod&&mod.lessons)||[]; var arr=[];
+      for(j=0;j<ls.length;j++){
+        var l=ls[j]; if(!l||l.isEnabled===false)continue;      // لازم يكون مفعّل
+        if(lessonDirectVideo(l)){ arr.push(true); continue; }
+        if(l.libraryContentId){ arr.push(l.libraryContentId); if(!(l.libraryContentId in LIB)&&need.indexOf(l.libraryContentId)<0)need.push(l.libraryContentId); }
+      }
+      perStage[ids[i]]=arr;
+    }
+    function apply(){
+      HAS_VIDEO={};
+      for(var k in perStage){
+        var a=perStage[k];
+        for(var m=0;m<a.length;m++){ if(a[m]===true||LIB[a[m]]===true){HAS_VIDEO[k]=true;break;} }
+      }
+      STATUS=computeStatus();
+      try{paint();paintScale();if(window.ioOnStatus)window.ioOnStatus();}catch(e){console.error('حالة الرحلة:',e);}
+    }
+    apply();
+    if(!need.length||typeof firebase==='undefined')return;
+    var fs; try{fs=firebase.firestore();}catch(e){return;}
+    Promise.all(need.map(function(id){
+      return fs.collection('courseContentLibrary').doc(id).get().then(function(d){
+        var c=d.exists?d.data():null;
+        LIB[id]=!!(c && (nonEmpty(c.videoData&&c.videoData.url) || nonEmpty(c.videoUrl)));
+      }).catch(function(){ LIB[id]=false; });
+    })).then(apply);
+  }
+  window.ioRefreshFromVideos=refreshFromVideos;
 
   function paint(){
-    var now=new Date(), i, el, st, badge;
+    var i, el, st, badge;
     var stages=document.querySelectorAll('.io-stage[data-stage]');
     for(i=0;i<stages.length;i++){
       el=stages[i]; st=null;
       for(var j=0;j<STAGES.length;j++){if(STAGES[j].id===el.getAttribute('data-stage'))st=STAGES[j];}
       if(!st)continue;
-      var s1=status(st,now);
+      var s1=status(st);
       el.classList.remove('io-done','io-active');
       if(s1!=='upcoming')el.classList.add('io-'+s1);
       badge=el.querySelector('.io-stage-status');
@@ -3826,29 +3885,30 @@
       el=rows[i]; st=null;
       for(var k=0;k<STAGES.length;k++){if(STAGES[k].id===el.getAttribute('data-stage'))st=STAGES[k];}
       if(!st)continue;
-      var s2=status(st,now);
+      var s2=status(st);
       badge=el.querySelector('.io-tl-badge');
       if(s2==='active')el.classList.add('io-is-active'); else el.classList.remove('io-is-active');
       if(badge){badge.textContent=LBL[s2];badge.classList.remove('io-done','io-now');
         if(s2==='done')badge.classList.add('io-done');
         if(s2==='active')badge.classList.add('io-now');}
     }
-    var pct=Math.max(0,Math.min(100,((now-START)/(END-START))*100));
+    var nDone=0; for(i=0;i<STAGES.length;i++){ if(status(STAGES[i])==='done')nDone++; }
+    var pct=Math.round((nDone/STAGES.length)*100);
     var fill=document.getElementById('ioSeasonFill'), dot=document.getElementById('ioSeasonDot');
     setTimeout(function(){ if(fill)fill.style.width=pct+'%'; if(dot)dot.style.right=pct+'%'; },300);
 
     var active=null,upcoming=null;
     for(i=0;i<STAGES.length;i++){
-      var s3=status(STAGES[i],now);
+      var s3=status(STAGES[i]);
       if(s3==='active'&&!active)active=STAGES[i];
       if(s3==='upcoming'&&!upcoming)upcoming=STAGES[i];
     }
     var w=document.getElementById('ioSeasonWhere');
     if(!w)return;
-    if(now<START)      w.innerHTML='رحلتك بتبدأ <b>الأربعاء ٢٢ يوليو</b>';
-    else if(now>END)   w.innerHTML='<b>رحلتك اكتملت</b> — وقيمتك زي ما هي، ثابتة';
-    else if(active)    w.innerHTML='إنت دلوقتي في: <b>'+active.name+'</b>';
-    else if(upcoming)  w.innerHTML='إنت في استراحة بين المحطات — الجايّة: <b>'+upcoming.name+'</b>';
+    if(nDone===STAGES.length) w.innerHTML='<b>رحلتك اكتملت</b> — وقيمتك زي ما هي، ثابتة';
+    else if(nDone===0)        w.innerHTML='رحلتك بتبدأ بـ <b>'+STAGES[0].name+'</b>';
+    else if(active)           w.innerHTML='إنت دلوقتي في: <b>'+active.name+'</b>';
+    else if(upcoming)         w.innerHTML='الجايّة: <b>'+upcoming.name+'</b>';
   }
 
   function reveal(){
@@ -3918,8 +3978,11 @@
     finale:      8    /* اللقاء الختامي              */
   };
 
-  /* فتح الدروس بالتاريخ لا بالتسلسل */
+  window.IO_STATION_MODULES = STATION_MODULES;
+
+  /* كل الدروس المفعّلة متاحة (من غير تسلسل) */
   window.IO_FLEXIBLE = true;
+  var userToggled = false;
 
   var moving = false, timer = null;
 
@@ -3944,6 +4007,7 @@
         '</div>'+
         '<div class="io-slot-body"></div>';
       slot.querySelector('.io-slot-head').addEventListener('click', function(){
+        userToggled = true;
         this.parentNode.classList.toggle('io-open');
       });
       card.appendChild(slot);
@@ -3990,21 +4054,9 @@
         var n = have.querySelectorAll('.lesson-item').length;
         count.textContent = n ? (n + ' عنصر') : 'جاهز';
 
-        /* المحطة الجارية تُفتح تلقائيًا، والباقي مطوي */
-        var status = (window.ioStageStatus ? window.ioStageStatus(sid) : 'upcoming');
-        if(status === 'active') slot.classList.add('io-open');
       }
 
-      /* لو مفيش محطة جارية، افتح آخر محطة تمّت وفيها محتوى */
-      if(!document.querySelector('.io-slot.io-open')){
-        var done = null;
-        for (var d=0; d<ids.length; d++){
-          var sl = document.querySelector('.io-slot[data-slot="'+ids[d]+'"]');
-          if(sl && sl.querySelector('.module-item') &&
-             window.ioStageStatus && window.ioStageStatus(ids[d]) === 'done') done = sl;
-        }
-        if(done) done.classList.add('io-open');
-      }
+      openCurrent();
 
       /* إخفاء قسم المحتوى الأصلي بعد إفراغه */
       var sec = document.getElementById('courseContentSection');
@@ -4013,7 +4065,26 @@
       else if(sec) sec.style.display = '';
     } catch(e){ console.error('توزيع الوحدات:', e); }
     moving = false;
+    /* تحديث حالة المحطات من الفيديوهات المرفوعة */
+    if(window.ioRefreshFromVideos) window.ioRefreshFromVideos();
   }
+
+  /* افتح المحطة الحالية (أو آخر محطة تمّت) — طالما العميل مقفلش/فتحش حاجة بنفسه */
+  function openCurrent(){
+    if(userToggled) return;
+    var ids = Object.keys(STATION_MODULES), d, sl, cur = null, done = null;
+    for (d=0; d<ids.length; d++){
+      sl = document.querySelector('.io-slot[data-slot="'+ids[d]+'"]');
+      if(!sl || !sl.querySelector('.module-item')) continue;
+      var stt = window.ioStageStatus ? window.ioStageStatus(ids[d]) : 'upcoming';
+      if(stt === 'active' && !cur) cur = sl;
+      if(stt === 'done') done = sl;
+    }
+    var target = cur || done;
+    var all = document.querySelectorAll('.io-slot');
+    for (d=0; d<all.length; d++) all[d].classList.toggle('io-open', all[d] === target);
+  }
+  window.ioOnStatus = openCurrent;
 
   function schedule(){
     if(moving) return;
